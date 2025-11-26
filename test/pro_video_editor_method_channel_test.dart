@@ -43,6 +43,8 @@ void main() {
           return [mockBytes, mockBytes];
         case 'renderVideo':
           return Uint8List(10);
+        case 'cancelTask':
+          return null;
         default:
           return null;
       }
@@ -124,5 +126,26 @@ void main() {
 
     expect(
         () async => await platform.renderVideo(mockModel), throwsArgumentError);
+  });
+
+  test('cancel forwards to platform channel', () async {
+    MethodCall? capturedCall;
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      capturedCall = methodCall;
+      return null;
+    });
+
+    const taskId = 'task-123';
+    await platform.cancel(taskId);
+
+    expect(capturedCall?.method, 'cancelTask');
+    final args = capturedCall?.arguments as Map<dynamic, dynamic>?;
+    expect(args?['id'], taskId);
+  });
+
+  test('cancel throws when taskId is empty', () {
+    expect(() => platform.cancel(''), throwsArgumentError);
   });
 }

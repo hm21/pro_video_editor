@@ -12,6 +12,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import kotlinx.coroutines.*
+import java.util.concurrent.ConcurrentHashMap
 
 /** ProVideoEditorPlugin */
 class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
@@ -24,6 +25,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var thumbnailGenerator: ThumbnailGenerator
 
     private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val activeRenderTasks = ConcurrentHashMap<String, RenderTask>()
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         methodChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "pro_video_editor")
@@ -143,9 +145,19 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                 val colorMatrixList = call.argument<List<List<Double>>>("colorMatrixList")
                     ?: emptyList<List<Double>>()
 
+                if (id.isBlank()) {
+                    result.error("INVALID_ARGUMENTS", "Expected non-empty task id", null)
+                    return
+                }
+
+                if (activeRenderTasks.containsKey(id)) {
+                    result.error("TASK_ALREADY_RUNNING", "A render task with id $id is already running", null)
+                    return
+                }
+
                 postProgress(id, 0.0)
 
-                renderVideo.render(
+                val jobHandle = renderVideo.render(
                     imageBytes = imageBytes,
                     inputFormat = inputFormat,
                     outputFormat = outputFormat,
@@ -171,13 +183,40 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                     onComplete = { resultBytes ->
                         postProgress(id, 1.0)
                         Handler(Looper.getMainLooper()).post {
+                            activeRenderTasks.remove(id)
                             result.success(resultBytes)
                         }
                     },
                     onError = { error ->
                         Log.e("RenderVideo", "Error rendering video: ${error.message}")
+                        Handler(Looper.getMainLooper()).post {
+                            val task = activeRenderTasks.remove(id)
+                            val code = if (task?.canceled == true) "CANCELED" else "RENDER_ERROR"
+                            result.error(code, error.message, null)
+                        }
                     }
                 )
+                activeRenderTasks[id] = RenderTask(jobHandle, result)
+                return
+            }
+
+            "cancelTask" -> {
+                val id = call.argument<String>("id") ?: ""
+                if (id.isBlank()) {
+                    result.error("INVALID_ARGUMENTS", "Expected non-empty task id", null)
+                    return
+                }
+
+                val task = activeRenderTasks[id]
+                if (task == null) {
+                    result.error("TASK_NOT_FOUND", "No active render task found for id $id", null)
+                    return
+                }
+
+                task.canceled = true
+                task.job.cancel()
+                result.success(null)
+                return
             }
 
             else -> {
@@ -192,6 +231,12 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         eventSink = null
         coroutineScope.cancel()
     }
+
+    private data class RenderTask(
+        val job: RenderJobHandle,
+        val result: MethodChannel.Result,
+        var canceled: Boolean = false,
+    )
 
     private fun postProgress(id: String, progress: Double) {
         Handler(Looper.getMainLooper()).post {

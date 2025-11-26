@@ -3,6 +3,7 @@ import Foundation
 
 public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     private var eventSink: FlutterEventSink?
+    private var activeRenderTasks: [String: RenderTask] = [:]
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let methodChannel = FlutterMethodChannel(
@@ -98,6 +99,21 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
                 return
             }
 
+            guard !id.isEmpty else {
+                result(
+                    FlutterError(
+                        code: "INVALID_ARGUMENTS", message: "Missing task id", details: nil))
+                return
+            }
+
+            if activeRenderTasks[id] != nil {
+                result(
+                    FlutterError(
+                        code: "TASK_ALREADY_RUNNING", message: "Task with id \(id) is already running",
+                        details: nil))
+                return
+            }
+
             let inputFormat = args["inputFormat"] as? String ?? "mp4"
             let outputFormat = args["outputFormat"] as? String ?? "mp4"
             let outputPath = args["outputPath"] as? String
@@ -121,7 +137,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
 
             postProgress(id: id, progress: 0.0)
 
-            RenderVideo.render(
+            let handle = RenderVideo.render(
                 inputPath: inputPath,
                 imageData: imageBytes,
                 inputFormat: inputFormat,
@@ -147,16 +163,48 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
                     self.postProgress(id: id, progress: progress)
                 },
                 onComplete: { outputData in
-                    self.postProgress(id: id, progress: 1.0)
-                    result(outputData)
+                    DispatchQueue.main.async {
+                        self.postProgress(id: id, progress: 1.0)
+                        let task = self.activeRenderTasks.removeValue(forKey: id)
+                        (task?.result ?? result)(outputData)
+                    }
                 },
                 onError: { error in
-                    result(
-                        FlutterError(
-                            code: "RENDER_ERROR", message: error.localizedDescription, details: nil)
-                    )
+                    DispatchQueue.main.async {
+                        let task = self.activeRenderTasks.removeValue(forKey: id)
+                        let code = (task?.isCanceled == true) ? "CANCELED" : "RENDER_ERROR"
+                        let flutterError = FlutterError(
+                            code: code,
+                            message: error.localizedDescription,
+                            details: nil
+                        )
+                        (task?.result ?? result)(flutterError)
+                    }
                 }
             )
+
+            activeRenderTasks[id] = RenderTask(result: result, handle: handle)
+
+        case "cancelTask":
+            guard let args = call.arguments as? [String: Any],
+                let id = args["id"] as? String
+            else {
+                result(
+                    FlutterError(
+                        code: "INVALID_ARGUMENTS", message: "Missing parameters", details: nil))
+                return
+            }
+
+            guard let task = activeRenderTasks[id] else {
+                result(
+                    FlutterError(
+                        code: "TASK_NOT_FOUND", message: "No task found for id \(id)", details: nil))
+                return
+            }
+
+            task.isCanceled = true
+            task.handle.cancel()
+            result(nil)
 
         default:
             result(FlutterMethodNotImplemented)
@@ -184,5 +232,17 @@ extension ProVideoEditorPlugin: FlutterStreamHandler {
     public func onCancel(withArguments arguments: Any?) -> FlutterError? {
         self.eventSink = nil
         return nil
+    }
+}
+
+private final class RenderTask {
+    let result: FlutterResult
+    let handle: RenderJobHandle
+    var isCanceled: Bool
+
+    init(result: @escaping FlutterResult, handle: RenderJobHandle) {
+        self.result = result
+        self.handle = handle
+        self.isCanceled = false
     }
 }

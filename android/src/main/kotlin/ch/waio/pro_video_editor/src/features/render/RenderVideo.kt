@@ -34,6 +34,7 @@ import applyScale
 import applyTrim
 import mapFormatToMimeType
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 @UnstableApi
 class RenderVideo(private val context: Context) {
@@ -62,7 +63,7 @@ class RenderVideo(private val context: Context) {
         onProgress: (Double) -> Unit,
         onComplete: (ByteArray?) -> Unit,
         onError: (Throwable) -> Unit
-    ) {
+    ): RenderJobHandle {
         val inputFile = File(inputPath)
         val outputFile =
             if (outputPath != null) {
@@ -170,5 +171,26 @@ class RenderVideo(private val context: Context) {
                 }
             }
         })
+
+        val cancelHandle = RenderJobHandle {
+            shouldStopPolling = true
+            mainHandler.removeCallbacksAndMessages(null)
+            transformer.cancel()
+            if (outputPath == null && outputFile.exists()) {
+                outputFile.delete()
+            }
+        }
+
+        return cancelHandle
+    }
+}
+
+class RenderJobHandle(private val cancelAction: () -> Unit) {
+    private val isCanceled = AtomicBoolean(false)
+
+    fun cancel() {
+        if (isCanceled.compareAndSet(false, true)) {
+            cancelAction()
+        }
     }
 }

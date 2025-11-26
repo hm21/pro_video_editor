@@ -9,6 +9,7 @@ import 'core/models/thumbnail/key_frames_configs.model.dart';
 import 'core/models/thumbnail/thumbnail_base.abstract.dart';
 import 'core/models/thumbnail/thumbnail_configs.model.dart';
 import 'core/models/video/progress_model.dart';
+import 'core/models/video/render_exceptions.dart';
 import 'core/models/video/render_video_model.dart';
 import 'core/models/video/video_metadata_model.dart';
 import 'core/platform/io/io_helper.dart';
@@ -16,6 +17,9 @@ import 'pro_video_editor_platform_interface.dart';
 
 /// An implementation of [ProVideoEditor] that uses method channels.
 class MethodChannelProVideoEditor extends ProVideoEditor {
+  /// Standardized error code emitted when renders are user canceled.
+  static const String renderCanceledErrorCode = 'CANCELED';
+
   /// The method channel used to interact with the native platform.
   @visibleForTesting
   final methodChannel = const MethodChannel('pro_video_editor');
@@ -76,19 +80,26 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
 
     var extension = _getFileExtension(renderData['inputPath']);
 
-    final Uint8List? result = await methodChannel.invokeMethod<Uint8List>(
-      'renderVideo',
-      {
-        ...renderData,
-        'inputFormat': extension,
-      },
-    );
+    try {
+      final Uint8List? result = await methodChannel.invokeMethod<Uint8List>(
+        'renderVideo',
+        {
+          ...renderData,
+          'inputFormat': extension,
+        },
+      );
 
-    if (result == null) {
-      throw ArgumentError('Failed to export the video');
+      if (result == null) {
+        throw ArgumentError('Failed to export the video');
+      }
+
+      return result;
+    } on PlatformException catch (error) {
+      if (error.code == renderCanceledErrorCode) {
+        throw const RenderCanceledException();
+      }
+      rethrow;
     }
-
-    return result;
   }
 
   @override
@@ -101,17 +112,38 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
 
     var extension = _getFileExtension(renderData['inputPath']);
 
-    await methodChannel.invokeMethod<String>(
-      'renderVideo',
-      {
-        ...renderData,
-        'inputFormat': extension,
-        'inputPath': inputPath,
-        'outputPath': filePath,
-      },
-    );
+    try {
+      await methodChannel.invokeMethod<String>(
+        'renderVideo',
+        {
+          ...renderData,
+          'inputFormat': extension,
+          'inputPath': inputPath,
+          'outputPath': filePath,
+        },
+      );
+    } on PlatformException catch (error) {
+      if (error.code == renderCanceledErrorCode) {
+        throw const RenderCanceledException();
+      }
+      rethrow;
+    }
 
     return filePath;
+  }
+
+  @override
+  Future<void> cancel(String taskId) async {
+    if (taskId.isEmpty) {
+      throw ArgumentError('taskId cannot be empty');
+    }
+
+    await methodChannel.invokeMethod<void>(
+      'cancelTask',
+      {
+        'id': taskId,
+      },
+    );
   }
 
   @override

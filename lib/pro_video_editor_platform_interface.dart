@@ -86,6 +86,14 @@ abstract class ProVideoEditor extends PlatformInterface {
     throw UnimplementedError('renderVideoToFile() has not been implemented.');
   }
 
+  /// Cancels an active rendering task identified by [taskId].
+  ///
+  /// Implementations should gracefully handle unknown task IDs by surfacing
+  /// a controlled error instead of crashing the app.
+  Future<void> cancel(String taskId) {
+    throw UnimplementedError('cancel() has not been implemented.');
+  }
+
   /// Stream of progress updates from native video tasks.
   ///
   /// Emits [ProgressModel] updates for all running or completed tasks. Each

@@ -73,6 +73,11 @@ class ProVideoEditorWeb extends ProVideoEditor {
   }
 
   @override
+  Future<void> cancel(String taskId) {
+    throw UnimplementedError('cancel() has not been implemented.');
+  }
+
+  @override
   void initializeStream() {}
 
   void _updateProgress(String taskId, double progress) {
