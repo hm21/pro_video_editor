@@ -433,11 +433,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       return VideoRendererProgressPanel(
         progressStream: ProVideoEditor.instance.progressStreamById(_taskId),
         supportsCancel: _supportsCancel,
-        onCancel: _supportsCancel
-            ? () {
-                _cancelRender();
-              }
-            : null,
+        onCancel: _supportsCancel ? _cancelRender : null,
       );
     }
 
