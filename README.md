@@ -217,6 +217,24 @@ var customData = RenderVideoModel.withQualityPreset(
 );
 ```
 
+#### Cancel an active render
+
+```dart
+final renderModel = RenderVideoModel(
+  video: EditorVideo.asset('assets/sample.mp4'),
+);
+
+final outputPath = '${(await getTemporaryDirectory()).path}/video.mp4';
+
+// Start the render. Keep the model.id so you can cancel it later.
+unawaited(
+  ProVideoEditor.instance.renderVideoToFile(outputPath, renderModel),
+);
+
+// ...from a UI callback
+await ProVideoEditor.instance.cancel(renderModel.id);
+```
+
 
 #### Advanced Example
 ```dart
