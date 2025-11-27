@@ -247,10 +247,17 @@ class _VideoEditorBasicExamplePageState
 
     final directory = await getTemporaryDirectory();
     final now = DateTime.now().millisecondsSinceEpoch;
-    _outputPath = await ProVideoEditor.instance.renderVideoToFile(
-      '${directory.path}/my_video_$now.mp4',
-      exportModel,
-    );
+    try {
+      _outputPath = await ProVideoEditor.instance.renderVideoToFile(
+        '${directory.path}/my_video_$now.mp4',
+        exportModel,
+      );
+    } on RenderCanceledException {
+      stopwatch.stop();
+      _outputPath = null;
+      _videoGenerationTime = Duration.zero;
+      return;
+    }
     _videoGenerationTime = stopwatch.elapsed;
   }
 

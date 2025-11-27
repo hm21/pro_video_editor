@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
+import 'package:pro_video_editor_example/shared/utils/render_cancel_capability.dart';
 
 /// A dialog that displays real-time export progress for video generation.
 ///
@@ -16,6 +17,18 @@ class VideoProgressAlert extends StatelessWidget {
 
   /// Optional taskId of the progress stream.
   final String taskId;
+
+  bool get _canCancel => taskId.isNotEmpty && canCancelOnCurrentPlatform();
+
+  Future<void> _handleCancelTap(BuildContext context) async {
+    try {
+      await ProVideoEditor.instance.cancel(taskId);
+    } catch (error, stackTrace) {
+      debugPrint('Failed to cancel render: $error\n$stackTrace');
+    }
+    // Always close the alert so the UI reflects the canceled render.
+    LoadingDialog.instance.hide();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -55,23 +68,39 @@ class VideoProgressAlert extends StatelessWidget {
               tween: Tween<double>(begin: 0, end: progress),
               duration: const Duration(milliseconds: 300),
               builder: (context, animatedValue, _) {
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  spacing: 10,
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  spacing: 16,
                   children: [
-                    CircularProgressIndicator(
-                      value: animatedValue,
-                      // ignore: deprecated_member_use
-                      year2023: false,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      spacing: 10,
+                      children: [
+                        CircularProgressIndicator(
+                          value: animatedValue,
+                          // ignore: deprecated_member_use
+                          year2023: false,
+                        ),
+                        Text(
+                          '${(animatedValue * 100).toStringAsFixed(1)} / 100',
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        )
+                      ],
                     ),
-                    Text(
-                      '${(animatedValue * 100).toStringAsFixed(1)} / 100',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w500,
+                    if (_canCancel)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: FilledButton.icon(
+                          onPressed: () => _handleCancelTap(context),
+                          icon: const Icon(Icons.stop_circle_outlined),
+                          label: const Text('Cancel render'),
+                        ),
                       ),
-                    )
                   ],
                 );
               });
