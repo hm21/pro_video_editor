@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +14,8 @@ void main() {
   final inputVideo = EditorVideo.asset(kVideoEditorExampleAssetPath);
   final isIOS = defaultTargetPlatform == TargetPlatform.iOS;
   final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
+  final supportsCancel =
+      !kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS);
 
   Future<VideoMetadata> testRender({
     required String description,
@@ -263,14 +267,136 @@ void main() {
 
     expect(progressValues, isNotEmpty, reason: 'No progress updates received');
     expect(progressValues.first, lessThanOrEqualTo(0.1),
-        reason: 'Progress didn’t start at low value');
+        reason: "Progress didn't start at low value");
     expect(progressValues.last, closeTo(1.0, 0.05),
-        reason: 'Progress didn’t reach 100%');
+        reason: "Progress didn't reach 100%");
     expect(progressValues, isA<List<double>>());
     expect(
       List.from(progressValues)..sort(),
       progressValues,
       reason: 'Progress should be monotonically increasing',
     );
+  });
+
+  group('cancel render task', () {
+    testWidgets('cancel renderVideo throws RenderCanceledException', (_) async {
+      final taskId = 'cancel-test-${DateTime.now().millisecondsSinceEpoch}';
+
+      final task = RenderVideoModel(
+        id: taskId,
+        video: inputVideo,
+        outputFormat: VideoOutputFormat.mp4,
+        // Use a slow operation to ensure we have time to cancel
+        playbackSpeed: 0.5,
+      );
+
+      // Start rendering in a non-blocking way
+      final renderFuture = ProVideoEditor.instance.renderVideo(task);
+
+      // Give the render task a moment to start
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      // Cancel the task
+      await ProVideoEditor.instance.cancel(taskId);
+
+      // Expect the render to throw RenderCanceledException
+      await expectLater(
+        renderFuture,
+        throwsA(isA<RenderCanceledException>()),
+      );
+    }, skip: !supportsCancel);
+
+    testWidgets('cancel renderVideoToFile throws RenderCanceledException',
+        (_) async {
+      final taskId =
+          'cancel-file-test-${DateTime.now().millisecondsSinceEpoch}';
+      final tempDir = await Directory.systemTemp.createTemp('render_test_');
+      final outputPath = '${tempDir.path}/cancelled_video.mp4';
+
+      final task = RenderVideoModel(
+        id: taskId,
+        video: inputVideo,
+        outputFormat: VideoOutputFormat.mp4,
+        playbackSpeed: 0.5,
+      );
+
+      // Start rendering to file in a non-blocking way
+      final renderFuture =
+          ProVideoEditor.instance.renderVideoToFile(outputPath, task);
+
+      // Give the render task a moment to start
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      // Cancel the task
+      await ProVideoEditor.instance.cancel(taskId);
+
+      // Expect the render to throw RenderCanceledException
+      await expectLater(
+        renderFuture,
+        throwsA(isA<RenderCanceledException>()),
+      );
+
+      // Clean up temp directory
+      await tempDir.delete(recursive: true);
+    }, skip: !supportsCancel);
+
+    testWidgets('cancel with invalid taskId does not throw', (_) async {
+      // Cancelling a non-existent task should not crash
+      await expectLater(
+        ProVideoEditor.instance.cancel('non-existent-task-id'),
+        completes,
+      );
+    }, skip: !supportsCancel);
+
+    testWidgets('cancel with empty taskId throws ArgumentError', (_) async {
+      await expectLater(
+        ProVideoEditor.instance.cancel(''),
+        throwsA(isA<ArgumentError>()),
+      );
+    }, skip: !supportsCancel);
+
+    testWidgets('progress stream stops after cancel', (_) async {
+      final taskId =
+          'cancel-progress-test-${DateTime.now().millisecondsSinceEpoch}';
+      final List<double> progressValues = [];
+
+      final task = RenderVideoModel(
+        id: taskId,
+        video: inputVideo,
+        outputFormat: VideoOutputFormat.mp4,
+        playbackSpeed: 0.5,
+      );
+
+      final subscription = task.progressStream.listen((progress) {
+        progressValues.add(progress.progress);
+      });
+
+      // Start rendering
+      final renderFuture = ProVideoEditor.instance.renderVideo(task);
+
+      // Wait for some progress to be reported
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      // Cancel the task
+      await ProVideoEditor.instance.cancel(taskId);
+
+      // Expect the render to be cancelled
+      try {
+        await renderFuture;
+      } on RenderCanceledException {
+        // Expected
+      }
+
+      await subscription.cancel();
+
+      // Progress should not have reached 100%
+      if (progressValues.isNotEmpty) {
+        expect(
+          progressValues.last,
+          lessThan(1.0),
+          reason: 'Progress should not reach 100% after cancel',
+        );
+      }
+    }, skip: !supportsCancel);
   });
 }
