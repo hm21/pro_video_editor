@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
@@ -340,11 +340,16 @@ void main() {
       await tempDir.delete(recursive: true);
     }, skip: !supportsCancel);
 
-    testWidgets('cancel with invalid taskId does not throw', (_) async {
-      // Cancelling a non-existent task should not crash
+    testWidgets('cancel with invalid taskId throws PlatformException',
+        (_) async {
+      // Cancelling a non-existent task should throw a PlatformException with
+      // code 'TASK_NOT_FOUND'
       await expectLater(
         ProVideoEditor.instance.cancel('non-existent-task-id'),
-        completes,
+        throwsA(
+          isA<PlatformException>()
+              .having((e) => e.code, 'code', 'TASK_NOT_FOUND'),
+        ),
       );
     }, skip: !supportsCancel);
 
