@@ -14,6 +14,7 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import kotlinx.coroutines.*
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** ProVideoEditorPlugin */
 class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
@@ -195,14 +196,14 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                         onError = { error ->
                             Log.e("RenderVideo", "Error rendering video: ${error.message}")
                             Handler(Looper.getMainLooper()).post {
-                                val task = activeRenderTasks.remove(id)
-                                val code = if (task?.canceled == true) "CANCELED" else "RENDER_ERROR"
+                                val removedTask = activeRenderTasks.remove(id)
+                                val code = if (removedTask?.canceled?.get() == true) "CANCELED" else "RENDER_ERROR"
                                 result.error(code, error.message, null)
                             }
                         }
                     )
                     task.job = jobHandle
-                    if (task.canceled) {
+                    if (task.canceled.get()) {
                         jobHandle.cancel()
                     }
                 } catch (throwable: Throwable) {
@@ -218,14 +219,13 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                     result.error("INVALID_ARGUMENTS", "Expected non-empty task id", null)
                     return
                 }
-
                 val task = activeRenderTasks[id]
                 if (task == null) {
                     result.error("TASK_NOT_FOUND", "No active render task found for id $id", null)
                     return
                 }
 
-                task.canceled = true
+                task.canceled.set(true)
                 task.job?.cancel()
                 result.success(null)
                 return
@@ -247,7 +247,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
     private data class RenderTask(
         var job: RenderJobHandle?,
         val result: MethodChannel.Result,
-        var canceled: Boolean = false,
+        val canceled: AtomicBoolean = AtomicBoolean(false),
     )
 
     private fun postProgress(id: String, progress: Double) {
