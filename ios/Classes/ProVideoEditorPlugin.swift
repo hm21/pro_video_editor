@@ -239,27 +239,34 @@ private final class RenderTask {
   let result: FlutterResult
   private var handle: RenderJobHandle?
   private let lock = NSLock()
-  private(set) var isCanceled: Bool
+  private var _isCanceled: Bool
   private var resultConsumed: Bool
 
   init(result: @escaping FlutterResult) {
     self.result = result
-    self.isCanceled = false
+    self._isCanceled = false
     self.resultConsumed = false
+  }
+
+  var isCanceled: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return _isCanceled
   }
 
   func attachHandle(_ handle: RenderJobHandle) {
     lock.lock()
-    defer { lock.unlock() }
+    let alreadyCanceled = _isCanceled
     self.handle = handle
-    if isCanceled {
+    lock.unlock()
+    if alreadyCanceled {
       handle.cancel()
     }
   }
 
   func cancel() {
     lock.lock()
-    isCanceled = true
+    _isCanceled = true
     let currentHandle = handle
     lock.unlock()
     currentHandle?.cancel()
