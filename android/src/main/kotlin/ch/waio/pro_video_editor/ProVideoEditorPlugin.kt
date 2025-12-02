@@ -158,46 +158,57 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
 
                 postProgress(id, 0.0)
 
-                val jobHandle = renderVideo.render(
-                    imageBytes = imageBytes,
-                    inputFormat = inputFormat,
-                    outputFormat = outputFormat,
-                    inputPath = inputPath,
-                    outputPath = outputPath,
-                    rotateTurns = rotateTurns,
-                    flipX = flipX,
-                    flipY = flipY,
-                    scaleX = scaleX,
-                    scaleY = scaleY,
-                    cropWidth = cropWidth,
-                    cropHeight = cropHeight,
-                    cropX = cropX,
-                    cropY = cropY,
-                    enableAudio = enableAudio,
-                    playbackSpeed = playbackSpeed,
-                    startUs = startUs,
-                    endUs = endUs,
-                    colorMatrixList = colorMatrixList,
-                    blur = blur,
-                    bitrate = bitrate,
-                    onProgress = { progress -> postProgress(id, progress) },
-                    onComplete = { resultBytes ->
-                        postProgress(id, 1.0)
-                        Handler(Looper.getMainLooper()).post {
-                            activeRenderTasks.remove(id)
-                            result.success(resultBytes)
+                val task = RenderTask(job = null, result = result)
+                activeRenderTasks[id] = task
+
+                try {
+                    val jobHandle = renderVideo.render(
+                        imageBytes = imageBytes,
+                        inputFormat = inputFormat,
+                        outputFormat = outputFormat,
+                        inputPath = inputPath,
+                        outputPath = outputPath,
+                        rotateTurns = rotateTurns,
+                        flipX = flipX,
+                        flipY = flipY,
+                        scaleX = scaleX,
+                        scaleY = scaleY,
+                        cropWidth = cropWidth,
+                        cropHeight = cropHeight,
+                        cropX = cropX,
+                        cropY = cropY,
+                        enableAudio = enableAudio,
+                        playbackSpeed = playbackSpeed,
+                        startUs = startUs,
+                        endUs = endUs,
+                        colorMatrixList = colorMatrixList,
+                        blur = blur,
+                        bitrate = bitrate,
+                        onProgress = { progress -> postProgress(id, progress) },
+                        onComplete = { resultBytes ->
+                            postProgress(id, 1.0)
+                            Handler(Looper.getMainLooper()).post {
+                                activeRenderTasks.remove(id)
+                                result.success(resultBytes)
+                            }
+                        },
+                        onError = { error ->
+                            Log.e("RenderVideo", "Error rendering video: ${error.message}")
+                            Handler(Looper.getMainLooper()).post {
+                                val task = activeRenderTasks.remove(id)
+                                val code = if (task?.canceled == true) "CANCELED" else "RENDER_ERROR"
+                                result.error(code, error.message, null)
+                            }
                         }
-                    },
-                    onError = { error ->
-                        Log.e("RenderVideo", "Error rendering video: ${error.message}")
-                        Handler(Looper.getMainLooper()).post {
-                            val task = activeRenderTasks.remove(id)
-                            val code = if (task?.canceled == true) "CANCELED" else "RENDER_ERROR"
-                            result.error(code, error.message, null)
-                        }
+                    )
+                    task.job = jobHandle
+                    if (task.canceled) {
+                        jobHandle.cancel()
                     }
-                )
-                activeRenderTasks[id] = RenderTask(jobHandle, result)
+                } catch (throwable: Throwable) {
+                    activeRenderTasks.remove(id)
+                    throw throwable
+                }
                 return
             }
 
@@ -215,7 +226,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                 }
 
                 task.canceled = true
-                task.job.cancel()
+                task.job?.cancel()
                 result.success(null)
                 return
             }
@@ -234,7 +245,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     private data class RenderTask(
-        val job: RenderJobHandle,
+        var job: RenderJobHandle?,
         val result: MethodChannel.Result,
         var canceled: Boolean = false,
     )
