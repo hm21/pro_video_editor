@@ -284,6 +284,14 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     if (!_supportsCancel) return;
     try {
       await ProVideoEditor.instance.cancel(_taskId);
+      // Reset the state after canceling.
+      setState(() {
+        _isExporting = false;
+        _videoBytes = null;
+        _generationTime = Duration.zero;
+        _outputMetadata = null;
+      });
+      _taskId = DateTime.now().microsecondsSinceEpoch.toString();
     } catch (error, stackTrace) {
       debugPrint('Failed to cancel render: $error\n$stackTrace');
     }
