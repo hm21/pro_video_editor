@@ -1,3 +1,7 @@
+## x.x.x
+
+- **FEAT**(android, iOS, macOS): Add `instance.cancel(taskId)` for cancelling started export tasks
+
 ## 0.3.0
 - **FEAT**(presets): Add video quality presets for simplified export configuration. Details in PR [#55](https://github.com/hm21/pro_video_editor/pull/55).
 
