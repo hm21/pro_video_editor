@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/shared/utils/render_cancel_capability.dart';
+import 'package:pro_video_editor_example/shared/widgets/video_renderer_progress.dart';
 
 /// A dialog that displays real-time export progress for video generation.
 ///
@@ -49,7 +50,7 @@ class VideoProgressAlert extends StatelessWidget {
                 constraints: const BoxConstraints(maxWidth: 500),
                 child: Padding(
                   padding: const EdgeInsets.only(top: 3.0),
-                  child: _buildProgressBody(),
+                  child: _buildProgressBody(context),
                 ),
               ),
             ),
@@ -59,51 +60,11 @@ class VideoProgressAlert extends StatelessWidget {
     );
   }
 
-  Widget _buildProgressBody() {
-    return StreamBuilder<ProgressModel>(
-        stream: ProVideoEditor.instance.progressStreamById(taskId),
-        builder: (context, snapshot) {
-          var progress = snapshot.data?.progress ?? 0;
-          return TweenAnimationBuilder<double>(
-              tween: Tween<double>(begin: 0, end: progress),
-              duration: const Duration(milliseconds: 300),
-              builder: (context, animatedValue, _) {
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  spacing: 16,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      spacing: 10,
-                      children: [
-                        CircularProgressIndicator(
-                          value: animatedValue,
-                          // ignore: deprecated_member_use
-                          year2023: false,
-                        ),
-                        Text(
-                          '${(animatedValue * 100).toStringAsFixed(1)} / 100',
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        )
-                      ],
-                    ),
-                    if (_canCancel)
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: FilledButton.icon(
-                          onPressed: () => _handleCancelTap(context),
-                          icon: const Icon(Icons.stop_circle_outlined),
-                          label: const Text('Cancel render'),
-                        ),
-                      ),
-                  ],
-                );
-              });
-        });
+  Widget _buildProgressBody(BuildContext context) {
+    return VideoRendererProgressPanel(
+      progressStream: ProVideoEditor.instance.progressStreamById(taskId),
+      supportsCancel: _canCancel,
+      onCancel: _canCancel ? () => _handleCancelTap(context) : null,
+    );
   }
 }
