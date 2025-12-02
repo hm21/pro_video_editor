@@ -137,6 +137,9 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
 
             postProgress(id: id, progress: 0.0)
 
+            let task = RenderTask(result: result)
+            activeRenderTasks[id] = task
+
             let handle = RenderVideo.render(
                 inputPath: inputPath,
                 imageData: imageBytes,
@@ -165,8 +168,11 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
                 onComplete: { outputData in
                     DispatchQueue.main.async {
                         self.postProgress(id: id, progress: 1.0)
-                        let task = self.activeRenderTasks.removeValue(forKey: id)
-                        (task?.result ?? result)(outputData)
+                        if let task = self.activeRenderTasks.removeValue(forKey: id) {
+                            task.sendSuccess(outputData)
+                        } else {
+                            result(outputData)
+                        }
                     }
                 },
                 onError: { error in
@@ -178,12 +184,15 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
                             message: error.localizedDescription,
                             details: nil
                         )
-                        (task?.result ?? result)(flutterError)
+                        if let task = task {
+                            task.sendError(flutterError)
+                        } else {
+                            result(flutterError)
+                        }
                     }
                 }
             )
-
-            activeRenderTasks[id] = RenderTask(result: result, handle: handle)
+            task.attachHandle(handle)
 
         case "cancelTask":
             guard let args = call.arguments as? [String: Any],
@@ -195,6 +204,14 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
                 return
             }
 
+            guard !id.isEmpty else {
+                result(
+                    FlutterError(
+                        code: "INVALID_ARGUMENTS", message: "Expected non-empty task id",
+                        details: nil))
+                return
+            }
+
             guard let task = activeRenderTasks[id] else {
                 result(
                     FlutterError(
@@ -202,8 +219,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
                 return
             }
 
-            task.isCanceled = true
-            task.handle.cancel()
+            task.cancel()
             result(nil)
 
         default:
@@ -237,12 +253,56 @@ extension ProVideoEditorPlugin: FlutterStreamHandler {
 
 private final class RenderTask {
     let result: FlutterResult
-    let handle: RenderJobHandle
-    var isCanceled: Bool
+    private var handle: RenderJobHandle?
+    private let lock = NSLock()
+    private var _isCanceled: Bool
+    private var resultConsumed: Bool
 
-    init(result: @escaping FlutterResult, handle: RenderJobHandle) {
+    init(result: @escaping FlutterResult) {
         self.result = result
+        self._isCanceled = false
+        self.resultConsumed = false
+    }
+
+    var isCanceled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _isCanceled
+    }
+
+    func attachHandle(_ handle: RenderJobHandle) {
+        lock.lock()
+        let alreadyCanceled = _isCanceled
         self.handle = handle
-        self.isCanceled = false
+        lock.unlock()
+        if alreadyCanceled {
+            handle.cancel()
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        _isCanceled = true
+        let currentHandle = handle
+        lock.unlock()
+        currentHandle?.cancel()
+    }
+
+    func sendSuccess(_ payload: Any?) {
+        takeResultHandler()?(payload)
+    }
+
+    func sendError(_ error: FlutterError) {
+        takeResultHandler()?(error)
+    }
+
+    private func takeResultHandler() -> FlutterResult? {
+        lock.lock()
+        defer { lock.unlock() }
+        if resultConsumed {
+            return nil
+        }
+        resultConsumed = true
+        return result
     }
 }
