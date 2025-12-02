@@ -104,7 +104,7 @@ class RenderVideo(private val context: Context) {
 
         applyAudio(editedMediaItemBuilder, enableAudio)
 
-        var shouldStopPolling = false
+        val shouldStopPolling = AtomicBoolean(false)
         val outputMimeType = mapFormatToMimeType(outputFormat)
         var editedMediaItem = editedMediaItemBuilder.build()
         val encoderFactoryBuilder = DefaultEncoderFactory.Builder(context)
@@ -122,7 +122,7 @@ class RenderVideo(private val context: Context) {
             .setVideoMimeType(outputMimeType)
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, result: ExportResult) {
-                    shouldStopPolling = true;
+                    shouldStopPolling.set(true)
                     try {
                         if (outputPath != null) {
                             onComplete(null)
@@ -143,7 +143,7 @@ class RenderVideo(private val context: Context) {
                     result: ExportResult,
                     exception: ExportException
                 ) {
-                    shouldStopPolling = true;
+                    shouldStopPolling.set(true)
                     onError(exception)
                     if (outputPath == null) outputFile.delete()
                 }
@@ -158,7 +158,7 @@ class RenderVideo(private val context: Context) {
 
         mainHandler.post(object : Runnable {
             override fun run() {
-                if (shouldStopPolling) return
+                if (shouldStopPolling.get()) return
 
                 val progressState = transformer.getProgress(progressHolder)
                 if (progressHolder.progress >= 0) {
@@ -166,14 +166,14 @@ class RenderVideo(private val context: Context) {
                 }
 
                 // Continue polling if transformer started
-                if (!shouldStopPolling && progressState != Transformer.PROGRESS_STATE_NOT_STARTED) {
+                if (!shouldStopPolling.get() && progressState != Transformer.PROGRESS_STATE_NOT_STARTED) {
                     mainHandler.postDelayed(this, 200)
                 }
             }
         })
 
         val cancelHandle = RenderJobHandle {
-            shouldStopPolling = true
+            shouldStopPolling.set(true)
             mainHandler.removeCallbacksAndMessages(null)
             transformer.cancel()
             if (outputPath == null && outputFile.exists()) {
