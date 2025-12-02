@@ -154,8 +154,11 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin, FlutterStreamHandler
         onComplete: { outputData in
           DispatchQueue.main.async {
             self.postProgress(id: id, progress: 1.0)
-            let task = self.activeRenderTasks.removeValue(forKey: id)
-            (task?.result ?? result)(outputData)
+            if let task = self.activeRenderTasks.removeValue(forKey: id) {
+              task.sendSuccess(outputData)
+            } else {
+              result(outputData)
+            }
           }
         },
         onError: { error in
@@ -167,7 +170,11 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin, FlutterStreamHandler
               message: error.localizedDescription,
               details: nil
             )
-            (task?.result ?? result)(flutterError)
+            if let task = task {
+              task.sendError(flutterError)
+            } else {
+              result(flutterError)
+            }
           }
         }
       )
@@ -222,10 +229,12 @@ private final class RenderTask {
   private var handle: RenderJobHandle?
   private let lock = NSLock()
   private(set) var isCanceled: Bool
+  private var resultConsumed: Bool
 
   init(result: @escaping FlutterResult) {
     self.result = result
     self.isCanceled = false
+    self.resultConsumed = false
   }
 
   func attachHandle(_ handle: RenderJobHandle) {
@@ -243,5 +252,23 @@ private final class RenderTask {
     let currentHandle = handle
     lock.unlock()
     currentHandle?.cancel()
+  }
+
+  func sendSuccess(_ payload: Any?) {
+    takeResultHandler()?(payload)
+  }
+
+  func sendError(_ error: FlutterError) {
+    takeResultHandler()?(error)
+  }
+
+  private func takeResultHandler() -> FlutterResult? {
+    lock.lock()
+    defer { lock.unlock() }
+    if resultConsumed {
+      return nil
+    }
+    resultConsumed = true
+    return result
   }
 }
