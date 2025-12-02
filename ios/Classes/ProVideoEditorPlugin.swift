@@ -189,6 +189,17 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin, FlutterStreamHandler
         return
       }
 
+      guard !id.isEmpty else {
+        result(
+          FlutterError(
+            code: "INVALID_ARGUMENTS",
+            message: "Expected non-empty task id",
+            details: nil
+          )
+        )
+        return
+      }
+
       guard let task = activeRenderTasks[id] else {
         result(FlutterError(code: "TASK_NOT_FOUND", message: "No task found for id \(id)", details: nil))
         return
