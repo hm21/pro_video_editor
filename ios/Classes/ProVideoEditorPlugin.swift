@@ -123,6 +123,9 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin, FlutterStreamHandler
 
       postProgress(id: id, progress: 0.0)
 
+      let task = RenderTask(result: result)
+      activeRenderTasks[id] = task
+
       let handle = RenderVideo.render(
         inputPath: inputPath,
         imageData: imageBytes,
@@ -169,7 +172,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin, FlutterStreamHandler
         }
       )
 
-      activeRenderTasks[id] = RenderTask(result: result, handle: handle)
+      task.attachHandle(handle)
 
     case "cancelTask":
       guard let args = call.arguments as? [String: Any],
@@ -184,8 +187,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin, FlutterStreamHandler
         return
       }
 
-      task.isCanceled = true
-      task.handle.cancel()
+      task.cancel()
       result(nil)
 
     default:
@@ -217,12 +219,29 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin, FlutterStreamHandler
 
 private final class RenderTask {
   let result: FlutterResult
-  let handle: RenderJobHandle
-  var isCanceled: Bool
+  private var handle: RenderJobHandle?
+  private let lock = NSLock()
+  private(set) var isCanceled: Bool
 
-  init(result: @escaping FlutterResult, handle: RenderJobHandle) {
+  init(result: @escaping FlutterResult) {
     self.result = result
-    self.handle = handle
     self.isCanceled = false
+  }
+
+  func attachHandle(_ handle: RenderJobHandle) {
+    lock.lock()
+    defer { lock.unlock() }
+    self.handle = handle
+    if isCanceled {
+      handle.cancel()
+    }
+  }
+
+  func cancel() {
+    lock.lock()
+    isCanceled = true
+    let currentHandle = handle
+    lock.unlock()
+    currentHandle?.cancel()
   }
 }
