@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/features/editor/widgets/video_progress_alert.dart';
-import 'package:pro_video_editor_example/features/render/video_renderer_page.dart';
 import 'package:pro_video_editor_example/shared/utils/render_cancel_capability.dart';
+import 'package:pro_video_editor_example/shared/widgets/video_renderer_progress.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
