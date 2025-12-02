@@ -189,8 +189,12 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                         onComplete = { resultBytes ->
                             postProgress(id, 1.0)
                             Handler(Looper.getMainLooper()).post {
-                                activeRenderTasks.remove(id)
-                                result.success(resultBytes)
+                                val removedTask = activeRenderTasks.remove(id)
+                                if (removedTask != null) {
+                                    removedTask.sendSuccess(resultBytes)
+                                } else {
+                                    result.success(resultBytes)
+                                }
                             }
                         },
                         onError = { error ->
@@ -198,7 +202,11 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                             Handler(Looper.getMainLooper()).post {
                                 val removedTask = activeRenderTasks.remove(id)
                                 val code = if (removedTask?.canceled?.get() == true) "CANCELED" else "RENDER_ERROR"
-                                result.error(code, error.message, null)
+                                if (removedTask != null) {
+                                    removedTask.sendError(code, error.message)
+                                } else {
+                                    result.error(code, error.message, null)
+                                }
                             }
                         }
                     )
@@ -244,11 +252,25 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         coroutineScope.cancel()
     }
 
-    private data class RenderTask(
+    private class RenderTask(
         var job: RenderJobHandle?,
-        val result: MethodChannel.Result,
+        private val result: MethodChannel.Result,
         val canceled: AtomicBoolean = AtomicBoolean(false),
-    )
+    ) {
+        private val resultConsumed = AtomicBoolean(false)
+
+        fun sendSuccess(payload: Any?) {
+            if (resultConsumed.compareAndSet(false, true)) {
+                result.success(payload)
+            }
+        }
+
+        fun sendError(code: String, message: String?, details: Any? = null) {
+            if (resultConsumed.compareAndSet(false, true)) {
+                result.error(code, message, details)
+            }
+        }
+    }
 
     private fun postProgress(id: String, progress: Double) {
         Handler(Looper.getMainLooper()).post {
