@@ -87,8 +87,9 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
     try {
       // Get output directory
       final directory = await getTemporaryDirectory();
-      final outputPath =
-          '${directory.path}/extracted_audio_${DateTime.now().millisecondsSinceEpoch}.${_selectedFormat.extension}';
+      final outputPath = '${directory.path}/extracted_audio_'
+          '${DateTime.now().millisecondsSinceEpoch}.'
+          '${_selectedFormat.extension}';
 
       // Create extraction config
       final config = AudioExtractConfigs(
@@ -189,7 +190,8 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Demo video has audio: $hasAudio\nMuted video has audio: $mutedHasAudio',
+              'Demo video has audio: $hasAudio\nMuted video has audio: '
+              '$mutedHasAudio',
             ),
             backgroundColor: Colors.blue,
           ),

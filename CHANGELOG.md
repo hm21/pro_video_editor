@@ -1,3 +1,6 @@
+## 1.2.1
+- **CHORE**: Adjusted code style to comply with lint rules.
+
 ## 1.2.0
 - **FEAT**(android, iOS, macOS): Add `hasAudioTrack` method to check if a video contains an audio track before attempting extraction.
 - **FEAT**(android, iOS, macOS): Add `NO_AUDIO` error code and `AudioNoTrackException` for better error handling when videos have no audio track during extraction.
