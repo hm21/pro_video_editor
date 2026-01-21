@@ -14,7 +14,7 @@ import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
  * to CompositionBuilder. The builder pattern provides better separation
  * of concerns and cleaner code organization.
  *
- * @param context Android context needed for audio resampling
+ * @param context Android context
  * @param config The render configuration containing all composition parameters
  * @param videoEffects List of video effects to apply (from EffectsProcessor)
  * @param audioEffects List of audio effects to apply (from EffectsProcessor)
@@ -25,10 +25,9 @@ fun applyComposition(
     context: Context,
     config: RenderConfig,
     videoEffects: List<Effect>,
-    audioEffects: List<AudioProcessor>,
-    onAudioMixProgress: ((Double) -> Unit)? = null
+    audioEffects: List<AudioProcessor>
 ): Composition? {
-    return CompositionBuilder(context, config, onAudioMixProgress)
+    return CompositionBuilder(context, config)
         .setVideoEffects(videoEffects)
         .setAudioEffects(audioEffects)
         .build()

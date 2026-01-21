@@ -1,3 +1,6 @@
+## 1.2.3
+- **PERF**(android): Improves render performance on Android when mixing with a custom audio track.
+
 ## 1.2.2
 - **FIX**(trim): Improved global trim precision by adding frame compensation to prevent encoder overshoot.
 

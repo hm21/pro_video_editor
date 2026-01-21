@@ -81,6 +81,8 @@ class AudioSequenceBuilder(
 
     /**
      * Builds audio processors for custom audio (channel mixing + volume).
+     *
+     * Uses ITU-R BS.775 standard coefficients for multi-channel downmixing.
      */
     private fun buildAudioProcessors(): List<AudioProcessor> {
         val processors = mutableListOf<AudioProcessor>()
@@ -88,20 +90,57 @@ class AudioSequenceBuilder(
         // Add channel mixing if needed
         if (needsNormalization) {
             val channelMixer = ChannelMixingAudioProcessor()
-            channelMixer.putChannelMixingMatrix(
-                ChannelMixingMatrix.create(2, 2) // Stereo to stereo
+
+            // 7.1 Surround (8 channels) to Stereo (2 channels)
+            // Channel order: FL, FR, FC, LFE, BL, BR, SL, SR
+            val eightToTwo = floatArrayOf(
+                1.0f, 0.0f, 0.707f, 0.0f, 0.707f, 0.0f, 0.707f, 0.0f,  // Left output
+                0.0f, 1.0f, 0.707f, 0.0f, 0.0f, 0.707f, 0.0f, 0.707f   // Right output
             )
             channelMixer.putChannelMixingMatrix(
-                ChannelMixingMatrix.create(1, 2) // Mono to stereo
+                ChannelMixingMatrix(8, 2, eightToTwo)
             )
+
+            // 5.1 Surround (6 channels) to Stereo (2 channels)
+            // ITU-R BS.775 standard
+            val sixToTwo = floatArrayOf(
+                1.0f, 0.0f, 0.707f, 0.0f, 0.707f, 0.0f,  // Left output
+                0.0f, 1.0f, 0.707f, 0.0f, 0.0f, 0.707f   // Right output
+            )
+            channelMixer.putChannelMixingMatrix(
+                ChannelMixingMatrix(6, 2, sixToTwo)
+            )
+
+            // Quad (4 channels) to Stereo (2 channels)
+            val fourToTwo = floatArrayOf(
+                1.0f, 0.0f, 0.707f, 0.0f,  // Left output
+                0.0f, 1.0f, 0.0f, 0.707f   // Right output
+            )
+            channelMixer.putChannelMixingMatrix(
+                ChannelMixingMatrix(4, 2, fourToTwo)
+            )
+
+            // Stereo (2 channels) to Stereo (2 channels) - passthrough
+            channelMixer.putChannelMixingMatrix(
+                ChannelMixingMatrix.create(2, 2)
+            )
+
+            // Mono (1 channel) to Stereo (2 channels)
+            channelMixer.putChannelMixingMatrix(
+                ChannelMixingMatrix.create(1, 2)
+            )
+
             processors.add(channelMixer)
             Log.d(RENDER_TAG, "Added channel normalization for custom audio")
         }
 
-        // Add volume processor if needed
+        // NOTE: Volume control is now handled by VolumeControlAudioMixerFactory
+        // because Media3's AudioProcessors on EditedMediaItems are NOT invoked
+        // when using parallel sequences (multiple EditedMediaItemSequence).
+        // The VolumeAudioProcessor was being configured but never actually processing audio.
+        // See VolumeControlAudioMixer which applies volumes during the mixing stage.
         if (volume != 1.0f) {
-            processors.add(VolumeAudioProcessor(volume))
-            Log.d(RENDER_TAG, "Added volume processor for custom audio: ${volume}x")
+            Log.d(RENDER_TAG, "Custom audio volume: ${volume}x (applied via VolumeControlAudioMixer)")
         }
 
         return processors

@@ -14,6 +14,7 @@ import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
+import ch.waio.pro_video_editor.src.features.render.helpers.VolumeAudioProcessor
 import java.io.File
 
 /**
@@ -39,6 +40,7 @@ class VideoSequenceBuilder(
     private var forceRemoveAudio: Boolean = false
     private var globalStartUs: Long? = null
     private var globalEndUs: Long? = null
+    private var hasCustomAudio: Boolean = false
 
     data class CropConfig(
         val width: Int?,
@@ -139,6 +141,17 @@ class VideoSequenceBuilder(
      */
     fun setForceRemoveAudio(enabled: Boolean): VideoSequenceBuilder {
         this.forceRemoveAudio = enabled
+        return this
+    }
+
+    /**
+     * Sets whether custom audio will be mixed with video audio.
+     *
+     * When true, volume control is handled by VolumeControlAudioMixer.
+     * When false, volume control uses VolumeAudioProcessor on the video sequence.
+     */
+    fun setHasCustomAudio(hasCustom: Boolean): VideoSequenceBuilder {
+        this.hasCustomAudio = hasCustom
         return this
     }
 
@@ -290,20 +303,58 @@ class VideoSequenceBuilder(
 
     /**
      * Builds channel normalization effects (channel mixer + audio processors).
+     *
+     * Uses boosted ITU-R BS.775 coefficients for multi-channel downmixing.
+     * 
+     * The standard ITU-R BS.775 coefficients (1.0, 0.707, 0.707) cause volume loss
+     * because the energy distributed across multiple channels doesn't fully translate
+     * to stereo. We apply a boost factor of ~1.4 (sqrt(2)) to compensate.
+     * 
+     * This ensures that surround content maintains similar perceived loudness
+     * when mixed with stereo custom audio tracks.
      */
     private fun buildChannelNormalizationEffects(): List<AudioProcessor> {
         val channelMixer = ChannelMixingAudioProcessor()
 
+        // Boost factor to compensate for energy loss during downmixing
+        // sqrt(2) ≈ 1.414 compensates for the typical ~70% volume loss
+        val boost = 1.4f
+
+        // 7.1 Surround (8 channels) to Stereo (2 channels)
+        // Channel order: FL, FR, FC, LFE, BL, BR, SL, SR
+        // Boosted coefficients to maintain loudness
+        val eightToTwo = floatArrayOf(
+            1.0f * boost, 0.0f, 0.707f * boost, 0.0f, 0.707f * boost, 0.0f, 0.707f * boost, 0.0f,  // Left output
+            0.0f, 1.0f * boost, 0.707f * boost, 0.0f, 0.0f, 0.707f * boost, 0.0f, 0.707f * boost   // Right output
+        )
+        channelMixer.putChannelMixingMatrix(
+            ChannelMixingMatrix(8, 2, eightToTwo)
+        )
+
         // 5.1 Surround (6 channels) to Stereo (2 channels)
+        // Channel order: FL, FR, FC, LFE, BL, BR
+        // Boosted ITU-R BS.775: L' = (L + 0.707*C + 0.707*Ls) * boost
         val sixToTwo = floatArrayOf(
-            1.0f, 0.0f, 0.7f, 0.0f, 0.7f, 0.0f,  // Left output
-            0.0f, 1.0f, 0.7f, 0.0f, 0.0f, 0.7f   // Right output
+            1.0f * boost, 0.0f, 0.707f * boost, 0.0f, 0.707f * boost, 0.0f,  // Left output
+            0.0f, 1.0f * boost, 0.707f * boost, 0.0f, 0.0f, 0.707f * boost   // Right output
         )
         channelMixer.putChannelMixingMatrix(
             ChannelMixingMatrix(6, 2, sixToTwo)
         )
 
-        // Stereo (2 channels) to Stereo (2 channels) - passthrough
+        // Quad (4 channels) to Stereo (2 channels)
+        // Channel order: FL, FR, BL, BR
+        // Slightly lower boost for quad (less energy distributed)
+        val boostQuad = 1.2f
+        val fourToTwo = floatArrayOf(
+            1.0f * boostQuad, 0.0f, 0.707f * boostQuad, 0.0f,  // Left output
+            0.0f, 1.0f * boostQuad, 0.0f, 0.707f * boostQuad   // Right output
+        )
+        channelMixer.putChannelMixingMatrix(
+            ChannelMixingMatrix(4, 2, fourToTwo)
+        )
+
+        // Stereo (2 channels) to Stereo (2 channels) - passthrough (no boost needed)
         channelMixer.putChannelMixingMatrix(
             ChannelMixingMatrix.create(2, 2)
         )
@@ -312,6 +363,8 @@ class VideoSequenceBuilder(
         channelMixer.putChannelMixingMatrix(
             ChannelMixingMatrix.create(1, 2)
         )
+
+        Log.d(RENDER_TAG, "Channel normalization configured with boosted coefficients for loudness preservation")
 
         return mutableListOf<AudioProcessor>(channelMixer).apply { addAll(audioEffects) }
     }
@@ -395,23 +448,32 @@ class VideoSequenceBuilder(
             )
         }
 
-        // Build audio effects with volume if needed
-        val clipAudioEffects = if (originalAudioVolume != null && originalAudioVolume != 1.0f) {
+        // Volume control approach depends on whether we're mixing with custom audio:
+        // - With custom audio: VolumeControlAudioMixer handles volume (AudioProcessors don't work with parallel sequences)
+        // - Without custom audio: VolumeAudioProcessor works because there's only one sequence
+        val volume = originalAudioVolume
+        val finalAudioEffects = if (!hasCustomAudio && volume != null && volume != 1.0f) {
             Log.d(
                 RENDER_TAG,
-                "Applying volume adjustment for clip $index: ${originalAudioVolume}x"
+                "Video audio volume: ${volume}x (applied via VolumeAudioProcessor - no custom audio)"
             )
-            val volumeProcessor = VolumeAudioProcessor(originalAudioVolume!!)
-            mutableListOf<AudioProcessor>(volumeProcessor).apply { addAll(normalizedAudioEffects) }
+            // Add VolumeAudioProcessor for video-only volume control
+            val volumeProcessor = VolumeAudioProcessor(volume)
+            mutableListOf<AudioProcessor>().apply {
+                addAll(normalizedAudioEffects)
+                add(volumeProcessor)
+            }
         } else {
-            Log.d(
-                RENDER_TAG,
-                "No volume adjustment for clip $index (volume: ${originalAudioVolume ?: 1.0f})"
-            )
+            if (hasCustomAudio && volume != null && volume != 1.0f) {
+                Log.d(
+                    RENDER_TAG,
+                    "Video audio volume: ${volume}x (applied via VolumeControlAudioMixer - mixing with custom audio)"
+                )
+            }
             normalizedAudioEffects
         }
 
-        val effects = Effects(clipAudioEffects, clipVideoEffects)
+        val effects = Effects(finalAudioEffects, clipVideoEffects)
 
         // Determine if audio should be removed
         val shouldRemoveAudio = !enableAudio ||

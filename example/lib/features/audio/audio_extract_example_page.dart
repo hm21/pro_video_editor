@@ -239,6 +239,11 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
   }
 
   @override
+  void setState(VoidCallback fn) {
+    if (mounted) super.setState(fn);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Audio Extraction')),

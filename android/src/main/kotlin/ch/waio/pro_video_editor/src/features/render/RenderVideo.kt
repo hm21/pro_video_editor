@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import applyBitrate
 import mapFormatToMimeType
 import ch.waio.pro_video_editor.src.features.render.helpers.applyComposition
+import ch.waio.pro_video_editor.src.features.render.helpers.VolumeControlAudioMixerFactory
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderJobHandle
 
@@ -77,10 +78,34 @@ class RenderVideo(private val context: Context) {
         // Declare transformer before listener to make it accessible
         lateinit var transformer: Transformer
 
+        // Check if we need custom audio mixing with volume control
+        val hasCustomAudio = config.customAudioPath != null && config.customAudioPath.isNotEmpty()
+        val videoAudioVolume = config.originalAudioVolume ?: 1.0f
+        val customAudioVolume = config.customAudioVolume ?: 1.0f
+        
+        // Determine if video audio will be present in the mix
+        // Video audio is removed when volume is 0 or audio is disabled
+        val videoAudioPresent = config.enableAudio && videoAudioVolume > 0.0f
+
         // Build transformer with callbacks
-        transformer = Transformer.Builder(context)
+        val transformerBuilder = Transformer.Builder(context)
             .setEncoderFactory(encoderFactoryBuilder.build())
             .setVideoMimeType(outputMimeType)
+
+        // Use custom audio mixer ONLY when mixing video audio with custom audio
+        // For video-only volume adjustment, VolumeAudioProcessor is used instead
+        // (AudioProcessors don't work with parallel sequences, but work fine with single sequence)
+        if (hasCustomAudio) {
+            transformerBuilder.setAudioMixerFactory(
+                VolumeControlAudioMixerFactory(
+                    videoAudioVolume = videoAudioVolume,
+                    customAudioVolume = customAudioVolume,
+                    videoAudioPresent = videoAudioPresent
+                )
+            )
+        }
+
+        transformer = transformerBuilder
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, result: ExportResult) {
                     shouldStopPolling.set(true)
@@ -112,34 +137,19 @@ class RenderVideo(private val context: Context) {
                 }
             })
             .build()
-
-        // Check if audio mixing is needed
-        val needsAudioMixing = config.customAudioPath != null && 
-                               config.customAudioPath.isNotEmpty() &&
-                               config.originalAudioVolume != null && 
-                               config.originalAudioVolume > 0.0f
         
-        // Create composition in background thread to avoid blocking UI (audio mixing can take time)
+        // Create composition (now fast - no manual audio mixing needed, Media3 handles it natively)
         Thread {
             try {
                 val composition = applyComposition(
                     context = context,
                     config = config,
                     videoEffects = videoEffects,
-                    audioEffects = audioEffects,
-                    onAudioMixProgress = if (needsAudioMixing) { progress ->
-                        // Map audio mixing progress to 0-10%
-                        mainHandler.post { onProgress(progress * 0.10) }
-                    } else null
+                    audioEffects = audioEffects
                 )
 
                 mainHandler.post {
                     if (composition != null) {
-                        // Audio mixing complete (if it was needed)
-                        if (needsAudioMixing) {
-                            onProgress(0.10)
-                        }
-                        
                         transformer.start(composition, outputFile.absolutePath)
                         
                         // Start progress tracking loop
@@ -150,15 +160,7 @@ class RenderVideo(private val context: Context) {
 
                                 val progressState = transformer.getProgress(progressHolder)
                                 if (progressHolder.progress >= 0) {
-                                    // Scale progress based on whether audio mixing happened
-                                    val scaledProgress = if (needsAudioMixing) {
-                                        // Scale transformer progress from 10-100%
-                                        0.10 + (progressHolder.progress / 100.0) * 0.90
-                                    } else {
-                                        // Use full 0-100% range
-                                        progressHolder.progress / 100.0
-                                    }
-                                    onProgress(scaledProgress)
+                                    onProgress(progressHolder.progress / 100.0)
                                 }
 
                                 // Continue polling if transformation is active
