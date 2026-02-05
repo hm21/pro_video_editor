@@ -72,9 +72,30 @@ fun applyImageLayer(
         "Applying image overlay: ${imageBytes.size / 1024} KB, scaled to ${videoWidth}x$videoHeight"
     )
 
-    val overlayBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-    val scaledOverlay =
-        Bitmap.createScaledBitmap(overlayBitmap, videoWidth, videoHeight, true)
+    // Decode with ARGB_8888 to ensure proper alpha channel handling
+    val options = BitmapFactory.Options().apply {
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    val overlayBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, options)
+
+    // Create a new bitmap with the target size and proper alpha handling
+    val scaledOverlay = Bitmap.createBitmap(videoWidth, videoHeight, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(scaledOverlay)
+    
+    // Use a paint with proper alpha blending to avoid black edges
+    val paint = android.graphics.Paint().apply {
+        isAntiAlias = true
+        isFilterBitmap = true
+        isDither = true
+    }
+    
+    // Scale the source bitmap to fit the destination
+    val srcRect = android.graphics.Rect(0, 0, overlayBitmap.width, overlayBitmap.height)
+    val dstRect = android.graphics.Rect(0, 0, videoWidth, videoHeight)
+    canvas.drawBitmap(overlayBitmap, srcRect, dstRect, paint)
+    
+    // Recycle the original bitmap to free memory
+    overlayBitmap.recycle()
 
     val bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(scaledOverlay)
     val overlayEffect = OverlayEffect(listOf(bitmapOverlay))
