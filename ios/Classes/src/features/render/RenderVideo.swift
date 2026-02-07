@@ -147,7 +147,7 @@ class RenderVideo {
                         config: &effectsConfig, to: videoComposition,
                         matrixList: config.colorMatrixList)
                     applyBlur(config: &effectsConfig, sigma: config.blur)
-                    applyImageLayer(config: &effectsConfig, imageData: config.imageData)
+                    applyImageLayer(config: &effectsConfig, imageData: config.imageData, withCropping: config.imageBytesWithCropping)
 
                     var finalRenderSize = videoComposition.renderSize
 

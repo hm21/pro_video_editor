@@ -68,7 +68,7 @@ class CompositionBuilder(
             .setRotation(rotationDegrees)
             .setFlip(config.flipX, config.flipY)
             .setCrop(config.cropWidth, config.cropHeight, config.cropX, config.cropY)
-            .setImageLayer(config.imageBytes, config.scaleX, config.scaleY)
+            .setImageLayer(config.imageBytes, config.scaleX, config.scaleY, config.imageBytesWithCropping)
             .setEnableAudio(config.enableAudio)
             .setOriginalAudioVolume(config.originalAudioVolume)
             .setGlobalTrim(config.startUs, config.endUs)

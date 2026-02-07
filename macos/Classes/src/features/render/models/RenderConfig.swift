@@ -79,6 +79,11 @@ struct RenderConfig {
     /// Whether to optimize the video for network streaming (fast start).
     /// When true, moves the moov atom to the beginning of the file.
     let shouldOptimizeForNetworkUse: Bool
+    
+    /// Whether to apply cropping to the image overlay along with the video.
+    /// When true, the image overlay is cropped together with the video.
+    /// When false (default), the overlay is scaled to the final cropped size.
+    let imageBytesWithCropping: Bool
     static func fromArguments(_ arguments: [String: Any]?) -> RenderConfig? {
         guard let args = arguments else {
             return nil
@@ -139,7 +144,8 @@ struct RenderConfig {
             customAudioVolume: (args["customAudioVolume"] as? NSNumber)?.floatValue,
             startUs: (args["startUs"] as? NSNumber)?.int64Value,
             endUs: (args["endUs"] as? NSNumber)?.int64Value,
-            shouldOptimizeForNetworkUse: args["shouldOptimizeForNetworkUse"] as? Bool ?? true
+            shouldOptimizeForNetworkUse: args["shouldOptimizeForNetworkUse"] as? Bool ?? true,
+            imageBytesWithCropping: args["imageBytesWithCropping"] as? Bool ?? false
         )
     }
 }

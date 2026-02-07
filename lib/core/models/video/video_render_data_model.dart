@@ -32,6 +32,7 @@ class VideoRenderData {
     this.originalAudioVolume,
     this.customAudioVolume,
     this.shouldOptimizeForNetworkUse = false,
+    this.imageBytesWithCropping = false,
     String? id,
   })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
         assert(
@@ -102,6 +103,7 @@ class VideoRenderData {
     double? originalAudioVolume,
     double? customAudioVolume,
     bool shouldOptimizeForNetworkUse = false,
+    bool imageBytesWithCropping = false,
     String? id,
   }) {
     final qualityConfig = VideoQualityConfig.fromPreset(qualityPreset);
@@ -124,6 +126,7 @@ class VideoRenderData {
       originalAudioVolume: originalAudioVolume,
       customAudioVolume: customAudioVolume,
       shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
+      imageBytesWithCropping: imageBytesWithCropping,
     );
   }
 
@@ -276,6 +279,25 @@ class VideoRenderData {
   /// more critical than streaming capability.
   final bool shouldOptimizeForNetworkUse;
 
+  /// Whether to apply cropping to the image overlay along with the video.
+  ///
+  /// When `false` (default), the [imageBytes] overlay is scaled to match
+  /// the **final** video dimensions (after cropping). The overlay covers
+  /// the entire output frame.
+  ///
+  /// When `true`, the [imageBytes] overlay is scaled to match the
+  /// **original** video dimensions (before cropping), and then the same
+  /// crop is applied to both the video and the overlay together.
+  /// This is useful when the overlay contains elements that should be
+  /// cropped in sync with the video content.
+  ///
+  /// **Default**: `false`
+  ///
+  /// **Example:**
+  /// - `false`: Overlay stretches to fill the cropped output
+  /// - `true`: Overlay is cropped together with the video
+  final bool imageBytesWithCropping;
+
   /// Returns a [Stream] of [ProgressModel] objects that provides updates on
   /// the progress of the video rendering process associated with this model's
   /// [id].
@@ -344,6 +366,7 @@ class VideoRenderData {
       'startUs': videoSegments != null ? startTime?.inMicroseconds : null,
       'endUs': videoSegments != null ? endTime?.inMicroseconds : null,
       'shouldOptimizeForNetworkUse': shouldOptimizeForNetworkUse,
+      'imageBytesWithCropping': imageBytesWithCropping,
     };
   }
 
@@ -367,6 +390,7 @@ class VideoRenderData {
     double? originalAudioVolume,
     double? customAudioVolume,
     bool? shouldOptimizeForNetworkUse,
+    bool? imageBytesWithCropping,
   }) {
     return VideoRenderData(
       id: id ?? this.id,
@@ -388,6 +412,8 @@ class VideoRenderData {
       customAudioVolume: customAudioVolume ?? this.customAudioVolume,
       shouldOptimizeForNetworkUse:
           shouldOptimizeForNetworkUse ?? this.shouldOptimizeForNetworkUse,
+      imageBytesWithCropping:
+          imageBytesWithCropping ?? this.imageBytesWithCropping,
     );
   }
 }

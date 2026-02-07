@@ -1,3 +1,6 @@
+## 1.5.0
+- **FEAT**(android, iOS, macOS): Add `imageBytesWithCropping` option to `VideoRenderData`. When enabled, the image overlay is applied before cropping and gets cropped together with the video instead of being scaled to the final cropped size.
+
 ## 1.4.2
 - **FIX**(android): Fixed black edges appearing around transparent overlay layers during video rendering by using proper ARGB_8888 bitmap configuration and correct alpha blending.
 

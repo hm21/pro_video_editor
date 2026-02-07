@@ -5,6 +5,7 @@ import UIKit
 class VideoCompositor: NSObject, AVVideoCompositing {
     var blurSigma: Double = 0.0
     var overlayImage: CIImage?
+    var imageBytesWithCropping: Bool = false
 
     var rotateRadians: Double = 0
     var rotateTurns: Int = 0
@@ -47,6 +48,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         self.cropHeight = config.cropHeight
         self.scaleX = config.scaleX
         self.scaleY = config.scaleY
+        self.imageBytesWithCropping = config.imageBytesWithCropping
 
         // Apply rotation metadata properties
         self.videoRotationDegrees = config.videoRotationDegrees
@@ -177,6 +179,16 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
         // 3: Apply user-defined effects (crop, rotation, flip, scale)
         var transform = CGAffineTransform.identity
+        
+        // Apply overlay BEFORE crop if imageBytesWithCropping is enabled
+        if imageBytesWithCropping, let overlay = overlayImage {
+            let imageRect = outputImage.extent
+            let scaledOverlay = overlay.transformed(
+                by: CGAffineTransform(
+                    scaleX: imageRect.width / overlay.extent.width,
+                    y: imageRect.height / overlay.extent.height))
+            outputImage = scaledOverlay.composited(over: outputImage)
+        }
 
         // Cropping
         if cropX != 0 || cropY != 0 || cropWidth != nil || cropHeight != nil {
@@ -256,8 +268,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
             outputImage = outputImage.applyingGaussianBlur(sigma: blurSigma)
         }
 
-        // Apply overlay image
-        if let overlay = overlayImage {
+        // Apply overlay image (only if not already applied before crop)
+        if !imageBytesWithCropping, let overlay = overlayImage {
             let imageRect = outputImage.extent
             let scaledOverlay = overlay.transformed(
                 by: CGAffineTransform(

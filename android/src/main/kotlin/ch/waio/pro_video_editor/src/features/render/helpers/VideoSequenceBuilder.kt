@@ -52,7 +52,8 @@ class VideoSequenceBuilder(
     data class ImageLayerConfig(
         val imageBytes: ByteArray?,
         val scaleX: Float?,
-        val scaleY: Float?
+        val scaleY: Float?,
+        val withCropping: Boolean = false
     )
 
     /**
@@ -102,9 +103,10 @@ class VideoSequenceBuilder(
     fun setImageLayer(
         imageBytes: ByteArray?,
         scaleX: Float?,
-        scaleY: Float?
+        scaleY: Float?,
+        withCropping: Boolean = false
     ): VideoSequenceBuilder {
-        this.imageLayerConfig = ImageLayerConfig(imageBytes, scaleX, scaleY)
+        this.imageLayerConfig = ImageLayerConfig(imageBytes, scaleX, scaleY, withCropping)
         return this
     }
 
@@ -419,6 +421,23 @@ class VideoSequenceBuilder(
         val clipVideoEffects = mutableListOf<Effect>()
         clipVideoEffects.addAll(videoEffects)
 
+        // Apply image layer BEFORE crop if withCropping is enabled
+        // This makes the image get cropped together with the video
+        if (imageLayerConfig?.withCropping == true) {
+            imageLayerConfig?.let { imageLayer ->
+                applyImageLayer(
+                    clipVideoEffects,
+                    inputFile,
+                    imageLayer.imageBytes,
+                    rotationDegrees,
+                    null, // Don't pass crop dimensions - use original video size
+                    null,
+                    imageLayer.scaleX,
+                    imageLayer.scaleY
+                )
+            }
+        }
+
         // Apply crop if configured
         cropConfig?.let { crop ->
             applyCrop(
@@ -434,18 +453,21 @@ class VideoSequenceBuilder(
             )
         }
 
-        // Apply image layer if configured
-        imageLayerConfig?.let { imageLayer ->
-            applyImageLayer(
-                clipVideoEffects,
-                inputFile,
-                imageLayer.imageBytes,
-                rotationDegrees,
-                cropConfig?.width,
-                cropConfig?.height,
-                imageLayer.scaleX,
-                imageLayer.scaleY
-            )
+        // Apply image layer AFTER crop if withCropping is disabled (default behavior)
+        // This makes the image stretch to the final cropped size
+        if (imageLayerConfig?.withCropping != true) {
+            imageLayerConfig?.let { imageLayer ->
+                applyImageLayer(
+                    clipVideoEffects,
+                    inputFile,
+                    imageLayer.imageBytes,
+                    rotationDegrees,
+                    cropConfig?.width,
+                    cropConfig?.height,
+                    imageLayer.scaleX,
+                    imageLayer.scaleY
+                )
+            }
         }
 
         // Volume control approach depends on whether we're mixing with custom audio:

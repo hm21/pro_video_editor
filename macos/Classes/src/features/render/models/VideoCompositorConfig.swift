@@ -25,4 +25,9 @@ struct VideoCompositorConfig {
 
     var preferredTransform: CGAffineTransform = .identity
     var originalNaturalSize: CGSize = .zero
+    
+    /// Whether to apply cropping to the image overlay along with the video.
+    /// When true, the overlay is applied before cropping and gets cropped together with the video.
+    /// When false (default), the overlay is scaled to the final cropped size.
+    var imageBytesWithCropping: Bool = false
 }
