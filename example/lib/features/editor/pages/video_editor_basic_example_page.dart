@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io' as io;
+import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -152,6 +153,9 @@ class _VideoEditorBasicExamplePageState
       isAudioSupported: true,
       minTrimDuration: Duration(seconds: 7),
       playTimeSmoothingDuration: Duration(milliseconds: 600),
+    ),
+    imageGeneration: const ImageGenerationConfigs(
+      captureImageByteFormat: ImageByteFormat.rawStraightRgba,
     ),
   );
 

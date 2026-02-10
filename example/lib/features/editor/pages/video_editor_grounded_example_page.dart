@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' as io;
 import 'dart:math';
+import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -477,6 +478,9 @@ class _VideoEditorGroundedExamplePageState
       style: VideoEditorStyle(
         toolbarPadding: EdgeInsets.fromLTRB(12, 0, 12, 20),
       ),
+    ),
+    imageGeneration: const ImageGenerationConfigs(
+      captureImageByteFormat: ImageByteFormat.rawStraightRgba,
     ),
   );
 

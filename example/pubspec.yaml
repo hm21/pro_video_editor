@@ -16,7 +16,7 @@ dependencies:
   intl: ^0.20.1
   cupertino_icons: ^1.0.8
 
-  pro_image_editor: ^12.0.0-beta.5
+  pro_image_editor: ^12.0.0-beta.7
   
   google_fonts: ^6.3.2
   flutter_colorpicker: ^1.1.0

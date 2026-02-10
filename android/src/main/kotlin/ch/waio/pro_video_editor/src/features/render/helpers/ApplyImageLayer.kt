@@ -10,6 +10,7 @@ import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.OverlayEffect
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
 import java.io.File
+import java.nio.ByteBuffer
 
 /**
  * Applies static image overlay on video.
@@ -72,34 +73,74 @@ fun applyImageLayer(
         "Applying image overlay: ${imageBytes.size / 1024} KB, scaled to ${videoWidth}x$videoHeight"
     )
 
-    // Decode with ARGB_8888 to ensure proper alpha channel handling
+    // Decode as premultiplied (default) so Canvas-based scaling works
     val options = BitmapFactory.Options().apply {
         inPreferredConfig = Bitmap.Config.ARGB_8888
     }
     val overlayBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, options)
 
-    // Create a new bitmap with the target size and proper alpha handling
-    val scaledOverlay = Bitmap.createBitmap(videoWidth, videoHeight, Bitmap.Config.ARGB_8888)
-    val canvas = android.graphics.Canvas(scaledOverlay)
-    
-    // Use a paint with proper alpha blending to avoid black edges
-    val paint = android.graphics.Paint().apply {
-        isAntiAlias = true
-        isFilterBitmap = true
-        isDither = true
+    // Use createScaledBitmap for cleaner scaling that preserves alpha correctly
+    val scaledOverlay = if (overlayBitmap.width != videoWidth || overlayBitmap.height != videoHeight) {
+        val scaled = Bitmap.createScaledBitmap(overlayBitmap, videoWidth, videoHeight, true)
+        overlayBitmap.recycle()
+        scaled
+    } else {
+        overlayBitmap
     }
-    
-    // Scale the source bitmap to fit the destination
-    val srcRect = android.graphics.Rect(0, 0, overlayBitmap.width, overlayBitmap.height)
-    val dstRect = android.graphics.Rect(0, 0, videoWidth, videoHeight)
-    canvas.drawBitmap(overlayBitmap, srcRect, dstRect, paint)
-    
-    // Recycle the original bitmap to free memory
-    overlayBitmap.recycle()
 
-    val bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(scaledOverlay)
+    // Media3's overlay GLSL shader uses straight-alpha blending:
+    //   output.rgb = overlay.rgb * overlay.a + video.rgb * (1 - overlay.a)
+    // But Android's BitmapFactory produces premultiplied alpha (RGB already
+    // multiplied by A). This causes double alpha multiplication and darkens
+    // semi-transparent areas.
+    // Fix: manually convert pixels from premultiplied to straight alpha.
+    // We keep isPremultiplied=true on the Bitmap so Canvas/Media3 don't
+    // complain - only the actual pixel data is converted to straight alpha.
+    val finalOverlay = unpremultiplyAlpha(scaledOverlay)
+    if (finalOverlay !== scaledOverlay) scaledOverlay.recycle()
+
+    // Create static bitmap overlay
+    // Color issues are fixed by using WORKING_COLOR_SPACE_ORIGINAL in RenderVideo.kt
+    val bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(finalOverlay)
     val overlayEffect = OverlayEffect(listOf(bitmapOverlay))
 
     videoEffects += overlayEffect
 }
 
+/**
+ * Converts premultiplied-alpha pixel data to straight alpha.
+ *
+ * Required because BitmapFactory produces premultiplied pixels (RGB *= A)
+ * but Media3's overlay shader multiplies by alpha again in GLSL.
+ *
+ * Uses copyPixelsToBuffer/copyPixelsFromBuffer for raw pixel access
+ * (unlike getPixels/setPixels which auto-convert).
+ * Keeps isPremultiplied=true so downstream Canvas calls don't crash.
+ */
+private fun unpremultiplyAlpha(bitmap: Bitmap): Bitmap {
+    val w = bitmap.width
+    val h = bitmap.height
+    val out = if (bitmap.isMutable) bitmap
+        else bitmap.copy(Bitmap.Config.ARGB_8888, true) ?: return bitmap
+
+    val n = w * h * 4
+    val buf = ByteBuffer.allocateDirect(n)
+    out.copyPixelsToBuffer(buf)
+    val px = ByteArray(n)
+    buf.rewind(); buf.get(px)
+
+    // ARGB_8888 raw byte order: R, G, B, A
+    for (i in 0 until w * h) {
+        val o = i * 4
+        val a = px[o + 3].toInt() and 0xFF
+        if (a in 1..254) {
+            px[o]     = ((px[o].toInt()     and 0xFF) * 255 / a).toByte()
+            px[o + 1] = ((px[o + 1].toInt() and 0xFF) * 255 / a).toByte()
+            px[o + 2] = ((px[o + 2].toInt() and 0xFF) * 255 / a).toByte()
+        }
+    }
+
+    buf.rewind(); buf.put(px); buf.rewind()
+    out.copyPixelsFromBuffer(buf)
+    return out
+}

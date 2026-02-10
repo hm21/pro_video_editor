@@ -1,3 +1,6 @@
+## 1.5.1
+- **FIX**(android): Fixed semi-transparent overlay layers appearing darker than expected during video rendering. The issue was caused by double alpha premultiplication — Android's BitmapFactory produces premultiplied pixels while Media3's overlay shader applies alpha again. Pixel data is now converted to straight alpha before uploading to the GPU.
+
 ## 1.5.0
 - **FEAT**(android, iOS, macOS): Add `imageBytesWithCropping` option to `VideoRenderData`. When enabled, the image overlay is applied before cropping and gets cropped together with the video instead of being scaled to the final cropped size.
 
