@@ -1,6 +1,36 @@
 import Foundation
 import Flutter
 
+struct ImageLayerConfig {
+    let imageData: Data
+    let startUs: Int64
+    let endUs: Int64
+
+    static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
+        guard let args = args else { return nil }
+
+        // Convert imageBytes from Flutter (FlutterStandardTypedData) to Data
+        let imageData: Data?
+        if let flutterData = args["imageData"] as? FlutterStandardTypedData {
+            imageData = flutterData.data
+        } else {
+            imageData = args["imageData"] as? Data
+        }
+
+        // Return nil if imageData is missing or empty
+        guard let imageData = imageData, !imageData.isEmpty else {
+            return nil
+        }
+
+        // endUs of -1 is used to signify "until the end of the video"
+        return ImageLayerConfig(
+            imageData: imageData,
+            startUs: (args["startUs"] as? NSNumber)?.int64Value ?? 0,
+            endUs: (args["endUs"] as? NSNumber)?.int64Value ?? -1
+        )
+    }
+}
+
 /// Configuration model for video rendering operations.
 ///
 /// This struct encapsulates all parameters required for rendering a video with
@@ -13,6 +43,9 @@ struct RenderConfig {
     /// Optional image data for image-to-video conversion
     let imageData: Data?
     
+    /// List of image layers with timing information for overlaying on the video
+    let imageLayers: [ImageLayerConfig]
+
     /// Output format for the rendered video (e.g., "mp4", "mov")
     let outputFormat: String
     
@@ -134,9 +167,17 @@ struct RenderConfig {
             imageData = args["imageBytes"] as? Data
         }
         
+        // Parse image layers
+        // compactMap filters out nil values returned by fromArguments for invalid layers
+        var imageLayers: [ImageLayerConfig] = []
+        if let layersRaw = args["imageLayers"] as? [[String: Any]] {
+            imageLayers = layersRaw.compactMap { layerMap in ImageLayerConfig.fromArguments(layerMap) }
+        }
+
         return RenderConfig(
             videoClips: videoClips,
             imageData: imageData,
+            imageLayers: imageLayers,
             outputFormat: args["outputFormat"] as? String ?? "mp4",
             outputPath: args["outputPath"] as? String,
             rotateTurns: args["rotateTurns"] as? Int,

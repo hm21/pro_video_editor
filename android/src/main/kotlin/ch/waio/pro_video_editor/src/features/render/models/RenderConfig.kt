@@ -17,9 +17,39 @@ data class VideoClip(
     val endUs: Long?
 )
 
+/**
+ * Represents an image overlay layer with timing information.
+ *
+ * @property imageData The image data as a byte array
+ * @property startUs Start time in microseconds when the layer should appear
+ * @property endUs End time in microseconds when the layer should disappear (-1 = until end of video)
+ */
+data class ImageLayer(
+    val imageData: ByteArray,
+    val startUs: Long,
+    val endUs: Long
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+        other as ImageLayer
+        return imageData.contentEquals(other.imageData) &&
+                startUs == other.startUs &&
+                endUs == other.endUs
+    }
+
+    override fun hashCode(): Int {
+        var result = imageData.contentHashCode()
+        result = 31 * result + startUs.hashCode()
+        result = 31 * result + endUs.hashCode()
+        return result
+    }
+}
+
 data class RenderConfig(
     val videoClips: List<VideoClip>,
     val imageBytes: ByteArray? = null,
+    val imageLayers: List<ImageLayer> = emptyList(),
     val outputFormat: String,
     val outputPath: String? = null,
     val rotateTurns: Int? = null,
@@ -64,6 +94,7 @@ data class RenderConfig(
                 imageBytes?.contentEquals(
                     other.imageBytes ?: byteArrayOf()
                 ) ?: (other.imageBytes == null) &&
+                imageLayers == other.imageLayers &&
                 outputFormat == other.outputFormat &&
                 outputPath == other.outputPath
     }
@@ -71,6 +102,7 @@ data class RenderConfig(
     override fun hashCode(): Int {
         var result = videoClips.hashCode()
         result = 31 * result + (imageBytes?.contentHashCode() ?: 0)
+        result = 31 * result + imageLayers.hashCode()
         result = 31 * result + outputFormat.hashCode()
         result = 31 * result + (outputPath?.hashCode() ?: 0)
         return result
@@ -106,10 +138,28 @@ data class RenderConfig(
                 clip
             }
 
+            // Parse image layers
+            val imageLayersRaw = call.argument<List<Map<String, Any>>>("imageLayers")
+            val imageLayers: List<ImageLayer> = imageLayersRaw?.mapNotNull { layerMap ->
+                val imageData = layerMap["imageData"] as? ByteArray
+                val startUs = (layerMap["startUs"] as? Number)?.toLong() ?: 0L
+                val endUs = (layerMap["endUs"] as? Number)?.toLong() ?: -1L
+                
+                // Return null if imageData is missing or empty (will be filtered out by mapNotNull)
+                if (imageData == null || imageData.isEmpty()) {
+                    null
+                } else {
+                    ImageLayer(imageData, startUs, endUs)
+                }
+            } ?: emptyList()
+
+            Log.d(PACKAGE_TAG, "Parsed ${imageLayers.size} image layer(s)")
+
             // Parse all other parameters
             return RenderConfig(
                 videoClips = videoClips,
                 imageBytes = call.argument<ByteArray?>("imageBytes"),
+                imageLayers = imageLayers,
                 outputFormat = call.argument<String>("outputFormat") ?: "mp4",
                 outputPath = call.argument<String>("outputPath"),
                 rotateTurns = call.argument<Number>("rotateTurns")?.toInt(),

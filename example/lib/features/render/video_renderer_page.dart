@@ -46,6 +46,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   final double _blurFactor = 0;
   final List<List<double>> _colorFilters = [];
+
   // kBasicFilterMatrix   kComplexFilterMatrix
 
   VideoMetadata? _outputMetadata;
@@ -172,13 +173,10 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// The asset audio is first loaded and saved to a temporary file,
   /// then the native code can access it via the file path.
   Future<void> _customAudioReplace() async {
-    final customAudioFile =
-        await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
+    final customAudioFile = await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
 
     var data = VideoRenderData(
-      video: _video,
-      customAudioPath: customAudioFile.path,
-      originalAudioVolume: 0.0, // Mute original audio
+      video: _video, customAudioPath: customAudioFile.path, originalAudioVolume: 0.0, // Mute original audio
       customAudioVolume: 1, // Full volume for custom audio
     );
 
@@ -193,13 +191,10 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// The asset audio is first loaded and saved to a temporary file,
   /// then mixed with the original video audio during export.
   Future<void> _customAudioMix() async {
-    final customAudioFile =
-        await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
+    final customAudioFile = await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
 
     var data = VideoRenderData(
-      video: _video,
-      customAudioPath: customAudioFile.path,
-      originalAudioVolume: 0.9, // Original audio at 90%
+      video: _video, customAudioPath: customAudioFile.path, originalAudioVolume: 0.9, // Original audio at 90%
       customAudioVolume: 0.1, // Background music at 10%
     );
 
@@ -219,8 +214,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// - `2.0`: Doubled volume
   Future<void> _adjustOriginalVolume() async {
     var data = VideoRenderData(
-      video: _video,
-      originalAudioVolume: 0.2, // Reduce original audio to 20%
+      video: _video, originalAudioVolume: 0.2, // Reduce original audio to 20%
     );
 
     await _renderVideo(data);
@@ -232,8 +226,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// Setting `loopCustomAudio: false` plays the audio only once,
   /// with silence for the remaining video duration.
   Future<void> _customAudioNoLoop() async {
-    final customAudioFile =
-        await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
+    final customAudioFile = await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
 
     var data = VideoRenderData(
       video: _video,
@@ -250,7 +243,14 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     final imageBytes = await _captureLayerContent();
     var data = VideoRenderData(
       video: _video,
-      imageBytes: imageBytes,
+      // imageBytes: imageBytes,
+      imageLayers: [
+        ImageLayer(
+            imageBytes,
+            const Duration(seconds: 1),
+            const Duration(seconds: 4)
+        ),
+      ]
     );
 
     await _renderVideo(data);
@@ -282,7 +282,14 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
         flipX: true,
       ),
       colorMatrixList: kBasicFilterMatrix,
-      imageBytes: imageBytes,
+      // imageBytes: imageBytes,
+      imageLayers: [
+        ImageLayer(
+            imageBytes,
+            const Duration(seconds: 1),
+            const Duration(seconds: 4)
+        ),
+      ],
       endTime: const Duration(seconds: 20),
     );
 
@@ -361,7 +368,14 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   Future<void> _concatenateWithTransforms() async {
     final imageBytes = await _captureLayerContent();
     var data = VideoRenderData(
-      imageBytes: imageBytes,
+      // imageBytes: imageBytes,
+      imageLayers: [
+        ImageLayer(
+            imageBytes,
+            const Duration(seconds: 2),
+            const Duration(seconds: 9)
+        ),
+      ],
       videoSegments: [
         VideoSegment(
           video: _video,
@@ -396,8 +410,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// streaming in browsers.
   Future<void> _optimizeForNetworkUse() async {
     var data = VideoRenderData(
-      video: _video,
-      shouldOptimizeForNetworkUse: true, // Default, but explicit for demo
+      video: _video, shouldOptimizeForNetworkUse: true, // Default, but explicit for demo
     );
 
     await _renderVideo(data);
@@ -474,10 +487,8 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   }
 
   Future<Uint8List> _captureLayerContent() async {
-    final boundary = _boundaryKey.currentContext!.findRenderObject()
-        as RenderRepaintBoundary;
-    final image = await boundary.toImage(
-        pixelRatio: MediaQuery.devicePixelRatioOf(context));
+    final boundary = _boundaryKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+    final image = await boundary.toImage(pixelRatio: MediaQuery.devicePixelRatioOf(context));
     final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
 
     return byteData!.buffer.asUint8List();
@@ -540,8 +551,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
                 child: ClipRect(
                   clipBehavior: Clip.hardEdge,
                   child: BackdropFilter(
-                    filter: ui.ImageFilter.blur(
-                        sigmaX: _blurFactor, sigmaY: _blurFactor),
+                    filter: ui.ImageFilter.blur(sigmaX: _blurFactor, sigmaY: _blurFactor),
                     child: Container(
                       alignment: Alignment.center,
                       color: Colors.white.withValues(alpha: 0.0),
@@ -607,12 +617,8 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
                 Row(
                   children: [
                     Icon(
-                      _outputMetadata!.isOptimizedForStreaming!
-                          ? Icons.check_circle
-                          : Icons.cancel,
-                      color: _outputMetadata!.isOptimizedForStreaming!
-                          ? Colors.green
-                          : Colors.red,
+                      _outputMetadata!.isOptimizedForStreaming! ? Icons.check_circle : Icons.cancel,
+                      color: _outputMetadata!.isOptimizedForStreaming! ? Colors.green : Colors.red,
                       size: 18,
                     ),
                     const SizedBox(width: 6),

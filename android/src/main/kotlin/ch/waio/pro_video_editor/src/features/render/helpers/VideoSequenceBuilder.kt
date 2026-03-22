@@ -34,6 +34,7 @@ class VideoSequenceBuilder(
     private var flipY: Boolean = false
     private var cropConfig: CropConfig? = null
     private var imageLayerConfig: ImageLayerConfig? = null
+    private var timedImageLayers: List<ImageLayerConfig> = emptyList()
     private var enableAudio: Boolean = true
     private var originalAudioVolume: Float? = null
     private var needsAudioNormalization: Boolean = false
@@ -53,7 +54,9 @@ class VideoSequenceBuilder(
         val imageBytes: ByteArray?,
         val scaleX: Float?,
         val scaleY: Float?,
-        val withCropping: Boolean = false
+        val withCropping: Boolean = false,
+        val startUs: Long = 0,
+        val endUs: Long = -1
     )
 
     /**
@@ -107,6 +110,14 @@ class VideoSequenceBuilder(
         withCropping: Boolean = false
     ): VideoSequenceBuilder {
         this.imageLayerConfig = ImageLayerConfig(imageBytes, scaleX, scaleY, withCropping)
+        return this
+    }
+
+    /**
+     * Sets time-based image layer overlays configuration.
+     */
+    fun setTimedImageLayers(layers: List<ImageLayerConfig>): VideoSequenceBuilder {
+        this.timedImageLayers = layers
         return this
     }
 
@@ -436,6 +447,20 @@ class VideoSequenceBuilder(
                     imageLayer.scaleY
                 )
             }
+            
+            // Apply time-based image layers BEFORE crop when withCropping is enabled
+            if (timedImageLayers.isNotEmpty()) {
+                applyTimedImageLayers(
+                    clipVideoEffects,
+                    inputFile,
+                    timedImageLayers,
+                    rotationDegrees,
+                    null, // Don't pass crop dimensions - use original video size
+                    null,
+                    null, // scaleX
+                    null  // scaleY
+                )
+            }
         }
 
         // Apply crop if configured
@@ -468,6 +493,22 @@ class VideoSequenceBuilder(
                     imageLayer.scaleY
                 )
             }
+        }
+
+        // Apply time-based image layers (if not applied before crop)
+        // Note: Currently only supports applying after effects, not before crop with withCropping
+        // This is because imageBytesWithCropping applies to both single overlay and timed layers
+        if (imageLayerConfig?.withCropping != true && timedImageLayers.isNotEmpty()) {
+            applyTimedImageLayers(
+                clipVideoEffects,
+                inputFile,
+                timedImageLayers,
+                rotationDegrees,
+                cropConfig?.width,
+                cropConfig?.height,
+                null, // scaleX - using dimensions from crop
+                null  // scaleY - using dimensions from crop
+            )
         }
 
         // Volume control approach depends on whether we're mixing with custom audio:

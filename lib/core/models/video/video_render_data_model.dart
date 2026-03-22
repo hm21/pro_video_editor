@@ -19,6 +19,7 @@ class VideoRenderData {
     this.video,
     this.videoSegments,
     this.imageBytes,
+    this.imageLayers = const [],
     this.transform,
     this.enableAudio = true,
     this.playbackSpeed,
@@ -92,6 +93,7 @@ class VideoRenderData {
     required VideoQualityPreset qualityPreset,
     VideoOutputFormat outputFormat = VideoOutputFormat.mp4,
     Uint8List? imageBytes,
+    List<ImageLayer> imageLayers = const [],
     ExportTransform? transform,
     bool enableAudio = true,
     double? playbackSpeed,
@@ -115,6 +117,7 @@ class VideoRenderData {
       outputFormat: outputFormat,
       video: video,
       imageBytes: imageBytes,
+      imageLayers: imageLayers,
       transform: transform,
       enableAudio: enableAudio,
       playbackSpeed: playbackSpeed,
@@ -183,6 +186,9 @@ class VideoRenderData {
 
   /// A transparent image which will overlay the video.
   final Uint8List? imageBytes;
+
+  /// A list of image layers with timing information for overlaying on the video
+  final List<ImageLayer> imageLayers;
 
   /// Transformation settings like resize, rotation, offset, and flipping.
   ///
@@ -284,13 +290,13 @@ class VideoRenderData {
 
   /// Whether to apply cropping to the image overlay along with the video.
   ///
-  /// When `false` (default), the [imageBytes] overlay is scaled to match
-  /// the **final** video dimensions (after cropping). The overlay covers
-  /// the entire output frame.
+  /// When `false` (default), the [imageBytes] amd [imageLayers] overlays
+  /// are scaled to match the **final** video dimensions (after cropping).
+  /// The overlay covers the entire output frame.
   ///
-  /// When `true`, the [imageBytes] overlay is scaled to match the
-  /// **original** video dimensions (before cropping), and then the same
-  /// crop is applied to both the video and the overlay together.
+  /// When `true`, the [imageBytes] and [imageLayers] overlays are scaled
+  /// to match the **original** video dimensions (before cropping), and then
+  /// the same crop is applied to both the video and the overlay together.
   /// This is useful when the overlay contains elements that should be
   /// cropped in sync with the video content.
   ///
@@ -363,6 +369,13 @@ class VideoRenderData {
       'id': id,
       'videoClips': videoSegmentsMaps,
       'imageBytes': imageBytes,
+      'imageLayers': imageLayers
+          .map((layer) => {
+                'imageData': layer.imageData,
+                'startUs': layer.startTime.inMicroseconds,
+                'endUs': layer.endTime?.inMicroseconds,
+              })
+          .toList(),
       'enableAudio': enableAudio,
       'playbackSpeed': playbackSpeed,
       'colorMatrixList': colorMatrixList,
@@ -392,6 +405,7 @@ class VideoRenderData {
     EditorVideo? video,
     List<VideoSegment>? videoSegments,
     Uint8List? imageBytes,
+    List<ImageLayer>? imageLayers,
     ExportTransform? transform,
     bool? enableAudio,
     double? playbackSpeed,
@@ -414,6 +428,7 @@ class VideoRenderData {
       video: video ?? this.video,
       videoSegments: videoSegments ?? this.videoSegments,
       imageBytes: imageBytes ?? this.imageBytes,
+      imageLayers: imageLayers ?? this.imageLayers,
       transform: transform ?? this.transform,
       enableAudio: enableAudio ?? this.enableAudio,
       playbackSpeed: playbackSpeed ?? this.playbackSpeed,
@@ -433,6 +448,22 @@ class VideoRenderData {
       loopCustomAudio: loopCustomAudio ?? this.loopCustomAudio,
     );
   }
+}
+
+/// A model representing an image overlay layer with timing information.
+class ImageLayer {
+  /// Creates an [ImageLayer] with the [imageData] and [startTime] and [endTime]
+  const ImageLayer(this.imageData, this.startTime, [this.endTime]);
+  
+  /// The image data for the overlay layer.
+  final Uint8List imageData;
+  
+  /// The start time for the layer, relative to the start of the video.
+  final Duration startTime;
+  
+  /// The end time of the layer, relative to the start of the video.
+  /// If `null`, the layer will be shown until the end of the video.
+  final Duration? endTime;
 }
 
 /// Supported video output formats for export.

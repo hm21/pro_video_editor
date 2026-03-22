@@ -5,12 +5,15 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.media3.common.Effect
+import androidx.media3.common.util.Size
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.OverlayEffect
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
 import java.io.File
 import java.nio.ByteBuffer
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 
 /**
  * Applies static image overlay on video.
@@ -49,19 +52,19 @@ fun applyImageLayer(
         rotationDegrees
     )
 
-    var isRotated90Deg = videoRotation == 90 || videoRotation == 270;
+    val isRotated90Deg = videoRotation == 90 || videoRotation == 270
     if (cropWidth != null) {
         if (isRotated90Deg) {
-            videoHeight = cropWidth;
+            videoHeight = cropWidth
         } else {
-            videoWidth = cropWidth;
+            videoWidth = cropWidth
         }
     }
     if (cropHeight != null) {
         if (isRotated90Deg) {
-            videoWidth = cropHeight;
+            videoWidth = cropHeight
         } else {
-            videoHeight = cropHeight;
+            videoHeight = cropHeight
         }
     }
 
@@ -81,7 +84,7 @@ fun applyImageLayer(
 
     // Use createScaledBitmap for cleaner scaling that preserves alpha correctly
     val scaledOverlay = if (overlayBitmap.width != videoWidth || overlayBitmap.height != videoHeight) {
-        val scaled = Bitmap.createScaledBitmap(overlayBitmap, videoWidth, videoHeight, true)
+        val scaled = overlayBitmap.scale(videoWidth, videoHeight)
         overlayBitmap.recycle()
         scaled
     } else {
@@ -105,6 +108,128 @@ fun applyImageLayer(
     val overlayEffect = OverlayEffect(listOf(bitmapOverlay))
 
     videoEffects += overlayEffect
+}
+
+/**
+ * Applies time-based image overlays on video.
+ *
+ * Each image layer has a start and end time, and will only be visible during
+ * that time range. Multiple layers can be active simultaneously.
+ *
+ * @param videoEffects List to add overlay effects to
+ * @param inputFile Video file for dimension detection
+ * @param imageLayers List of image layers with timing information
+ * @param rotationDegrees Applied rotation (affects dimensions)
+ * @param cropWidth Applied crop width (affects overlay size)
+ * @param cropHeight Applied crop height (affects overlay size)
+ * @param scaleX Applied horizontal scale (affects overlay size)
+ * @param scaleY Applied vertical scale (affects overlay size)
+ */
+@UnstableApi
+fun applyTimedImageLayers(
+    videoEffects: MutableList<Effect>,
+    inputFile: File,
+    imageLayers: List<VideoSequenceBuilder.ImageLayerConfig>,
+    rotationDegrees: Float,
+    cropWidth: Int?,
+    cropHeight: Int?,
+    scaleX: Float?,
+    scaleY: Float?,
+) {
+    if (imageLayers.isEmpty()) return
+
+    // Calculate target video dimensions
+    var (videoWidth, videoHeight, videoRotation) = getRotatedVideoDimensions(
+        inputFile,
+        rotationDegrees
+    )
+
+    val isRotated90Deg = videoRotation == 90 || videoRotation == 270
+    if (cropWidth != null) {
+        if (isRotated90Deg) {
+            videoHeight = cropWidth
+        } else {
+            videoWidth = cropWidth
+        }
+    }
+    if (cropHeight != null) {
+        if (isRotated90Deg) {
+            videoWidth = cropHeight
+        } else {
+            videoHeight = cropHeight
+        }
+    }
+
+    if (scaleX != null) videoWidth = (videoWidth * scaleX).toInt()
+    if (scaleY != null) videoHeight = (videoHeight * scaleY).toInt()
+
+    Log.d(
+        RENDER_TAG,
+        "Applying ${imageLayers.size} time-based image layer(s), scaled to ${videoWidth}x$videoHeight"
+    )
+
+    // Create bitmap overlays for each layer
+    val bitmapOverlays = imageLayers.mapNotNull { layer ->
+        try {
+            // Decode the image
+            val options = BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            val overlayBitmap = BitmapFactory.decodeByteArray(
+                layer.imageBytes, 0, layer.imageBytes!!.size, options
+            )
+
+            // Scale to match video dimensions
+            val scaledOverlay = if (overlayBitmap.width != videoWidth || overlayBitmap.height != videoHeight) {
+                val scaled = overlayBitmap.scale(videoWidth, videoHeight)
+                overlayBitmap.recycle()
+                scaled
+            } else {
+                overlayBitmap
+            }
+
+            // Convert from premultiplied to straight alpha
+            val finalOverlay = unpremultiplyAlpha(scaledOverlay)
+            if (finalOverlay !== scaledOverlay) scaledOverlay.recycle()
+
+            // Convert times from microseconds to seconds
+            val startTimeUs = layer.startUs
+            val endTimeUs = layer.endUs
+            
+            Log.d(
+                RENDER_TAG,
+                "Layer: start=${startTimeUs}us, end=${endTimeUs}us (${if (endTimeUs == -1L) "until end" else "${endTimeUs}us"})"
+            )
+
+            // Create a transparent bitmap placeholder for when layer is not active
+            val transparentBitmap = createBitmap(videoWidth, videoHeight)
+            
+            // Create a timed bitmap overlay
+            // Media3 expects time in microseconds
+            object : BitmapOverlay() {
+                override fun getBitmap(presentationTimeUs: Long): Bitmap {
+                    // Check if current time is within the layer's time range
+                    // endUs of -1 means "until the end of the video"
+                    val inTimeRange = presentationTimeUs >= startTimeUs &&
+                            (endTimeUs == -1L || presentationTimeUs <= endTimeUs)
+                    
+                    return if (inTimeRange) finalOverlay else transparentBitmap
+                }
+
+                override fun configure(videoSize: Size) {
+                    // No configuration needed
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(RENDER_TAG, "Failed to decode image layer: ${e.message}")
+            null
+        }
+    }
+
+    if (bitmapOverlays.isNotEmpty()) {
+        val overlayEffect = OverlayEffect(bitmapOverlays)
+        videoEffects += overlayEffect
+    }
 }
 
 /**

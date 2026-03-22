@@ -1,9 +1,17 @@
 import AVFoundation
 import CoreImage
 
+struct ImageLayerConfig {
+    let imageData: Data
+    let startUs: Int64
+    /// endUs of -1 indicates the image should be displayed until the end of the video.
+    let endUs: Int64
+}
+
 struct VideoCompositorConfig {
     var blurSigma: Double = 0.0
     var overlayImage: Data? = nil
+    var imageLayerConfigs: [ImageLayerConfig] = []
 
     var rotateRadians: Double = 0.0
     var rotateTurns: Int = 0

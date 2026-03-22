@@ -69,6 +69,16 @@ class CompositionBuilder(
             .setFlip(config.flipX, config.flipY)
             .setCrop(config.cropWidth, config.cropHeight, config.cropX, config.cropY)
             .setImageLayer(config.imageBytes, config.scaleX, config.scaleY, config.imageBytesWithCropping)
+            .setTimedImageLayers(config.imageLayers.map { imageLayer ->
+                VideoSequenceBuilder.ImageLayerConfig(
+                    imageBytes = imageLayer.imageData,
+                    scaleX = null,
+                    scaleY = config.scaleY,
+                    withCropping = config.imageBytesWithCropping,
+                    startUs = imageLayer.startUs,
+                    endUs = imageLayer.endUs
+                )
+            })
             .setEnableAudio(config.enableAudio)
             .setOriginalAudioVolume(config.originalAudioVolume)
             .setGlobalTrim(config.startUs, config.endUs)

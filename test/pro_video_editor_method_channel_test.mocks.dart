@@ -32,6 +32,7 @@ import 'package:pro_video_editor/pro_video_editor.dart' as _i4;
 // ignore_for_file: unnecessary_parenthesis
 // ignore_for_file: camel_case_types
 // ignore_for_file: subtype_of_sealed_class
+// ignore_for_file: invalid_use_of_internal_member
 
 class _FakeEditorVideo_0 extends _i1.SmartFake implements _i2.EditorVideo {
   _FakeEditorVideo_0(
@@ -109,19 +110,19 @@ class MockEditorVideo extends _i1.Mock implements _i2.EditorVideo {
       ) as _i2.EditorVideoType);
 
   @override
-  set byteArray(_i5.Uint8List? _byteArray) => super.noSuchMethod(
+  set byteArray(_i5.Uint8List? value) => super.noSuchMethod(
         Invocation.setter(
           #byteArray,
-          _byteArray,
+          value,
         ),
         returnValueForMissingStub: null,
       );
 
   @override
-  set file(_i6.File? _file) => super.noSuchMethod(
+  set file(_i6.File? value) => super.noSuchMethod(
         Invocation.setter(
           #file,
-          _file,
+          value,
         ),
         returnValueForMissingStub: null,
       );
@@ -358,6 +359,12 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
       ) as _i4.VideoOutputFormat);
 
   @override
+  List<_i4.ImageLayer> get imageLayers => (super.noSuchMethod(
+        Invocation.getter(#imageLayers),
+        returnValue: <_i4.ImageLayer>[],
+      ) as List<_i4.ImageLayer>);
+
+  @override
   bool get enableAudio => (super.noSuchMethod(
         Invocation.getter(#enableAudio),
         returnValue: false,
@@ -410,6 +417,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
     _i2.EditorVideo? video,
     List<_i4.VideoSegment>? videoSegments,
     _i5.Uint8List? imageBytes,
+    List<_i4.ImageLayer>? imageLayers,
     _i4.ExportTransform? transform,
     bool? enableAudio,
     double? playbackSpeed,
@@ -436,6 +444,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
             #video: video,
             #videoSegments: videoSegments,
             #imageBytes: imageBytes,
+            #imageLayers: imageLayers,
             #transform: transform,
             #enableAudio: enableAudio,
             #playbackSpeed: playbackSpeed,
@@ -464,6 +473,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
               #video: video,
               #videoSegments: videoSegments,
               #imageBytes: imageBytes,
+              #imageLayers: imageLayers,
               #transform: transform,
               #enableAudio: enableAudio,
               #playbackSpeed: playbackSpeed,
