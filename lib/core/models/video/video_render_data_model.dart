@@ -454,13 +454,13 @@ class VideoRenderData {
 class ImageLayer {
   /// Creates an [ImageLayer] with the [imageData] and [startTime] and [endTime]
   const ImageLayer(this.imageData, this.startTime, [this.endTime]);
-  
+
   /// The image data for the overlay layer.
   final Uint8List imageData;
-  
+
   /// The start time for the layer, relative to the start of the video.
   final Duration startTime;
-  
+
   /// The end time of the layer, relative to the start of the video.
   /// If `null`, the layer will be shown until the end of the video.
   final Duration? endTime;
