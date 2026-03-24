@@ -11,6 +11,7 @@ internal class AudioSequenceBuilder {
     private let targetDuration: CMTime
     private var volume: Float = 1.0
     private var loopAudio: Bool = true
+    private var startTime: CMTime = .zero
     
     /// Initializes builder with audio path and target duration.
     ///
@@ -37,6 +38,17 @@ internal class AudioSequenceBuilder {
     /// - Returns: Self for chaining
     func setLoop(_ loop: Bool) -> AudioSequenceBuilder {
         self.loopAudio = loop
+        return self
+    }
+    
+    /// Sets the start time offset for the custom audio.
+    ///
+    /// - Parameter startTimeUs: Start time in microseconds from the beginning of the audio file
+    /// - Returns: Self for chaining
+    func setStartTime(_ startTimeUs: Int64?) -> AudioSequenceBuilder {
+        if let startTimeUs = startTimeUs, startTimeUs > 0 {
+            self.startTime = CMTime(value: startTimeUs, timescale: 1_000_000)
+        }
         return self
     }
     
@@ -72,33 +84,52 @@ internal class AudioSequenceBuilder {
             audioDuration = audioAsset.duration
         }
         
+        // Calculate effective audio duration after start offset
+        let effectiveAudioDuration = CMTimeSubtract(audioDuration, startTime)
+        if CMTimeCompare(effectiveAudioDuration, .zero) <= 0 {
+            print("⚠️ Start time (\(startTime.seconds)s) exceeds audio duration (\(audioDuration.seconds)s)")
+            return nil
+        }
+        
+        if CMTimeCompare(startTime, .zero) > 0 {
+            print("🎵 Custom audio start offset: \(startTime.seconds)s")
+        }
+        
         // Trim or loop custom audio to match video duration
-        if audioDuration > targetDuration {
-            // Trim audio to match video duration
-            let timeRange = CMTimeRange(start: .zero, duration: targetDuration)
+        if CMTimeCompare(effectiveAudioDuration, targetDuration) > 0 {
+            // Trim audio to match video duration (starting from startTime)
+            let timeRange = CMTimeRange(start: startTime, duration: targetDuration)
             try compositionAudioTrack.insertTimeRange(timeRange, of: audioTrack, at: .zero)
             print("✂️ Custom audio trimmed to \(targetDuration.seconds)s")
         } else if loopAudio {
             // Loop audio to match video duration
             var currentTime = CMTime.zero
             var loopCount = 0
+            var isFirstLoop = true
             
-            while currentTime < targetDuration {
+            while CMTimeCompare(currentTime, targetDuration) < 0 {
+                loopCount += 1
                 let remainingDuration = CMTimeSubtract(targetDuration, currentTime)
-                let insertDuration = CMTimeMinimum(audioDuration, remainingDuration)
-                let timeRange = CMTimeRange(start: .zero, duration: insertDuration)
+                
+                // First loop uses startTime offset, subsequent loops start from beginning
+                let loopStartTime = isFirstLoop ? startTime : .zero
+                let loopAudioDuration = isFirstLoop ? effectiveAudioDuration : audioDuration
+                
+                let insertDuration = CMTimeMinimum(loopAudioDuration, remainingDuration)
+                let timeRange = CMTimeRange(start: loopStartTime, duration: insertDuration)
                 
                 try compositionAudioTrack.insertTimeRange(timeRange, of: audioTrack, at: currentTime)
                 currentTime = CMTimeAdd(currentTime, insertDuration)
-                loopCount += 1
+                isFirstLoop = false
             }
             
             print("🔄 Custom audio looped \(loopCount) times to match \(targetDuration.seconds)s duration")
         } else {
-            // Play audio once without looping
-            let timeRange = CMTimeRange(start: .zero, duration: audioDuration)
+            // Play audio once without looping (starting from startTime)
+            let timeRange = CMTimeRange(start: startTime, duration: effectiveAudioDuration)
             try compositionAudioTrack.insertTimeRange(timeRange, of: audioTrack, at: .zero)
-            print("▶️ Custom audio plays once (\(audioDuration.seconds)s, no loop)")
+            print("▶️ Custom audio plays once (\(effectiveAudioDuration.seconds)s, no loop)" + 
+                  (CMTimeCompare(startTime, .zero) > 0 ? " starting at \(startTime.seconds)s" : ""))
         }
         
         if volume != 1.0 {

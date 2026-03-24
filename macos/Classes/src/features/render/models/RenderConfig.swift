@@ -64,6 +64,9 @@ struct RenderConfig {
     /// Absolute path to custom audio file to mix in (nil = no custom audio)
     let customAudioPath: String?
     
+    /// Start time offset in microseconds for the custom audio track
+    let customAudioStartTimeUs: Int64?
+    
     /// Volume for original video audio (0.0-1.0, nil = 1.0)
     let originalAudioVolume: Float?
     
@@ -145,6 +148,7 @@ struct RenderConfig {
             colorMatrixList: colorMatrixList,
             blur: (args["blur"] as? NSNumber)?.doubleValue,
             customAudioPath: args["customAudioPath"] as? String,
+            customAudioStartTimeUs: (args["customAudioStartTimeUs"] as? NSNumber)?.int64Value,
             originalAudioVolume: (args["originalAudioVolume"] as? NSNumber)?.floatValue,
             customAudioVolume: (args["customAudioVolume"] as? NSNumber)?.floatValue,
             startUs: (args["startUs"] as? NSNumber)?.int64Value,

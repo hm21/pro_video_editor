@@ -1,3 +1,6 @@
+## 1.8.0
+- **FEAT**(android, iOS, macOS): Add `customAudioStartTime` option to `VideoRenderData`. Allows starting the custom audio track from a specific offset instead of from the beginning. Useful for using a specific section of a longer audio file.
+
 ## 1.7.0
 - **FEAT**(android, iOS, macOS): Add `loopCustomAudio` option to `VideoRenderData`. When `false`, custom audio plays once instead of looping to match the video duration. Defaults to `true` for backward compatibility.
 

@@ -152,14 +152,31 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
     final directory = await getTemporaryDirectory();
 
+    // Ensure directory exists
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+
     // Extract just the filename from the asset path
     final fileName = assetPath.split('/').last;
     final file = File('${directory.path}/$fileName');
+
+    // Ensure parent directory exists
+    final parent = file.parent;
+    if (!await parent.exists()) {
+      await parent.create(recursive: true);
+    }
 
     await file.writeAsBytes(
       buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
       flush: true,
     );
+
+    // Verify the file was written successfully
+    if (!await file.exists()) {
+      throw Exception('Failed to write audio file to: ${file.path}');
+    }
+    debugPrint('Audio file written to: ${file.path}');
 
     return file;
   }
@@ -241,6 +258,28 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       originalAudioVolume: 0.0,
       customAudioVolume: 1.0,
       loopCustomAudio: false,
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Start custom audio from a specific offset.
+  ///
+  /// This example demonstrates how to use `customAudioStartTime` to start
+  /// playing the custom audio from a specific position instead of from the
+  /// beginning. This is useful for using a specific section of a longer
+  /// audio file.
+  Future<void> _customAudioStartOffset() async {
+    final customAudioFile =
+        await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
+
+    var data = VideoRenderData(
+      video: _video,
+      customAudioPath: customAudioFile.path,
+      customAudioStartTime: const Duration(seconds: 5), // Start at 5 seconds
+      loopCustomAudio: false,
+      originalAudioVolume: 0.0,
+      customAudioVolume: 1.0,
     );
 
     await _renderVideo(data);
@@ -741,6 +780,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           leading: const Icon(Icons.music_off_outlined),
           title: const Text('Custom Audio Without Loop'),
           subtitle: const Text('Plays once, then silence'),
+        ),
+        ListTile(
+          onTap: _customAudioStartOffset,
+          leading: const Icon(Icons.skip_next_outlined),
+          title: const Text('Custom Audio with Start Offset'),
+          subtitle: const Text('Start at 5 seconds into audio'),
         ),
         ..._buildSectionTitle('Quality'),
         ListTile(

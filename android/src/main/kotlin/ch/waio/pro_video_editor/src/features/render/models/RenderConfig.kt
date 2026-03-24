@@ -37,6 +37,8 @@ data class RenderConfig(
     val colorMatrixList: List<List<Double>> = emptyList(),
     val blur: Double? = null,
     val customAudioPath: String? = null,
+    /** Start time offset in microseconds for the custom audio track */
+    val customAudioStartTimeUs: Long? = null,
     val originalAudioVolume: Float? = null,
     val customAudioVolume: Float? = null,
     /** Global start time in microseconds for trimming the final composition */
@@ -128,6 +130,7 @@ data class RenderConfig(
                     ?: emptyList(),
                 blur = call.argument<Number>("blur")?.toDouble(),
                 customAudioPath = call.argument<String?>("customAudioPath"),
+                customAudioStartTimeUs = call.argument<Number?>("customAudioStartTimeUs")?.toLong(),
                 originalAudioVolume = call.argument<Number?>("originalAudioVolume")?.toFloat(),
                 customAudioVolume = call.argument<Number?>("customAudioVolume")?.toFloat(),
                 startUs = call.argument<Number?>("startUs")?.toLong(),
