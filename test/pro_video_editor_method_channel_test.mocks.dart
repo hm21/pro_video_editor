@@ -32,6 +32,7 @@ import 'package:pro_video_editor/pro_video_editor.dart' as _i4;
 // ignore_for_file: unnecessary_parenthesis
 // ignore_for_file: camel_case_types
 // ignore_for_file: subtype_of_sealed_class
+// ignore_for_file: invalid_use_of_internal_member
 
 class _FakeEditorVideo_0 extends _i1.SmartFake implements _i2.EditorVideo {
   _FakeEditorVideo_0(
@@ -109,19 +110,19 @@ class MockEditorVideo extends _i1.Mock implements _i2.EditorVideo {
       ) as _i2.EditorVideoType);
 
   @override
-  set byteArray(_i5.Uint8List? _byteArray) => super.noSuchMethod(
+  set byteArray(_i5.Uint8List? value) => super.noSuchMethod(
         Invocation.setter(
           #byteArray,
-          _byteArray,
+          value,
         ),
         returnValueForMissingStub: null,
       );
 
   @override
-  set file(_i6.File? _file) => super.noSuchMethod(
+  set file(_i6.File? value) => super.noSuchMethod(
         Invocation.setter(
           #file,
-          _file,
+          value,
         ),
         returnValueForMissingStub: null,
       );
@@ -420,6 +421,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
     int? bitrate,
     _i4.VideoQualityConfig? qualityConfig,
     String? customAudioPath,
+    Duration? customAudioStartTime,
     double? originalAudioVolume,
     double? customAudioVolume,
     bool? shouldOptimizeForNetworkUse,
@@ -446,6 +448,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
             #bitrate: bitrate,
             #qualityConfig: qualityConfig,
             #customAudioPath: customAudioPath,
+            #customAudioStartTime: customAudioStartTime,
             #originalAudioVolume: originalAudioVolume,
             #customAudioVolume: customAudioVolume,
             #shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
@@ -474,6 +477,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
               #bitrate: bitrate,
               #qualityConfig: qualityConfig,
               #customAudioPath: customAudioPath,
+              #customAudioStartTime: customAudioStartTime,
               #originalAudioVolume: originalAudioVolume,
               #customAudioVolume: customAudioVolume,
               #shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
