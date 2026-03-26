@@ -1,3 +1,6 @@
+## 1.9.1
+- **FIX**(android): Strip metadata (GPS, title, artist, etc.) from rendered videos. Previously, Android's Media3 Transformer copied all source metadata to the output, while iOS/macOS correctly removed them to protect the privacy from users.
+
 ## 1.9.0
 - **FEAT**(android, iOS, macOS): Add `gpsCoordinates` to `VideoMetadata` for extracting GPS location from videos.
 - **FEAT**(android, iOS, macOS): Add `frameRate` to `VideoMetadata` for extracting video frame rate.
