@@ -3,6 +3,54 @@ import 'dart:ui';
 import '/shared/utils/parser/double_parser.dart';
 import '/shared/utils/parser/int_parser.dart';
 
+/// Represents GPS coordinates with latitude and longitude.
+///
+/// This class is used to store location information extracted from video
+/// metadata, typically representing where the video was recorded.
+class GpsCoordinates {
+  /// Creates a [GpsCoordinates] instance.
+  const GpsCoordinates({
+    required this.latitude,
+    required this.longitude,
+  });
+
+  /// The GPS latitude coordinate.
+  ///
+  /// Positive values represent North, negative values represent South.
+  ///
+  /// Example:
+  /// ```dart
+  /// 47.3769 // Zurich, Switzerland (North)
+  /// -33.8688 // Sydney, Australia (South)
+  /// ```
+  final double latitude;
+
+  /// The GPS longitude coordinate.
+  ///
+  /// Positive values represent East, negative values represent West.
+  ///
+  /// Example:
+  /// ```dart
+  /// 8.5417 // Zurich, Switzerland (East)
+  /// -122.4194 // San Francisco, USA (West)
+  /// ```
+  final double longitude;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is GpsCoordinates &&
+        other.latitude == latitude &&
+        other.longitude == longitude;
+  }
+
+  @override
+  int get hashCode => latitude.hashCode ^ longitude.hashCode;
+
+  @override
+  String toString() => 'GpsCoordinates($latitude, $longitude)';
+}
+
 /// A class that holds metadata information about a video.
 class VideoMetadata {
   /// Creates a [VideoMetadata] instance.
@@ -21,6 +69,10 @@ class VideoMetadata {
     this.albumArtist = '',
     this.date,
     this.isOptimizedForStreaming,
+    this.gpsCoordinates,
+    this.frameRate,
+    this.cameraMake = '',
+    this.cameraModel = '',
   });
 
   /// Creates a [VideoMetadata] instance from a map of data.
@@ -54,6 +106,15 @@ class VideoMetadata {
       date:
           (value['date'] ?? '') != '' ? DateTime.tryParse(value['date']) : null,
       isOptimizedForStreaming: value['isOptimizedForStreaming'] as bool?,
+      gpsCoordinates: value['latitude'] != null && value['longitude'] != null
+          ? GpsCoordinates(
+              latitude: safeParseDouble(value['latitude']),
+              longitude: safeParseDouble(value['longitude']),
+            )
+          : null,
+      frameRate: value['frameRate'] as double?,
+      cameraMake: value['cameraMake'] ?? '',
+      cameraModel: value['cameraModel'] ?? '',
     );
   }
 
@@ -168,6 +229,46 @@ class VideoMetadata {
   /// to `true` when rendering.
   final bool? isOptimizedForStreaming;
 
+  /// The GPS coordinates where the video was recorded.
+  ///
+  /// This value is `null` if the video does not contain location metadata
+  /// or if the device did not have location permissions when recording.
+  ///
+  /// Example:
+  /// ```dart
+  /// GpsCoordinates(latitude: 47.3769, longitude: 8.5417) // Zurich, Switzerland
+  /// ```
+  final GpsCoordinates? gpsCoordinates;
+
+  /// The frame rate of the video in frames per second (fps).
+  ///
+  /// This value represents how many frames are displayed per second.
+  /// Common values are 24, 25, 30, 60 fps.
+  ///
+  /// Example:
+  /// ```dart
+  /// 30.0 // 30 fps
+  /// ```
+  final double? frameRate;
+
+  /// The make (manufacturer) of the camera used to record the video.
+  ///
+  /// Example:
+  /// ```dart
+  /// 'Apple' // iPhone
+  /// 'Samsung' // Samsung phone
+  /// ```
+  final String cameraMake;
+
+  /// The model of the camera used to record the video.
+  ///
+  /// Example:
+  /// ```dart
+  /// 'iPhone 14 Pro'
+  /// 'SM-S918B' // Samsung Galaxy S23 Ultra
+  /// ```
+  final String cameraModel;
+
   /// Returns a copy of this config with the given fields replaced.
   VideoMetadata copyWith({
     String? title,
@@ -185,6 +286,10 @@ class VideoMetadata {
     String? extension,
     int? bitrate,
     bool? isOptimizedForStreaming,
+    GpsCoordinates? gpsCoordinates,
+    double? frameRate,
+    String? cameraMake,
+    String? cameraModel,
   }) {
     return VideoMetadata(
       title: title ?? this.title,
@@ -202,6 +307,10 @@ class VideoMetadata {
       bitrate: bitrate ?? this.bitrate,
       isOptimizedForStreaming:
           isOptimizedForStreaming ?? this.isOptimizedForStreaming,
+      gpsCoordinates: gpsCoordinates ?? this.gpsCoordinates,
+      frameRate: frameRate ?? this.frameRate,
+      cameraMake: cameraMake ?? this.cameraMake,
+      cameraModel: cameraModel ?? this.cameraModel,
     );
   }
 
@@ -223,7 +332,11 @@ class VideoMetadata {
         other.audioDuration == audioDuration &&
         other.extension == extension &&
         other.bitrate == bitrate &&
-        other.isOptimizedForStreaming == isOptimizedForStreaming;
+        other.isOptimizedForStreaming == isOptimizedForStreaming &&
+        other.gpsCoordinates == gpsCoordinates &&
+        other.frameRate == frameRate &&
+        other.cameraMake == cameraMake &&
+        other.cameraModel == cameraModel;
   }
 
   @override
@@ -241,6 +354,10 @@ class VideoMetadata {
         audioDuration.hashCode ^
         extension.hashCode ^
         bitrate.hashCode ^
-        isOptimizedForStreaming.hashCode;
+        isOptimizedForStreaming.hashCode ^
+        gpsCoordinates.hashCode ^
+        frameRate.hashCode ^
+        cameraMake.hashCode ^
+        cameraModel.hashCode;
   }
 }

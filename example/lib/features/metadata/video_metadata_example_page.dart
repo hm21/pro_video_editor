@@ -80,6 +80,20 @@ class _VideoMetadataExamplePageState extends State<VideoMetadataExamplePage> {
         _buildMetadataRow('Album:', meta.album),
         _buildMetadataRow('AlbumArtist:', meta.albumArtist),
         _buildMetadataRow(
+          'GPS:',
+          meta.gpsCoordinates != null
+              ? '${meta.gpsCoordinates!.latitude}, ${meta.gpsCoordinates!.longitude}'
+              : 'Not available',
+        ),
+        _buildMetadataRow(
+          'Frame Rate:',
+          meta.frameRate != null
+              ? '${meta.frameRate!.toStringAsFixed(2)} fps'
+              : 'N/A',
+        ),
+        _buildMetadataRow('Camera Make:', meta.cameraMake),
+        _buildMetadataRow('Camera Model:', meta.cameraModel),
+        _buildMetadataRow(
           'Optimized for Streaming:',
           meta.isOptimizedForStreaming == null
               ? 'N/A (non-MP4/MOV)'

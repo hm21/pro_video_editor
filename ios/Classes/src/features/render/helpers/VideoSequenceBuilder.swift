@@ -304,7 +304,7 @@ internal struct VideoSequenceResult {
 /// This is required for older iOS versions (e.g., iPhone 7, iOS 15) where
 /// AVMutableVideoCompositionInstruction doesn't properly derive track IDs
 /// from layer instructions when using a custom video compositor.
-internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionInstructionProtocol {
+internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionInstructionProtocol, @unchecked Sendable {
     let timeRange: CMTimeRange
     let enablePostProcessing: Bool = false
     let containsTweening: Bool = false
