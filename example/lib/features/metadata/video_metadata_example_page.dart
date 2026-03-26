@@ -82,7 +82,8 @@ class _VideoMetadataExamplePageState extends State<VideoMetadataExamplePage> {
         _buildMetadataRow(
           'GPS:',
           meta.gpsCoordinates != null
-              ? '${meta.gpsCoordinates!.latitude}, ${meta.gpsCoordinates!.longitude}'
+              ? '${meta.gpsCoordinates!.latitude}, '
+                  '${meta.gpsCoordinates!.longitude}'
               : 'Not available',
         ),
         _buildMetadataRow(
