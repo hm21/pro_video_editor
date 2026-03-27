@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/shared/utils/render_cancel_capability.dart';
 import 'package:pro_video_editor_example/shared/widgets/video_renderer_progress.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '/core/constants/example_constants.dart';
 import '/core/constants/example_filters.dart';
@@ -37,6 +38,8 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   late final _controllerContent = VideoController(_playerContent);
   late final _playerPreview = Player();
   late final _controllerPreview = VideoController(_playerPreview);
+
+  final _shareKey = GlobalKey();
 
   final _boundaryKey = GlobalKey();
   bool _isExporting = false;
@@ -263,13 +266,13 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// beginning. This is useful for using a specific section of a longer
   /// audio file.
   Future<void> _customAudioStartOffset() async {
-    final customAudioFile =
-        await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
+    final customAudioFile = await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
 
     var data = VideoRenderData(
       video: _video,
       customAudioPath: customAudioFile.path,
-      customAudioStartTime: const Duration(seconds: 5), // Start at 5 seconds
+      customAudioStartTime: const Duration(seconds: 5),
+      // Start at 5 seconds
       loopCustomAudio: false,
       originalAudioVolume: 0.0,
       customAudioVolume: 1.0,
@@ -290,14 +293,11 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   Future<void> _layersTimed() async {
     final imageBytes = await _captureLayerContent();
-    var data = VideoRenderData(
-      video: _video,
-        imageLayers: [
-          ImageLayer(imageBytes, const Duration(seconds: 1), const Duration(seconds: 2)),
-          ImageLayer(imageBytes, const Duration(seconds: 3), const Duration(seconds: 4)),
-          ImageLayer(imageBytes, const Duration(seconds: 5), const Duration(seconds: 6)),
-      ]
-    );
+    var data = VideoRenderData(video: _video, imageLayers: [
+      ImageLayer(imageBytes, const Duration(seconds: 1), const Duration(seconds: 2)),
+      ImageLayer(imageBytes, const Duration(seconds: 3), const Duration(seconds: 4)),
+      ImageLayer(imageBytes, const Duration(seconds: 5), const Duration(seconds: 6)),
+    ]);
 
     await _renderVideo(data);
   }
@@ -479,17 +479,13 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     };
 
     final allPassed = checks.values.every((v) => v);
-    final details = checks.entries
-        .map((e) => '${e.value ? "\u2705" : "\u274c"} ${e.key}')
-        .join('\n');
+    final details = checks.entries.map((e) => '${e.value ? "\u2705" : "\u274c"} ${e.key}').join('\n');
 
     if (!mounted) return;
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text(allPassed
-            ? '\u2705 All metadata stripped'
-            : '\u274c Some metadata leaked'),
+        title: Text(allPassed ? '\u2705 All metadata stripped' : '\u274c Some metadata leaked'),
         content: Text(
           'Source GPS: ${sourceMeta.gpsCoordinates}\n'
           'Source Date: ${sourceMeta.date}\n\n'
@@ -497,8 +493,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           'Note: Date is expected to remain (MP4 creation_time).',
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context), child: const Text('OK')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
         ],
       ),
     );
@@ -571,7 +566,16 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Video Export')),
+      appBar: AppBar(
+        title: const Text('Video Export'),
+        actions: [
+          IconButton(
+            key: _shareKey,
+            onPressed: _videoBytes == null ? null : _shareVideo,
+            icon: const Icon(Icons.share),
+          ),
+        ],
+      ),
       body: SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(
           0,
@@ -895,5 +899,19 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
         ),
       )
     ];
+  }
+
+  Future<void> _shareVideo() async {
+    var renderBox = _shareKey.currentContext!.findRenderObject()! as RenderBox;
+    var origin = renderBox.localToGlobal(Offset.zero) & renderBox.size;
+    await SharePlus.instance.share(ShareParams(
+      files: [
+        XFile.fromData(_videoBytes!, name: 'video.mp4', mimeType: 'video/mp4'),
+      ],
+      text: 'Shared from Pro Video Editor Example\n'
+          'Generated in ${_generationTime.inSeconds} seconds\n'
+          'Size ${formatBytes(_videoBytes?.lengthInBytes ?? 0)}',
+      sharePositionOrigin: origin,
+    ));
   }
 }
