@@ -1,3 +1,6 @@
+## 1.9.1
+- **FIX**(android, iOS, macOS): Fixed rendering failure with HEVC encoded videos.
+
 ## 1.9.0
 - **FEAT**(android, iOS, macOS): Add `gpsCoordinates` to `VideoMetadata` for extracting GPS location from videos.
 - **FEAT**(android, iOS, macOS): Add `frameRate` to `VideoMetadata` for extracting video frame rate.
