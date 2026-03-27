@@ -289,8 +289,11 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
         video: _video,
         // imageBytes: imageBytes,
         imageLayers: [
-          ImageLayer(imageBytes, const Duration(seconds: 1),
-              const Duration(seconds: 4)),
+          ImageLayer(
+            image: EditorLayerImage.memory(imageBytes),
+            startTime: const Duration(seconds: 1),
+            endTime: const Duration(seconds: 4),
+          ),
         ]);
 
     await _renderVideo(data);
@@ -325,7 +328,10 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       // imageBytes: imageBytes,
       imageLayers: [
         ImageLayer(
-            imageBytes, const Duration(seconds: 1), const Duration(seconds: 4)),
+          image: EditorLayerImage.memory(imageBytes),
+          startTime: const Duration(seconds: 1),
+          endTime: const Duration(seconds: 4),
+        ),
       ],
       endTime: const Duration(seconds: 20),
     );
@@ -408,7 +414,10 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       // imageBytes: imageBytes,
       imageLayers: [
         ImageLayer(
-            imageBytes, const Duration(seconds: 2), const Duration(seconds: 9)),
+          image: EditorLayerImage.memory(imageBytes),
+          startTime: const Duration(seconds: 2),
+          endTime: const Duration(seconds: 9),
+        ),
       ],
       videoSegments: [
         VideoSegment(

@@ -381,13 +381,13 @@ class VideoRenderData {
       'id': id,
       'videoClips': videoSegmentsMaps,
       'imageBytes': imageBytes,
-      'imageLayers': imageLayers
-          .map((layer) => {
-                'imageData': layer.imageData,
-                'startUs': layer.startTime.inMicroseconds,
-                'endUs': layer.endTime?.inMicroseconds,
-              })
-          .toList(),
+      'imageLayers': await Future.wait(
+        imageLayers.map((layer) async => {
+              'imageData': await layer.image.safeByteArray(),
+              'startUs': layer.startTime.inMicroseconds,
+              'endUs': layer.endTime?.inMicroseconds,
+            }),
+      ),
       'enableAudio': enableAudio,
       'playbackSpeed': playbackSpeed,
       'colorMatrixList': colorMatrixList,
@@ -463,22 +463,6 @@ class VideoRenderData {
       loopCustomAudio: loopCustomAudio ?? this.loopCustomAudio,
     );
   }
-}
-
-/// A model representing an image overlay layer with timing information.
-class ImageLayer {
-  /// Creates an [ImageLayer] with the [imageData] and [startTime] and [endTime]
-  const ImageLayer(this.imageData, this.startTime, [this.endTime]);
-
-  /// The image data for the overlay layer.
-  final Uint8List imageData;
-
-  /// The start time for the layer, relative to the start of the video.
-  final Duration startTime;
-
-  /// The end time of the layer, relative to the start of the video.
-  /// If `null`, the layer will be shown until the end of the video.
-  final Duration? endTime;
 }
 
 /// Supported video output formats for export.
