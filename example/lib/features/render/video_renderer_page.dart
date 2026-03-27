@@ -547,12 +547,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       checkStreamingOptimization: true,
     );
 
-    await _playerPreview.open(Media(outputPath));
-    await _playerPreview.play();
-
     _isExporting = false;
     _videoBytes = result;
     setState(() {});
+
+    await _playerPreview.open(Media(outputPath));
+    await _playerPreview.play();
   }
 
   Future<void> _cancelRender() async {
