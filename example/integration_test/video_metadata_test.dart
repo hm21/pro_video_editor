@@ -12,7 +12,7 @@ void main() {
   final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
 
   testWidgets('plugin getMetadata returns correct values', (tester) async {
-    final video = EditorVideo.asset(kVideoEditorExampleAssetPath);
+    final video = EditorVideo.asset(kVideoEditorExampleH264Path);
 
     final metadata = await ProVideoEditor.instance.getMetadata(video);
 

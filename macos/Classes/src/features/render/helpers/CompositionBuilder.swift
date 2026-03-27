@@ -12,6 +12,7 @@ internal class CompositionBuilder {
     private let videoEffects: VideoCompositorConfig
     private var enableAudio: Bool = true
     private var customAudioPath: String?
+    private var customAudioStartTimeUs: Int64?
     private var originalAudioVolume: Float = 1.0
     private var customAudioVolume: Float = 1.0
     private var loopCustomAudio: Bool = true
@@ -41,6 +42,15 @@ internal class CompositionBuilder {
     /// - Returns: Self for chaining
     func setCustomAudioPath(_ path: String?) -> CompositionBuilder {
         self.customAudioPath = path
+        return self
+    }
+    
+    /// Sets the start time offset for the custom audio.
+    ///
+    /// - Parameter startTimeUs: Start time in microseconds from the beginning of the audio file
+    /// - Returns: Self for chaining
+    func setCustomAudioStartTime(_ startTimeUs: Int64?) -> CompositionBuilder {
+        self.customAudioStartTimeUs = startTimeUs
         return self
     }
     
@@ -111,6 +121,7 @@ internal class CompositionBuilder {
                 targetDuration: videoResult.totalDuration
             ).setVolume(customAudioVolume)
              .setLoop(loopCustomAudio)
+             .setStartTime(customAudioStartTimeUs)
             
             customAudioTrack = try await audioBuilder.build(in: composition)
         }

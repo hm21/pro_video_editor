@@ -30,6 +30,7 @@ class VideoRenderData {
     this.colorMatrixList = const [],
     this.qualityConfig,
     this.customAudioPath,
+    this.customAudioStartTime,
     this.originalAudioVolume,
     this.customAudioVolume,
     this.shouldOptimizeForNetworkUse = false,
@@ -103,6 +104,7 @@ class VideoRenderData {
     int? bitrateOverride,
     List<List<double>> colorMatrixList = const [],
     String? customAudioPath,
+    Duration? customAudioStartTime,
     double? originalAudioVolume,
     double? customAudioVolume,
     bool shouldOptimizeForNetworkUse = false,
@@ -128,6 +130,7 @@ class VideoRenderData {
       colorMatrixList: colorMatrixList,
       qualityConfig: qualityConfig,
       customAudioPath: customAudioPath,
+      customAudioStartTime: customAudioStartTime,
       originalAudioVolume: originalAudioVolume,
       customAudioVolume: customAudioVolume,
       shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
@@ -240,6 +243,15 @@ class VideoRenderData {
   /// Use [originalAudioVolume] and [customAudioVolume] to control the mix
   /// levels of each audio track.
   final String? customAudioPath;
+
+  /// The start time offset for the custom audio track.
+  ///
+  /// When provided, the custom audio will start playing from this position
+  /// instead of from the beginning. This is useful for using a specific
+  /// section of a longer audio file.
+  ///
+  /// This parameter is only effective when [customAudioPath] is provided.
+  final Duration? customAudioStartTime;
 
   /// Volume multiplier for the original video audio track.
   ///
@@ -385,6 +397,7 @@ class VideoRenderData {
       'scaleX': scaleX,
       'scaleY': scaleY,
       'customAudioPath': customAudioPath,
+      'customAudioStartTimeUs': customAudioStartTime?.inMicroseconds,
       'originalAudioVolume': originalAudioVolume,
       'customAudioVolume': customAudioVolume,
       // Global trim for entire composition (only for videoSegments,
@@ -416,6 +429,7 @@ class VideoRenderData {
     int? bitrate,
     VideoQualityConfig? qualityConfig,
     String? customAudioPath,
+    Duration? customAudioStartTime,
     double? originalAudioVolume,
     double? customAudioVolume,
     bool? shouldOptimizeForNetworkUse,
@@ -439,6 +453,7 @@ class VideoRenderData {
       bitrate: bitrate ?? this.bitrate,
       qualityConfig: qualityConfig ?? this.qualityConfig,
       customAudioPath: customAudioPath ?? this.customAudioPath,
+      customAudioStartTime: customAudioStartTime ?? this.customAudioStartTime,
       originalAudioVolume: originalAudioVolume ?? this.originalAudioVolume,
       customAudioVolume: customAudioVolume ?? this.customAudioVolume,
       shouldOptimizeForNetworkUse:

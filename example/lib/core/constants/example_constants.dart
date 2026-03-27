@@ -1,7 +1,12 @@
 /// A URL or local path to the demo video asset used for video editor examples.
-const String kVideoEditorExampleAssetPath = 'assets/demo.mp4';
+/// Note: This is an HEVC 10-bit HDR video (Samsung Galaxy S26) for testing
+/// compatibility with problematic codecs.
+const String kVideoEditorExampleHevcPath = 'assets/hevc.mp4';
 
-/// A URL or local path to the secpmd demo video asset used for video editor
+/// A URL or local path to a standard H.264 video asset for comparison testing.
+const String kVideoEditorExampleH264Path = 'assets/demo.mp4';
+
+/// A URL or local path to the second demo video asset used for video editor
 /// examples.
 const String kVideoEditorExampleAssetWorldPath = 'assets/demo_world.mp4';
 

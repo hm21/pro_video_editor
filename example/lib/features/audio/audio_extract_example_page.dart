@@ -105,7 +105,7 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
 
       // Create extraction config
       final config = AudioExtractConfigs(
-        video: EditorVideo.asset(kVideoEditorExampleAssetPath),
+        video: EditorVideo.asset(kVideoEditorExampleH264Path),
         format: _selectedFormat,
         // Optional: Add trimming
         // startTime: Duration(seconds: 5),
@@ -183,7 +183,7 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
 
     try {
       // Check if the demo video has audio
-      final videoWithAudio = EditorVideo.asset(kVideoEditorExampleAssetPath);
+      final videoWithAudio = EditorVideo.asset(kVideoEditorExampleH264Path);
       final hasAudio =
           await ProVideoEditor.instance.hasAudioTrack(videoWithAudio);
 

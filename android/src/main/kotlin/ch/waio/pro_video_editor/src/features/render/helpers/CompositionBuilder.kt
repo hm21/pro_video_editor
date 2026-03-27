@@ -121,6 +121,7 @@ class CompositionBuilder(
                 .setVolume(config.customAudioVolume ?: 1.0f)
                 .setNormalization(needsNormalization)
                 .setLoop(config.loopCustomAudio)
+                .setStartTime(config.customAudioStartTimeUs)
                 .build()
 
             if (audioSequence != null) {

@@ -49,10 +49,46 @@ class RenderVideo {
                         ))
                     return
                 }
+                
+                var transcodedFiles: [String] = []
+                var workingConfig = config
+                
+                // HEVC 10-bit HDR videos cause issues with AVFoundation's compositor
+                // They must be pre-transcoded to H.264 8-bit SDR for ANY effect processing
+                print("🔍 Checking for HEVC 10-bit videos that need transcoding...")
+                
+                // Pre-transcode HEVC 10-bit HDR videos to H.264 8-bit SDR
+                let inputPaths = config.videoClips.map { $0.inputPath }
+                let transcodeMap = await VideoTranscoder.transcodeClipsIfNeeded(inputPaths)
+                
+                // Track transcoded files for cleanup
+                transcodedFiles = transcodeMap.values.filter { $0.contains("transcoded_") }
+                
+                if !transcodedFiles.isEmpty {
+                    print("✅ Pre-transcoded \(transcodedFiles.count) HEVC 10-bit videos to H.264")
+                    
+                    // Update config with transcoded paths
+                    let updatedClips = config.videoClips.map { clip -> VideoClip in
+                        if let newPath = transcodeMap[clip.inputPath], newPath != clip.inputPath {
+                            return VideoClip(
+                                inputPath: newPath,
+                                startUs: clip.startUs,
+                                endUs: clip.endUs
+                            )
+                        }
+                        return clip
+                    }
+                    
+                    // Create new config with updated clips
+                    workingConfig = config.copyWith(videoClips: updatedClips)
+                }
+                
                 var outputURL: URL!
 
                 let finalize: () -> Void = {
                     try? cleanup(config.outputPath == nil ? [outputURL] : [])
+                    // Clean up transcoded files
+                    VideoTranscoder.cleanupTranscodedFiles(transcodedFiles)
                 }
 
                 let handleCompletion: (Result<Data?, Error>) -> Void = { result in
@@ -64,11 +100,11 @@ class RenderVideo {
                 }
 
                 do {
-                    if let outputPath = config.outputPath {
+                    if let outputPath = workingConfig.outputPath {
                         // Ensure file extension matches the requested format
                         let url = URL(fileURLWithPath: outputPath)
                         let pathExtension = url.pathExtension.lowercased()
-                        let requestedFormat = config.outputFormat.lowercased()
+                        let requestedFormat = workingConfig.outputFormat.lowercased()
                         
                         if pathExtension != requestedFormat {
                             print("⚠️ WARNING: Output path extension '.\(pathExtension)' doesn't match requested format '.\(requestedFormat)'")
@@ -81,18 +117,18 @@ class RenderVideo {
                             outputURL = url
                         }
                     } else {
-                        outputURL = temporaryURL(for: config.outputFormat)
+                        outputURL = temporaryURL(for: workingConfig.outputFormat)
                     }
 
                     print("")
                     print("🎬 ===== RENDER CONFIG =====")
-                    print("   Video clips: \(config.videoClips.count)")
-                    print("   � Output format: \(config.outputFormat)")
+                    print("   Video clips: \(workingConfig.videoClips.count)")
+                    print("   📁 Output format: \(workingConfig.outputFormat)")
                     print("   📹 Output path: \(outputURL.path)")
-                    print("   �🔊 Enable Audio: \(config.enableAudio)")
-                    print("   🔊 Original audio volume: \(config.originalAudioVolume ?? 1.0)")
-                    print("   🔊 Custom audio path: \(config.customAudioPath ?? "none")")
-                    print("   🔊 Custom audio volume: \(config.customAudioVolume ?? 1.0)")
+                    print("   🔊 Enable Audio: \(workingConfig.enableAudio)")
+                    print("   🔊 Original audio volume: \(workingConfig.originalAudioVolume ?? 1.0)")
+                    print("   🔊 Custom audio path: \(workingConfig.customAudioPath ?? "none")")
+                    print("   🔊 Custom audio volume: \(workingConfig.customAudioVolume ?? 1.0)")
                     print("===========================")
                     print("")
 
@@ -102,23 +138,24 @@ class RenderVideo {
                     // Use composition helper to merge multiple video clips
                     let (composition, videoComposition, renderSize, audioMix, sourceTrackID) =
                         try await applyComposition(
-                            videoClips: config.videoClips,
+                            videoClips: workingConfig.videoClips,
                             videoEffects: effectsConfig,
-                            enableAudio: config.enableAudio,
-                            customAudioPath: config.customAudioPath,
-                            originalAudioVolume: config.originalAudioVolume,
-                            customAudioVolume: config.customAudioVolume,
-                            loopCustomAudio: config.loopCustomAudio
+                            enableAudio: workingConfig.enableAudio,
+                            customAudioPath: workingConfig.customAudioPath,
+                            customAudioStartTimeUs: workingConfig.customAudioStartTimeUs,
+                            originalAudioVolume: workingConfig.originalAudioVolume,
+                            customAudioVolume: workingConfig.customAudioVolume,
+                            loopCustomAudio: workingConfig.loopCustomAudio
                         )
                     
                     // Set source track ID for fallback on older iOS versions (e.g., iPhone 7)
                     effectsConfig.sourceTrackID = sourceTrackID
 
                     // Apply playback speed to the entire composition
-                    applyPlaybackSpeed(composition: composition, speed: config.playbackSpeed)
+                    applyPlaybackSpeed(composition: composition, speed: workingConfig.playbackSpeed)
 
                     // Get the first video track for orientation info
-                    let firstClipURL = URL(fileURLWithPath: config.videoClips[0].inputPath)
+                    let firstClipURL = URL(fileURLWithPath: workingConfig.videoClips[0].inputPath)
                     let firstAsset = AVURLAsset(url: firstClipURL)
                     let videoTrack = try await loadVideoTrack(from: firstAsset)
 
@@ -137,33 +174,33 @@ class RenderVideo {
                     let croppedSize = applyCrop(
                         config: &effectsConfig,
                         naturalSize: renderSize,
-                        rotateTurns: config.rotateTurns,
-                        cropX: config.cropX,
-                        cropY: config.cropY,
-                        cropWidth: config.cropWidth,
-                        cropHeight: config.cropHeight
+                        rotateTurns: workingConfig.rotateTurns,
+                        cropX: workingConfig.cropX,
+                        cropY: workingConfig.cropY,
+                        cropWidth: workingConfig.cropWidth,
+                        cropHeight: workingConfig.cropHeight
                     )
 
-                    applyRotation(config: &effectsConfig, rotateTurns: config.rotateTurns)
-                    applyFlip(config: &effectsConfig, flipX: config.flipX, flipY: config.flipY)
-                    applyScale(config: &effectsConfig, scaleX: config.scaleX, scaleY: config.scaleY)
+                    applyRotation(config: &effectsConfig, rotateTurns: workingConfig.rotateTurns)
+                    applyFlip(config: &effectsConfig, flipX: workingConfig.flipX, flipY: workingConfig.flipY)
+                    applyScale(config: &effectsConfig, scaleX: workingConfig.scaleX, scaleY: workingConfig.scaleY)
                     applyColorMatrix(
                         config: &effectsConfig, to: videoComposition,
-                        matrixList: config.colorMatrixList)
-                    applyBlur(config: &effectsConfig, sigma: config.blur)
+                        matrixList: workingConfig.colorMatrixList)
+                    applyBlur(config: &effectsConfig, sigma: workingConfig.blur)
                     applyImageLayer(
                         config: &effectsConfig,
-                        imageData: config.imageData,
-                        imageLayers: config.imageLayers,
-                        withCropping: config.imageBytesWithCropping)
+                        imageData: workingConfig.imageData,
+                        imageLayers: workingConfig.imageLayers,
+                        withCropping: workingConfig.imageBytesWithCropping)
 
                     var finalRenderSize = videoComposition.renderSize
 
                     // Only update renderSize if cropping was actually applied
-                    if config.cropWidth != nil || config.cropHeight != nil {
+                    if workingConfig.cropWidth != nil || workingConfig.cropHeight != nil {
                         finalRenderSize = croppedSize
                     } else {
-                        if let rotateTurns = config.rotateTurns {
+                        if let rotateTurns = workingConfig.rotateTurns {
                             let normalizedRotation = (rotateTurns % 4 + 4) % 4
                             if normalizedRotation == 1 || normalizedRotation == 3 {
                                 finalRenderSize = CGSize(
@@ -174,8 +211,8 @@ class RenderVideo {
                         }
                     }
 
-                    let effectiveScaleX = config.scaleX ?? 1.0
-                    let effectiveScaleY = config.scaleY ?? 1.0
+                    let effectiveScaleX = workingConfig.scaleX ?? 1.0
+                    let effectiveScaleY = workingConfig.scaleY ?? 1.0
 
                     if effectiveScaleX != 1.0 || effectiveScaleY != 1.0 {
                         finalRenderSize = CGSize(
@@ -194,25 +231,25 @@ class RenderVideo {
                     let compositorClass = makeVideoCompositorSubclass(with: effectsConfig)
                     videoComposition.customVideoCompositorClass = compositorClass
 
-                    let preset = applyBitrate(requestedBitrate: config.bitrate)
+                    let preset = applyBitrate(requestedBitrate: workingConfig.bitrate)
 
                     let export = try prepareExportSession(
                         composition: composition,
                         videoComposition: videoComposition,
                         audioMix: audioMix,
                         outputURL: outputURL,
-                        outputFormat: config.outputFormat,
+                        outputFormat: workingConfig.outputFormat,
                         preset: preset,
-                        startUs: config.startUs,
-                        endUs: config.endUs,
-                        shouldOptimizeForNetworkUse: config.shouldOptimizeForNetworkUse
+                        startUs: workingConfig.startUs,
+                        endUs: workingConfig.endUs,
+                        shouldOptimizeForNetworkUse: workingConfig.shouldOptimizeForNetworkUse
                     )
 
                     handle.attach(export: export)
 
                     try await monitorExportProgress(export, onProgress: onProgress)
 
-                    if config.outputPath != nil {
+                    if workingConfig.outputPath != nil {
                         handleCompletion(.success(nil))
                     } else {
                         let data = try Data(contentsOf: outputURL)

@@ -108,8 +108,11 @@ class ConfigurableInAppMp4Muxer private constructor(
     }
 
     override fun addMetadataEntry(metadataEntry: Metadata.Entry) {
-        if (MuxerUtil.isMetadataSupported(metadataEntry)) {
-            metadataEntries.add(metadataEntry)
+        // Only keep orientation data, strip all other metadata (GPS, date, etc.)
+        if (metadataEntry is Mp4OrientationData) {
+            if (MuxerUtil.isMetadataSupported(metadataEntry)) {
+                metadataEntries.add(metadataEntry)
+            }
         }
     }
 
