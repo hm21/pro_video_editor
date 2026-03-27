@@ -1,3 +1,6 @@
+## 1.9.2
+- **FIX**(all): Fix file write failures when the target directory does not exist. `writeMemoryVideoToFile`, `writeAssetVideoToFile`, and `fetchVideoToFile` now create parent directories recursively before writing.
+
 ## 1.9.1
 - **FIX**(android): Strip metadata (GPS, title, artist, etc.) from rendered videos. Previously, Android's Media3 Transformer copied all source metadata to the output, while iOS/macOS correctly removed them to protect the privacy from users.
 
