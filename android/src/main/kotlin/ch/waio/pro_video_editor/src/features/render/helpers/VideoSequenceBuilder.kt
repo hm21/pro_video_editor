@@ -56,7 +56,9 @@ class VideoSequenceBuilder(
         val scaleY: Float?,
         val withCropping: Boolean = false,
         val startUs: Long = 0,
-        val endUs: Long = -1
+        val endUs: Long = -1,
+        val x: Int = 0,
+        val y: Int = 0
     )
 
     /**
@@ -432,6 +434,32 @@ class VideoSequenceBuilder(
         val clipVideoEffects = mutableListOf<Effect>()
         clipVideoEffects.addAll(videoEffects)
 
+        // Calculate video dimensions for image layer positioning
+        // This must be done before applying any effects
+        var (videoWidth, videoHeight, videoRotation) = ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions(
+            inputFile,
+            rotationDegrees
+        )
+        
+        // Adjust dimensions based on rotation
+        val isRotated90Deg = videoRotation == 90 || videoRotation == 270
+        
+        // If crop is applied, update dimensions for AFTER crop scenario
+        val croppedWidth: Int?
+        val croppedHeight: Int?
+        if (cropConfig != null) {
+            croppedWidth = if (cropConfig.width != null) {
+                if (isRotated90Deg) cropConfig.width else cropConfig.width
+            } else null
+            
+            croppedHeight = if (cropConfig.height != null) {
+                if (isRotated90Deg) cropConfig.height else cropConfig.height
+            } else null
+        } else {
+            croppedWidth = null
+            croppedHeight = null
+        }
+
         // Apply image layer BEFORE crop if withCropping is enabled
         // This makes the image get cropped together with the video
         if (imageLayerConfig?.withCropping == true) {
@@ -449,8 +477,9 @@ class VideoSequenceBuilder(
             }
             
             // Apply time-based image layers BEFORE crop when withCropping is enabled
+            // Use original video dimensions
             if (timedImageLayers.isNotEmpty()) {
-                applyTimedImageLayers(clipVideoEffects, timedImageLayers)
+                applyTimedImageLayers(clipVideoEffects, timedImageLayers, videoWidth, videoHeight)
             }
         }
 
@@ -467,6 +496,10 @@ class VideoSequenceBuilder(
                 crop.x,
                 crop.y
             )
+            
+            // Update dimensions after crop for image layers applied AFTER crop
+            if (croppedWidth != null) videoWidth = croppedWidth
+            if (croppedHeight != null) videoHeight = croppedHeight
         }
 
         // Apply image layer AFTER crop if withCropping is disabled (default behavior)
@@ -490,7 +523,7 @@ class VideoSequenceBuilder(
         // Note: Currently only supports applying after effects, not before crop with withCropping
         // This is because imageBytesWithCropping applies to both single overlay and timed layers
         if (imageLayerConfig?.withCropping != true && timedImageLayers.isNotEmpty()) {
-            applyTimedImageLayers(clipVideoEffects, timedImageLayers)
+            applyTimedImageLayers(clipVideoEffects, timedImageLayers, videoWidth, videoHeight)
         }
 
         // Volume control approach depends on whether we're mixing with custom audio:

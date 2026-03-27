@@ -5,6 +5,8 @@ struct ImageLayerConfig {
     let imageData: Data
     let startUs: Int64
     let endUs: Int64
+    let x: Int
+    let y: Int
 
     static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
         guard let args = args else { return nil }
@@ -22,11 +24,14 @@ struct ImageLayerConfig {
             return nil
         }
 
-        // endUs of -1 is used to signify "until the end of the video"
+        // Use -1 as sentinel value for "from start" when startUs is null
+        // Use -1 for endUs to signify "until the end of the video"
         return ImageLayerConfig(
             imageData: imageData,
-            startUs: (args["startUs"] as? NSNumber)?.int64Value ?? 0,
-            endUs: (args["endUs"] as? NSNumber)?.int64Value ?? -1
+            startUs: (args["startUs"] as? NSNumber)?.int64Value ?? -1,
+            endUs: (args["endUs"] as? NSNumber)?.int64Value ?? -1,
+            x: (args["x"] as? NSNumber)?.intValue ?? 0,
+            y: (args["y"] as? NSNumber)?.intValue ?? 0
         )
     }
 }

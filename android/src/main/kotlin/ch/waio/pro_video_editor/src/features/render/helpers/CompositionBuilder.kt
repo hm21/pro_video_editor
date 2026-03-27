@@ -76,7 +76,9 @@ class CompositionBuilder(
                     scaleY = config.scaleY,
                     withCropping = config.imageBytesWithCropping,
                     startUs = imageLayer.startUs,
-                    endUs = imageLayer.endUs
+                    endUs = imageLayer.endUs,
+                    x = imageLayer.x,
+                    y = imageLayer.y
                 )
             })
             .setEnableAudio(config.enableAudio)

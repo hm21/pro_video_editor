@@ -115,20 +115,25 @@ fun applyImageLayer(
  *
  * Each image layer has a start and end time, and will only be visible during
  * that time range. Multiple layers can be active simultaneously.
+ * Images are positioned at the specified x/y offset from the bottom-left of the video frame.
  *
  * @param videoEffects List to add overlay effects to
  * @param imageLayers List of image layers with timing information
+ * @param videoWidth Width of the video frame for positioning
+ * @param videoHeight Height of the video frame for positioning
  */
 @UnstableApi
 fun applyTimedImageLayers(
     videoEffects: MutableList<Effect>,
     imageLayers: List<VideoSequenceBuilder.ImageLayerConfig>,
+    videoWidth: Int,
+    videoHeight: Int
 ) {
     if (imageLayers.isEmpty()) return
 
     Log.d(
         RENDER_TAG,
-        "Applying ${imageLayers.size} time-based image layer(s), scaled to ${videoWidth}x$videoHeight"
+        "Applying ${imageLayers.size} time-based image layer(s) to ${videoWidth}x$videoHeight video"
     )
 
     // Create bitmap overlays for each layer
@@ -142,33 +147,46 @@ fun applyTimedImageLayers(
                 layer.imageBytes, 0, layer.imageBytes!!.size, options
             )
 
-            // Scale to match video dimensions
-            val scaledOverlay = if (overlayBitmap.width != videoWidth || overlayBitmap.height != videoHeight) {
-                val scaled = overlayBitmap.scale(videoWidth, videoHeight)
-                overlayBitmap.recycle()
-                scaled
-            } else {
-                overlayBitmap
-            }
+            val imageWidth = overlayBitmap.width
+            val imageHeight = overlayBitmap.height
 
             // Convert from premultiplied to straight alpha
-            val finalOverlay = unpremultiplyAlpha(scaledOverlay)
-            if (finalOverlay !== scaledOverlay) scaledOverlay.recycle()
+            val finalOverlay = unpremultiplyAlpha(overlayBitmap)
+            if (finalOverlay !== overlayBitmap) overlayBitmap.recycle()
 
             // Convert times from microseconds to seconds
             val startTimeUs = layer.startUs
             val endTimeUs = layer.endUs
             
+            // Extract x/y offsets from layer (defaults to 0)
+            val xOffset = layer.x
+            val yOffset = layer.y
+            
             Log.d(
                 RENDER_TAG,
                 "Layer: ${if (startTimeUs == -1L) "from start" else "start=${startTimeUs}us"}," +
-                        " ${if (endTimeUs == -1L) "until end" else "end=${endTimeUs}us"})"
+                        " ${if (endTimeUs == -1L) "until end" else "end=${endTimeUs}us"}," +
+                        " size=${imageWidth}x${imageHeight}, offset=($xOffset, $yOffset)"
             )
 
             // Create a transparent bitmap placeholder for when layer is not active
             val transparentBitmap = createBitmap(videoWidth, videoHeight)
             
-            // Create a timed bitmap overlay
+            // Pre-create the positioned bitmap (create once, reuse for all frames)
+            val positionedBitmap = createBitmap(videoWidth, videoHeight)
+            val canvas = android.graphics.Canvas(positionedBitmap)
+            
+            // The coordinate system in Android Canvas has origin at top-left
+            // We need to convert from bottom-left origin to top-left origin
+            // y_top_left = videoHeight - y_bottom_left - imageHeight
+            val yTopLeft = videoHeight - yOffset - imageHeight
+            
+            canvas.drawBitmap(finalOverlay, xOffset.toFloat(), yTopLeft.toFloat(), null)
+            
+            // We can recycle finalOverlay now since it's been drawn to positionedBitmap
+            finalOverlay.recycle()
+            
+            // Create a timed bitmap overlay with positioning
             // Media3 expects time in microseconds
             object : BitmapOverlay() {
                 override fun getBitmap(presentationTimeUs: Long): Bitmap {
@@ -178,7 +196,7 @@ fun applyTimedImageLayers(
                     val inTimeRange = (startTimeUs == -1L || presentationTimeUs >= startTimeUs) &&
                             (endTimeUs == -1L || presentationTimeUs <= endTimeUs)
                     
-                    return if (inTimeRange) finalOverlay else transparentBitmap
+                    return if (inTimeRange) positionedBitmap else transparentBitmap
                 }
 
                 override fun configure(videoSize: Size) {

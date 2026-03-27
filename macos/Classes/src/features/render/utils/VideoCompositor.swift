@@ -91,7 +91,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
             overlayImageLayers.append(ImageLayer(
                 image: CIImage(cgImage: cgImage),
                 startUs: layer.startUs,
-                endUs: layer.endUs
+                endUs: layer.endUs,
+                x: layer.x,
+                y: layer.y
             ))
         }
     }
@@ -300,8 +302,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
             let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
             for layer in overlayImageLayers {
                 // Check if current time is within the layer's time range
+                // startUs of -1 means "from the start of the video"
                 // endUs of -1 means "until the end of the video"
-                let inTimeRange = currentTimeUs >= layer.startUs &&
+                let inTimeRange = (layer.startUs == -1 || currentTimeUs >= layer.startUs) &&
                                   (layer.endUs == -1 || currentTimeUs <= layer.endUs)
 
                 if inTimeRange {
@@ -407,20 +410,18 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                 outputImage = scaledOverlay.composited(over: outputImage)
             }
 
-            // Apply time-based overlay layers
+            // Apply time-based overlay layers with positioning
             let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
             for layer in overlayImageLayers {
                 // Check if current time is within the layer's time range
+                // startUs of -1 means "from the start of the video"
                 // endUs of -1 means "until the end of the video"
-                let inTimeRange = currentTimeUs >= layer.startUs &&
+                let inTimeRange = (layer.startUs == -1 || currentTimeUs >= layer.startUs) &&
                                   (layer.endUs == -1 || currentTimeUs <= layer.endUs)
-
                 if inTimeRange {
-                    let scaledLayerOverlay = layer.image.transformed(
-                        by: CGAffineTransform(
-                            scaleX: imageRect.width / layer.image.extent.width,
-                            y: imageRect.height / layer.image.extent.height))
-                    outputImage = scaledLayerOverlay.composited(over: outputImage)
+                    let positionedOverlay = layer.image.transformed(
+                        by: CGAffineTransform(translationX: CGFloat(layer.x), y: CGFloat(layer.y)))
+                    outputImage = positionedOverlay.composited(over: outputImage)
                 }
             }
         }
