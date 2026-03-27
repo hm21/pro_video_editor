@@ -53,6 +53,7 @@ Future<Uint8List> loadAssetVideoAsUint8List(String assetPath) async {
 Future<File> writeMemoryVideoToFile(Uint8List bytes, String filePath) async {
   final file = File(filePath);
 
+  await file.parent.create(recursive: true);
   await file.writeAsBytes(
     bytes,
     flush: true,
@@ -81,6 +82,7 @@ Future<File> writeAssetVideoToFile(String assetPath, String filePath) async {
 
   final file = File(filePath);
 
+  await file.parent.create(recursive: true);
   await file.writeAsBytes(
     buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
     flush: true,
@@ -151,6 +153,8 @@ Future<File> fetchVideoToFile(String videoUrl, String filePath) async {
 
   if (response.statusCode == 200) {
     final file = File(filePath);
+
+    await file.parent.create(recursive: true);
 
     // Create an empty file and open an IOSink to write to it
     final sink = file.openWrite() as IOSink;
