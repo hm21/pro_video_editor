@@ -173,8 +173,9 @@ fun applyTimedImageLayers(
             object : BitmapOverlay() {
                 override fun getBitmap(presentationTimeUs: Long): Bitmap {
                     // Check if current time is within the layer's time range
+                    // startUs of -1 means "from the start of the video"
                     // endUs of -1 means "until the end of the video"
-                    val inTimeRange = presentationTimeUs >= startTimeUs &&
+                    val inTimeRange = (startTimeUs == -1L || presentationTimeUs >= startTimeUs) &&
                             (endTimeUs == -1L || presentationTimeUs <= endTimeUs)
                     
                     return if (inTimeRange) finalOverlay else transparentBitmap

@@ -144,7 +144,8 @@ data class RenderConfig(
             val imageLayersRaw = call.argument<List<Map<String, Any>>>("imageLayers")
             val imageLayers: List<ImageLayer> = imageLayersRaw?.mapNotNull { layerMap ->
                 val imageData = layerMap["imageData"] as? ByteArray
-                val startUs = (layerMap["startUs"] as? Number)?.toLong() ?: 0L
+                // Use -1L as sentinel value for "from start" when startUs is null
+                val startUs = (layerMap["startUs"] as? Number)?.toLong() ?: -1L
                 val endUs = (layerMap["endUs"] as? Number)?.toLong() ?: -1L
                 
                 // Return null if imageData is missing or empty (will be filtered out by mapNotNull)
