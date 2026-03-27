@@ -125,6 +125,43 @@ struct RenderConfig {
     /// When true (default), audio is repeated to match video duration.
     /// When false, audio plays once and silence fills the rest.
     let loopCustomAudio: Bool
+
+    /// Returns a copy of this config with the specified fields replaced.
+    /// Fields not provided retain their current values.
+    func copyWith(
+        videoClips: [VideoClip]? = nil
+    ) -> RenderConfig {
+        return RenderConfig(
+            videoClips: videoClips ?? self.videoClips,
+            imageData: self.imageData,
+            outputFormat: self.outputFormat,
+            outputPath: self.outputPath,
+            rotateTurns: self.rotateTurns,
+            flipX: self.flipX,
+            flipY: self.flipY,
+            cropWidth: self.cropWidth,
+            cropHeight: self.cropHeight,
+            cropX: self.cropX,
+            cropY: self.cropY,
+            scaleX: self.scaleX,
+            scaleY: self.scaleY,
+            bitrate: self.bitrate,
+            enableAudio: self.enableAudio,
+            playbackSpeed: self.playbackSpeed,
+            colorMatrixList: self.colorMatrixList,
+            blur: self.blur,
+            customAudioPath: self.customAudioPath,
+            customAudioStartTimeUs: self.customAudioStartTimeUs,
+            originalAudioVolume: self.originalAudioVolume,
+            customAudioVolume: self.customAudioVolume,
+            startUs: self.startUs,
+            endUs: self.endUs,
+            shouldOptimizeForNetworkUse: self.shouldOptimizeForNetworkUse,
+            imageBytesWithCropping: self.imageBytesWithCropping,
+            loopCustomAudio: self.loopCustomAudio
+        )
+    }
+
     static func fromArguments(_ arguments: [String: Any]?) -> RenderConfig? {
         guard let args = arguments else {
             return nil

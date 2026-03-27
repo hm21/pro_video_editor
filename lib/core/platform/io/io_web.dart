@@ -10,6 +10,11 @@ class File {
   /// The file path represented as a string.
   final String path;
 
+  /// Returns the parent directory.
+  Directory get parent {
+    return Directory();
+  }
+
   /// Write to the file path
   Future<void> writeAsString(String value) async {
     throw ArgumentError('This function is not supported on the web.');
@@ -104,8 +109,23 @@ class Platform {
 
 /// A reference to a directory (or _folder_) on the file system.
 class Directory {
+  /// Creates a [Directory] instance.
+  Directory([this._path = '']);
+
+  final String _path;
+
   /// Gets the path of this directory.
-  String get path => '';
+  String get path => _path;
+
+  /// Returns the parent directory.
+  Directory get parent {
+    return Directory();
+  }
+
+  /// Creates the directory.
+  Future<Directory> create({bool recursive = false}) async {
+    throw ArgumentError('This function is not supported on the web.');
+  }
 
   /// System temporary directory
   static Directory get systemTemp {

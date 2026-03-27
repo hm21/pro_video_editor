@@ -62,7 +62,7 @@ class _VideoEditorBasicExamplePageState
   final int _thumbnailCount = 7;
 
   /// The video currently loaded in the editor.
-  EditorVideo _video = EditorVideo.asset(kVideoEditorExampleAssetPath);
+  EditorVideo _video = EditorVideo.asset(kVideoEditorExampleH264Path);
 
   final _proVideoEditor = ProVideoEditor.instance;
 
@@ -235,8 +235,7 @@ class _VideoEditorBasicExamplePageState
       _generateThumbnails();
     });
 
-    _videoController =
-        VideoPlayerController.asset(kVideoEditorExampleAssetPath);
+    _videoController = VideoPlayerController.asset(kVideoEditorExampleH264Path);
 
     await Future.wait([
       _videoController.initialize(),

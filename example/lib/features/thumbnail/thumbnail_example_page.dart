@@ -28,7 +28,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
 
   Future<void> _setMetadata() async {
     _informations = await ProVideoEditor.instance.getMetadata(
-      EditorVideo.asset(kVideoEditorExampleAssetPath),
+      EditorVideo.asset(kVideoEditorExampleH264Path),
     );
     setState(() {});
   }
@@ -41,7 +41,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
     var raw = await ProVideoEditor.instance.getThumbnails(
       ThumbnailConfigs(
         id: _thumbnailTaskId,
-        video: EditorVideo.asset(kVideoEditorExampleAssetPath),
+        video: EditorVideo.asset(kVideoEditorExampleH264Path),
         outputFormat: _thumbnailFormat,
         timestamps: List.generate(
           _exampleImageCount,
@@ -67,7 +67,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
     var raw = await ProVideoEditor.instance.getKeyFrames(
       KeyFramesConfigs(
         id: _keyFramesTaskId,
-        video: EditorVideo.asset(kVideoEditorExampleAssetPath),
+        video: EditorVideo.asset(kVideoEditorExampleH264Path),
         outputFormat: _thumbnailFormat,
         maxOutputFrames: _exampleImageCount,
         outputSize: Size(outputSize, outputSize),
