@@ -337,17 +337,24 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     String filePath,
     VideoRenderData value,
   ) async {
-    final renderData = await value.toAsyncMap();
+    try {
+      final renderData = await value.toAsyncMap();
 
-    await methodChannel.invokeMethod<String>(
-      'renderVideo',
-      {
-        ...renderData,
-        'outputPath': filePath,
-      },
-    );
+      await methodChannel.invokeMethod<String>(
+        'renderVideo',
+        {
+          ...renderData,
+          'outputPath': filePath,
+        },
+      );
 
-    return filePath;
+      return filePath;
+    } on PlatformException catch (error) {
+      if (error.code == renderCanceledErrorCode) {
+        throw const RenderCanceledException();
+      }
+      rethrow;
+    }
   }
 
   @override

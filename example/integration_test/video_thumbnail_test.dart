@@ -8,7 +8,7 @@ import 'package:pro_video_editor_example/core/constants/example_constants.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-  final testVideo = EditorVideo.asset(kVideoEditorExampleAssetPath);
+  final testVideo = EditorVideo.asset(kVideoEditorExampleH264Path);
 
   const formatMimeMap = {
     ThumbnailFormat.jpeg: 'image/jpeg',

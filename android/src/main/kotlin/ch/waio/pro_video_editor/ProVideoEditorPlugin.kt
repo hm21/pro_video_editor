@@ -547,6 +547,8 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             renderTask.canceled.set(true)
             renderTask.job?.cancel()
             activeRenderTasks.remove(id)
+            // Send CANCELED error to complete the Dart render future
+            renderTask.sendError("CANCELED", "Task was canceled")
             result.success(true)
             return
         }
@@ -557,6 +559,8 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             audioTask.canceled.set(true)
             audioTask.job?.cancel()
             activeAudioTasks.remove(id)
+            // Send CANCELED error to complete the Dart audio future
+            audioTask.sendError("CANCELED", "Task was canceled")
             result.success(true)
             return
         }

@@ -26,7 +26,7 @@ class _VideoMetadataExamplePageState extends State<VideoMetadataExamplePage> {
 
   Future<void> _setMetadata() async {
     _metadata = await ProVideoEditor.instance.getMetadata(
-      EditorVideo.asset(kVideoEditorExampleAssetPath),
+      EditorVideo.asset(kVideoEditorExampleH264Path),
       checkStreamingOptimization: true, // Enable streaming optimization check
     );
     setState(() {});

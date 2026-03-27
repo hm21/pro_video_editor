@@ -60,10 +60,10 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   void initState() {
     super.initState();
     _playerContent.open(
-      Media('asset:///$kVideoEditorExampleAssetPath'),
+      Media('asset:///$kVideoEditorExampleH264Path'),
       play: false,
     );
-    _video = EditorVideo.asset(kVideoEditorExampleAssetPath);
+    _video = EditorVideo.asset(kVideoEditorExampleH264Path);
   }
 
   @override
