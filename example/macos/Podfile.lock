@@ -14,6 +14,8 @@ PODS:
     - FlutterMacOS
   - pro_video_editor (0.0.1):
     - FlutterMacOS
+  - share_plus (0.0.1):
+    - FlutterMacOS
   - shared_preferences_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
@@ -34,6 +36,7 @@ DEPENDENCIES:
   - package_info_plus (from `Flutter/ephemeral/.symlinks/plugins/package_info_plus/macos`)
   - pro_image_editor (from `Flutter/ephemeral/.symlinks/plugins/pro_image_editor/macos`)
   - pro_video_editor (from `Flutter/ephemeral/.symlinks/plugins/pro_video_editor/macos`)
+  - share_plus (from `Flutter/ephemeral/.symlinks/plugins/share_plus/macos`)
   - shared_preferences_foundation (from `Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin`)
   - video_player_avfoundation (from `Flutter/ephemeral/.symlinks/plugins/video_player_avfoundation/darwin`)
   - volume_controller (from `Flutter/ephemeral/.symlinks/plugins/volume_controller/macos`)
@@ -56,6 +59,8 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral/.symlinks/plugins/pro_image_editor/macos
   pro_video_editor:
     :path: Flutter/ephemeral/.symlinks/plugins/pro_video_editor/macos
+  share_plus:
+    :path: Flutter/ephemeral/.symlinks/plugins/share_plus/macos
   shared_preferences_foundation:
     :path: Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin
   video_player_avfoundation:
@@ -74,11 +79,12 @@ SPEC CHECKSUMS:
   package_info_plus: 12f1c5c2cfe8727ca46cbd0b26677728972d9a5b
   pro_image_editor: 9a363ba6d460288c632b65e3bed387018ee9fded
   pro_video_editor: 9a76a7e438e2d42965680599df7fbb4c0f688a83
+  share_plus: 1fa619de8392a4398bfaf176d441853922614e89
   shared_preferences_foundation: 5086985c1d43c5ba4d5e69a4e8083a389e2909e6
   video_player_avfoundation: 7993f492ae0bd77edaea24d9dc051d8bb2cd7c86
   volume_controller: 90a5978956cf18ebb7739bf5382fc1b0cfef66d0
   wakelock_plus: 9d63063ffb7af1c215209769067c57103bde719d
 
-PODFILE CHECKSUM: a7b2294dcf03cd31cca4e939ca284789719745c6
+PODFILE CHECKSUM: d53808ad3e260398c64f5e8ffae8c72d2669e2a5
 
 COCOAPODS: 1.16.2
