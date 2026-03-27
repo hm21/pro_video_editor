@@ -384,8 +384,10 @@ class VideoRenderData {
       'imageLayers': await Future.wait(
         imageLayers.map((layer) async => {
               'imageData': await layer.image.safeByteArray(),
-              'startUs': layer.startTime.inMicroseconds,
+              'startUs': layer.startTime?.inMicroseconds,
               'endUs': layer.endTime?.inMicroseconds,
+              'x': layer.x,
+              'y': layer.y,
             }),
       ),
       'enableAudio': enableAudio,
