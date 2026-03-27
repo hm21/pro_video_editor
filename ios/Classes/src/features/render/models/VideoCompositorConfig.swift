@@ -1,12 +1,6 @@
 import AVFoundation
 import CoreImage
 
-struct ImageLayerConfig {
-    let imageData: Data
-    let startUs: Int64
-    let endUs: Int64
-}
-
 struct VideoCompositorConfig {
     var blurSigma: Double = 0.0
     var overlayImage: Data? = nil

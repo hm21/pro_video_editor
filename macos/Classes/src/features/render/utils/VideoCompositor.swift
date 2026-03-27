@@ -73,10 +73,11 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         guard let data,
             let nsImage = NSImage(data: data),
             let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
-            overlayImage = CIImage(cgImage: cgImage)
         else {
             overlayImage = nil
+            return
         }
+        overlayImage = CIImage(cgImage: cgImage)
     }
 
     func setOverlayImageLayers(from layers: [ImageLayerConfig]) {
