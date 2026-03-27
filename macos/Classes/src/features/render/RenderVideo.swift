@@ -107,6 +107,7 @@ class RenderVideo {
                             videoEffects: effectsConfig,
                             enableAudio: config.enableAudio,
                             customAudioPath: config.customAudioPath,
+                            customAudioStartTimeUs: config.customAudioStartTimeUs,
                             originalAudioVolume: config.originalAudioVolume,
                             customAudioVolume: config.customAudioVolume,
                             loopCustomAudio: config.loopCustomAudio

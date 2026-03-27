@@ -77,6 +77,9 @@ class VideoMetadata {
             "rotation": 0,
             "bitrate": 0
         ]
+        
+        // Frame rate variable
+        var frameRate: Double? = nil
 
         // Calculate bitrate from file size and duration
         // Bitrate (bps) = (file size in bits) / (duration in seconds)
@@ -102,6 +105,12 @@ class VideoMetadata {
                 // atan2(b, a) gives the rotation angle in radians
                 let angle = atan2(transform.b, transform.a)
                 numericMetadata["rotation"] = (Int(round(angle * 180 / .pi)) + 360) % 360
+                
+                // Extract frame rate
+                let nominalFrameRate = try await track.load(.nominalFrameRate)
+                if nominalFrameRate > 0 {
+                    frameRate = Double(nominalFrameRate)
+                }
             }
         } else {
             // Fallback for macOS versions before 13.0
@@ -112,6 +121,11 @@ class VideoMetadata {
 
                 let angle = atan2(track.preferredTransform.b, track.preferredTransform.a)
                 numericMetadata["rotation"] = (Int(round(angle * 180 / .pi)) + 360) % 360
+                
+                // Extract frame rate
+                if track.nominalFrameRate > 0 {
+                    frameRate = Double(track.nominalFrameRate)
+                }
             }
         }
 
@@ -129,18 +143,223 @@ class VideoMetadata {
         ]
         
         var textMetadata: [String: String] = [:]
-
+        
+        // GPS coordinates
+        var latitude: Double? = nil
+        var longitude: Double? = nil
+        
+        // Camera information
+        var cameraMake: String = ""
+        var cameraModel: String = ""
+        
         if #available(macOS 13.0, *) {
             // Use async API to load metadata items
             let metadataItems = try await asset.load(.commonMetadata)
             for (resultKey, metadataKey) in textMetadataKeys {
                 textMetadata[resultKey] = try await loadMetadataString(from: metadataItems, key: metadataKey)
             }
+            
+            // Extract GPS location from common metadata
+            if let locationItem = metadataItems.first(where: { $0.commonKey?.rawValue == "location" }) {
+                if let locationString = try? await locationItem.load(.stringValue) {
+                    let coords = parseLocationString(locationString)
+                    latitude = coords.latitude
+                    longitude = coords.longitude
+                }
+            }
+            
+            // Extract camera make and model from QuickTime metadata
+            let allMetadata = try await asset.load(.metadata)
+            
+            for item in allMetadata {
+                // Check by string key
+                if let key = item.key as? String {
+                    let keyLower = key.lowercased()
+                    if key == "com.apple.quicktime.make" {
+                        cameraMake = try await item.load(.stringValue) ?? ""
+                    } else if key == "com.apple.quicktime.model" {
+                        cameraModel = try await item.load(.stringValue) ?? ""
+                    } else if latitude == nil && (key == "com.apple.quicktime.location.ISO6709" ||
+                              keyLower.contains("location") || keyLower.contains("gps") || key.contains("©xyz")) {
+                        // Try string value first
+                        if let locationString = try? await item.load(.stringValue) {
+                            let coords = parseLocationString(locationString)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                        // Try data value if string failed (Samsung/Android stores as binary)
+                        if latitude == nil, let locationData = try? await item.load(.dataValue) {
+                            let coords = parseLocationData(locationData)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                    }
+                }
+                
+                // Also check by identifier (important for MP4 files)
+                if latitude == nil, let identifier = item.identifier {
+                    let idRaw = identifier.rawValue.lowercased()
+                    // Check for ©xyz (URL-encoded as %A9xyz)
+                    if identifier == .quickTimeMetadataLocationISO6709 ||
+                       identifier == .identifier3GPUserDataLocation ||
+                       idRaw.contains("location") ||
+                       idRaw.contains("gps") ||
+                       idRaw.contains("%a9xyz") ||
+                       idRaw.contains("©xyz") {
+                        // Try string value first
+                        if let locationString = try? await item.load(.stringValue) {
+                            let coords = parseLocationString(locationString)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                        // Try data value if string failed
+                        if latitude == nil, let locationData = try? await item.load(.dataValue) {
+                            let coords = parseLocationData(locationData)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                    }
+                    
+                    // Extract camera model from Samsung's auth field
+                    if cameraModel.isEmpty && idRaw.contains("auth") {
+                        if let model = try? await item.load(.stringValue) {
+                            cameraModel = model
+                        }
+                    }
+                }
+            }
+            
+            // Try to get location from QuickTime user data as fallback
+            if latitude == nil {
+                let qtUserDataMetadata = AVMetadataItem.metadataItems(
+                    from: allMetadata,
+                    filteredByIdentifier: .quickTimeMetadataLocationISO6709
+                )
+                if let locationItem = qtUserDataMetadata.first {
+                    if let locationString = try? await locationItem.load(.stringValue) {
+                        let coords = parseLocationString(locationString)
+                        latitude = coords.latitude
+                        longitude = coords.longitude
+                    }
+                }
+            }
+            
+            // Try 3GP location format (used by some MP4 encoders)
+            if latitude == nil {
+                let threeGPMetadata = AVMetadataItem.metadataItems(
+                    from: allMetadata,
+                    filteredByIdentifier: .identifier3GPUserDataLocation
+                )
+                if let locationItem = threeGPMetadata.first {
+                    if let locationString = try? await locationItem.load(.stringValue) {
+                        let coords = parseLocationString(locationString)
+                        latitude = coords.latitude
+                        longitude = coords.longitude
+                    }
+                }
+            }
         } else {
             // Fallback for macOS versions before 13.0 using synchronous API
             let metadataItems = asset.commonMetadata
             for (resultKey, metadataKey) in textMetadataKeys {
                 textMetadata[resultKey] = metadataItems.first(where: { $0.commonKey?.rawValue == metadataKey })?.stringValue ?? ""
+            }
+            
+            // Extract GPS location from common metadata
+            if let locationItem = metadataItems.first(where: { $0.commonKey?.rawValue == "location" }),
+               let locationString = locationItem.stringValue {
+                let coords = parseLocationString(locationString)
+                latitude = coords.latitude
+                longitude = coords.longitude
+            }
+            
+            // Extract camera make and model from all metadata
+            let allMetadata = asset.metadata
+            
+            for item in allMetadata {
+                // Check by string key
+                if let key = item.key as? String {
+                    let keyLower = key.lowercased()
+                    if key == "com.apple.quicktime.make" {
+                        cameraMake = item.stringValue ?? ""
+                    } else if key == "com.apple.quicktime.model" {
+                        cameraModel = item.stringValue ?? ""
+                    } else if latitude == nil && (key == "com.apple.quicktime.location.ISO6709" ||
+                              keyLower.contains("location") || keyLower.contains("gps") || key.contains("©xyz")) {
+                        // Try string value first
+                        if let locationString = item.stringValue {
+                            let coords = parseLocationString(locationString)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                        // Try data value if string failed (Samsung/Android stores as binary)
+                        if latitude == nil, let locationData = item.dataValue {
+                            let coords = parseLocationData(locationData)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                    }
+                }
+                
+                // Also check by identifier (important for MP4 files)
+                if latitude == nil, let identifier = item.identifier {
+                    let idRaw = identifier.rawValue.lowercased()
+                    // Check for ©xyz (URL-encoded as %A9xyz)
+                    if identifier == .quickTimeMetadataLocationISO6709 ||
+                       identifier == .identifier3GPUserDataLocation ||
+                       idRaw.contains("location") ||
+                       idRaw.contains("gps") ||
+                       idRaw.contains("%a9xyz") ||
+                       idRaw.contains("©xyz") {
+                        // Try string value first
+                        if let locationString = item.stringValue {
+                            let coords = parseLocationString(locationString)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                        // Try data value if string failed
+                        if latitude == nil, let locationData = item.dataValue {
+                            let coords = parseLocationData(locationData)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                    }
+                    
+                    // Extract camera model from Samsung's auth field
+                    if cameraModel.isEmpty && idRaw.contains("auth") {
+                        if let model = item.stringValue {
+                            cameraModel = model
+                        }
+                    }
+                }
+            }
+            
+            // Try to get location from QuickTime user data as fallback
+            if latitude == nil {
+                let qtUserDataMetadata = AVMetadataItem.metadataItems(
+                    from: allMetadata,
+                    filteredByIdentifier: .quickTimeMetadataLocationISO6709
+                )
+                if let locationItem = qtUserDataMetadata.first,
+                   let locationString = locationItem.stringValue {
+                    let coords = parseLocationString(locationString)
+                    latitude = coords.latitude
+                    longitude = coords.longitude
+                }
+            }
+            
+            // Try 3GP location format (used by some MP4 encoders)
+            if latitude == nil {
+                let threeGPMetadata = AVMetadataItem.metadataItems(
+                    from: allMetadata,
+                    filteredByIdentifier: .identifier3GPUserDataLocation
+                )
+                if let locationItem = threeGPMetadata.first,
+                   let locationString = locationItem.stringValue {
+                    let coords = parseLocationString(locationString)
+                    latitude = coords.latitude
+                    longitude = coords.longitude
+                }
             }
         }
 
@@ -181,11 +400,26 @@ class VideoMetadata {
             "album": textMetadata["album"] ?? "",                   // Album metadata
             "albumArtist": textMetadata["albumArtist"] ?? "",       // Album artist metadata
             "date": dateStr,                                        // Creation date in ISO8601 format
+            "cameraMake": cameraMake,                               // Camera manufacturer
+            "cameraModel": cameraModel,                             // Camera model
         ]
         
         // Add audio duration if present
         if let audioDuration = audioDurationMs {
             metadataDict["audioDuration"] = audioDuration
+        }
+        
+        // Add GPS coordinates if present
+        if let lat = latitude {
+            metadataDict["latitude"] = lat
+        }
+        if let lon = longitude {
+            metadataDict["longitude"] = lon
+        }
+        
+        // Add frame rate if present
+        if let fps = frameRate {
+            metadataDict["frameRate"] = fps
         }
         
         // Check if video is optimized for streaming (moov before mdat)
@@ -243,6 +477,94 @@ class VideoMetadata {
             return try await item.load(.stringValue) ?? ""
         }
         return ""
+    }
+    
+    /// Parses a GPS location string into latitude and longitude coordinates.
+    ///
+    /// The location string format from QuickTime/macOS videos is typically:
+    /// "+47.3769+008.5417/" (ISO 6709 format) or similar variations.
+    ///
+    /// - Parameter locationString: The raw location string from video metadata
+    /// - Returns: A tuple containing the parsed latitude and longitude, or nil values if parsing fails
+    private static func parseLocationString(_ locationString: String) -> (latitude: Double?, longitude: Double?) {
+        // Remove trailing slash and whitespace
+        let cleaned = locationString.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        
+        // Pattern: +/-DD.DDDD+/-DDD.DDDD (ISO 6709 format)
+        // First coordinate is latitude, second is longitude
+        var latitude: Double? = nil
+        var longitude: Double? = nil
+        
+        // Find positions of + or - signs to split coordinates
+        var signPositions: [Int] = []
+        for (index, char) in cleaned.enumerated() {
+            if char == "+" || char == "-" {
+                signPositions.append(index)
+            }
+        }
+        
+        if signPositions.count >= 2 {
+            let latStartIndex = cleaned.index(cleaned.startIndex, offsetBy: signPositions[0])
+            let lonStartIndex = cleaned.index(cleaned.startIndex, offsetBy: signPositions[1])
+            
+            let latString = String(cleaned[latStartIndex..<lonStartIndex])
+            let lonString = String(cleaned[lonStartIndex...])
+            
+            latitude = Double(latString)
+            longitude = Double(lonString)
+        }
+        
+        return (latitude, longitude)
+    }
+    
+    /// Parses GPS location from binary data (used by Samsung/Android devices).
+    ///
+    /// The ©xyz atom stores location as a UTF-8 or UTF-16 encoded string in binary form,
+    /// following ISO 6709 format: "+47.3769+008.5417/" or as raw bytes.
+    ///
+    /// - Parameter data: The raw binary data from the ©xyz metadata atom
+    /// - Returns: A tuple containing the parsed latitude and longitude, or nil values if parsing fails
+    private static func parseLocationData(_ data: Data) -> (latitude: Double?, longitude: Double?) {
+        // Try to interpret as UTF-8 string first
+        if let locationString = String(data: data, encoding: .utf8) {
+            let coords = parseLocationString(locationString)
+            if coords.latitude != nil {
+                return coords
+            }
+        }
+        
+        // Try UTF-16 (some devices use this)
+        if let locationString = String(data: data, encoding: .utf16) {
+            let coords = parseLocationString(locationString)
+            if coords.latitude != nil {
+                return coords
+            }
+        }
+        
+        // Try to parse as raw IEEE 754 floats (32-bit each)
+        // Format: [4 bytes latitude][4 bytes longitude]
+        if data.count >= 8 {
+            let latBytes = data.subdata(in: 0..<4)
+            let lonBytes = data.subdata(in: 4..<8)
+            
+            let lat = latBytes.withUnsafeBytes { $0.load(as: Float32.self) }
+            let lon = lonBytes.withUnsafeBytes { $0.load(as: Float32.self) }
+            
+            // Validate coordinates are in reasonable range
+            if lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 {
+                return (Double(lat), Double(lon))
+            }
+            
+            // Try big-endian format
+            let latBE = Float32(bitPattern: UInt32(bigEndian: latBytes.withUnsafeBytes { $0.load(as: UInt32.self) }))
+            let lonBE = Float32(bitPattern: UInt32(bigEndian: lonBytes.withUnsafeBytes { $0.load(as: UInt32.self) }))
+            
+            if latBE >= -90 && latBE <= 90 && lonBE >= -180 && lonBE <= 180 {
+                return (Double(latBE), Double(lonBE))
+            }
+        }
+        
+        return (nil, nil)
     }
     
     // MARK: - Streaming Optimization Check

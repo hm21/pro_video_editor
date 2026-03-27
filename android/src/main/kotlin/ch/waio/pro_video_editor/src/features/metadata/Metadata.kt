@@ -149,6 +149,34 @@ class Metadata(private val context: Context) {
             textMetadata.forEach { (key, metadataKey) ->
                 metadata[key] = retriever.extractMetadata(metadataKey) ?: ""
             }
+            
+            // Extract GPS location (format: "+47.3769+008.5417/")
+            val locationString = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION)
+            if (locationString != null) {
+                val (latitude, longitude) = parseLocationString(locationString)
+                if (latitude != null) {
+                    metadata["latitude"] = latitude
+                }
+                if (longitude != null) {
+                    metadata["longitude"] = longitude
+                }
+            }
+            
+            // Extract frame rate (capture framerate, available from API 23+)
+            val captureFrameRate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
+            if (captureFrameRate != null) {
+                val frameRate = captureFrameRate.toDoubleOrNull()
+                if (frameRate != null && frameRate > 0) {
+                    metadata["frameRate"] = frameRate
+                }
+            }
+            
+            // Camera make and model are not directly available in MediaMetadataRetriever
+            // They would need to be extracted from EXIF data, which is typically for images.
+            // For videos, these are often stored in proprietary formats.
+            // We set empty strings to maintain API consistency across platforms.
+            metadata["cameraMake"] = ""
+            metadata["cameraModel"] = ""
 
             // Check if video is optimized for streaming (moov before mdat)
             // Only perform this check if explicitly requested (performance optimization)
@@ -190,6 +218,41 @@ class Metadata(private val context: Context) {
             // Always release the retriever to free native resources
             retriever.release()
         }
+    }
+    
+    /**
+     * Parses a GPS location string into latitude and longitude coordinates.
+     *
+     * The location string format from video metadata is typically:
+     * "+47.3769+008.5417/" (ISO 6709 format) or similar variations.
+     *
+     * @param locationString The raw location string from video metadata
+     * @return A Pair containing the parsed latitude and longitude, or null values if parsing fails
+     */
+    private fun parseLocationString(locationString: String): Pair<Double?, Double?> {
+        // Remove trailing slash and whitespace
+        val cleaned = locationString.trim().trimEnd('/')
+        
+        // Pattern: +/-DD.DDDD+/-DDD.DDDD (ISO 6709 format)
+        // First coordinate is latitude, second is longitude
+        val signPositions = mutableListOf<Int>()
+        for ((index, char) in cleaned.withIndex()) {
+            if (char == '+' || char == '-') {
+                signPositions.add(index)
+            }
+        }
+        
+        if (signPositions.size >= 2) {
+            val latString = cleaned.substring(signPositions[0], signPositions[1])
+            val lonString = cleaned.substring(signPositions[1])
+            
+            val latitude = latString.toDoubleOrNull()
+            val longitude = lonString.toDoubleOrNull()
+            
+            return Pair(latitude, longitude)
+        }
+        
+        return Pair(null, null)
     }
 
     /**

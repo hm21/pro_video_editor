@@ -3,7 +3,7 @@ import Foundation
 import Flutter
 
 /// Exception thrown when no audio track is found in the video file.
-class NoAudioTrackException: NSError {
+class NoAudioTrackException: NSError, @unchecked Sendable {
     init() {
         super.init(
             domain: "ExtractAudio",

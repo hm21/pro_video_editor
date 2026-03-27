@@ -153,14 +153,31 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
     final directory = await getTemporaryDirectory();
 
+    // Ensure directory exists
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+
     // Extract just the filename from the asset path
     final fileName = assetPath.split('/').last;
     final file = File('${directory.path}/$fileName');
+
+    // Ensure parent directory exists
+    final parent = file.parent;
+    if (!await parent.exists()) {
+      await parent.create(recursive: true);
+    }
 
     await file.writeAsBytes(
       buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
       flush: true,
     );
+
+    // Verify the file was written successfully
+    if (!await file.exists()) {
+      throw Exception('Failed to write audio file to: ${file.path}');
+    }
+    debugPrint('Audio file written to: ${file.path}');
 
     return file;
   }
@@ -234,6 +251,28 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       originalAudioVolume: 0.0,
       customAudioVolume: 1.0,
       loopCustomAudio: false,
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Start custom audio from a specific offset.
+  ///
+  /// This example demonstrates how to use `customAudioStartTime` to start
+  /// playing the custom audio from a specific position instead of from the
+  /// beginning. This is useful for using a specific section of a longer
+  /// audio file.
+  Future<void> _customAudioStartOffset() async {
+    final customAudioFile =
+        await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
+
+    var data = VideoRenderData(
+      video: _video,
+      customAudioPath: customAudioFile.path,
+      customAudioStartTime: const Duration(seconds: 5), // Start at 5 seconds
+      loopCustomAudio: false,
+      originalAudioVolume: 0.0,
+      customAudioVolume: 1.0,
     );
 
     await _renderVideo(data);
@@ -430,6 +469,48 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  Future<void> _testMetadataStripped() async {
+    final sourceMeta = await _pve.getMetadata(_video);
+
+    final result = await _pve.renderVideo(
+      VideoRenderData(video: _video, outputFormat: VideoOutputFormat.mp4),
+    );
+
+    final renderedMeta = await _pve.getMetadata(EditorVideo.memory(result));
+
+    final checks = <String, bool>{
+      'GPS stripped': renderedMeta.gpsCoordinates == null,
+      'Title stripped': renderedMeta.title.isEmpty,
+      'Artist stripped': renderedMeta.artist.isEmpty,
+      'Author stripped': renderedMeta.author.isEmpty,
+    };
+
+    final allPassed = checks.values.every((v) => v);
+    final details = checks.entries
+        .map((e) => '${e.value ? "\u2705" : "\u274c"} ${e.key}')
+        .join('\n');
+
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(allPassed
+            ? '\u2705 All metadata stripped'
+            : '\u274c Some metadata leaked'),
+        content: Text(
+          'Source GPS: ${sourceMeta.gpsCoordinates}\n'
+          'Source Date: ${sourceMeta.date}\n\n'
+          '$details\n\n'
+          'Note: Date is expected to remain (MP4 creation_time).',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context), child: const Text('OK')),
+        ],
+      ),
+    );
+  }
+
   Future<void> _renderVideo(VideoRenderData value) async {
     _taskId = DateTime.now().microsecondsSinceEpoch.toString();
     setState(() => _isExporting = true);
@@ -499,7 +580,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Video Export')),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(vertical: 16),
+        padding: EdgeInsets.fromLTRB(
+          0,
+          16,
+          0,
+          16 + MediaQuery.viewPaddingOf(context).bottom,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           spacing: 20,
@@ -748,6 +834,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           title: const Text('Custom Audio Without Loop'),
           subtitle: const Text('Plays once, then silence'),
         ),
+        ListTile(
+          onTap: _customAudioStartOffset,
+          leading: const Icon(Icons.skip_next_outlined),
+          title: const Text('Custom Audio with Start Offset'),
+          subtitle: const Text('Start at 5 seconds into audio'),
+        ),
         ..._buildSectionTitle('Quality'),
         ListTile(
           onTap: _qualityPreset1080p,
@@ -779,6 +871,13 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           leading: const Icon(Icons.cloud_off_outlined),
           title: const Text('No Network Optimization'),
           subtitle: const Text('Fast start disabled'),
+        ),
+        ..._buildSectionTitle('Privacy'),
+        ListTile(
+          onTap: _testMetadataStripped,
+          leading: const Icon(Icons.security_outlined),
+          title: const Text('Test Metadata Stripping'),
+          subtitle: const Text('Verify GPS, date, etc. are removed'),
         ),
       ],
     );

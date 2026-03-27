@@ -27,6 +27,7 @@ class AudioSequenceBuilder(
     private var volume: Float = 1.0f
     private var needsNormalization: Boolean = false
     private var loopAudio: Boolean = true
+    private var startTimeUs: Long = 0
 
     /**
      * Sets the volume multiplier for the custom audio.
@@ -60,6 +61,16 @@ class AudioSequenceBuilder(
     }
 
     /**
+     * Sets the start time offset for the custom audio.
+     *
+     * @param startTimeUs Start time in microseconds from the beginning of the audio file
+     */
+    fun setStartTime(startTimeUs: Long?): AudioSequenceBuilder {
+        this.startTimeUs = startTimeUs ?: 0
+        return this
+    }
+
+    /**
      * Builds the audio sequence with looping to match video duration.
      *
      * @return EditedMediaItemSequence for custom audio, or null if file not found
@@ -67,6 +78,9 @@ class AudioSequenceBuilder(
     fun build(): EditedMediaItemSequence? {
         Log.d(RENDER_TAG, "Building custom audio sequence: $audioPath")
         Log.d(RENDER_TAG, "Custom audio volume: $volume")
+        if (startTimeUs > 0) {
+            Log.d(RENDER_TAG, "Custom audio start offset: ${startTimeUs / 1000} ms")
+        }
 
         val audioFile = File(audioPath)
         if (!audioFile.exists()) {
@@ -74,9 +88,16 @@ class AudioSequenceBuilder(
             return null
         }
 
-        val audioDurationUs = MediaInfoExtractor.getAudioDuration(audioPath)
-        if (audioDurationUs == 0L) {
+        val totalAudioDurationUs = MediaInfoExtractor.getAudioDuration(audioPath)
+        if (totalAudioDurationUs == 0L) {
             Log.w(RENDER_TAG, "Cannot determine custom audio duration")
+            return null
+        }
+
+        // Calculate effective audio duration after start offset
+        val effectiveAudioDurationUs = totalAudioDurationUs - startTimeUs
+        if (effectiveAudioDurationUs <= 0) {
+            Log.w(RENDER_TAG, "Start time ($startTimeUs us) exceeds audio duration ($totalAudioDurationUs us)")
             return null
         }
 
@@ -86,9 +107,9 @@ class AudioSequenceBuilder(
 
         // Create audio items with looping or single play
         val audioItems = if (loopAudio) {
-            createLoopedAudioItems(audioFile, audioDurationUs, audioEffects)
+            createLoopedAudioItems(audioFile, totalAudioDurationUs, effectiveAudioDurationUs, audioEffects)
         } else {
-            createSingleAudioItem(audioFile, audioDurationUs, audioEffects)
+            createSingleAudioItem(audioFile, effectiveAudioDurationUs, audioEffects)
         }
 
         return EditedMediaItemSequence.Builder(audioItems).build()
@@ -163,43 +184,53 @@ class AudioSequenceBuilder(
 
     /**
      * Creates audio items with looping to match video duration.
+     * First iteration uses startTimeUs offset, subsequent loops start from beginning.
      */
     private fun createLoopedAudioItems(
         audioFile: File,
-        audioDurationUs: Long,
+        totalAudioDurationUs: Long,
+        effectiveAudioDurationUs: Long,
         effects: Effects
     ): List<EditedMediaItem> {
         val audioItems = mutableListOf<EditedMediaItem>()
 
-        if (audioDurationUs <= 0 || videoDurationUs <= 0) {
+        if (effectiveAudioDurationUs <= 0 || videoDurationUs <= 0) {
             // Fallback: add audio once without duration constraints
-            val audioItem = createAudioItem(audioFile, null, effects)
+            val audioItem = createAudioItem(audioFile, startTimeUs, null, effects)
             audioItems.add(audioItem)
             return audioItems
         }
 
         var remainingDurationUs = videoDurationUs
         var loopCount = 0
+        var isFirstLoop = true
 
         while (remainingDurationUs > 0) {
             loopCount++
-            val trimDurationUs = if (remainingDurationUs < audioDurationUs) {
+            
+            // First loop uses startTimeUs offset, subsequent loops start from 0
+            val loopStartUs = if (isFirstLoop) startTimeUs else 0L
+            val loopAudioDurationUs = if (isFirstLoop) effectiveAudioDurationUs else totalAudioDurationUs
+            
+            val endPositionUs = if (remainingDurationUs < loopAudioDurationUs) {
                 Log.d(
                     RENDER_TAG,
                     "Loop $loopCount: Trimming audio to ${remainingDurationUs / 1000} ms (final loop)"
                 )
-                remainingDurationUs
+                loopStartUs + remainingDurationUs
             } else {
                 Log.d(
                     RENDER_TAG,
-                    "Loop $loopCount: Using full audio duration ${audioDurationUs / 1000} ms"
+                    "Loop $loopCount: Using audio duration ${loopAudioDurationUs / 1000} ms" +
+                    if (isFirstLoop && startTimeUs > 0) " (starting at ${startTimeUs / 1000} ms)" else ""
                 )
-                null
+                null // Use full remaining audio
             }
 
-            val audioItem = createAudioItem(audioFile, trimDurationUs, effects)
+            val audioItem = createAudioItem(audioFile, loopStartUs, endPositionUs, effects)
             audioItems.add(audioItem)
-            remainingDurationUs -= audioDurationUs
+            remainingDurationUs -= loopAudioDurationUs
+            isFirstLoop = false
         }
 
         Log.d(RENDER_TAG, "Custom audio will loop $loopCount times to match video duration")
@@ -211,35 +242,40 @@ class AudioSequenceBuilder(
      */
     private fun createSingleAudioItem(
         audioFile: File,
-        audioDurationUs: Long,
+        effectiveAudioDurationUs: Long,
         effects: Effects
     ): List<EditedMediaItem> {
-        val trimDurationUs = if (audioDurationUs > videoDurationUs && videoDurationUs > 0) {
+        val endPositionUs = if (effectiveAudioDurationUs > videoDurationUs && videoDurationUs > 0) {
             Log.d(RENDER_TAG, "Trimming audio to ${videoDurationUs / 1000} ms (no loop)")
-            videoDurationUs
+            startTimeUs + videoDurationUs
         } else {
-            Log.d(RENDER_TAG, "Playing audio once (${audioDurationUs / 1000} ms, no loop)")
+            Log.d(RENDER_TAG, "Playing audio once (${effectiveAudioDurationUs / 1000} ms, no loop)" +
+                if (startTimeUs > 0) " starting at ${startTimeUs / 1000} ms" else "")
             null
         }
-        return listOf(createAudioItem(audioFile, trimDurationUs, effects))
+        return listOf(createAudioItem(audioFile, startTimeUs, endPositionUs, effects))
     }
 
     /**
-     * Creates a single audio EditedMediaItem with optional trimming.
+     * Creates a single audio EditedMediaItem with start offset and optional end position.
      */
     private fun createAudioItem(
         audioFile: File,
-        trimDurationUs: Long?,
+        startPositionUs: Long,
+        endPositionUs: Long?,
         effects: Effects
     ): EditedMediaItem {
         val mediaItemBuilder = MediaItem.Builder().setUri(Uri.fromFile(audioFile))
 
-        if (trimDurationUs != null) {
+        if (startPositionUs > 0 || endPositionUs != null) {
             val clippingConfig = MediaItem.ClippingConfiguration.Builder()
-                .setStartPositionMs(0)
-                .setEndPositionMs(trimDurationUs / 1000)
-                .build()
-            mediaItemBuilder.setClippingConfiguration(clippingConfig)
+                .setStartPositionMs(startPositionUs / 1000)
+            
+            if (endPositionUs != null) {
+                clippingConfig.setEndPositionMs(endPositionUs / 1000)
+            }
+            
+            mediaItemBuilder.setClippingConfiguration(clippingConfig.build())
         }
 
         val mediaItem = mediaItemBuilder.build()
