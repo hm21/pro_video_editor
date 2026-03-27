@@ -117,51 +117,14 @@ fun applyImageLayer(
  * that time range. Multiple layers can be active simultaneously.
  *
  * @param videoEffects List to add overlay effects to
- * @param inputFile Video file for dimension detection
  * @param imageLayers List of image layers with timing information
- * @param rotationDegrees Applied rotation (affects dimensions)
- * @param cropWidth Applied crop width (affects overlay size)
- * @param cropHeight Applied crop height (affects overlay size)
- * @param scaleX Applied horizontal scale (affects overlay size)
- * @param scaleY Applied vertical scale (affects overlay size)
  */
 @UnstableApi
 fun applyTimedImageLayers(
     videoEffects: MutableList<Effect>,
-    inputFile: File,
     imageLayers: List<VideoSequenceBuilder.ImageLayerConfig>,
-    rotationDegrees: Float,
-    cropWidth: Int?,
-    cropHeight: Int?,
-    scaleX: Float?,
-    scaleY: Float?,
 ) {
     if (imageLayers.isEmpty()) return
-
-    // Calculate target video dimensions
-    var (videoWidth, videoHeight, videoRotation) = getRotatedVideoDimensions(
-        inputFile,
-        rotationDegrees
-    )
-
-    val isRotated90Deg = videoRotation == 90 || videoRotation == 270
-    if (cropWidth != null) {
-        if (isRotated90Deg) {
-            videoHeight = cropWidth
-        } else {
-            videoWidth = cropWidth
-        }
-    }
-    if (cropHeight != null) {
-        if (isRotated90Deg) {
-            videoWidth = cropHeight
-        } else {
-            videoHeight = cropHeight
-        }
-    }
-
-    if (scaleX != null) videoWidth = (videoWidth * scaleX).toInt()
-    if (scaleY != null) videoHeight = (videoHeight * scaleY).toInt()
 
     Log.d(
         RENDER_TAG,
@@ -198,7 +161,8 @@ fun applyTimedImageLayers(
             
             Log.d(
                 RENDER_TAG,
-                "Layer: start=${startTimeUs}us, end=${endTimeUs}us (${if (endTimeUs == -1L) "until end" else "${endTimeUs}us"})"
+                "Layer: ${if (startTimeUs == -1L) "from start" else "start=${startTimeUs}us"}," +
+                        " ${if (endTimeUs == -1L) "until end" else "end=${endTimeUs}us"})"
             )
 
             // Create a transparent bitmap placeholder for when layer is not active
