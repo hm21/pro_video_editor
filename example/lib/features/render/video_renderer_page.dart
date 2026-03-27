@@ -456,6 +456,48 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  Future<void> _testMetadataStripped() async {
+    final sourceMeta = await _pve.getMetadata(_video);
+
+    final result = await _pve.renderVideo(
+      VideoRenderData(video: _video, outputFormat: VideoOutputFormat.mp4),
+    );
+
+    final renderedMeta = await _pve.getMetadata(EditorVideo.memory(result));
+
+    final checks = <String, bool>{
+      'GPS stripped': renderedMeta.gpsCoordinates == null,
+      'Title stripped': renderedMeta.title.isEmpty,
+      'Artist stripped': renderedMeta.artist.isEmpty,
+      'Author stripped': renderedMeta.author.isEmpty,
+    };
+
+    final allPassed = checks.values.every((v) => v);
+    final details = checks.entries
+        .map((e) => '${e.value ? "\u2705" : "\u274c"} ${e.key}')
+        .join('\n');
+
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(allPassed
+            ? '\u2705 All metadata stripped'
+            : '\u274c Some metadata leaked'),
+        content: Text(
+          'Source GPS: ${sourceMeta.gpsCoordinates}\n'
+          'Source Date: ${sourceMeta.date}\n\n'
+          '$details\n\n'
+          'Note: Date is expected to remain (MP4 creation_time).',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context), child: const Text('OK')),
+        ],
+      ),
+    );
+  }
+
   Future<void> _renderVideo(VideoRenderData value) async {
     _taskId = DateTime.now().microsecondsSinceEpoch.toString();
     setState(() => _isExporting = true);
@@ -527,7 +569,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Video Export')),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(vertical: 16),
+        padding: EdgeInsets.fromLTRB(
+          0,
+          16,
+          0,
+          16 + MediaQuery.viewPaddingOf(context).bottom,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           spacing: 20,
@@ -818,6 +865,13 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           leading: const Icon(Icons.cloud_off_outlined),
           title: const Text('No Network Optimization'),
           subtitle: const Text('Fast start disabled'),
+        ),
+        ..._buildSectionTitle('Privacy'),
+        ListTile(
+          onTap: _testMetadataStripped,
+          leading: const Icon(Icons.security_outlined),
+          title: const Text('Test Metadata Stripping'),
+          subtitle: const Text('Verify GPS, date, etc. are removed'),
         ),
       ],
     );

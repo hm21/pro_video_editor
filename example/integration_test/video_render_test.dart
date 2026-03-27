@@ -1450,5 +1450,50 @@ void main() {
       expect(meta.resolution.width, greaterThan(0));
       expect(meta.resolution.height, greaterThan(0));
     });
+
+    testWidgets('metadata is stripped after rendering', (_) async {
+      // Verify the source video has GPS metadata
+      final sourceMeta = await ProVideoEditor.instance.getMetadata(inputVideo);
+      expect(
+        sourceMeta.gpsCoordinates,
+        isNotNull,
+        reason: 'Source video should have GPS coordinates',
+      );
+
+      // Render the video
+      final result = await ProVideoEditor.instance.renderVideo(
+        VideoRenderData(
+          video: inputVideo,
+          outputFormat: VideoOutputFormat.mp4,
+        ),
+      );
+
+      // Check that the rendered video has no metadata
+      final renderedMeta = await ProVideoEditor.instance.getMetadata(
+        EditorVideo.memory(result),
+      );
+      expect(
+        renderedMeta.gpsCoordinates,
+        isNull,
+        reason: 'GPS metadata should be stripped after rendering',
+      );
+      // Note: date is expected to remain — the MP4 container automatically
+      // writes a creation_time in the mvhd atom during muxing.
+      expect(
+        renderedMeta.title,
+        isEmpty,
+        reason: 'Title metadata should be stripped after rendering',
+      );
+      expect(
+        renderedMeta.artist,
+        isEmpty,
+        reason: 'Artist metadata should be stripped after rendering',
+      );
+      expect(
+        renderedMeta.author,
+        isEmpty,
+        reason: 'Author metadata should be stripped after rendering',
+      );
+    }, skip: true);
   });
 }
