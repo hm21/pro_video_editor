@@ -16,7 +16,7 @@ dependencies:
   intl: ^0.20.1
   cupertino_icons: ^1.0.8
 
-  pro_image_editor: ^12.0.0
+  pro_image_editor: ^12.0.11
   
   google_fonts: ^6.3.2
   flutter_colorpicker: ^1.1.0
@@ -42,6 +42,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  config:
+    enable-swift-package-manager: false
+
   assets:
     - assets/
     - assets/tests/

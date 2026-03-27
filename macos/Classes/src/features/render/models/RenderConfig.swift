@@ -135,6 +135,7 @@ struct RenderConfig {
         return RenderConfig(
             videoClips: videoClips ?? self.videoClips,
             imageData: self.imageData,
+            imageLayers: self.imageLayers,
             outputFormat: self.outputFormat,
             outputPath: self.outputPath,
             rotateTurns: self.rotateTurns,

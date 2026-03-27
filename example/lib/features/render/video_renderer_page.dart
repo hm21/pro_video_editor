@@ -282,13 +282,20 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     final imageBytes = await _captureLayerContent();
     var data = VideoRenderData(
       video: _video,
-      // imageBytes: imageBytes,
-      imageLayers: [
-        ImageLayer(
-            imageBytes,
-            const Duration(seconds: 1),
-            const Duration(seconds: 4)
-        ),
+      imageBytes: imageBytes,
+    );
+
+    await _renderVideo(data);
+  }
+
+  Future<void> _layersTimed() async {
+    final imageBytes = await _captureLayerContent();
+    var data = VideoRenderData(
+      video: _video,
+        imageLayers: [
+          ImageLayer(imageBytes, const Duration(seconds: 1), const Duration(seconds: 2)),
+          ImageLayer(imageBytes, const Duration(seconds: 3), const Duration(seconds: 4)),
+          ImageLayer(imageBytes, const Duration(seconds: 5), const Duration(seconds: 6)),
       ]
     );
 
@@ -321,14 +328,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
         flipX: true,
       ),
       colorMatrixList: kBasicFilterMatrix,
-      // imageBytes: imageBytes,
-      imageLayers: [
-        ImageLayer(
-            imageBytes,
-            const Duration(seconds: 1),
-            const Duration(seconds: 4)
-        ),
-      ],
+      imageBytes: imageBytes,
       endTime: const Duration(seconds: 20),
     );
 
@@ -407,14 +407,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   Future<void> _concatenateWithTransforms() async {
     final imageBytes = await _captureLayerContent();
     var data = VideoRenderData(
-      // imageBytes: imageBytes,
-      imageLayers: [
-        ImageLayer(
-            imageBytes,
-            const Duration(seconds: 2),
-            const Duration(seconds: 9)
-        ),
-      ],
+      imageBytes: imageBytes,
       videoSegments: [
         VideoSegment(
           video: _video,
@@ -764,6 +757,11 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           onTap: _layers,
           leading: const Icon(Icons.layers_outlined),
           title: const Text('Parse with layers'),
+        ),
+        ListTile(
+          onTap: _layersTimed,
+          leading: const Icon(Icons.av_timer_outlined),
+          title: const Text('Parse with timed layers'),
         ),
         ListTile(
           onTap: _colorMatrix,
