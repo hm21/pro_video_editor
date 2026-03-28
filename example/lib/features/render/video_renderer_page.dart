@@ -182,7 +182,8 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     var data = VideoRenderData(
       video: _video,
       customAudioPath: customAudioFile.path,
-      originalAudioVolume: 0.0, // Mute original audio
+      originalAudioVolume: 0.0,
+      // Mute original audio
       customAudioVolume: 1, // Full volume for custom audio
     );
 
@@ -204,7 +205,8 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     var data = VideoRenderData(
       video: _video,
       customAudioPath: customAudioFile.path,
-      originalAudioVolume: 0.9, // Original audio at 90%
+      originalAudioVolume: 0.9,
+      // Original audio at 90%
       customAudioVolume: 0.1, // Background music at 10%
     );
 
@@ -284,25 +286,22 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   }
 
   Future<void> _layersTimed() async {
-    final imageBytes = await _captureLayerContent();
+    final metadata = await _pve.getMetadata(_video);
+
+    final imageBytes = await _captureLayerContent(metadata.rawResolution);
+    final layerImage = EditorLayerImage.memory(imageBytes);
+
     var data = VideoRenderData(
       video: _video,
       imageLayers: [
-        ImageLayer(
-          image: EditorLayerImage.memory(imageBytes),
-          startTime: const Duration(seconds: 1),
-          endTime: const Duration(seconds: 2),
-        ),
-        ImageLayer(
-          image: EditorLayerImage.memory(imageBytes),
-          startTime: const Duration(seconds: 3),
-          endTime: const Duration(seconds: 4),
-        ),
-        ImageLayer(
-          image: EditorLayerImage.memory(imageBytes),
-          startTime: const Duration(seconds: 5),
-          endTime: const Duration(seconds: 6),
-        ),
+        for (int i = 0; i < metadata.duration.inSeconds; i++)
+          ImageLayer(
+            image: layerImage,
+            startTime: Duration(seconds: i),
+            endTime: Duration(seconds: i + 1),
+            x: i * 25,
+            y: i.isEven ? 0 : 25,
+          ),
       ],
     );
 
@@ -561,35 +560,35 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     }
   }
 
-  Future<Uint8List> _captureLayerContent() async {
-    final boundary =
-        _boundaryKey.currentContext!.findRenderObject()
-            as RenderRepaintBoundary;
-    final image = await boundary.toImage(
-      pixelRatio: MediaQuery.devicePixelRatioOf(context),
-    );
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+  Future<Uint8List> _captureLayerContent([Size? resolution]) async {
+    final context = _boundaryKey.currentContext!;
+    final boundary = context.findRenderObject() as RenderRepaintBoundary;
+    final double pixelRatio = resolution == null
+        ? MediaQuery.devicePixelRatioOf(context)
+        : max(
+            resolution.width / boundary.size.width,
+            resolution.height / boundary.size.height,
+          );
+
+    final image = await boundary.toImage(pixelRatio: pixelRatio);
+    final byteData = await image.toByteData(format: .png);
 
     return byteData!.buffer.asUint8List();
   }
 
   @override
   Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewPaddingOf(context).bottom;
     return Scaffold(
       appBar: AppBar(title: const Text('Video Export')),
       body: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(
-          0,
-          16,
-          0,
-          16 + MediaQuery.viewPaddingOf(context).bottom,
-        ),
+        padding: .fromLTRB(0, 16, 0, 16 + bottom),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           spacing: 20,
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              padding: const .symmetric(horizontal: 16.0),
               child: Wrap(
                 spacing: 16,
                 runSpacing: 16,
