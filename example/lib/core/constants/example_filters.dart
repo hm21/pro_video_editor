@@ -25,7 +25,7 @@ const kComplexFilterMatrix = [
     0.0,
     0.0,
     1.0,
-    0.0
+    0.0,
   ],
   [
     1.0,
@@ -47,7 +47,7 @@ const kComplexFilterMatrix = [
     0.0,
     0.0,
     1.0,
-    0.0
+    0.0,
   ],
   [
     1.0,
@@ -69,7 +69,7 @@ const kComplexFilterMatrix = [
     0.0,
     0.0,
     1.0,
-    0.0
+    0.0,
   ],
   [
     2.9543726235741445,
@@ -91,7 +91,7 @@ const kComplexFilterMatrix = [
     0.0,
     0.0,
     1.0,
-    0.0
+    0.0,
   ],
   [
     1.0,
@@ -113,7 +113,7 @@ const kComplexFilterMatrix = [
     0.0,
     0.0,
     1.0,
-    0.0
+    0.0,
   ],
   [
     1.0,
@@ -135,7 +135,7 @@ const kComplexFilterMatrix = [
     0.0,
     0.0,
     1.0,
-    0.0
+    0.0,
   ],
   [
     1.0,
@@ -157,7 +157,7 @@ const kComplexFilterMatrix = [
     0.0,
     0.0,
     1.0,
-    0.0
+    0.0,
   ],
   [
     1.0,
@@ -179,7 +179,7 @@ const kComplexFilterMatrix = [
     0.0,
     0.0,
     1.0,
-    0.0
+    0.0,
   ],
   [
     1.0,
@@ -201,6 +201,6 @@ const kComplexFilterMatrix = [
     0.0,
     0.0,
     1.0,
-    0.0
-  ]
+    0.0,
+  ],
 ];

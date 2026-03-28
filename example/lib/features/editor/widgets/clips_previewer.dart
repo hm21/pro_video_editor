@@ -78,8 +78,9 @@ class _ClipsPreviewerState extends State<ClipsPreviewer> {
     } else if (video.hasAssetPath) {
       _controller = VideoPlayerController.asset(video.assetPath!);
     } else if (video.hasNetworkUrl) {
-      _controller =
-          VideoPlayerController.networkUrl(Uri.parse(video.networkUrl!));
+      _controller = VideoPlayerController.networkUrl(
+        Uri.parse(video.networkUrl!),
+      );
     } else {
       final directory = await getApplicationCacheDirectory();
       final file = io.File('${directory.path}/temp.mp4');
@@ -93,13 +94,14 @@ class _ClipsPreviewerState extends State<ClipsPreviewer> {
       _controller.initialize(),
       _controller.setVolume(widget.videoConfigs.initialMuted ? 0 : 100),
     ]);
-    final meta =
-        await ProVideoEditor.instance.getMetadata(EditorVideo.autoSource(
-      file: video.file,
-      byteArray: video.bytes,
-      assetPath: video.assetPath,
-      networkUrl: video.networkUrl,
-    ));
+    final meta = await ProVideoEditor.instance.getMetadata(
+      EditorVideo.autoSource(
+        file: video.file,
+        byteArray: video.bytes,
+        assetPath: video.assetPath,
+        networkUrl: video.networkUrl,
+      ),
+    );
 
     /// Listen to play time
     _controller.addListener(() {

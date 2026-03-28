@@ -3,7 +3,7 @@ description: "Demonstrates how to use the pro_video_editor plugin."
 publish_to: 'none'
 
 environment:
-  sdk: '>=3.4.0 <4.0.0'
+  sdk: '>=3.11.0 <4.0.0'
 
 dependencies:
   flutter:
