@@ -157,11 +157,15 @@ class _PreviewVideoState extends State<PreviewVideo> {
               future: _videoMetadata,
               builder: (context, snapshot) {
                 var data = snapshot.data;
-
                 if (data == null ||
                     snapshot.connectionState == ConnectionState.waiting) {
                   return const CircularProgressIndicator.adaptive();
                 }
+                final resolution = data.resolution;
+                final dimension =
+                    '${_numberFormatter.format(resolution.width.round())}'
+                    ' x '
+                    '${_numberFormatter.format(resolution.height.round())}';
 
                 return Table(
                   defaultColumnWidth: const IntrinsicColumnWidth(),
@@ -214,7 +218,7 @@ class _PreviewVideoState extends State<PreviewVideo> {
                         Padding(
                           padding: const EdgeInsets.only(left: 8.0),
                           child: Text(
-                            '${_numberFormatter.format(data.resolution.width.round())} x ${_numberFormatter.format(data.resolution.height.round())}',
+                            dimension,
                             style: _valueStyle,
                             textAlign: TextAlign.right,
                           ),

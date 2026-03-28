@@ -131,10 +131,7 @@ class DemoBuildStickers extends StatelessWidget {
                     child: Stack(
                       fit: StackFit.expand,
                       alignment: Alignment.center,
-                      children: <Widget>[
-                        ...previousChildren,
-                        if (currentChild != null) currentChild,
-                      ],
+                      children: <Widget>[...previousChildren, ?currentChild],
                     ),
                   );
                 },

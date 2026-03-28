@@ -19,5 +19,7 @@
     ],
     "diffEditor.experimental.showEmptyDecorations": true,
     "diffEditor.hideUnchangedRegions.enabled": false,
-    "editor.minimap.showMarkSectionHeaders": true
+    "editor.minimap.showMarkSectionHeaders": true,
+    "cSpell.logLevel": "None",
+    "cSpell.diagnosticLevel": "Hint"
 }

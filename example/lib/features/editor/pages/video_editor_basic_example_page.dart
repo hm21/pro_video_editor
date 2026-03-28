@@ -597,7 +597,7 @@ class _VideoEditorBasicExamplePageState
   Widget _buildVideoPlayer() {
     return ValueListenableBuilder(
       valueListenable: _updateClipsNotifier,
-      builder: (_, isLoading, __) {
+      builder: (_, isLoading, _) {
         return Center(
           child: isLoading
               ? const CircularProgressIndicator.adaptive()
