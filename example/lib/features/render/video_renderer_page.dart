@@ -12,7 +12,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/shared/utils/render_cancel_capability.dart';
 import 'package:pro_video_editor_example/shared/widgets/video_renderer_progress.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '/core/constants/example_constants.dart';
 import '/core/constants/example_filters.dart';
