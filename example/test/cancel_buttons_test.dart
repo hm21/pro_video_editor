@@ -25,13 +25,12 @@ void main() {
     ProVideoEditor.instance = originalEditor;
   });
 
-  testWidgets('Video editor progress alert forwards cancel to plugin',
-      (tester) async {
+  testWidgets('Video editor progress alert forwards cancel to plugin', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       const MaterialApp(
-        home: Scaffold(
-          body: VideoProgressAlert(taskId: 'task-editor'),
-        ),
+        home: Scaffold(body: VideoProgressAlert(taskId: 'task-editor')),
       ),
     );
 
@@ -46,8 +45,9 @@ void main() {
     expect(fakeEditor.cancelCalls, 1);
   });
 
-  testWidgets('Video renderer progress panel triggers cancel callback',
-      (tester) async {
+  testWidgets('Video renderer progress panel triggers cancel callback', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -114,10 +114,7 @@ class _FakeCancelableEditor extends ProVideoEditor {
   }
 
   @override
-  Future<String> renderVideoToFile(
-    String filePath,
-    VideoRenderData value,
-  ) {
+  Future<String> renderVideoToFile(String filePath, VideoRenderData value) {
     throw UnimplementedError();
   }
 }

@@ -12,7 +12,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/shared/utils/render_cancel_capability.dart';
 import 'package:pro_video_editor_example/shared/widgets/video_renderer_progress.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '/core/constants/example_constants.dart';
 import '/core/constants/example_filters.dart';
@@ -38,8 +37,6 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   late final _controllerContent = VideoController(_playerContent);
   late final _playerPreview = Player();
   late final _controllerPreview = VideoController(_playerPreview);
-
-  final _shareKey = GlobalKey();
 
   final _boundaryKey = GlobalKey();
   bool _isExporting = false;
@@ -579,16 +576,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Video Export'),
-        actions: [
-          IconButton(
-            key: _shareKey,
-            onPressed: _videoBytes == null ? null : _shareVideo,
-            icon: const Icon(Icons.share),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Video Export')),
       body: SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(
           0,
@@ -906,26 +894,5 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
         ),
       ),
     ];
-  }
-
-  Future<void> _shareVideo() async {
-    var renderBox = _shareKey.currentContext!.findRenderObject()! as RenderBox;
-    var origin = renderBox.localToGlobal(Offset.zero) & renderBox.size;
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [
-          XFile.fromData(
-            _videoBytes!,
-            name: 'video.mp4',
-            mimeType: 'video/mp4',
-          ),
-        ],
-        text:
-            'Shared from Pro Video Editor Example\n'
-            'Generated in ${_generationTime.inSeconds} seconds\n'
-            'Size ${formatBytes(_videoBytes?.lengthInBytes ?? 0)}',
-        sharePositionOrigin: origin,
-      ),
-    );
   }
 }

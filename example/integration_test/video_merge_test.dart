@@ -48,8 +48,11 @@ void main() {
       );
 
       expect(result, isNotNull);
-      expect(result.lengthInBytes, greaterThan(100000),
-          reason: 'Merged video should have reasonable file size');
+      expect(
+        result.lengthInBytes,
+        greaterThan(100000),
+        reason: 'Merged video should have reasonable file size',
+      );
 
       // Verify output metadata
       final outputMeta = await ProVideoEditor.instance.getMetadata(
@@ -61,8 +64,11 @@ void main() {
         closeTo(expectedDuration.inSeconds, durationTolerance),
         reason: 'Total duration should match sum of inputs',
       );
-      expect(outputMeta.resolution, equals(metadataA.resolution),
-          reason: 'Resolution should match input');
+      expect(
+        outputMeta.resolution,
+        equals(metadataA.resolution),
+        reason: 'Resolution should match input',
+      );
       expect(outputMeta.extension, equals('mp4'));
     });
 
@@ -114,11 +120,7 @@ void main() {
         VideoRenderData(
           outputFormat: VideoOutputFormat.mp4,
           videoSegments: [
-            VideoSegment(
-              video: videoA,
-              startTime: trimStart,
-              endTime: trimEnd,
-            ),
+            VideoSegment(video: videoA, startTime: trimStart, endTime: trimEnd),
             VideoSegment(
               video: EditorVideo.asset(testAPath),
               startTime: trimStart,
@@ -212,8 +214,9 @@ void main() {
       );
     });
 
-    testWidgets('Merge multiple different aspect ratios (A + B + A)',
-        (tester) async {
+    testWidgets('Merge multiple different aspect ratios (A + B + A)', (
+      tester,
+    ) async {
       final videoA1 = EditorVideo.asset(testAPath);
       final videoB = EditorVideo.asset(testBPath);
       final videoA2 = EditorVideo.asset(testAPath);
@@ -349,8 +352,9 @@ void main() {
   });
 
   group('Video Merging - Audio Handling', () {
-    testWidgets('Merge video with audio (A) and video without audio (D)',
-        (tester) async {
+    testWidgets('Merge video with audio (A) and video without audio (D)', (
+      tester,
+    ) async {
       final videoA = EditorVideo.asset(testAPath);
       final videoD = EditorVideo.asset(testDPath);
 
@@ -383,8 +387,9 @@ void main() {
       );
     });
 
-    testWidgets('Merge video without audio (D) and video with audio (A)',
-        (tester) async {
+    testWidgets('Merge video without audio (D) and video with audio (A)', (
+      tester,
+    ) async {
       final videoD = EditorVideo.asset(testDPath);
       final videoA = EditorVideo.asset(testAPath);
 
@@ -671,56 +676,60 @@ void main() {
   });
 
   group('Video Merging - Complex Scenarios', () {
-    testWidgets('Merge all test videos (A + B + C + D + E + F)',
-        (tester) async {
-      final videoA = EditorVideo.asset(testAPath);
-      final videoB = EditorVideo.asset(testBPath);
-      final videoC = EditorVideo.asset(testCPath);
-      final videoD = EditorVideo.asset(testDPath);
-      final videoE = EditorVideo.asset(testEPath);
-      final videoF = EditorVideo.asset(testFPath);
+    testWidgets(
+      'Merge all test videos (A + B + C + D + E + F)',
+      (tester) async {
+        final videoA = EditorVideo.asset(testAPath);
+        final videoB = EditorVideo.asset(testBPath);
+        final videoC = EditorVideo.asset(testCPath);
+        final videoD = EditorVideo.asset(testDPath);
+        final videoE = EditorVideo.asset(testEPath);
+        final videoF = EditorVideo.asset(testFPath);
 
-      final metadataA = await ProVideoEditor.instance.getMetadata(videoA);
-      final metadataB = await ProVideoEditor.instance.getMetadata(videoB);
-      final metadataC = await ProVideoEditor.instance.getMetadata(videoC);
-      final metadataD = await ProVideoEditor.instance.getMetadata(videoD);
-      final metadataE = await ProVideoEditor.instance.getMetadata(videoE);
-      final metadataF = await ProVideoEditor.instance.getMetadata(videoF);
+        final metadataA = await ProVideoEditor.instance.getMetadata(videoA);
+        final metadataB = await ProVideoEditor.instance.getMetadata(videoB);
+        final metadataC = await ProVideoEditor.instance.getMetadata(videoC);
+        final metadataD = await ProVideoEditor.instance.getMetadata(videoD);
+        final metadataE = await ProVideoEditor.instance.getMetadata(videoE);
+        final metadataF = await ProVideoEditor.instance.getMetadata(videoF);
 
-      final expectedDuration = metadataA.duration +
-          metadataB.duration +
-          metadataC.duration +
-          metadataD.duration +
-          metadataE.duration +
-          metadataF.duration;
+        final expectedDuration =
+            metadataA.duration +
+            metadataB.duration +
+            metadataC.duration +
+            metadataD.duration +
+            metadataE.duration +
+            metadataF.duration;
 
-      final result = await ProVideoEditor.instance.renderVideo(
-        VideoRenderData(
-          outputFormat: VideoOutputFormat.mp4,
-          videoSegments: [
-            VideoSegment(video: videoA),
-            VideoSegment(video: videoB),
-            VideoSegment(video: videoC),
-            VideoSegment(video: videoD),
-            VideoSegment(video: videoE),
-            VideoSegment(video: videoF),
-          ],
-        ),
-      );
+        final result = await ProVideoEditor.instance.renderVideo(
+          VideoRenderData(
+            outputFormat: VideoOutputFormat.mp4,
+            videoSegments: [
+              VideoSegment(video: videoA),
+              VideoSegment(video: videoB),
+              VideoSegment(video: videoC),
+              VideoSegment(video: videoD),
+              VideoSegment(video: videoE),
+              VideoSegment(video: videoF),
+            ],
+          ),
+        );
 
-      expect(result, isNotNull);
-      expect(result.lengthInBytes, greaterThan(100000));
+        expect(result, isNotNull);
+        expect(result.lengthInBytes, greaterThan(100000));
 
-      final outputMeta = await ProVideoEditor.instance.getMetadata(
-        EditorVideo.memory(result),
-      );
+        final outputMeta = await ProVideoEditor.instance.getMetadata(
+          EditorVideo.memory(result),
+        );
 
-      expect(
-        outputMeta.duration.inSeconds,
-        closeTo(expectedDuration.inSeconds, durationTolerance * 2),
-        reason: 'All test videos should merge into one',
-      );
-    }, skip: !enableMergeAudioTests);
+        expect(
+          outputMeta.duration.inSeconds,
+          closeTo(expectedDuration.inSeconds, durationTolerance * 2),
+          reason: 'All test videos should merge into one',
+        );
+      },
+      skip: !enableMergeAudioTests,
+    );
 
     testWidgets('Merge with mixed trimming and full clips', (tester) async {
       final videoA = EditorVideo.asset(testAPath);
@@ -768,52 +777,55 @@ void main() {
     });
 
     testWidgets(
-        'Merge portrait/landscape/60fps/no-audio/HEVC (B + A + C + D + E)',
-        (tester) async {
-      final videoB = EditorVideo.asset(testBPath);
-      final videoA = EditorVideo.asset(testAPath);
-      final videoC = EditorVideo.asset(testCPath);
-      final videoD = EditorVideo.asset(testDPath);
-      final videoE = EditorVideo.asset(testEPath);
+      'Merge portrait/landscape/60fps/no-audio/HEVC (B + A + C + D + E)',
+      (tester) async {
+        final videoB = EditorVideo.asset(testBPath);
+        final videoA = EditorVideo.asset(testAPath);
+        final videoC = EditorVideo.asset(testCPath);
+        final videoD = EditorVideo.asset(testDPath);
+        final videoE = EditorVideo.asset(testEPath);
 
-      final metadataB = await ProVideoEditor.instance.getMetadata(videoB);
-      final metadataA = await ProVideoEditor.instance.getMetadata(videoA);
-      final metadataC = await ProVideoEditor.instance.getMetadata(videoC);
-      final metadataD = await ProVideoEditor.instance.getMetadata(videoD);
-      final metadataE = await ProVideoEditor.instance.getMetadata(videoE);
+        final metadataB = await ProVideoEditor.instance.getMetadata(videoB);
+        final metadataA = await ProVideoEditor.instance.getMetadata(videoA);
+        final metadataC = await ProVideoEditor.instance.getMetadata(videoC);
+        final metadataD = await ProVideoEditor.instance.getMetadata(videoD);
+        final metadataE = await ProVideoEditor.instance.getMetadata(videoE);
 
-      final expectedDuration = metadataB.duration +
-          metadataA.duration +
-          metadataC.duration +
-          metadataD.duration +
-          metadataE.duration;
+        final expectedDuration =
+            metadataB.duration +
+            metadataA.duration +
+            metadataC.duration +
+            metadataD.duration +
+            metadataE.duration;
 
-      final result = await ProVideoEditor.instance.renderVideo(
-        VideoRenderData(
-          outputFormat: VideoOutputFormat.mp4,
-          videoSegments: [
-            VideoSegment(video: videoB),
-            VideoSegment(video: videoA),
-            VideoSegment(video: videoC),
-            VideoSegment(video: videoD),
-            VideoSegment(video: videoE),
-          ],
-        ),
-      );
+        final result = await ProVideoEditor.instance.renderVideo(
+          VideoRenderData(
+            outputFormat: VideoOutputFormat.mp4,
+            videoSegments: [
+              VideoSegment(video: videoB),
+              VideoSegment(video: videoA),
+              VideoSegment(video: videoC),
+              VideoSegment(video: videoD),
+              VideoSegment(video: videoE),
+            ],
+          ),
+        );
 
-      expect(result, isNotNull);
+        expect(result, isNotNull);
 
-      final outputMeta = await ProVideoEditor.instance.getMetadata(
-        EditorVideo.memory(result),
-      );
+        final outputMeta = await ProVideoEditor.instance.getMetadata(
+          EditorVideo.memory(result),
+        );
 
-      expect(
-        outputMeta.duration.inSeconds,
-        closeTo(expectedDuration.inSeconds, durationTolerance * 2),
-        reason:
-            'Complex scenario with all variations should produce valid output',
-      );
-    });
+        expect(
+          outputMeta.duration.inSeconds,
+          closeTo(expectedDuration.inSeconds, durationTolerance * 2),
+          reason:
+              'Complex scenario with all variations should produce '
+              'valid output',
+        );
+      },
+    );
   });
 
   group('Video Merging - Output Formats', () {
@@ -878,8 +890,11 @@ void main() {
         EditorVideo.file(outputPath),
       );
 
-      expect(outputMeta.extension, anyOf(equals('mov'), equals('quicktime')),
-          reason: 'MOV format can be reported as either "mov" or "quicktime"');
+      expect(
+        outputMeta.extension,
+        anyOf(equals('mov'), equals('quicktime')),
+        reason: 'MOV format can be reported as either "mov" or "quicktime"',
+      );
     }, skip: !isIOS && !isMacOS);
   });
 
@@ -918,8 +933,11 @@ void main() {
       );
 
       expect(result, isNotNull);
-      expect(result.lengthInBytes, greaterThan(10000),
-          reason: 'Even very short clips should produce valid output');
+      expect(
+        result.lengthInBytes,
+        greaterThan(10000),
+        reason: 'Even very short clips should produce valid output',
+      );
     });
 
     testWidgets('Merge same video multiple times', (tester) async {
@@ -971,7 +989,7 @@ void main() {
             for (int i = 0; i < loopCount; i++) ...[
               VideoSegment(video: video4kA),
               VideoSegment(video: video4kB),
-            ]
+            ],
           ],
         ),
       );
@@ -979,8 +997,11 @@ void main() {
       expect(outputPath, isNotNull);
       final outputFile = File(outputPath);
       expect(outputFile.existsSync(), isTrue);
-      expect(outputFile.lengthSync(), greaterThan(100000000),
-          reason: 'Large merged file should be substantial');
+      expect(
+        outputFile.lengthSync(),
+        greaterThan(100000000),
+        reason: 'Large merged file should be substantial',
+      );
 
       final outputMeta = await ProVideoEditor.instance.getMetadata(
         EditorVideo.file(outputPath),
@@ -1018,12 +1039,21 @@ void main() {
       await ProVideoEditor.instance.renderVideo(task);
       await sub.cancel();
 
-      expect(progressValues, isNotEmpty,
-          reason: 'Progress updates should be emitted');
-      expect(progressValues.first, lessThanOrEqualTo(0.1),
-          reason: 'Progress should start near 0');
-      expect(progressValues.last, closeTo(1.0, 0.05),
-          reason: 'Progress should reach 1.0 at completion');
+      expect(
+        progressValues,
+        isNotEmpty,
+        reason: 'Progress updates should be emitted',
+      );
+      expect(
+        progressValues.first,
+        lessThanOrEqualTo(0.1),
+        reason: 'Progress should start near 0',
+      );
+      expect(
+        progressValues.last,
+        closeTo(1.0, 0.05),
+        reason: 'Progress should reach 1.0 at completion',
+      );
 
       // Verify progress is monotonically increasing
       for (int i = 1; i < progressValues.length; i++) {
@@ -1037,8 +1067,9 @@ void main() {
   });
 
   group('Video Merging - Rotation Metadata', () {
-    testWidgets('Merge video with rotation metadata (B) with baseline (A)',
-        (tester) async {
+    testWidgets('Merge video with rotation metadata (B) with baseline (A)', (
+      tester,
+    ) async {
       final videoB = EditorVideo.asset(testBPath); // Has rotation metadata
       final videoA = EditorVideo.asset(testAPath);
 

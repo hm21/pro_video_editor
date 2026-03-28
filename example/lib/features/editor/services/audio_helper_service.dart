@@ -8,9 +8,7 @@ import 'package:video_player/video_player.dart';
 class AudioHelperService {
   /// Creates an instance of [AudioHelperService] for the
   /// given [videoController].
-  AudioHelperService({
-    required this.videoController,
-  });
+  AudioHelperService({required this.videoController});
 
   /// The internal audio player used to handle audio playback.
   final _audioPlayer = AudioPlayer();
@@ -125,8 +123,9 @@ class AudioHelperService {
         return (await fetchVideoToFile(audio.networkUrl!, filePath)).path;
       } else if (audio.hasAssetPath) {
         return (await writeAssetVideoToFile(
-                'assets/${audio.assetPath!}', filePath))
-            .path;
+          'assets/${audio.assetPath!}',
+          filePath,
+        )).path;
       } else {
         return (await writeMemoryVideoToFile(audio.bytes!, filePath)).path;
       }

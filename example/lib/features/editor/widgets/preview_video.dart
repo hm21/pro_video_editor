@@ -72,68 +72,70 @@ class _PreviewVideoState extends State<PreviewVideo> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, constraints) {
-      return Theme(
-        data: Theme.of(context),
-        child: Scaffold(
-          appBar: AppBar(
-            title: const Text('Result'),
-          ),
-          body: CustomPaint(
-            painter: const PixelTransparentPainter(
-              primary: Color.fromARGB(255, 17, 17, 17),
-              secondary: Color.fromARGB(255, 36, 36, 37),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Theme(
+          data: Theme.of(context),
+          child: Scaffold(
+            appBar: AppBar(title: const Text('Result')),
+            body: CustomPaint(
+              painter: const PixelTransparentPainter(
+                primary: Color.fromARGB(255, 17, 17, 17),
+                secondary: Color.fromARGB(255, 36, 36, 37),
+              ),
+              child: Stack(
+                fit: StackFit.expand,
+                alignment: Alignment.center,
+                children: [
+                  _buildVideoPlayer(constraints),
+                  _buildGenerationInfos(),
+                ],
+              ),
             ),
-            child: Stack(
-              fit: StackFit.expand,
-              alignment: Alignment.center,
-              children: [
-                _buildVideoPlayer(constraints),
-                _buildGenerationInfos(),
-              ],
-            ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
   }
 
   Widget _buildVideoPlayer(BoxConstraints constraints) {
     return FutureBuilder<VideoMetadata>(
-        future: _videoMetadata,
-        builder: (context, snapshot) {
-          final aspectRatio = snapshot.data?.resolution.aspectRatio ?? 1;
-          final rotation = snapshot.data?.rotation ?? 0;
+      future: _videoMetadata,
+      builder: (context, snapshot) {
+        final aspectRatio = snapshot.data?.resolution.aspectRatio ?? 1;
+        final rotation = snapshot.data?.rotation ?? 0;
 
-          int convertedRotation = rotation % 360;
+        int convertedRotation = rotation % 360;
 
-          final is90DegRotated =
-              convertedRotation == 90 || convertedRotation == 270;
+        final is90DegRotated =
+            convertedRotation == 90 || convertedRotation == 270;
 
-          final maxWidth = constraints.maxWidth;
-          final maxHeight = constraints.maxHeight;
+        final maxWidth = constraints.maxWidth;
+        final maxHeight = constraints.maxHeight;
 
-          double width = maxWidth;
-          double height =
-              is90DegRotated ? width * aspectRatio : width / aspectRatio;
+        double width = maxWidth;
+        double height = is90DegRotated
+            ? width * aspectRatio
+            : width / aspectRatio;
 
-          if (height > maxHeight) {
-            height = maxHeight;
-            width = height * aspectRatio;
-          }
-          return Center(
-            child: AspectRatio(
-              aspectRatio: aspectRatio,
-              child: Hero(
-                tag: const ProImageEditorConfigs().heroTag,
-                child: Video(
-                  key: const ValueKey('Preview-Video-Player'),
-                  controller: _controller,
-                ),
+        if (height > maxHeight) {
+          height = maxHeight;
+          width = height * aspectRatio;
+        }
+        return Center(
+          child: AspectRatio(
+            aspectRatio: aspectRatio,
+            child: Hero(
+              tag: const ProImageEditorConfigs().heroTag,
+              child: Video(
+                key: const ValueKey('Preview-Video-Player'),
+                controller: _controller,
               ),
             ),
-          );
-        });
+          ),
+        );
+      },
+    );
   }
 
   Widget _buildGenerationInfos() {
@@ -152,19 +154,26 @@ class _PreviewVideoState extends State<PreviewVideo> {
             ),
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
             child: FutureBuilder<VideoMetadata>(
-                future: _videoMetadata,
-                builder: (context, snapshot) {
-                  var data = snapshot.data;
+              future: _videoMetadata,
+              builder: (context, snapshot) {
+                var data = snapshot.data;
 
-                  if (data == null ||
-                      snapshot.connectionState == ConnectionState.waiting) {
-                    return const CircularProgressIndicator.adaptive();
-                  }
+                if (data == null ||
+                    snapshot.connectionState == ConnectionState.waiting) {
+                  return const CircularProgressIndicator.adaptive();
+                }
 
-                  return Table(
-                    defaultColumnWidth: const IntrinsicColumnWidth(),
-                    children: [
-                      TableRow(children: [
+                final resolution = data.resolution;
+                final dimension =
+                    '${_numberFormatter.format(resolution.width.round())}'
+                    ' x '
+                    '${_numberFormatter.format(resolution.height.round())}';
+
+                return Table(
+                  defaultColumnWidth: const IntrinsicColumnWidth(),
+                  children: [
+                    TableRow(
+                      children: [
                         const Text('Generation-Time'),
                         Padding(
                           padding: const EdgeInsets.only(left: 8.0),
@@ -174,9 +183,11 @@ class _PreviewVideoState extends State<PreviewVideo> {
                             textAlign: TextAlign.right,
                           ),
                         ),
-                      ]),
-                      tableSpace,
-                      TableRow(children: [
+                      ],
+                    ),
+                    tableSpace,
+                    TableRow(
+                      children: [
                         const Text('Video-Size'),
                         Padding(
                           padding: const EdgeInsets.only(left: 8.0),
@@ -186,9 +197,11 @@ class _PreviewVideoState extends State<PreviewVideo> {
                             textAlign: TextAlign.right,
                           ),
                         ),
-                      ]),
-                      tableSpace,
-                      TableRow(children: [
+                      ],
+                    ),
+                    tableSpace,
+                    TableRow(
+                      children: [
                         const Text('Content-Type'),
                         Padding(
                           padding: const EdgeInsets.only(left: 8.0),
@@ -198,25 +211,25 @@ class _PreviewVideoState extends State<PreviewVideo> {
                             textAlign: TextAlign.right,
                           ),
                         ),
-                      ]),
-                      tableSpace,
-                      TableRow(children: [
+                      ],
+                    ),
+                    tableSpace,
+                    TableRow(
+                      children: [
                         const Text('Dimension'),
                         Padding(
                           padding: const EdgeInsets.only(left: 8.0),
                           child: Text(
-                            '${_numberFormatter.format(
-                              data.resolution.width.round(),
-                            )} x ${_numberFormatter.format(
-                              data.resolution.height.round(),
-                            )}',
+                            dimension,
                             style: _valueStyle,
                             textAlign: TextAlign.right,
                           ),
                         ),
-                      ]),
-                      tableSpace,
-                      TableRow(children: [
+                      ],
+                    ),
+                    tableSpace,
+                    TableRow(
+                      children: [
                         const Text('Video-Duration'),
                         Padding(
                           padding: const EdgeInsets.only(left: 8.0),
@@ -226,10 +239,12 @@ class _PreviewVideoState extends State<PreviewVideo> {
                             textAlign: TextAlign.right,
                           ),
                         ),
-                      ]),
-                    ],
-                  );
-                }),
+                      ],
+                    ),
+                  ],
+                );
+              },
+            ),
           ),
         ),
       ),

@@ -29,10 +29,7 @@ Future<Uint8List> createTestOverlayImage({
     ..style = ui.PaintingStyle.stroke
     ..strokeWidth = 4;
 
-  canvas.drawRect(
-    ui.Rect.fromLTWH(2, 2, width - 4, height - 4),
-    borderPaint,
-  );
+  canvas.drawRect(ui.Rect.fromLTWH(2, 2, width - 4, height - 4), borderPaint);
 
   final picture = recorder.endRecording();
   final image = await picture.toImage(width, height);
@@ -87,10 +84,7 @@ void main() {
           video: inputVideo,
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
-            ImageLayer(
-              image: overlayImage,
-              startTime: Duration.zero,
-            ),
+            ImageLayer(image: overlayImage, startTime: Duration.zero),
           ],
         ),
       );
