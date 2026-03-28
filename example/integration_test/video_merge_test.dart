@@ -821,7 +821,8 @@ void main() {
           outputMeta.duration.inSeconds,
           closeTo(expectedDuration.inSeconds, durationTolerance * 2),
           reason:
-              'Complex scenario with all variations should produce valid output',
+              'Complex scenario with all variations should produce '
+              'valid output',
         );
       },
     );
