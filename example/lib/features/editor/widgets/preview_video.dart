@@ -163,6 +163,12 @@ class _PreviewVideoState extends State<PreviewVideo> {
                   return const CircularProgressIndicator.adaptive();
                 }
 
+                final resolution = data.resolution;
+                final dimension =
+                    '${_numberFormatter.format(resolution.width.round())}'
+                    ' x '
+                    '${_numberFormatter.format(resolution.height.round())}';
+
                 return Table(
                   defaultColumnWidth: const IntrinsicColumnWidth(),
                   children: [
@@ -214,7 +220,7 @@ class _PreviewVideoState extends State<PreviewVideo> {
                         Padding(
                           padding: const EdgeInsets.only(left: 8.0),
                           child: Text(
-                            '${_numberFormatter.format(data.resolution.width.round())} x ${_numberFormatter.format(data.resolution.height.round())}',
+                            dimension,
                             style: _valueStyle,
                             textAlign: TextAlign.right,
                           ),
