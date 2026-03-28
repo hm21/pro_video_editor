@@ -59,7 +59,7 @@ class CompositionBuilder(
         val rotationDegrees = (4 - (config.rotateTurns ?: 0)) * 90f
 
         // Check if custom audio is provided
-        val hasCustomAudio = config.customAudioPath != null && config.customAudioPath.isNotEmpty()
+        val hasCustomAudio = !config.customAudioPath.isNullOrEmpty()
 
         // Build video sequence
         val videoBuilder = VideoSequenceBuilder(config.videoClips)
