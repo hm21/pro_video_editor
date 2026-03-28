@@ -234,7 +234,7 @@ class RenderVideo(private val context: Context) {
         lateinit var transformer: Transformer
 
         // Check if we need custom audio mixing with volume control
-        val hasCustomAudio = config.customAudioPath != null && config.customAudioPath.isNotEmpty()
+        val hasCustomAudio = !config.customAudioPath.isNullOrEmpty()
         val videoAudioVolume = config.originalAudioVolume ?: 1.0f
         val customAudioVolume = config.customAudioVolume ?: 1.0f
         

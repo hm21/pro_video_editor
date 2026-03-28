@@ -131,7 +131,7 @@ data class RenderConfig(
 
             Log.d(PACKAGE_TAG, "Received videoClipsRaw: ${videoClipsRaw?.size ?: 0} clips")
 
-            if (videoClipsRaw == null || videoClipsRaw.isEmpty()) {
+            if (videoClipsRaw.isNullOrEmpty()) {
                 throw IllegalArgumentException("videoClips is required and cannot be empty")
             }
 

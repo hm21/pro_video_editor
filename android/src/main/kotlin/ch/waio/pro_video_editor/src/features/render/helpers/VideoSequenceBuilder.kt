@@ -14,7 +14,7 @@ import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
-import ch.waio.pro_video_editor.src.features.render.helpers.VolumeAudioProcessor
+import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
 import java.io.File
 
 /**
@@ -436,7 +436,7 @@ class VideoSequenceBuilder(
 
         // Calculate video dimensions for image layer positioning
         // This must be done before applying any effects
-        var (videoWidth, videoHeight, videoRotation) = ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions(
+        var (videoWidth, videoHeight, videoRotation) = getRotatedVideoDimensions(
             inputFile,
             rotationDegrees
         )
@@ -447,14 +447,10 @@ class VideoSequenceBuilder(
         // If crop is applied, update dimensions for AFTER crop scenario
         val croppedWidth: Int?
         val croppedHeight: Int?
-        if (cropConfig != null) {
-            croppedWidth = if (cropConfig.width != null) {
-                if (isRotated90Deg) cropConfig.width else cropConfig.width
-            } else null
-            
-            croppedHeight = if (cropConfig.height != null) {
-                if (isRotated90Deg) cropConfig.height else cropConfig.height
-            } else null
+        val crop = cropConfig
+        if (crop != null) {
+            croppedWidth = if (isRotated90Deg) crop.height else crop.width
+            croppedHeight = if (isRotated90Deg) crop.width else crop.height
         } else {
             croppedWidth = null
             croppedHeight = null
