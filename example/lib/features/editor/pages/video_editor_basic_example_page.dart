@@ -82,9 +82,8 @@ class _VideoEditorBasicExamplePageState
   late final ProImageEditorConfigs _configs = ProImageEditorConfigs(
     dialogConfigs: DialogConfigs(
       widgets: DialogWidgets(
-        loadingDialog: (message, configs) => VideoProgressAlert(
-          taskId: _taskId,
-        ),
+        loadingDialog: (message, configs) =>
+            VideoProgressAlert(taskId: _taskId),
       ),
     ),
     mainEditor: MainEditorConfigs(
@@ -101,18 +100,14 @@ class _VideoEditorBasicExamplePageState
         SubEditorMode.sticker,
       ],
       widgets: MainEditorWidgets(
-        removeLayerArea: (
-          removeAreaKey,
-          editor,
-          rebuildStream,
-          isLayerBeingTransformed,
-        ) =>
-            VideoEditorRemoveArea(
-          removeAreaKey: removeAreaKey,
-          editor: editor,
-          rebuildStream: rebuildStream,
-          isLayerBeingTransformed: isLayerBeingTransformed,
-        ),
+        removeLayerArea:
+            (removeAreaKey, editor, rebuildStream, isLayerBeingTransformed) =>
+                VideoEditorRemoveArea(
+                  removeAreaKey: removeAreaKey,
+                  editor: editor,
+                  rebuildStream: rebuildStream,
+                  isLayerBeingTransformed: isLayerBeingTransformed,
+                ),
       ),
     ),
     paintEditor: const PaintEditorConfigs(
@@ -181,7 +176,8 @@ class _VideoEditorBasicExamplePageState
   /// Generates thumbnails for the given [_video].
   Future<void> _generateThumbnails({bool updateClipThumbnails = true}) async {
     if (!mounted) return;
-    var imageWidth = MediaQuery.sizeOf(context).width /
+    var imageWidth =
+        MediaQuery.sizeOf(context).width /
         _thumbnailCount *
         MediaQuery.devicePixelRatioOf(context);
 
@@ -205,8 +201,9 @@ class _VideoEditorBasicExamplePageState
       ),
     );
 
-    List<ImageProvider> temporaryThumbnails =
-        thumbnailList.map(MemoryImage.new).toList();
+    List<ImageProvider> temporaryThumbnails = thumbnailList
+        .map(MemoryImage.new)
+        .toList();
 
     if (updateClipThumbnails) {
       _configs.clipsEditor.clips.first = _configs.clipsEditor.clips.first
@@ -214,8 +211,9 @@ class _VideoEditorBasicExamplePageState
     }
 
     /// Optional precache every thumbnail
-    var cacheList =
-        temporaryThumbnails.map((item) => precacheImage(item, context));
+    var cacheList = temporaryThumbnails.map(
+      (item) => precacheImage(item, context),
+    );
     await Future.wait(cacheList);
     _thumbnails = temporaryThumbnails;
 
@@ -227,10 +225,8 @@ class _VideoEditorBasicExamplePageState
   Future<void> _initializePlayer() async {
     await _setMetadata();
 
-    _configs.clipsEditor.clips.first =
-        _configs.clipsEditor.clips.first.copyWith(
-      duration: _videoMetadata.duration,
-    );
+    _configs.clipsEditor.clips.first = _configs.clipsEditor.clips.first
+        .copyWith(duration: _videoMetadata.duration);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _generateThumbnails();
     });
@@ -342,8 +338,9 @@ class _VideoEditorBasicExamplePageState
               flipY: parameters.flipY,
             )
           : null,
-      customAudioPath:
-          await _audioService.safeCustomAudioPath(customAudioTrack),
+      customAudioPath: await _audioService.safeCustomAudioPath(
+        customAudioTrack,
+      ),
       originalAudioVolume: originalVolume,
       customAudioVolume: overlayVolume,
       // bitrate: _videoMetadata.bitrate,
@@ -431,21 +428,19 @@ class _VideoEditorBasicExamplePageState
       updatedFile.path,
       VideoRenderData(
         id: _taskId,
-        videoSegments: clips.map(
-          (el) {
-            final clip = el.clip;
-            return VideoSegment(
-              video: EditorVideo.autoSource(
-                networkUrl: clip.networkUrl,
-                assetPath: clip.assetPath,
-                byteArray: clip.bytes,
-                file: clip.file,
-              ),
-              startTime: el.trimSpan?.start,
-              endTime: el.trimSpan?.end,
-            );
-          },
-        ).toList(),
+        videoSegments: clips.map((el) {
+          final clip = el.clip;
+          return VideoSegment(
+            video: EditorVideo.autoSource(
+              networkUrl: clip.networkUrl,
+              assetPath: clip.assetPath,
+              byteArray: clip.bytes,
+              file: clip.file,
+            ),
+            startTime: el.trimSpan?.start,
+            endTime: el.trimSpan?.end,
+          );
+        }).toList(),
       ),
     );
     if (!mounted) {
@@ -461,19 +456,20 @@ class _VideoEditorBasicExamplePageState
 
     final editor = _editorKey.currentState!;
 
-    _proVideoController = ProVideoController(
-      videoPlayer: _buildVideoPlayer(),
-      initialResolution: _videoMetadata.resolution,
-      videoDuration: _videoMetadata.duration,
-      fileSize: _videoMetadata.fileSize,
-      thumbnails: _thumbnails,
-    )..initialize(
-        configsFunction: () => _configs.videoEditor,
-        callbacksAudioFunction: () =>
-            editor.audioEditorCallbacks ?? const AudioEditorCallbacks(),
-        callbacksFunction: () =>
-            editor.callbacks.videoEditorCallbacks ?? VideoEditorCallbacks(),
-      );
+    _proVideoController =
+        ProVideoController(
+          videoPlayer: _buildVideoPlayer(),
+          initialResolution: _videoMetadata.resolution,
+          videoDuration: _videoMetadata.duration,
+          fileSize: _videoMetadata.fileSize,
+          thumbnails: _thumbnails,
+        )..initialize(
+          configsFunction: () => _configs.videoEditor,
+          callbacksAudioFunction: () =>
+              editor.audioEditorCallbacks ?? const AudioEditorCallbacks(),
+          callbacksFunction: () =>
+              editor.callbacks.videoEditorCallbacks ?? VideoEditorCallbacks(),
+        );
 
     /// FIXME: On android video metadata say it's 90deg rotated??
 
@@ -600,18 +596,17 @@ class _VideoEditorBasicExamplePageState
 
   Widget _buildVideoPlayer() {
     return ValueListenableBuilder(
-        valueListenable: _updateClipsNotifier,
-        builder: (_, isLoading, __) {
-          return Center(
-            child: isLoading
-                ? const CircularProgressIndicator.adaptive()
-                : AspectRatio(
-                    aspectRatio: _videoController.value.size.aspectRatio,
-                    child: VideoPlayer(
-                      _videoController,
-                    ),
-                  ),
-          );
-        });
+      valueListenable: _updateClipsNotifier,
+      builder: (_, isLoading, __) {
+        return Center(
+          child: isLoading
+              ? const CircularProgressIndicator.adaptive()
+              : AspectRatio(
+                  aspectRatio: _videoController.value.size.aspectRatio,
+                  child: VideoPlayer(_videoController),
+                ),
+        );
+      },
+    );
   }
 }

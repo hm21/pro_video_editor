@@ -11,10 +11,7 @@ class VideoInitializingWidget extends StatelessWidget {
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [
-              Colors.blueGrey.shade900,
-              Colors.black87,
-            ],
+            colors: [Colors.blueGrey.shade900, Colors.black87],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),

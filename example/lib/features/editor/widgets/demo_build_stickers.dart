@@ -38,7 +38,7 @@ class DemoBuildStickers extends StatelessWidget {
     'Boring',
     'Frog',
     'Snow',
-    'More'
+    'More',
   ];
   @override
   Widget build(BuildContext context) {
@@ -49,10 +49,7 @@ class DemoBuildStickers extends StatelessWidget {
         SliverPadding(
           padding: const EdgeInsets.only(bottom: 4),
           sliver: SliverToBoxAdapter(
-            child: Text(
-              element,
-              style: const TextStyle(color: Colors.white),
-            ),
+            child: Text(element, style: const TextStyle(color: Colors.white)),
           ),
         ),
         _buildDemoStickers(offset, setLayer),
@@ -109,73 +106,71 @@ class DemoBuildStickers extends StatelessWidget {
     Function(WidgetLayer layer) setLayer,
   ) {
     return SliverGrid.builder(
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 80,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-        ),
-        itemCount: max(3, 3 + offset % 6),
-        itemBuilder: (context, index) {
-          String url =
-              'https://picsum.photos/id/${offset + (index + 3) * 3}/2000';
-          var widget = ClipRRect(
-            borderRadius: BorderRadius.circular(7),
-            child: Image.network(
-              url,
-              width: 120,
-              height: 120,
-              fit: BoxFit.cover,
-              loadingBuilder: (context, child, loadingProgress) {
-                return AnimatedSwitcher(
-                  layoutBuilder: (currentChild, previousChildren) {
-                    return SizedBox(
-                      width: 120,
-                      height: 120,
-                      child: Stack(
-                        fit: StackFit.expand,
-                        alignment: Alignment.center,
-                        children: <Widget>[
-                          ...previousChildren,
-                          if (currentChild != null) currentChild,
-                        ],
-                      ),
-                    );
-                  },
-                  duration: const Duration(milliseconds: 200),
-                  child: loadingProgress == null
-                      ? child
-                      : Center(
-                          child: CircularProgressIndicator(
-                            value: loadingProgress.expectedTotalBytes != null
-                                ? loadingProgress.cumulativeBytesLoaded /
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 80,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+      ),
+      itemCount: max(3, 3 + offset % 6),
+      itemBuilder: (context, index) {
+        String url =
+            'https://picsum.photos/id/${offset + (index + 3) * 3}/2000';
+        var widget = ClipRRect(
+          borderRadius: BorderRadius.circular(7),
+          child: Image.network(
+            url,
+            width: 120,
+            height: 120,
+            fit: BoxFit.cover,
+            loadingBuilder: (context, child, loadingProgress) {
+              return AnimatedSwitcher(
+                layoutBuilder: (currentChild, previousChildren) {
+                  return SizedBox(
+                    width: 120,
+                    height: 120,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      alignment: Alignment.center,
+                      children: <Widget>[
+                        ...previousChildren,
+                        if (currentChild != null) currentChild,
+                      ],
+                    ),
+                  );
+                },
+                duration: const Duration(milliseconds: 200),
+                child: loadingProgress == null
+                    ? child
+                    : Center(
+                        child: CircularProgressIndicator(
+                          value: loadingProgress.expectedTotalBytes != null
+                              ? loadingProgress.cumulativeBytesLoaded /
                                     loadingProgress.expectedTotalBytes!
-                                : null,
-                          ),
+                              : null,
                         ),
-                );
-              },
-            ),
-          );
-          return GestureDetector(
-            onTap: () async {
-              // Important make sure the image is completely loaded
-              // cuz the editor will directly take a screenshot
-              // inside of a background isolated thread.
-              LoadingDialog.instance.show(
-                context,
-                configs: const ProImageEditorConfigs(),
-                theme: Theme.of(context),
+                      ),
               );
-
-              await precacheImage(NetworkImage(url), context);
-              LoadingDialog.instance.hide();
-              setLayer(WidgetLayer(widget: widget));
             },
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: widget,
-            ),
-          );
-        });
+          ),
+        );
+        return GestureDetector(
+          onTap: () async {
+            // Important make sure the image is completely loaded
+            // cuz the editor will directly take a screenshot
+            // inside of a background isolated thread.
+            LoadingDialog.instance.show(
+              context,
+              configs: const ProImageEditorConfigs(),
+              theme: Theme.of(context),
+            );
+
+            await precacheImage(NetworkImage(url), context);
+            LoadingDialog.instance.hide();
+            setLayer(WidgetLayer(widget: widget));
+          },
+          child: MouseRegion(cursor: SystemMouseCursors.click, child: widget),
+        );
+      },
+    );
   }
 }

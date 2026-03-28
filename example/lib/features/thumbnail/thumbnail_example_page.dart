@@ -46,10 +46,11 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
         timestamps: List.generate(
           _exampleImageCount,
           (i) => Duration(
-            milliseconds: (_informations!.duration.inMilliseconds /
-                    _exampleImageCount *
-                    i)
-                .toInt(),
+            milliseconds:
+                (_informations!.duration.inMilliseconds /
+                        _exampleImageCount *
+                        i)
+                    .toInt(),
           ),
         ),
         outputSize: Size(outputSize, outputSize),

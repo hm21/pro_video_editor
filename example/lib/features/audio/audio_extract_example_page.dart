@@ -99,7 +99,8 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
     try {
       // Get output directory
       final directory = await getTemporaryDirectory();
-      final outputPath = '${directory.path}/extracted_audio_'
+      final outputPath =
+          '${directory.path}/extracted_audio_'
           '${DateTime.now().millisecondsSinceEpoch}.'
           '${_selectedFormat.extension}';
 
@@ -113,10 +114,7 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
       );
 
       // Extract audio
-      await ProVideoEditor.instance.extractAudioToFile(
-        outputPath,
-        config,
-      );
+      await ProVideoEditor.instance.extractAudioToFile(outputPath, config);
 
       setState(() {
         _extractedAudioPath = outputPath;
@@ -184,13 +182,15 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
     try {
       // Check if the demo video has audio
       final videoWithAudio = EditorVideo.asset(kVideoEditorExampleH264Path);
-      final hasAudio =
-          await ProVideoEditor.instance.hasAudioTrack(videoWithAudio);
+      final hasAudio = await ProVideoEditor.instance.hasAudioTrack(
+        videoWithAudio,
+      );
 
       // Check if the muted video has audio
       final mutedVideo = EditorVideo.asset('assets/demo_muted.mp4');
-      final mutedHasAudio =
-          await ProVideoEditor.instance.hasAudioTrack(mutedVideo);
+      final mutedHasAudio = await ProVideoEditor.instance.hasAudioTrack(
+        mutedVideo,
+      );
 
       setState(() {
         _hasAudioTrack = hasAudio;
@@ -499,9 +499,7 @@ class _AudioExtractionCard extends StatelessWidget {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.audiotrack),
-                label: Text(
-                  isExtracting ? 'Extracting...' : 'Extract Audio',
-                ),
+                label: Text(isExtracting ? 'Extracting...' : 'Extract Audio'),
               ),
             ),
             if (isExtracting) ...[
@@ -647,10 +645,7 @@ class _AudioTrackDetectionCard extends StatelessWidget {
 }
 
 class _AudioTrackResultRow extends StatelessWidget {
-  const _AudioTrackResultRow({
-    required this.label,
-    required this.hasAudio,
-  });
+  const _AudioTrackResultRow({required this.label, required this.hasAudio});
 
   final String label;
   final bool hasAudio;
@@ -793,11 +788,11 @@ class _WaveformGenerationCard extends StatelessWidget {
                     label: Text(
                       _isProcessing
                           ? (streamingConfig != null
-                              ? 'Streaming...'
-                              : 'Generating...')
+                                ? 'Streaming...'
+                                : 'Generating...')
                           : (useStreamingMode
-                              ? 'Stream Waveform'
-                              : 'Generate Waveform'),
+                                ? 'Stream Waveform'
+                                : 'Generate Waveform'),
                     ),
                   ),
                 ),

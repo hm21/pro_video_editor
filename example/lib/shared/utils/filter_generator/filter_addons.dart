@@ -20,12 +20,7 @@ class ColorFilterAddons {
   /// - [b]: The blue component of the overlay color.
   /// - [scale]: The blending scale factor, where `0` is no overlay and `1` is
   ///   full overlay.
-  static List<double> colorOverlay(
-    double r,
-    double g,
-    double b,
-    double scale,
-  ) {
+  static List<double> colorOverlay(double r, double g, double b, double scale) {
     double invScale = 1 - scale;
     return [
       invScale,
@@ -47,7 +42,7 @@ class ColorFilterAddons {
       0,
       0,
       1,
-      0
+      0,
     ];
   }
 
@@ -95,7 +90,7 @@ class ColorFilterAddons {
       1 + r, 0, 0, 0, 0, // Red channel adjustment
       0, 1 + r * 0.5, 0, 0, 0, // Green channel adjustment (half of red)
       0, 0, 1 + b, 0, 0, // Blue channel adjustment
-      0, 0, 0, 1, 0 // Alpha channel (unchanged)
+      0, 0, 0, 1, 0, // Alpha channel (unchanged)
     ];
   }
 
@@ -127,7 +122,7 @@ class ColorFilterAddons {
       0,
       0,
       1,
-      0
+      0,
     ];
   }
 
@@ -163,7 +158,7 @@ class ColorFilterAddons {
       0,
       0,
       1,
-      0
+      0,
     ];
   }
 
@@ -193,7 +188,7 @@ class ColorFilterAddons {
       0,
       0,
       1,
-      0
+      0,
     ];
   }
 
@@ -230,7 +225,7 @@ class ColorFilterAddons {
       0,
       0,
       1,
-      0
+      0,
     ];
   }
 
@@ -266,7 +261,7 @@ class ColorFilterAddons {
       0,
       0,
       1,
-      0
+      0,
     ];
   }
 
@@ -316,7 +311,7 @@ class ColorFilterAddons {
       0,
       0,
       1,
-      0
+      0,
     ];
   }
 
@@ -358,7 +353,7 @@ class ColorFilterAddons {
       0,
       0,
       1,
-      0
+      0,
     ];
   }
 
@@ -390,7 +385,7 @@ class ColorFilterAddons {
       exposureFactor, 0, 0, 0, 0, // Red channel
       0, exposureFactor, 0, 0, 0, // Green channel
       0, 0, exposureFactor, 0, 0, // Blue channel
-      0, 0, 0, 1, 0 // Alpha channel (no change)
+      0, 0, 0, 1, 0, // Alpha channel (no change)
     ];
   }
 
@@ -426,7 +421,7 @@ class ColorFilterAddons {
       0,
       0,
       1,
-      0
+      0,
     ];
   }
 
@@ -469,7 +464,7 @@ class ColorFilterAddons {
       0,
       0,
       1,
-      0
+      0,
     ];
   }
 
@@ -513,7 +508,7 @@ class ColorFilterAddons {
       0,
       0,
       1,
-      0
+      0,
     ];
   }
 }
