@@ -11,10 +11,7 @@ import 'package:pro_video_editor_example/shared/widgets/video_renderer_progress.
 /// circular progress indicator with percentage text.
 class VideoProgressAlert extends StatelessWidget {
   /// Creates a [VideoProgressAlert] widget.
-  const VideoProgressAlert({
-    super.key,
-    this.taskId = '',
-  });
+  const VideoProgressAlert({super.key, this.taskId = ''});
 
   /// Optional taskId of the progress stream.
   final String taskId;
@@ -44,8 +41,10 @@ class VideoProgressAlert extends StatelessWidget {
           child: Theme(
             data: Theme.of(context),
             child: AlertDialog(
-              contentPadding:
-                  const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+              contentPadding: const EdgeInsets.symmetric(
+                vertical: 16,
+                horizontal: 20,
+              ),
               content: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 500),
                 child: Padding(
