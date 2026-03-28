@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.media3.common.Effect
-import androidx.media3.common.util.Size
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.OverlayEffect
@@ -14,6 +13,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
+import androidx.media3.effect.TimestampWrapper
 
 /**
  * Applies static image overlay on video.
@@ -113,8 +113,8 @@ fun applyImageLayer(
 /**
  * Applies time-based image overlays on video.
  *
- * Each image layer has a start and end time, and will only be visible during
- * that time range. Multiple layers can be active simultaneously.
+ * Each image layer has a start and end time, and will only be visible during that time range.
+ * Multiple layers can be active simultaneously.
  * Images are positioned at the specified x/y offset from the bottom-left of the video frame.
  *
  * @param videoEffects List to add overlay effects to
@@ -135,83 +135,51 @@ fun applyTimedImageLayers(
         RENDER_TAG,
         "Applying ${imageLayers.size} time-based image layer(s) to ${videoWidth}x$videoHeight video"
     )
-
-    // Create bitmap overlays for each layer
-    val bitmapOverlays = imageLayers.mapNotNull { layer ->
+    for (layer in imageLayers) {
         try {
-            // Decode the image
             val options = BitmapFactory.Options().apply {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
-            val overlayBitmap = BitmapFactory.decodeByteArray(
+            val layerBitmap = BitmapFactory.decodeByteArray(
                 layer.imageBytes, 0, layer.imageBytes!!.size, options
             )
 
-            val imageWidth = overlayBitmap.width
-            val imageHeight = overlayBitmap.height
+            val imageWidth = layerBitmap.width
+            val imageHeight = layerBitmap.height
 
             // Convert from premultiplied to straight alpha
-            val finalOverlay = unpremultiplyAlpha(overlayBitmap)
-            if (finalOverlay !== overlayBitmap) overlayBitmap.recycle()
+            val finalOverlay = unpremultiplyAlpha(layerBitmap)
+            if (finalOverlay !== layerBitmap) layerBitmap.recycle()
 
             // Convert times from microseconds to seconds
             val startTimeUs = layer.startUs
             val endTimeUs = layer.endUs
-            
-            // Extract x/y offsets from layer (defaults to 0)
-            val xOffset = layer.x
-            val yOffset = layer.y
-            
+
             Log.d(
                 RENDER_TAG,
                 "Layer: ${if (startTimeUs == -1L) "from start" else "start=${startTimeUs}us"}," +
                         " ${if (endTimeUs == -1L) "until end" else "end=${endTimeUs}us"}," +
-                        " size=${imageWidth}x${imageHeight}, offset=($xOffset, $yOffset)"
+                        " size=${imageWidth}x${imageHeight}, offset=(${layer.x}, ${layer.y})"
             )
 
-            // Create a transparent bitmap placeholder for when layer is not active
-            val transparentBitmap = createBitmap(videoWidth, videoHeight)
-            
-            // Pre-create the positioned bitmap (create once, reuse for all frames)
             val positionedBitmap = createBitmap(videoWidth, videoHeight)
             val canvas = android.graphics.Canvas(positionedBitmap)
-            
-            // The coordinate system in Android Canvas has origin at top-left
-            // We need to convert from bottom-left origin to top-left origin
-            // y_top_left = videoHeight - y_bottom_left - imageHeight
-            val yTopLeft = videoHeight - yOffset - imageHeight
-            
-            canvas.drawBitmap(finalOverlay, xOffset.toFloat(), yTopLeft.toFloat(), null)
-            
-            // We can recycle finalOverlay now since it's been drawn to positionedBitmap
-            finalOverlay.recycle()
-            
-            // Create a timed bitmap overlay with positioning
-            // Media3 expects time in microseconds
-            object : BitmapOverlay() {
-                override fun getBitmap(presentationTimeUs: Long): Bitmap {
-                    // Check if current time is within the layer's time range
-                    // startUs of -1 means "from the start of the video"
-                    // endUs of -1 means "until the end of the video"
-                    val inTimeRange = (startTimeUs == -1L || presentationTimeUs >= startTimeUs) &&
-                            (endTimeUs == -1L || presentationTimeUs <= endTimeUs)
-                    
-                    return if (inTimeRange) positionedBitmap else transparentBitmap
-                }
 
-                override fun configure(videoSize: Size) {
-                    // No configuration needed
-                }
-            }
+            // The coordinate system in Android Canvas has origin at top-left
+            // convert from bottom-left origin to top-left origin
+            val yTopLeft = videoHeight - layer.y - imageHeight
+
+            canvas.drawBitmap(finalOverlay, layer.x.toFloat(), yTopLeft.toFloat(), null)
+            finalOverlay.recycle()
+
+            val bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(positionedBitmap)
+            videoEffects += TimestampWrapper(
+                OverlayEffect(listOf(bitmapOverlay)), startTimeUs, endTimeUs
+            )
+
         } catch (e: Exception) {
             Log.e(RENDER_TAG, "Failed to decode image layer: ${e.message}")
-            null
         }
-    }
-
-    if (bitmapOverlays.isNotEmpty()) {
-        val overlayEffect = OverlayEffect(bitmapOverlays)
-        videoEffects += overlayEffect
     }
 }
 
