@@ -6,6 +6,8 @@ struct ImageLayer {
     let image: CIImage
     let startUs: Int64
     let endUs: Int64
+    let x: Int64
+    let y: Int64
 }
 
 class VideoCompositor: NSObject, AVVideoCompositing {

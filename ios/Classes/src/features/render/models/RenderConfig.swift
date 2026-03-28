@@ -5,8 +5,8 @@ struct ImageLayerConfig {
     let imageData: Data
     let startUs: Int64
     let endUs: Int64
-    let x: Int
-    let y: Int
+    let x: Int64
+    let y: Int64
 
     static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
         guard let args = args else { return nil }
@@ -30,8 +30,8 @@ struct ImageLayerConfig {
             imageData: imageData,
             startUs: (args["startUs"] as? NSNumber)?.int64Value ?? -1,
             endUs: (args["endUs"] as? NSNumber)?.int64Value ?? -1,
-            x: (args["x"] as? NSNumber)?.intValue ?? 0,
-            y: (args["y"] as? NSNumber)?.intValue ?? 0
+            x: (args["x"] as? NSNumber)?.int64Value ?? 0,
+            y: (args["y"] as? NSNumber)?.int64Value ?? 0
         )
     }
 }
