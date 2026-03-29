@@ -22,12 +22,15 @@ class NoAudioTrackException(message: String) : Exception(message)
 /**
  * Service for extracting audio from video files.
  *
- * This class handles the audio extraction pipeline using Android MediaExtractor and MediaMuxer:
+ * This class handles the audio extraction pipeline:
  * - Extracts audio track from video file
  * - Supports trimming (start/end time)
  * - Supports multiple output formats (MP3, AAC, WAV, M4A, OGG)
  * - Provides progress tracking during extraction
  * - Supports cancellation of active extraction jobs
+ *
+ * For WAV format, uses custom WAV file writer with PCM encoding.
+ * For other formats, uses Android MediaExtractor and MediaMuxer.
  */
 class ExtractAudio(private val context: Context) {
 
@@ -50,6 +53,153 @@ class ExtractAudio(private val context: Context) {
      * @return AudioExtractJobHandle that can be used to cancel the extraction job
      */
     fun extract(
+        config: AudioExtractConfig,
+        onProgress: (Double) -> Unit,
+        onComplete: (ByteArray?) -> Unit,
+        onError: (Throwable) -> Unit
+    ): AudioExtractJobHandle {
+        return if (config.format.lowercase() == "wav") {
+            // WAV format requires special handling
+            extractToWav(config, onProgress, onComplete, onError)
+        } else {
+            // Use MediaMuxer for other formats
+            extractWithMuxer(config, onProgress, onComplete, onError)
+        }
+    }
+
+    /**
+     * Extracts audio to WAV format using custom WAV file writer.
+     *
+     * This method properly handles both compressed and PCM audio formats:
+     * - Compressed formats (AAC, MP3): Uses MediaCodec to decode to PCM
+     * - PCM formats: Writes directly to WAV file
+     */
+    private fun extractToWav(
+        config: AudioExtractConfig,
+        onProgress: (Double) -> Unit,
+        onComplete: (ByteArray?) -> Unit,
+        onError: (Throwable) -> Unit
+    ): AudioExtractJobHandle {
+        val shouldStop = AtomicBoolean(false)
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        // Determine output file location
+        val outputFile = if (config.outputPath != null) {
+            File(config.outputPath)
+        } else {
+            File(
+                context.cacheDir,
+                "audio_output_${System.currentTimeMillis()}.wav"
+            )
+        }
+
+        // Run extraction in background thread
+        Thread {
+            var extractor: MediaExtractor? = null
+            var wavWriter: WavFileWriter? = null
+
+            try {
+                // Initialize extractor
+                extractor = MediaExtractor()
+                extractor.setDataSource(config.inputPath)
+
+                // Find audio track
+                val audioTrackIndex = findAudioTrack(extractor)
+                if (audioTrackIndex < 0) {
+                    throw NoAudioTrackException("No audio track found in video file")
+                }
+
+                val audioFormat = extractor.getTrackFormat(audioTrackIndex)
+
+                // Get duration for progress tracking
+                val durationUs = audioFormat.getLong(MediaFormat.KEY_DURATION)
+                val startUs = config.startUs ?: 0L
+                val endUs = config.endUs ?: durationUs
+
+                // Validate end time
+                if (endUs <= startUs) {
+                    throw IllegalArgumentException("endUs must be greater than startUs")
+                }
+
+                // Create WAV writer (handles both compressed and PCM audio)
+                wavWriter = WavFileWriter(outputFile)
+
+                mainHandler.post { onProgress(0.0) }
+                
+                wavWriter.extractAndWrite(
+                    extractor = extractor,
+                    audioTrackIndex = audioTrackIndex,
+                    startUs = startUs,
+                    endUs = endUs,
+                    onProgress = { progress ->
+                        if (!shouldStop.get()) {
+                            mainHandler.post { onProgress(progress) }
+                        }
+                    },
+                    shouldStop = { shouldStop.get() }
+                )
+
+                // Check if cancelled
+                if (shouldStop.get()) {
+                    outputFile.delete()
+                    throw InterruptedException("Extraction cancelled by user")
+                }
+
+                extractor.release()
+                extractor = null
+
+                // Read output and invoke completion callback
+                mainHandler.post {
+                    try {
+                        if (config.outputPath != null) {
+                            // Output saved to file, return null
+                            onComplete(null)
+                        } else {
+                            // Read temporary file and return bytes
+                            val resultBytes = outputFile.readBytes()
+                            onComplete(resultBytes)
+                        }
+                    } catch (e: Exception) {
+                        onError(e)
+                    } finally {
+                        if (config.outputPath == null) {
+                            outputFile.delete()
+                        }
+                    }
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error extracting WAV audio: ${e.message}", e)
+                mainHandler.post {
+                    onError(e)
+                }
+                // Clean up output file on error
+                if (outputFile.exists()) {
+                    outputFile.delete()
+                }
+            } finally {
+                try {
+                    extractor?.release()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error releasing extractor: ${e.message}")
+                }
+            }
+        }.start()
+
+        // Return cancellation handle
+        return AudioExtractJobHandle {
+            shouldStop.set(true)
+            mainHandler.removeCallbacksAndMessages(null)
+            if (outputFile.exists()) {
+                outputFile.delete()
+            }
+        }
+    }
+
+    /**
+     * Extracts audio using MediaMuxer for non-WAV formats.
+     */
+    private fun extractWithMuxer(
         config: AudioExtractConfig,
         onProgress: (Double) -> Unit,
         onComplete: (ByteArray?) -> Unit,
@@ -245,7 +395,7 @@ class ExtractAudio(private val context: Context) {
     /**
      * Determines the MediaMuxer output format based on the requested audio format.
      *
-     * @param format Audio format string (mp3, aac, wav, m4a, ogg)
+     * @param format Audio format string (mp3, aac, m4a, ogg)
      * @return MediaMuxer output format constant
      */
     private fun determineOutputFormat(format: String): Int {
@@ -253,7 +403,7 @@ class ExtractAudio(private val context: Context) {
             "mp3" -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
             "aac" -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
             "m4a" -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
-            "wav" -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+            "wav" -> throw IllegalArgumentException("WAV format should be handled by extractToWav()")
             "ogg" -> MediaMuxer.OutputFormat.MUXER_OUTPUT_OGG
             "webm" -> MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM
             else -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4 // Default to MP4 container

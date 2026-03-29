@@ -4,8 +4,10 @@ import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:mime/mime.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
+import 'package:wav/wav.dart';
 
 import '/core/constants/example_constants.dart';
 
@@ -58,8 +60,7 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
     if (!_isFormatSupported(_selectedFormat)) {
       // Find first supported format
       _selectedFormat = AudioFormat.values.firstWhere(
-        _isFormatSupported,
-        orElse: () => AudioFormat.m4a, // Fallback to M4A
+        _isFormatSupported, orElse: () => AudioFormat.m4a, // Fallback to M4A
       );
     }
   }
@@ -124,9 +125,26 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
       });
 
       if (mounted) {
+        var raf = File(outputPath).openSync();
+        var bytes = raf.readSync(defaultMagicNumbersMaxLength);
+        raf.closeSync();
+
+        var info = lookupMimeType(outputPath, headerBytes: bytes) ?? 'unknown';
+
+        if (_selectedFormat == AudioFormat.wav) {
+          try {
+            var wav = Wav.read(File(outputPath).readAsBytesSync());
+            info += ' channels:${wav.channels.length}'
+                ' sampleRate:${wav.samplesPerSecond}'
+                ' format:${wav.format.name}';
+          } catch (_) {
+            info += ' (invalid wav)';
+          }
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Audio extracted successfully!'),
+          SnackBar(
+            content: Text('Audio extracted successfully!\n$info'),
             backgroundColor: Colors.green,
           ),
         );

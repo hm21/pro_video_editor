@@ -406,6 +406,22 @@ class ExtractAudio {
                 let sampleRate = audioStreamBasicDescription?.mSampleRate ?? 44100
                 let channels = audioStreamBasicDescription?.mChannelsPerFrame ?? 2
                 
+                // Create audio channel layout based on number of channels
+                var channelLayout = AudioChannelLayout()
+                channelLayout.mChannelBitmap = AudioChannelBitmap(rawValue: 0)
+                channelLayout.mNumberChannelDescriptions = 0
+                channelLayout.mChannelLayoutTag = switch channels {
+                    case 1: kAudioChannelLayoutTag_Mono
+                    case 2: kAudioChannelLayoutTag_Stereo
+                    case 3: kAudioChannelLayoutTag_MPEG_3_0_A
+                    case 4: kAudioChannelLayoutTag_Quadraphonic
+                    case 5: kAudioChannelLayoutTag_MPEG_5_0_A
+                    case 6: kAudioChannelLayoutTag_MPEG_5_1_A
+                    case 7: kAudioChannelLayoutTag_MPEG_6_1_A
+                    case 8: kAudioChannelLayoutTag_MPEG_7_1_A
+                    default: kAudioChannelLayoutTag_DiscreteInOrder | UInt32(channels)
+                }
+                
                 // Configure writer input for PCM WAV
                 let writerInputSettings: [String: Any] = [
                     AVFormatIDKey: kAudioFormatLinearPCM,
@@ -414,7 +430,8 @@ class ExtractAudio {
                     AVLinearPCMBitDepthKey: 16,
                     AVLinearPCMIsFloatKey: false,
                     AVLinearPCMIsBigEndianKey: false,
-                    AVLinearPCMIsNonInterleaved: false
+                    AVLinearPCMIsNonInterleaved: false,
+                    AVChannelLayoutKey: Data(bytes: &channelLayout, count: MemoryLayout<AudioChannelLayout>.size)
                 ]
                 
                 let writerInput = AVAssetWriterInput(mediaType: .audio, outputSettings: writerInputSettings)

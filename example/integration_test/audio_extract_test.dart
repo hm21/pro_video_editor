@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:mime/mime.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/core/constants/example_constants.dart';
@@ -17,6 +18,8 @@ void main() {
   // Audio extraction is not supported on Web, Windows, and Linux yet
   final skipPlatform = kIsWeb || isWindows || isLinux;
 
+  final pve = ProVideoEditor.instance;
+
   /// Helper to check if a format is supported on current platform
   bool isFormatSupported(AudioFormat format) {
     if (kIsWeb) return false;
@@ -24,9 +27,7 @@ void main() {
     switch (format) {
       case AudioFormat.mp3:
         return Platform.isAndroid; // MP3 only on Android
-      case AudioFormat.aac:
-      case AudioFormat.m4a:
-      case AudioFormat.wav:
+      case AudioFormat.aac || AudioFormat.m4a || AudioFormat.wav:
         return Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
       case AudioFormat.caf:
         return Platform.isIOS || Platform.isMacOS; // CAF only on Apple
@@ -41,15 +42,8 @@ void main() {
         final outputPath =
             '${directory.path}/test_audio_${DateTime.now().millisecondsSinceEpoch}.${format.extension}';
 
-        final config = AudioExtractConfigs(
-          video: testVideo,
-          format: format,
-        );
-
-        final result = await ProVideoEditor.instance.extractAudioToFile(
-          outputPath,
-          config,
-        );
+        final config = AudioExtractConfigs(video: testVideo, format: format);
+        final result = await pve.extractAudioToFile(outputPath, config);
 
         expect(result, equals(outputPath));
 
@@ -57,6 +51,10 @@ void main() {
         final file = File(outputPath);
         expect(await file.exists(), isTrue,
             reason: 'Audio file should exist at $outputPath');
+
+        final header = file.openSync().readSync(defaultMagicNumbersMaxLength);
+        final mimeType = lookupMimeType(result, headerBytes: header);
+        expect(mimeType, format.mimeType);
 
         // Verify file has content
         final fileSize = await file.length();
@@ -84,10 +82,7 @@ void main() {
           endTime: const Duration(seconds: 10),
         );
 
-        final result = await ProVideoEditor.instance.extractAudioToFile(
-          outputPath,
-          config,
-        );
+        final result = await pve.extractAudioToFile(outputPath, config);
 
         expect(result, equals(outputPath));
 
@@ -127,12 +122,11 @@ void main() {
       );
 
       final progressValues = <double>[];
-      final subscription =
-          ProVideoEditor.instance.progressStreamById(config.id).listen((event) {
+      final subscription = pve.progressStreamById(config.id).listen((event) {
         progressValues.add(event.progress);
       });
 
-      await ProVideoEditor.instance.extractAudioToFile(outputPath, config);
+      await pve.extractAudioToFile(outputPath, config);
       await subscription.cancel();
 
       // Verify progress updates
@@ -173,14 +167,13 @@ void main() {
       );
 
       // Start extraction
-      final extractionFuture =
-          ProVideoEditor.instance.extractAudioToFile(outputPath, config);
+      final extractionFuture = pve.extractAudioToFile(outputPath, config);
 
       // Wait a bit to ensure extraction has started
       await Future.delayed(const Duration(milliseconds: 100));
 
       // Cancel the task
-      await ProVideoEditor.instance.cancel(config.id);
+      await pve.cancel(config.id);
 
       // Extraction should throw or complete with error
       try {
@@ -220,7 +213,7 @@ void main() {
       );
 
       try {
-        await ProVideoEditor.instance.extractAudioToFile(outputPath, config);
+        await pve.extractAudioToFile(outputPath, config);
         // If it succeeds, the implementation might handle it gracefully
         // by swapping or clamping the values
       } catch (e) {
