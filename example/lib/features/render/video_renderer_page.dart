@@ -288,8 +288,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   Future<void> _layersTimed() async {
     final metadata = await _pve.getMetadata(_video);
 
-    final imageBytes = await _captureLayerContent(metadata.rawResolution);
-    final layerImage = EditorLayerImage.memory(imageBytes);
+    final layerImage = EditorLayerImage.asset('assets/sticker.png');
+
+    final rng = Random();
+    const stickerSize = 256;
+    const videoWidth = 1280;
+    const videoHeight = 720;
 
     var data = VideoRenderData(
       video: _video,
@@ -299,8 +303,10 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
             image: layerImage,
             startTime: Duration(seconds: i),
             endTime: Duration(seconds: i + 1),
-            x: i * 25,
-            y: i.isEven ? 0 : 25,
+            offset: Offset(
+              rng.nextInt(videoWidth - stickerSize).toDouble(),
+              rng.nextInt(videoHeight - stickerSize).toDouble(),
+            ),
           ),
       ],
     );

@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'editor_layer_image_model.dart';
 
 /// A model representing a video overlay layer with timing information.
@@ -8,8 +10,7 @@ class ImageLayer {
     required this.image,
     this.startTime,
     this.endTime,
-    this.x,
-    this.y,
+    this.offset = Offset.zero,
   });
 
   /// The image to overlay on the video.
@@ -23,9 +24,11 @@ class ImageLayer {
   /// If `null`, the layer will be shown until the end of the video.
   final Duration? endTime;
 
-  /// Horizontal offset
-  final int? x;
-
-  /// Vertical offset
-  final int? y;
+  /// Position offset from the top-left corner of the video frame, in pixels.
+  ///
+  /// [Offset.dx] is the horizontal offset from the left edge.
+  /// [Offset.dy] is the vertical offset from the top edge.
+  ///
+  /// Defaults to [Offset.zero] (top-left corner).
+  final Offset offset;
 }
