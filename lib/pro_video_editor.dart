@@ -7,6 +7,8 @@ export '/core/models/audio/waveform_configs_model.dart';
 export '/core/models/audio/waveform_data_model.dart';
 export 'features/audio/widgets/audio_waveform.dart';
 export 'features/audio/models/waveform_style.dart';
+export 'core/models/image/editor_layer_image_model.dart';
+export 'core/models/image/image_layer_model.dart';
 export 'core/models/video/progress_model.dart';
 export 'core/models/video/editor_video_model.dart';
 export 'core/models/video/export_transform_model.dart';

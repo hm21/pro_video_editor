@@ -59,7 +59,7 @@ class CompositionBuilder(
         val rotationDegrees = (4 - (config.rotateTurns ?: 0)) * 90f
 
         // Check if custom audio is provided
-        val hasCustomAudio = config.customAudioPath != null && config.customAudioPath.isNotEmpty()
+        val hasCustomAudio = !config.customAudioPath.isNullOrEmpty()
 
         // Build video sequence
         val videoBuilder = VideoSequenceBuilder(config.videoClips)
@@ -69,6 +69,18 @@ class CompositionBuilder(
             .setFlip(config.flipX, config.flipY)
             .setCrop(config.cropWidth, config.cropHeight, config.cropX, config.cropY)
             .setImageLayer(config.imageBytes, config.scaleX, config.scaleY, config.imageBytesWithCropping)
+            .setTimedImageLayers(config.imageLayers.map { imageLayer ->
+                VideoSequenceBuilder.ImageLayerConfig(
+                    imageBytes = imageLayer.imageData,
+                    scaleX = config.scaleX,
+                    scaleY = config.scaleY,
+                    withCropping = config.imageBytesWithCropping,
+                    startUs = imageLayer.startUs,
+                    endUs = imageLayer.endUs,
+                    x = imageLayer.x,
+                    y = imageLayer.y
+                )
+            })
             .setEnableAudio(config.enableAudio)
             .setOriginalAudioVolume(config.originalAudioVolume)
             .setGlobalTrim(config.startUs, config.endUs)

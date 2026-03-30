@@ -10,7 +10,7 @@ import 'package:pro_video_editor_example/core/constants/example_constants.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-  final testVideo = EditorVideo.asset(kVideoEditorExampleAssetPath);
+  final testVideo = EditorVideo.asset(kVideoEditorExampleH264Path);
 
   final isWindows = defaultTargetPlatform == TargetPlatform.windows;
   final isLinux = defaultTargetPlatform == TargetPlatform.linux;
@@ -27,7 +27,9 @@ void main() {
     switch (format) {
       case AudioFormat.mp3:
         return Platform.isAndroid; // MP3 only on Android
-      case AudioFormat.aac || AudioFormat.m4a || AudioFormat.wav:
+      case AudioFormat.aac:
+      case AudioFormat.m4a:
+      case AudioFormat.wav:
         return Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
       case AudioFormat.caf:
         return Platform.isIOS || Platform.isMacOS; // CAF only on Apple
@@ -49,8 +51,11 @@ void main() {
 
         // Verify file was created
         final file = File(outputPath);
-        expect(await file.exists(), isTrue,
-            reason: 'Audio file should exist at $outputPath');
+        expect(
+          await file.exists(),
+          isTrue,
+          reason: 'Audio file should exist at $outputPath',
+        );
 
         final header = file.openSync().readSync(defaultMagicNumbersMaxLength);
         final mimeType = lookupMimeType(result, headerBytes: header);
@@ -58,8 +63,11 @@ void main() {
 
         // Verify file has content
         final fileSize = await file.length();
-        expect(fileSize, greaterThan(1000),
-            reason: 'Audio file should have reasonable size (>1KB)');
+        expect(
+          fileSize,
+          greaterThan(1000),
+          reason: 'Audio file should have reasonable size (>1KB)',
+        );
 
         // Clean up
         await file.delete();
@@ -88,16 +96,25 @@ void main() {
 
         // Verify file was created
         final file = File(outputPath);
-        expect(await file.exists(), isTrue,
-            reason: 'Trimmed audio file should exist');
+        expect(
+          await file.exists(),
+          isTrue,
+          reason: 'Trimmed audio file should exist',
+        );
 
         // Verify file size is smaller than full extraction
         // (approximately 1/6 of the original since we extract 5 of ~30 seconds)
         final fileSize = await file.length();
-        expect(fileSize, greaterThan(500),
-            reason: 'Trimmed audio should have some content');
-        expect(fileSize, lessThan(500000),
-            reason: 'Trimmed audio should be smaller than full extraction');
+        expect(
+          fileSize,
+          greaterThan(500),
+          reason: 'Trimmed audio should have some content',
+        );
+        expect(
+          fileSize,
+          lessThan(500000),
+          reason: 'Trimmed audio should be smaller than full extraction',
+        );
 
         // Clean up
         await file.delete();
@@ -106,50 +123,53 @@ void main() {
     );
   }
 
-  testWidgets(
-    'extractAudio emits progress updates',
-    (tester) async {
-      // Use platform-specific format
-      final format = Platform.isAndroid ? AudioFormat.mp3 : AudioFormat.m4a;
+  testWidgets('extractAudio emits progress updates', (tester) async {
+    // Use platform-specific format
+    final format = Platform.isAndroid ? AudioFormat.mp3 : AudioFormat.m4a;
 
-      final directory = await getTemporaryDirectory();
-      final outputPath =
-          '${directory.path}/test_audio_progress_${DateTime.now().millisecondsSinceEpoch}.${format.extension}';
+    final directory = await getTemporaryDirectory();
+    final outputPath =
+        '${directory.path}/test_audio_progress_${DateTime.now().millisecondsSinceEpoch}.${format.extension}';
 
-      final config = AudioExtractConfigs(
-        video: testVideo,
-        format: format,
-      );
+    final config = AudioExtractConfigs(video: testVideo, format: format);
 
-      final progressValues = <double>[];
-      final subscription = pve.progressStreamById(config.id).listen((event) {
-        progressValues.add(event.progress);
-      });
+    final progressValues = <double>[];
+    final subscription = ProVideoEditor.instance
+        .progressStreamById(config.id)
+        .listen((event) {
+          progressValues.add(event.progress);
+        });
 
-      await pve.extractAudioToFile(outputPath, config);
-      await subscription.cancel();
+    await ProVideoEditor.instance.extractAudioToFile(outputPath, config);
+    await subscription.cancel();
 
-      // Verify progress updates
-      expect(progressValues, isNotEmpty,
-          reason: 'Progress: no updates received');
-      expect(progressValues.first, lessThanOrEqualTo(0.1),
-          reason: 'Progress: did not start low');
-      expect(progressValues.last, closeTo(1.0, 0.05),
-          reason: 'Progress: did not reach 1.0');
+    // Verify progress updates
+    expect(progressValues, isNotEmpty, reason: 'Progress: no updates received');
+    expect(
+      progressValues.first,
+      lessThanOrEqualTo(0.1),
+      reason: 'Progress: did not start low',
+    );
+    expect(
+      progressValues.last,
+      closeTo(1.0, 0.05),
+      reason: 'Progress: did not reach 1.0',
+    );
 
-      // Verify progress is monotonically increasing
-      final sorted = List.of(progressValues)..sort();
-      expect(progressValues, sorted,
-          reason: 'Progress: not monotonically increasing');
+    // Verify progress is monotonically increasing
+    final sorted = List.of(progressValues)..sort();
+    expect(
+      progressValues,
+      sorted,
+      reason: 'Progress: not monotonically increasing',
+    );
 
-      // Clean up
-      final file = File(outputPath);
-      if (await file.exists()) {
-        await file.delete();
-      }
-    },
-    skip: skipPlatform,
-  );
+    // Clean up
+    final file = File(outputPath);
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }, skip: skipPlatform);
 
   testWidgets(
     'extractAudio can be cancelled',
@@ -161,13 +181,13 @@ void main() {
       final outputPath =
           '${directory.path}/test_audio_cancel_${DateTime.now().millisecondsSinceEpoch}.${format.extension}';
 
-      final config = AudioExtractConfigs(
-        video: testVideo,
-        format: format,
-      );
+      final config = AudioExtractConfigs(video: testVideo, format: format);
 
       // Start extraction
-      final extractionFuture = pve.extractAudioToFile(outputPath, config);
+      final extractionFuture = ProVideoEditor.instance.extractAudioToFile(
+        outputPath,
+        config,
+      );
 
       // Wait a bit to ensure extraction has started
       await Future.delayed(const Duration(milliseconds: 100));
@@ -194,39 +214,37 @@ void main() {
     skip: skipPlatform || true, // TODO: Fix that test
   );
 
-  testWidgets(
-    'extractAudio handles invalid time ranges gracefully',
-    (tester) async {
-      // Use platform-specific format
-      final format = Platform.isAndroid ? AudioFormat.mp3 : AudioFormat.m4a;
+  testWidgets('extractAudio handles invalid time ranges gracefully', (
+    tester,
+  ) async {
+    // Use platform-specific format
+    final format = Platform.isAndroid ? AudioFormat.mp3 : AudioFormat.m4a;
 
-      final directory = await getTemporaryDirectory();
-      final outputPath =
-          '${directory.path}/test_audio_invalid_${DateTime.now().millisecondsSinceEpoch}.${format.extension}';
+    final directory = await getTemporaryDirectory();
+    final outputPath =
+        '${directory.path}/test_audio_invalid_${DateTime.now().millisecondsSinceEpoch}.${format.extension}';
 
-      // Try to extract with start time after end time
-      final config = AudioExtractConfigs(
-        video: testVideo,
-        format: format,
-        startTime: const Duration(seconds: 20),
-        endTime: const Duration(seconds: 10),
-      );
+    // Try to extract with start time after end time
+    final config = AudioExtractConfigs(
+      video: testVideo,
+      format: format,
+      startTime: const Duration(seconds: 20),
+      endTime: const Duration(seconds: 10),
+    );
 
-      try {
-        await pve.extractAudioToFile(outputPath, config);
-        // If it succeeds, the implementation might handle it gracefully
-        // by swapping or clamping the values
-      } catch (e) {
-        // Expected: should throw an error for invalid range
-        expect(e, isNotNull);
-      }
+    try {
+      await ProVideoEditor.instance.extractAudioToFile(outputPath, config);
+      // If it succeeds, the implementation might handle it gracefully
+      // by swapping or clamping the values
+    } catch (e) {
+      // Expected: should throw an error for invalid range
+      expect(e, isNotNull);
+    }
 
-      // Clean up if file was created
-      final file = File(outputPath);
-      if (await file.exists()) {
-        await file.delete();
-      }
-    },
-    skip: skipPlatform,
-  );
+    // Clean up if file was created
+    final file = File(outputPath);
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }, skip: skipPlatform);
 }

@@ -1,6 +1,41 @@
 import Foundation
 import Flutter
 
+struct ImageLayerConfig {
+    let imageData: Data
+    let startUs: Int64
+    let endUs: Int64
+    let x: Int64
+    let y: Int64
+
+    static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
+        guard let args = args else { return nil }
+
+        // Convert imageBytes from Flutter (FlutterStandardTypedData) to Data
+        let imageData: Data?
+        if let flutterData = args["imageData"] as? FlutterStandardTypedData {
+            imageData = flutterData.data
+        } else {
+            imageData = args["imageData"] as? Data
+        }
+
+        // Return nil if imageData is missing or empty
+        guard let imageData = imageData, !imageData.isEmpty else {
+            return nil
+        }
+
+        // Use -1 as sentinel value for "from start" when startUs is null
+        // Use -1 for endUs to signify "until the end of the video"
+        return ImageLayerConfig(
+            imageData: imageData,
+            startUs: (args["startUs"] as? NSNumber)?.int64Value ?? -1,
+            endUs: (args["endUs"] as? NSNumber)?.int64Value ?? -1,
+            x: (args["x"] as? NSNumber)?.int64Value ?? 0,
+            y: (args["y"] as? NSNumber)?.int64Value ?? 0
+        )
+    }
+}
+
 /// Configuration model for video rendering operations.
 ///
 /// This struct encapsulates all parameters required for rendering a video with
@@ -13,6 +48,9 @@ struct RenderConfig {
     /// Optional image data for image-to-video conversion
     let imageData: Data?
     
+    /// List of image layers with timing information for overlaying on the video
+    let imageLayers: [ImageLayerConfig]
+
     /// Output format for the rendered video (e.g., "mp4", "mov")
     let outputFormat: String
     
@@ -92,6 +130,44 @@ struct RenderConfig {
     /// When true (default), audio is repeated to match video duration.
     /// When false, audio plays once and silence fills the rest.
     let loopCustomAudio: Bool
+
+    /// Returns a copy of this config with the specified fields replaced.
+    /// Fields not provided retain their current values.
+    func copyWith(
+        videoClips: [VideoClip]? = nil
+    ) -> RenderConfig {
+        return RenderConfig(
+            videoClips: videoClips ?? self.videoClips,
+            imageData: self.imageData,
+            imageLayers: self.imageLayers,
+            outputFormat: self.outputFormat,
+            outputPath: self.outputPath,
+            rotateTurns: self.rotateTurns,
+            flipX: self.flipX,
+            flipY: self.flipY,
+            cropWidth: self.cropWidth,
+            cropHeight: self.cropHeight,
+            cropX: self.cropX,
+            cropY: self.cropY,
+            scaleX: self.scaleX,
+            scaleY: self.scaleY,
+            bitrate: self.bitrate,
+            enableAudio: self.enableAudio,
+            playbackSpeed: self.playbackSpeed,
+            colorMatrixList: self.colorMatrixList,
+            blur: self.blur,
+            customAudioPath: self.customAudioPath,
+            customAudioStartTimeUs: self.customAudioStartTimeUs,
+            originalAudioVolume: self.originalAudioVolume,
+            customAudioVolume: self.customAudioVolume,
+            startUs: self.startUs,
+            endUs: self.endUs,
+            shouldOptimizeForNetworkUse: self.shouldOptimizeForNetworkUse,
+            imageBytesWithCropping: self.imageBytesWithCropping,
+            loopCustomAudio: self.loopCustomAudio
+        )
+    }
+
     static func fromArguments(_ arguments: [String: Any]?) -> RenderConfig? {
         guard let args = arguments else {
             return nil
@@ -137,9 +213,17 @@ struct RenderConfig {
             imageData = args["imageBytes"] as? Data
         }
         
+        // Parse image layers
+        // compactMap filters out nil values returned by fromArguments for invalid layers
+        var imageLayers: [ImageLayerConfig] = []
+        if let layersRaw = args["imageLayers"] as? [[String: Any]] {
+            imageLayers = layersRaw.compactMap { layerMap in ImageLayerConfig.fromArguments(layerMap) }
+        }
+
         return RenderConfig(
             videoClips: videoClips,
             imageData: imageData,
+            imageLayers: imageLayers,
             outputFormat: args["outputFormat"] as? String ?? "mp4",
             outputPath: args["outputPath"] as? String,
             rotateTurns: args["rotateTurns"] as? Int,

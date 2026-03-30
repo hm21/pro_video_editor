@@ -7,10 +7,7 @@ class FilterModel {
   /// The [name] parameter is required and represents the name of the filter.
   /// The [filters] parameter is required and represents the filter matrix to
   /// be applied.
-  const FilterModel({
-    required this.name,
-    required this.filters,
-  });
+  const FilterModel({required this.name, required this.filters});
 
   /// The name of the filter.
   final String name;

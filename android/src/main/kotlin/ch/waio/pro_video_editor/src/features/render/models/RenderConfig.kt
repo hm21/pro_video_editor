@@ -17,9 +17,47 @@ data class VideoClip(
     val endUs: Long?
 )
 
+/**
+ * Represents an image overlay layer with timing information.
+ *
+ * @property imageData The image data as a byte array
+ * @property startUs Start time in microseconds when the layer should appear
+ * @property endUs End time in microseconds when the layer should disappear (-1 = until end of video)
+ * @property x Horizontal offset in pixels from the left edge of the video frame (0 = left edge)
+ * @property y Vertical offset in pixels from the bottom edge of the video frame (0 = bottom edge)
+ */
+data class ImageLayer(
+    val imageData: ByteArray,
+    val startUs: Long,
+    val endUs: Long,
+    val x: Int = 0,
+    val y: Int = 0
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+        other as ImageLayer
+        return imageData.contentEquals(other.imageData) &&
+                startUs == other.startUs &&
+                endUs == other.endUs &&
+                x == other.x &&
+                y == other.y
+    }
+
+    override fun hashCode(): Int {
+        var result = imageData.contentHashCode()
+        result = 31 * result + startUs.hashCode()
+        result = 31 * result + endUs.hashCode()
+        result = 31 * result + x.hashCode()
+        result = 31 * result + y.hashCode()
+        return result
+    }
+}
+
 data class RenderConfig(
     val videoClips: List<VideoClip>,
     val imageBytes: ByteArray? = null,
+    val imageLayers: List<ImageLayer> = emptyList(),
     val outputFormat: String,
     val outputPath: String? = null,
     val rotateTurns: Int? = null,
@@ -66,6 +104,7 @@ data class RenderConfig(
                 imageBytes?.contentEquals(
                     other.imageBytes ?: byteArrayOf()
                 ) ?: (other.imageBytes == null) &&
+                imageLayers == other.imageLayers &&
                 outputFormat == other.outputFormat &&
                 outputPath == other.outputPath
     }
@@ -73,6 +112,7 @@ data class RenderConfig(
     override fun hashCode(): Int {
         var result = videoClips.hashCode()
         result = 31 * result + (imageBytes?.contentHashCode() ?: 0)
+        result = 31 * result + imageLayers.hashCode()
         result = 31 * result + outputFormat.hashCode()
         result = 31 * result + (outputPath?.hashCode() ?: 0)
         return result
@@ -91,7 +131,7 @@ data class RenderConfig(
 
             Log.d(PACKAGE_TAG, "Received videoClipsRaw: ${videoClipsRaw?.size ?: 0} clips")
 
-            if (videoClipsRaw == null || videoClipsRaw.isEmpty()) {
+            if (videoClipsRaw.isNullOrEmpty()) {
                 throw IllegalArgumentException("videoClips is required and cannot be empty")
             }
 
@@ -108,10 +148,31 @@ data class RenderConfig(
                 clip
             }
 
+            // Parse image layers
+            val imageLayersRaw = call.argument<List<Map<String, Any>>>("imageLayers")
+            val imageLayers: List<ImageLayer> = imageLayersRaw?.mapNotNull { layerMap ->
+                val imageData = layerMap["imageData"] as? ByteArray
+                // Use -1L as sentinel value for "from start" when startUs is null
+                val startUs = (layerMap["startUs"] as? Number)?.toLong() ?: -1L
+                val endUs = (layerMap["endUs"] as? Number)?.toLong() ?: -1L
+                val x = (layerMap["x"] as? Number)?.toInt() ?: 0
+                val y = (layerMap["y"] as? Number)?.toInt() ?: 0
+
+                // Return null if imageData is missing or empty (will be filtered out by mapNotNull)
+                if (imageData == null || imageData.isEmpty()) {
+                    null
+                } else {
+                    ImageLayer(imageData, startUs, endUs, x, y)
+                }
+            } ?: emptyList()
+
+            Log.d(PACKAGE_TAG, "Parsed ${imageLayers.size} image layer(s)")
+
             // Parse all other parameters
             return RenderConfig(
                 videoClips = videoClips,
                 imageBytes = call.argument<ByteArray?>("imageBytes"),
+                imageLayers = imageLayers,
                 outputFormat = call.argument<String>("outputFormat") ?: "mp4",
                 outputPath = call.argument<String>("outputPath"),
                 rotateTurns = call.argument<Number>("rotateTurns")?.toInt(),

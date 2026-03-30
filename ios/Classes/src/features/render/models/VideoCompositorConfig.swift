@@ -4,6 +4,7 @@ import CoreImage
 struct VideoCompositorConfig {
     var blurSigma: Double = 0.0
     var overlayImage: Data? = nil
+    var imageLayerConfigs: [ImageLayerConfig] = []
 
     var rotateRadians: Double = 0.0
     var rotateTurns: Int = 0

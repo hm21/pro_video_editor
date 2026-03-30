@@ -119,6 +119,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 
 #### 🎨 **Visual Effects**
 - 🖼️ **Layers**: Overlay a image like a text or drawings on the video.
+- 🕐 **Timed Image Layers**: Position image overlays at specific coordinates with optional start/end times.
 - 🧮 **Color Matrix**: Apply one or multiple 4x5 color matrices (e.g., for filters).
 - 💧 **Blur**: Add a blur effect to the video.
 - 📡 **Bitrate**: Set a custom video bitrate. If constant bitrate (CBR) isn't supported, it will gracefully fall back to the next available mode.
@@ -143,6 +144,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 | `Playback-Speed`           | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Remove-Audio`             | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Overlay Layers`           | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
+| `Timed Image Layers`       | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Multiple ColorMatrix 4x5` | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Cancel export task`       | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Blur background`          | 🧪      | 🧪  | 🧪     | ❌      | ❌     | 🚫   |
@@ -421,6 +423,14 @@ var task = VideoRenderData(
     id: 'my-special-task'
     video: EditorVideo.asset('assets/my-video.mp4'),
     imageBytes: imageBytes, /// A image "Layer" which will overlay the video.
+    imageLayers: [
+      ImageLayer(
+        imageBytes: layerBytes,
+        offset: const Offset(100, 50),
+        startTime: const Duration(seconds: 2),
+        endTime: const Duration(seconds: 8),
+      ),
+    ],
     outputFormat: VideoOutputFormat.mp4,
     playbackSpeed: 2,
     startTime: const Duration(seconds: 5),

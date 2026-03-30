@@ -46,6 +46,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   final double _blurFactor = 0;
   final List<List<double>> _colorFilters = [];
+
   // kBasicFilterMatrix   kComplexFilterMatrix
 
   VideoMetadata? _outputMetadata;
@@ -60,10 +61,10 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   void initState() {
     super.initState();
     _playerContent.open(
-      Media('asset:///$kVideoEditorExampleAssetPath'),
+      Media('asset:///$kVideoEditorExampleH264Path'),
       play: false,
     );
-    _video = EditorVideo.asset(kVideoEditorExampleAssetPath);
+    _video = EditorVideo.asset(kVideoEditorExampleH264Path);
   }
 
   @override
@@ -76,9 +77,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   Future<void> _rotate() async {
     var data = VideoRenderData(
       video: _video,
-      transform: const ExportTransform(
-        rotateTurns: 1,
-      ),
+      transform: const ExportTransform(rotateTurns: 1),
     );
 
     await _renderVideo(data);
@@ -87,9 +86,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   Future<void> _flip() async {
     var data = VideoRenderData(
       video: _video,
-      transform: const ExportTransform(
-        flipX: true,
-      ),
+      transform: const ExportTransform(flipX: true),
     );
 
     await _renderVideo(data);
@@ -98,12 +95,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   Future<void> _crop() async {
     var data = VideoRenderData(
       video: _video,
-      transform: const ExportTransform(
-        x: 100,
-        y: 250,
-        width: 700,
-        height: 300,
-      ),
+      transform: const ExportTransform(x: 100, y: 250, width: 700, height: 300),
     );
 
     await _renderVideo(data);
@@ -129,19 +121,13 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   }
 
   Future<void> _changeSpeed() async {
-    var data = VideoRenderData(
-      video: _video,
-      playbackSpeed: 2,
-    );
+    var data = VideoRenderData(video: _video, playbackSpeed: 2);
 
     await _renderVideo(data);
   }
 
   Future<void> _removeAudio() async {
-    var data = VideoRenderData(
-      video: _video,
-      enableAudio: false,
-    );
+    var data = VideoRenderData(video: _video, enableAudio: false);
 
     await _renderVideo(data);
   }
@@ -189,13 +175,15 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// The asset audio is first loaded and saved to a temporary file,
   /// then the native code can access it via the file path.
   Future<void> _customAudioReplace() async {
-    final customAudioFile =
-        await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
+    final customAudioFile = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio1Path,
+    );
 
     var data = VideoRenderData(
       video: _video,
       customAudioPath: customAudioFile.path,
-      originalAudioVolume: 0.0, // Mute original audio
+      originalAudioVolume: 0.0,
+      // Mute original audio
       customAudioVolume: 1, // Full volume for custom audio
     );
 
@@ -210,13 +198,15 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// The asset audio is first loaded and saved to a temporary file,
   /// then mixed with the original video audio during export.
   Future<void> _customAudioMix() async {
-    final customAudioFile =
-        await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
+    final customAudioFile = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio1Path,
+    );
 
     var data = VideoRenderData(
       video: _video,
       customAudioPath: customAudioFile.path,
-      originalAudioVolume: 0.9, // Original audio at 90%
+      originalAudioVolume: 0.9,
+      // Original audio at 90%
       customAudioVolume: 0.1, // Background music at 10%
     );
 
@@ -249,8 +239,9 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// Setting `loopCustomAudio: false` plays the audio only once,
   /// with silence for the remaining video duration.
   Future<void> _customAudioNoLoop() async {
-    final customAudioFile =
-        await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
+    final customAudioFile = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio1Path,
+    );
 
     var data = VideoRenderData(
       video: _video,
@@ -270,13 +261,15 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// beginning. This is useful for using a specific section of a longer
   /// audio file.
   Future<void> _customAudioStartOffset() async {
-    final customAudioFile =
-        await _writeAssetAudioToFile(kVideoEditorExampleAudio1Path);
+    final customAudioFile = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio1Path,
+    );
 
     var data = VideoRenderData(
       video: _video,
       customAudioPath: customAudioFile.path,
-      customAudioStartTime: const Duration(seconds: 5), // Start at 5 seconds
+      customAudioStartTime: const Duration(seconds: 5),
+      // Start at 5 seconds
       loopCustomAudio: false,
       originalAudioVolume: 0.0,
       customAudioVolume: 1.0,
@@ -287,9 +280,53 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   Future<void> _layers() async {
     final imageBytes = await _captureLayerContent();
+    var data = VideoRenderData(video: _video, imageBytes: imageBytes);
+
+    await _renderVideo(data);
+  }
+
+  Future<void> _layersTimed() async {
+    final metadata = await _pve.getMetadata(_video);
+
+    final layerImage = EditorLayerImage.asset('assets/sticker.png');
+
+    final rng = Random();
+    const stickerSize = 256;
+    const videoWidth = 1280;
+    const videoHeight = 720;
+
     var data = VideoRenderData(
       video: _video,
-      imageBytes: imageBytes,
+      imageLayers: [
+        /// Always visible
+        ImageLayer(image: layerImage, offset: const Offset(0, 0)),
+
+        /// Start at 5s
+        ImageLayer(
+          image: layerImage,
+          startTime: const Duration(seconds: 5),
+          offset: Offset((videoWidth - stickerSize).toDouble(), 0),
+        ),
+
+        /// End at 7s
+        ImageLayer(
+          image: layerImage,
+          endTime: const Duration(seconds: 7),
+          offset: Offset(0, (videoHeight - stickerSize).toDouble()),
+        ),
+
+        /// Random positions
+        for (int i = 0; i < metadata.duration.inSeconds; i++)
+          ImageLayer(
+            image: layerImage,
+            startTime: Duration(seconds: i),
+            endTime: Duration(seconds: i + 1),
+            offset: Offset(
+              rng.nextInt(videoWidth - stickerSize).toDouble(),
+              rng.nextInt(videoHeight - stickerSize).toDouble(),
+            ),
+          ),
+      ],
     );
 
     await _renderVideo(data);
@@ -305,10 +342,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   }
 
   Future<void> _blur() async {
-    var data = VideoRenderData(
-      video: _video,
-      blur: 5,
-    );
+    var data = VideoRenderData(video: _video, blur: 5);
 
     await _renderVideo(data);
   }
@@ -317,9 +351,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     final imageBytes = await _captureLayerContent();
     var data = VideoRenderData(
       video: _video,
-      transform: const ExportTransform(
-        flipX: true,
-      ),
+      transform: const ExportTransform(flipX: true),
       colorMatrixList: kBasicFilterMatrix,
       imageBytes: imageBytes,
       endTime: const Duration(seconds: 20),
@@ -329,10 +361,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   }
 
   Future<void> _bitrate() async {
-    var data = VideoRenderData(
-      video: _video,
-      bitrate: 1000000,
-    );
+    var data = VideoRenderData(video: _video, bitrate: 1000000);
 
     await _renderVideo(data);
   }
@@ -481,9 +510,11 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text(allPassed
-            ? '\u2705 All metadata stripped'
-            : '\u274c Some metadata leaked'),
+        title: Text(
+          allPassed
+              ? '\u2705 All metadata stripped'
+              : '\u274c Some metadata leaked',
+        ),
         content: Text(
           'Source GPS: ${sourceMeta.gpsCoordinates}\n'
           'Source Date: ${sourceMeta.date}\n\n'
@@ -492,7 +523,9 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context), child: const Text('OK')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
         ],
       ),
     );
@@ -511,10 +544,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     String outputPath = '${directory.path}/my_video_$now.$extension';
 
     try {
-      await _pve.renderVideoToFile(
-        outputPath,
-        value.copyWith(id: _taskId),
-      );
+      await _pve.renderVideoToFile(outputPath, value.copyWith(id: _taskId));
     } on RenderCanceledException {
       setState(() => _isExporting = false);
       return;
@@ -529,12 +559,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       checkStreamingOptimization: true,
     );
 
-    await _playerPreview.open(Media(outputPath));
-    await _playerPreview.play();
-
     _isExporting = false;
     _videoBytes = result;
     setState(() {});
+
+    await _playerPreview.open(Media(outputPath));
+    await _playerPreview.play();
   }
 
   Future<void> _cancelRender() async {
@@ -554,48 +584,46 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     }
   }
 
-  Future<Uint8List> _captureLayerContent() async {
-    final boundary = _boundaryKey.currentContext!.findRenderObject()
-        as RenderRepaintBoundary;
-    final image = await boundary.toImage(
-        pixelRatio: MediaQuery.devicePixelRatioOf(context));
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+  Future<Uint8List> _captureLayerContent([Size? resolution]) async {
+    final context = _boundaryKey.currentContext!;
+    final boundary = context.findRenderObject() as RenderRepaintBoundary;
+    final double pixelRatio = resolution == null
+        ? MediaQuery.devicePixelRatioOf(context)
+        : max(
+            resolution.width / boundary.size.width,
+            resolution.height / boundary.size.height,
+          );
+
+    final image = await boundary.toImage(pixelRatio: pixelRatio);
+    final byteData = await image.toByteData(format: .png);
 
     return byteData!.buffer.asUint8List();
   }
 
   @override
   Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewPaddingOf(context).bottom;
     return Scaffold(
       appBar: AppBar(title: const Text('Video Export')),
       body: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(
-          0,
-          16,
-          0,
-          16 + MediaQuery.viewPaddingOf(context).bottom,
-        ),
+        padding: .fromLTRB(0, 16, 0, 16 + bottom),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           spacing: 20,
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              padding: const .symmetric(horizontal: 16.0),
               child: Wrap(
                 spacing: 16,
                 runSpacing: 16,
                 alignment: WrapAlignment.center,
                 children: [
                   ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: 360,
-                    ),
+                    constraints: const BoxConstraints(maxWidth: 360),
                     child: _buildDemoEditorContent(),
                   ),
                   ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: 360,
-                    ),
+                    constraints: const BoxConstraints(maxWidth: 360),
                     child: _buildExportedVideo(),
                   ),
                 ],
@@ -627,7 +655,9 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
                   clipBehavior: Clip.hardEdge,
                   child: BackdropFilter(
                     filter: ui.ImageFilter.blur(
-                        sigmaX: _blurFactor, sigmaY: _blurFactor),
+                      sigmaX: _blurFactor,
+                      sigmaY: _blurFactor,
+                    ),
                     child: Container(
                       alignment: Alignment.center,
                       color: Colors.white.withValues(alpha: 0.0),
@@ -645,18 +675,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
                         Positioned(
                           top: 10,
                           left: 10,
-                          child: Text(
-                            '🤑',
-                            style: TextStyle(fontSize: 40),
-                          ),
+                          child: Text('🤑', style: TextStyle(fontSize: 40)),
                         ),
                         Positioned(
                           bottom: 10,
                           right: 10,
-                          child: Text(
-                            '❤️',
-                            style: TextStyle(fontSize: 32),
-                          ),
+                          child: Text('❤️', style: TextStyle(fontSize: 32)),
                         ),
                       ],
                     ),
@@ -758,6 +782,11 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           onTap: _layers,
           leading: const Icon(Icons.layers_outlined),
           title: const Text('Parse with layers'),
+        ),
+        ListTile(
+          onTap: _layersTimed,
+          leading: const Icon(Icons.av_timer_outlined),
+          title: const Text('Parse with timed layers'),
         ),
         ListTile(
           onTap: _colorMatrix,
@@ -884,12 +913,9 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
         child: Text(
           title,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
-      )
+      ),
     ];
   }
 }

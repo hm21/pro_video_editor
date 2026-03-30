@@ -359,6 +359,12 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
       ) as _i4.VideoOutputFormat);
 
   @override
+  List<_i4.ImageLayer> get imageLayers => (super.noSuchMethod(
+        Invocation.getter(#imageLayers),
+        returnValue: <_i4.ImageLayer>[],
+      ) as List<_i4.ImageLayer>);
+
+  @override
   bool get enableAudio => (super.noSuchMethod(
         Invocation.getter(#enableAudio),
         returnValue: false,
@@ -411,6 +417,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
     _i2.EditorVideo? video,
     List<_i4.VideoSegment>? videoSegments,
     _i5.Uint8List? imageBytes,
+    List<_i4.ImageLayer>? imageLayers,
     _i4.ExportTransform? transform,
     bool? enableAudio,
     double? playbackSpeed,
@@ -438,6 +445,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
             #video: video,
             #videoSegments: videoSegments,
             #imageBytes: imageBytes,
+            #imageLayers: imageLayers,
             #transform: transform,
             #enableAudio: enableAudio,
             #playbackSpeed: playbackSpeed,
@@ -467,6 +475,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
               #video: video,
               #videoSegments: videoSegments,
               #imageBytes: imageBytes,
+              #imageLayers: imageLayers,
               #transform: transform,
               #enableAudio: enableAudio,
               #playbackSpeed: playbackSpeed,

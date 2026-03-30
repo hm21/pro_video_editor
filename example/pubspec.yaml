@@ -3,7 +3,7 @@ description: "Demonstrates how to use the pro_video_editor plugin."
 publish_to: 'none'
 
 environment:
-  sdk: '>=3.4.0 <4.0.0'
+  sdk: '>=3.11.0 <4.0.0'
 
 dependencies:
   flutter:
@@ -16,7 +16,7 @@ dependencies:
   intl: ^0.20.1
   cupertino_icons: ^1.0.8
 
-  pro_image_editor: ^12.0.0
+  pro_image_editor: ^12.0.11
   
   google_fonts: ^6.3.2
   flutter_colorpicker: ^1.1.0

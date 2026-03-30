@@ -2,9 +2,18 @@ import AVFoundation
 import CoreImage
 import UIKit
 
+struct ImageLayer {
+    let image: CIImage
+    let startUs: Int64
+    let endUs: Int64
+    let x: Int64
+    let y: Int64
+}
+
 class VideoCompositor: NSObject, AVVideoCompositing {
     var blurSigma: Double = 0.0
     var overlayImage: CIImage?
+    var overlayImageLayers: [ImageLayer] = []
     var imageBytesWithCropping: Bool = false
 
     var rotateRadians: Double = 0
@@ -60,6 +69,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         self.sourceTrackID = config.sourceTrackID
 
         self.setOverlayImage(from: config.overlayImage)
+        self.setOverlayImageLayers(from: config.imageLayerConfigs)
         self.setLUT(data: config.lutData, size: config.lutSize)
     }
 
@@ -72,6 +82,24 @@ class VideoCompositor: NSObject, AVVideoCompositing {
             return
         }
         overlayImage = CIImage(cgImage: cgImage)
+    }
+
+    func setOverlayImageLayers(from layers: [ImageLayerConfig]) {
+        overlayImageLayers = []
+        for layer in layers {
+            guard let uiImage = UIImage(data: layer.imageData),
+                let cgImage = uiImage.cgImage
+            else {
+                continue
+            }
+            overlayImageLayers.append(ImageLayer(
+                image: CIImage(cgImage: cgImage),
+                startUs: layer.startUs,
+                endUs: layer.endUs,
+                x: layer.x,
+                y: layer.y
+            ))
+        }
     }
 
     func clearLUT() {
@@ -262,13 +290,35 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         }
         
         // Apply overlay BEFORE crop if imageBytesWithCropping is enabled
-        if imageBytesWithCropping, let overlay = overlayImage {
+        if imageBytesWithCropping {
             let imageRect = outputImage.extent
-            let scaledOverlay = overlay.transformed(
-                by: CGAffineTransform(
-                    scaleX: imageRect.width / overlay.extent.width,
-                    y: imageRect.height / overlay.extent.height))
-            outputImage = scaledOverlay.composited(over: outputImage)
+
+            // Apply single overlay image if present
+            if let overlay = overlayImage {
+                let scaledOverlay = overlay.transformed(
+                    by: CGAffineTransform(
+                        scaleX: imageRect.width / overlay.extent.width,
+                        y: imageRect.height / overlay.extent.height))
+                outputImage = scaledOverlay.composited(over: outputImage)
+            }
+
+            // Apply time-based overlay layers
+            let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
+            for layer in overlayImageLayers {
+                // Check if current time is within the layer's time range
+                // startUs of -1 means "from the start of the video"
+                // endUs of -1 means "until the end of the video"
+                let inTimeRange = (layer.startUs == -1 || currentTimeUs >= layer.startUs) &&
+                                  (layer.endUs == -1 || currentTimeUs <= layer.endUs)
+
+                if inTimeRange {
+                    // Convert y from top-left (Dart) to bottom-left (Core Graphics)
+                    let cgY = imageRect.height - CGFloat(layer.y) - layer.image.extent.height
+                    let positionedOverlay = layer.image.transformed(
+                        by: CGAffineTransform(translationX: CGFloat(layer.x), y: cgY))
+                    outputImage = positionedOverlay.composited(over: outputImage)
+                }
+            }
         }
 
         // Cropping
@@ -352,13 +402,35 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         }
 
         // Apply overlay image (only if not already applied before crop)
-        if !imageBytesWithCropping, let overlay = overlayImage {
+        if !imageBytesWithCropping {
             let imageRect = outputImage.extent
-            let scaledOverlay = overlay.transformed(
-                by: CGAffineTransform(
-                    scaleX: imageRect.width / overlay.extent.width,
-                    y: imageRect.height / overlay.extent.height))
-            outputImage = scaledOverlay.composited(over: outputImage)
+
+            // Apply single overlay image if present
+            if let overlay = overlayImage {
+                let scaledOverlay = overlay.transformed(
+                    by: CGAffineTransform(
+                        scaleX: imageRect.width / overlay.extent.width,
+                        y: imageRect.height / overlay.extent.height))
+                outputImage = scaledOverlay.composited(over: outputImage)
+            }
+
+            // Apply time-based overlay layers with positioning
+            let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
+            for layer in overlayImageLayers {
+                // Check if current time is within the layer's time range
+                // startUs of -1 means "from the start of the video"
+                // endUs of -1 means "until the end of the video"
+                let inTimeRange = (layer.startUs == -1 || currentTimeUs >= layer.startUs) &&
+                                  (layer.endUs == -1 || currentTimeUs <= layer.endUs)
+
+                if inTimeRange {
+                    // Convert y from top-left (Dart) to bottom-left (Core Graphics)
+                    let cgY = imageRect.height - CGFloat(layer.y) - layer.image.extent.height
+                    let positionedOverlay = layer.image.transformed(
+                        by: CGAffineTransform(translationX: CGFloat(layer.x), y: cgY))
+                    outputImage = positionedOverlay.composited(over: outputImage)
+                }
+            }
         }
 
         guard let outputBuffer = request.renderContext.newPixelBuffer() else {

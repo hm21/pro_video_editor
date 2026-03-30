@@ -26,7 +26,7 @@ class _VideoMetadataExamplePageState extends State<VideoMetadataExamplePage> {
 
   Future<void> _setMetadata() async {
     _metadata = await ProVideoEditor.instance.getMetadata(
-      EditorVideo.asset(kVideoEditorExampleAssetPath),
+      EditorVideo.asset(kVideoEditorExampleH264Path),
       checkStreamingOptimization: true, // Enable streaming optimization check
     );
     setState(() {});
@@ -47,7 +47,7 @@ class _VideoMetadataExamplePageState extends State<VideoMetadataExamplePage> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: _buildTable(),
-            )
+            ),
         ],
       ),
     );
@@ -56,10 +56,7 @@ class _VideoMetadataExamplePageState extends State<VideoMetadataExamplePage> {
   Widget _buildTable() {
     var meta = _metadata!;
     return Table(
-      columnWidths: const {
-        0: IntrinsicColumnWidth(),
-        1: FlexColumnWidth(),
-      },
+      columnWidths: const {0: IntrinsicColumnWidth(), 1: FlexColumnWidth()},
       children: [
         _buildMetadataRow('FileSize:', formatBytes(meta.fileSize)),
         _buildMetadataRow('Format:', meta.extension),
@@ -83,7 +80,7 @@ class _VideoMetadataExamplePageState extends State<VideoMetadataExamplePage> {
           'GPS:',
           meta.gpsCoordinates != null
               ? '${meta.gpsCoordinates!.latitude}, '
-                  '${meta.gpsCoordinates!.longitude}'
+                    '${meta.gpsCoordinates!.longitude}'
               : 'Not available',
         ),
         _buildMetadataRow(
@@ -99,8 +96,8 @@ class _VideoMetadataExamplePageState extends State<VideoMetadataExamplePage> {
           meta.isOptimizedForStreaming == null
               ? 'N/A (non-MP4/MOV)'
               : meta.isOptimizedForStreaming!
-                  ? '✅ Yes (moov before mdat)'
-                  : '❌ No (mdat before moov)',
+              ? '✅ Yes (moov before mdat)'
+              : '❌ No (mdat before moov)',
         ),
       ],
     );
@@ -109,10 +106,7 @@ class _VideoMetadataExamplePageState extends State<VideoMetadataExamplePage> {
   TableRow _buildMetadataRow(String label, String value) {
     return TableRow(
       children: [
-        Padding(
-          padding: const EdgeInsets.only(right: 10),
-          child: Text(label),
-        ),
+        Padding(padding: const EdgeInsets.only(right: 10), child: Text(label)),
         Text(value.isEmpty ? '-' : value),
       ],
     );

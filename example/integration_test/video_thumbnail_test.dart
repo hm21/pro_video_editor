@@ -8,7 +8,7 @@ import 'package:pro_video_editor_example/core/constants/example_constants.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-  final testVideo = EditorVideo.asset(kVideoEditorExampleAssetPath);
+  final testVideo = EditorVideo.asset(kVideoEditorExampleH264Path);
 
   const formatMimeMap = {
     ThumbnailFormat.jpeg: 'image/jpeg',
@@ -30,10 +30,7 @@ void main() {
           ThumbnailConfigs(
             video: testVideo,
             outputFormat: format,
-            timestamps: List.generate(
-              5,
-              (i) => Duration(seconds: (i + 1) * 2),
-            ),
+            timestamps: List.generate(5, (i) => Duration(seconds: (i + 1) * 2)),
             outputSize: const Size(outputWidth, outputHeight),
             boxFit: ThumbnailBoxFit.cover,
           ),
@@ -112,18 +109,33 @@ void main() {
 
     reasonPrefix ??= 'Progress';
 
-    expect(progressValues, isNotEmpty,
-        reason: '$reasonPrefix: no updates received');
-    expect(progressValues.first, lessThanOrEqualTo(0.1),
-        reason: '$reasonPrefix: did not start low');
-    expect(progressValues.last, closeTo(1.0, 0.05),
-        reason: '$reasonPrefix: did not reach 1.0');
-    expect(progressValues, isA<List<double>>(),
-        reason: '$reasonPrefix: wrong type');
+    expect(
+      progressValues,
+      isNotEmpty,
+      reason: '$reasonPrefix: no updates received',
+    );
+    expect(
+      progressValues.first,
+      lessThanOrEqualTo(0.1),
+      reason: '$reasonPrefix: did not start low',
+    );
+    expect(
+      progressValues.last,
+      closeTo(1.0, 0.05),
+      reason: '$reasonPrefix: did not reach 1.0',
+    );
+    expect(
+      progressValues,
+      isA<List<double>>(),
+      reason: '$reasonPrefix: wrong type',
+    );
 
     final sorted = List.of(progressValues)..sort();
-    expect(progressValues, sorted,
-        reason: '$reasonPrefix: not monotonically increasing');
+    expect(
+      progressValues,
+      sorted,
+      reason: '$reasonPrefix: not monotonically increasing',
+    );
   }
 
   testWidgets('getThumbnails emits progress', (tester) async {
@@ -175,8 +187,7 @@ void main() {
         outputSize: outputSize,
         boxFit: fit,
       ),
-    ))
-        .first;
+    )).first;
 
     final decoded = await decodeImageFromList(thumb);
     expect(decoded, isNotNull);
@@ -211,22 +222,25 @@ void main() {
     }
   }
 
-  testWidgets('ThumbnailBoxFit.cover size is correct and respects aspect ratio',
-      (tester) async {
-    await expectThumbnailRespectsBoxFit(
-      fit: ThumbnailBoxFit.cover,
-      outputSize: const Size(100, 100),
-      video: testVideo,
-    );
-  });
+  testWidgets(
+    'ThumbnailBoxFit.cover size is correct and respects aspect ratio',
+    (tester) async {
+      await expectThumbnailRespectsBoxFit(
+        fit: ThumbnailBoxFit.cover,
+        outputSize: const Size(100, 100),
+        video: testVideo,
+      );
+    },
+  );
 
   testWidgets(
-      'ThumbnailBoxFit.contain size is correct and respects aspect ratio',
-      (tester) async {
-    await expectThumbnailRespectsBoxFit(
-      fit: ThumbnailBoxFit.contain,
-      outputSize: const Size(100, 100),
-      video: testVideo,
-    );
-  });
+    'ThumbnailBoxFit.contain size is correct and respects aspect ratio',
+    (tester) async {
+      await expectThumbnailRespectsBoxFit(
+        fit: ThumbnailBoxFit.contain,
+        outputSize: const Size(100, 100),
+        video: testVideo,
+      );
+    },
+  );
 }

@@ -5,10 +5,7 @@ import 'filter_model.dart';
 /// Preset filters that can be used directly
 class PresetFilters {
   /// NoFilter: No filter
-  static FilterModel none = const FilterModel(
-    name: 'No Filter',
-    filters: [],
-  );
+  static FilterModel none = const FilterModel(name: 'No Filter', filters: []);
 
   /// Clarendon: adds light to lighter areas and dark to darker areas
   static FilterModel clarendon = FilterModel(
@@ -23,26 +20,19 @@ class PresetFilters {
   /// Increase red color gradient
   static FilterModel addictiveRed = FilterModel(
     name: 'AddictiveRed',
-    filters: [
-      ColorFilterAddons.addictiveColor(50, 0, 0),
-    ],
+    filters: [ColorFilterAddons.addictiveColor(50, 0, 0)],
   );
 
   /// Increase blue color gradient
   static FilterModel addictiveBlue = FilterModel(
     name: 'AddictiveBlue',
-    filters: [
-      ColorFilterAddons.addictiveColor(0, 0, 50),
-    ],
+    filters: [ColorFilterAddons.addictiveColor(0, 0, 50)],
   );
 
   /// Gingham: Vintage-inspired, taking some color out
   static FilterModel gingham = FilterModel(
     name: 'Gingham',
-    filters: [
-      ColorFilterAddons.sepia(.04),
-      ColorFilterAddons.contrast(-.15),
-    ],
+    filters: [ColorFilterAddons.sepia(.04), ColorFilterAddons.contrast(-.15)],
   );
 
   /// Moon: B/W, increase brightness and decrease contrast
@@ -124,9 +114,7 @@ class PresetFilters {
   /// Perpetua: Adding a pastel look, this filter is ideal for portraits
   static FilterModel perpetua = FilterModel(
     name: 'Perpetua',
-    filters: [
-      ColorFilterAddons.rgbScale(1.05, 1.1, 1),
-    ],
+    filters: [ColorFilterAddons.rgbScale(1.05, 1.1, 1)],
   );
 
   /// Amaro: Adds light to an image, with the focus on the centre
@@ -224,9 +212,7 @@ class PresetFilters {
   /// Inkwell: Direct shift to black and white
   static FilterModel inkwell = FilterModel(
     name: 'Inkwell',
-    filters: [
-      ColorFilterAddons.grayscale(),
-    ],
+    filters: [ColorFilterAddons.grayscale()],
   );
 
   /// Hefe: Hight contrast and saturation, with a similar effect to Lo-Fi but
@@ -252,10 +238,7 @@ class PresetFilters {
   /// Stinson: washing out the colors ever so slightly
   static FilterModel stinson = FilterModel(
     name: 'Stinson',
-    filters: [
-      ColorFilterAddons.brightness(0.1),
-      ColorFilterAddons.sepia(0.3),
-    ],
+    filters: [ColorFilterAddons.brightness(0.1), ColorFilterAddons.sepia(0.3)],
   );
 
   /// Vesper: adds a yellow tint that
@@ -349,10 +332,7 @@ class PresetFilters {
   /// Ginza: brightens and adds a warm glow
   static FilterModel ginza = FilterModel(
     name: 'Ginza',
-    filters: [
-      ColorFilterAddons.sepia(0.06),
-      ColorFilterAddons.brightness(0.1),
-    ],
+    filters: [ColorFilterAddons.sepia(0.06), ColorFilterAddons.brightness(0.1)],
   );
 
   /// Skyline: brightens to the image pop
