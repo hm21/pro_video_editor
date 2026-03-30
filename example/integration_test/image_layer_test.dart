@@ -272,8 +272,23 @@ void main() {
       );
     });
 
+    testWidgets('image layer on h264 video', (_) async {
+      await testRender(
+        description: 'Image layer on HEVC',
+        renderModel: VideoRenderData(
+          video: h264Video,
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            ImageLayer(
+              image: overlayImage,
+              endTime: const Duration(seconds: 2),
+            ),
+          ],
+        ),
+      );
+    });
+
     testWidgets('image layer on HEVC video', (_) async {
-      // FIXME:
       await testRender(
         description: 'Image layer on HEVC',
         renderModel: VideoRenderData(
@@ -282,7 +297,6 @@ void main() {
           imageLayers: [
             ImageLayer(
               image: overlayImage,
-              startTime: Duration.zero,
               endTime: const Duration(seconds: 2),
             ),
           ],

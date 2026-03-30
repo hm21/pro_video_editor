@@ -47,10 +47,11 @@ class RenderVideo(private val context: Context) {
     private fun hasGpuEffects(config: RenderConfig): Boolean {
         // These effects use GPU surfaces and fail with HEVC 10-bit HDR
         val hasImageOverlay = config.imageBytes != null && config.imageBytes.isNotEmpty()
+        val hasImageLayers = config.imageLayers.isNotEmpty()
         val hasBlur = config.blur != null && config.blur > 0.0
         val hasColorMatrix = config.colorMatrixList.isNotEmpty()
 
-        return hasImageOverlay || hasBlur || hasColorMatrix
+        return hasImageOverlay || hasImageLayers || hasBlur || hasColorMatrix
     }
 
     /**
