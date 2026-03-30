@@ -359,12 +359,6 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
       ) as _i4.VideoOutputFormat);
 
   @override
-  List<_i4.ImageLayer> get imageLayers => (super.noSuchMethod(
-        Invocation.getter(#imageLayers),
-        returnValue: <_i4.ImageLayer>[],
-      ) as List<_i4.ImageLayer>);
-
-  @override
   bool get enableAudio => (super.noSuchMethod(
         Invocation.getter(#enableAudio),
         returnValue: false,
@@ -375,6 +369,18 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
         Invocation.getter(#colorMatrixList),
         returnValue: <List<double>>[],
       ) as List<List<double>>);
+
+  @override
+  List<_i4.ColorFilter> get colorFilters => (super.noSuchMethod(
+        Invocation.getter(#colorFilters),
+        returnValue: <_i4.ColorFilter>[],
+      ) as List<_i4.ColorFilter>);
+
+  @override
+  List<_i4.VideoAudioTrack> get audioTracks => (super.noSuchMethod(
+        Invocation.getter(#audioTracks),
+        returnValue: <_i4.VideoAudioTrack>[],
+      ) as List<_i4.VideoAudioTrack>);
 
   @override
   bool get shouldOptimizeForNetworkUse => (super.noSuchMethod(
@@ -424,6 +430,8 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
     Duration? startTime,
     Duration? endTime,
     List<List<double>>? colorMatrixList,
+    List<_i4.ColorFilter>? colorFilters,
+    List<_i4.VideoAudioTrack>? audioTracks,
     double? blur,
     int? bitrate,
     _i4.VideoQualityConfig? qualityConfig,
@@ -452,6 +460,8 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
             #startTime: startTime,
             #endTime: endTime,
             #colorMatrixList: colorMatrixList,
+            #colorFilters: colorFilters,
+            #audioTracks: audioTracks,
             #blur: blur,
             #bitrate: bitrate,
             #qualityConfig: qualityConfig,
@@ -482,6 +492,8 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
               #startTime: startTime,
               #endTime: endTime,
               #colorMatrixList: colorMatrixList,
+              #colorFilters: colorFilters,
+              #audioTracks: audioTracks,
               #blur: blur,
               #bitrate: bitrate,
               #qualityConfig: qualityConfig,

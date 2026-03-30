@@ -28,15 +28,16 @@ class VideoRenderData {
     this.blur,
     this.bitrate,
     this.qualityConfig,
-    this.originalAudioVolume,
+    @Deprecated('Use VideoSegment.volume instead.') this.originalAudioVolume,
     this.shouldOptimizeForNetworkUse = false,
     this.imageBytesWithCropping = false,
-    // TODO(hm21): convert to timeline based.
-    this.colorMatrixList = const [],
-    this.customAudioPath,
-    this.customAudioStartTime,
-    this.customAudioVolume,
-    this.loopCustomAudio = true,
+    @Deprecated('Use colorFilters instead.') this.colorMatrixList = const [],
+    this.colorFilters = const [],
+    this.audioTracks = const [],
+    @Deprecated('Use audioTracks instead.') this.customAudioPath,
+    @Deprecated('Use audioTracks instead.') this.customAudioStartTime,
+    @Deprecated('Use audioTracks instead.') this.customAudioVolume,
+    @Deprecated('Use audioTracks instead.') this.loopCustomAudio = true,
     String? id,
   })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
         assert(
@@ -46,6 +47,24 @@ class VideoRenderData {
         assert(
           videoSegments == null || videoSegments.isNotEmpty,
           'videoSegments must not be empty if provided',
+        ),
+        assert(
+          imageBytes == null || imageLayers == null || imageLayers.isEmpty,
+          'Cannot use both imageBytes and imageLayers. '
+          'Use imageLayers instead.',
+        ),
+        assert(
+          colorMatrixList.isEmpty || colorFilters.isEmpty,
+          'Cannot use both colorMatrixList and colorFilters. '
+          'Use colorFilters instead.',
+        ),
+        assert(
+          audioTracks.isEmpty ||
+              (customAudioPath == null &&
+                  customAudioStartTime == null &&
+                  customAudioVolume == null),
+          'Cannot use both audioTracks and customAudio* fields. '
+          'Use audioTracks instead.',
         ),
         assert(
           startTime == null || endTime == null || startTime < endTime,
@@ -104,14 +123,17 @@ class VideoRenderData {
     Duration? endTime,
     double? blur,
     int? bitrateOverride,
+    @Deprecated('Use colorFilters instead.')
     List<List<double>> colorMatrixList = const [],
-    String? customAudioPath,
-    Duration? customAudioStartTime,
-    double? originalAudioVolume,
-    double? customAudioVolume,
+    List<ColorFilter> colorFilters = const [],
+    List<VideoAudioTrack> audioTracks = const [],
+    @Deprecated('Use audioTracks instead.') String? customAudioPath,
+    @Deprecated('Use audioTracks instead.') Duration? customAudioStartTime,
+    @Deprecated('Use VideoSegment.volume instead.') double? originalAudioVolume,
+    @Deprecated('Use audioTracks instead.') double? customAudioVolume,
     bool shouldOptimizeForNetworkUse = false,
     bool imageBytesWithCropping = false,
-    bool loopCustomAudio = true,
+    @Deprecated('Use audioTracks instead.') bool loopCustomAudio = true,
     String? id,
   }) {
     final qualityConfig = VideoQualityConfig.fromPreset(qualityPreset);
@@ -130,14 +152,22 @@ class VideoRenderData {
       endTime: endTime,
       blur: blur,
       bitrate: bitrateOverride ?? qualityConfig.bitrate,
+      // ignore: deprecated_member_use_from_same_package
       colorMatrixList: colorMatrixList,
+      colorFilters: colorFilters,
+      audioTracks: audioTracks,
       qualityConfig: qualityConfig,
+      // ignore: deprecated_member_use_from_same_package
       customAudioPath: customAudioPath,
+      // ignore: deprecated_member_use_from_same_package
       customAudioStartTime: customAudioStartTime,
+      // ignore: deprecated_member_use_from_same_package
       originalAudioVolume: originalAudioVolume,
+      // ignore: deprecated_member_use_from_same_package
       customAudioVolume: customAudioVolume,
       shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
       imageBytesWithCropping: imageBytesWithCropping,
+      // ignore: deprecated_member_use_from_same_package
       loopCustomAudio: loopCustomAudio,
     );
   }
@@ -223,7 +253,20 @@ class VideoRenderData {
   final Duration? endTime;
 
   /// A 4x5 matrix used to apply color filters (e.g., saturation, brightness).
+  @Deprecated('Use colorFilters instead.')
   final List<List<double>> colorMatrixList;
+
+  /// A list of color filters with optional time ranges.
+  ///
+  /// Each filter applies a color matrix to the video, optionally
+  /// restricted to a specific time range.
+  final List<ColorFilter> colorFilters;
+
+  /// A list of audio tracks with optional time ranges.
+  ///
+  /// Each track adds audio to the video, optionally restricted
+  /// to a specific time range.
+  final List<VideoAudioTrack> audioTracks;
 
   /// Amount of blur to apply.
   ///
@@ -249,6 +292,7 @@ class VideoRenderData {
   /// When provided, this audio will be mixed with the original video audio.
   /// Use [originalAudioVolume] and [customAudioVolume] to control the mix
   /// levels of each audio track.
+  @Deprecated('Use audioTracks instead.')
   final String? customAudioPath;
 
   /// The start time offset for the custom audio track.
@@ -258,6 +302,7 @@ class VideoRenderData {
   /// section of a longer audio file.
   ///
   /// This parameter is only effective when [customAudioPath] is provided.
+  @Deprecated('Use audioTracks instead.')
   final Duration? customAudioStartTime;
 
   /// Volume multiplier for the original video audio track.
@@ -273,6 +318,7 @@ class VideoRenderData {
   /// - `2.0`: Double the original volume
   ///
   /// This parameter is only effective when [enableAudio] is `true`.
+  @Deprecated('Use VideoSegment.volume instead.')
   final double? originalAudioVolume;
 
   /// Volume multiplier for the custom audio track.
@@ -288,6 +334,7 @@ class VideoRenderData {
   /// - `1.2`: Slightly amplified
   ///
   /// This parameter is only effective when [customAudioPath] is provided.
+  @Deprecated('Use audioTracks instead.')
   final double? customAudioVolume;
 
   /// Whether to optimize the video for network streaming (fast start).
@@ -335,6 +382,7 @@ class VideoRenderData {
   /// This parameter is only effective when [customAudioPath] is provided.
   ///
   /// **Default**: `true`
+  @Deprecated('Use audioTracks instead.')
   final bool loopCustomAudio;
 
   /// Returns a [Stream] of [ProgressModel] objects that provides updates on
@@ -409,15 +457,20 @@ class VideoRenderData {
             ),
       'enableAudio': enableAudio,
       'playbackSpeed': playbackSpeed,
+      // ignore: deprecated_member_use_from_same_package
       'colorMatrixList': colorMatrixList,
       'outputFormat': outputFormat.name,
       'blur': blur,
       'bitrate': bitrate,
       'scaleX': scaleX,
       'scaleY': scaleY,
+      // ignore: deprecated_member_use_from_same_package
       'customAudioPath': customAudioPath,
+      // ignore: deprecated_member_use_from_same_package
       'customAudioStartTimeUs': customAudioStartTime?.inMicroseconds,
+      // ignore: deprecated_member_use_from_same_package
       'originalAudioVolume': originalAudioVolume,
+      // ignore: deprecated_member_use_from_same_package
       'customAudioVolume': customAudioVolume,
       // Global trim for entire composition (only for videoSegments,
       // not single video). For single video, startTime/endTime are already
@@ -426,6 +479,7 @@ class VideoRenderData {
       'endUs': videoSegments != null ? endTime?.inMicroseconds : null,
       'shouldOptimizeForNetworkUse': shouldOptimizeForNetworkUse,
       'imageBytesWithCropping': imageBytesWithCropping,
+      // ignore: deprecated_member_use_from_same_package
       'loopCustomAudio': loopCustomAudio,
     };
   }
@@ -444,6 +498,8 @@ class VideoRenderData {
     Duration? startTime,
     Duration? endTime,
     List<List<double>>? colorMatrixList,
+    List<ColorFilter>? colorFilters,
+    List<VideoAudioTrack>? audioTracks,
     double? blur,
     int? bitrate,
     VideoQualityConfig? qualityConfig,
@@ -469,18 +525,26 @@ class VideoRenderData {
       playbackSpeed: playbackSpeed ?? this.playbackSpeed,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
+      // ignore: deprecated_member_use_from_same_package
       colorMatrixList: colorMatrixList ?? this.colorMatrixList,
+      colorFilters: colorFilters ?? this.colorFilters,
+      audioTracks: audioTracks ?? this.audioTracks,
       blur: blur ?? this.blur,
       bitrate: bitrate ?? this.bitrate,
       qualityConfig: qualityConfig ?? this.qualityConfig,
+      // ignore: deprecated_member_use_from_same_package
       customAudioPath: customAudioPath ?? this.customAudioPath,
+      // ignore: deprecated_member_use_from_same_package
       customAudioStartTime: customAudioStartTime ?? this.customAudioStartTime,
+      // ignore: deprecated_member_use_from_same_package
       originalAudioVolume: originalAudioVolume ?? this.originalAudioVolume,
+      // ignore: deprecated_member_use_from_same_package
       customAudioVolume: customAudioVolume ?? this.customAudioVolume,
       shouldOptimizeForNetworkUse:
           shouldOptimizeForNetworkUse ?? this.shouldOptimizeForNetworkUse,
       imageBytesWithCropping:
           imageBytesWithCropping ?? this.imageBytesWithCropping,
+      // ignore: deprecated_member_use_from_same_package
       loopCustomAudio: loopCustomAudio ?? this.loopCustomAudio,
     );
   }

@@ -190,11 +190,18 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     );
 
     var data = VideoRenderData(
-      videoSegments: [VideoSegment(video: _video)],
-      customAudioPath: customAudioFile.path,
-      originalAudioVolume: 0.0,
-      // Mute original audio
-      customAudioVolume: 1, // Full volume for custom audio
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          volume: 0.0, // Mute original audio
+        ),
+      ],
+      audioTracks: [
+        VideoAudioTrack(
+          path: customAudioFile.path,
+          volume: 1, // Full volume for custom audio
+        ),
+      ],
     );
 
     await _renderVideo(data);
@@ -213,11 +220,10 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     );
 
     var data = VideoRenderData(
-      videoSegments: [VideoSegment(video: _video)],
-      customAudioPath: customAudioFile.path,
-      originalAudioVolume: 0.9,
-      // Original audio at 90%
-      customAudioVolume: 0.1, // Background music at 10%
+      videoSegments: [VideoSegment(video: _video, volume: 0.9)],
+      audioTracks: [
+        VideoAudioTrack(path: customAudioFile.path, volume: 0.1, loop: true),
+      ],
     );
 
     await _renderVideo(data);
@@ -236,8 +242,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// - `2.0`: Doubled volume
   Future<void> _adjustOriginalVolume() async {
     var data = VideoRenderData(
-      videoSegments: [VideoSegment(video: _video)],
-      originalAudioVolume: 0.2, // Reduce original audio to 20%
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          volume: 0.2, // Reduce to 20%
+        ),
+      ],
     );
 
     await _renderVideo(data);
@@ -254,11 +264,15 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     );
 
     var data = VideoRenderData(
-      videoSegments: [VideoSegment(video: _video)],
-      customAudioPath: customAudioFile.path,
-      originalAudioVolume: 0.0,
-      customAudioVolume: 1.0,
-      loopCustomAudio: false,
+      videoSegments: [VideoSegment(video: _video, volume: 0)],
+      audioTracks: [
+        VideoAudioTrack(
+          path: customAudioFile.path,
+          startTime: const Duration(seconds: 5),
+          volume: 1.0,
+          loop: false,
+        ),
+      ],
     );
 
     await _renderVideo(data);
@@ -276,13 +290,15 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     );
 
     var data = VideoRenderData(
-      videoSegments: [VideoSegment(video: _video)],
-      customAudioPath: customAudioFile.path,
-      customAudioStartTime: const Duration(seconds: 5),
-      // Start at 5 seconds
-      loopCustomAudio: false,
-      originalAudioVolume: 0.0,
-      customAudioVolume: 1.0,
+      videoSegments: [VideoSegment(video: _video, volume: 0)],
+      audioTracks: [
+        VideoAudioTrack(
+          path: customAudioFile.path,
+          startTime: const Duration(seconds: 5),
+          volume: 1.0,
+          loop: false,
+        ),
+      ],
     );
 
     await _renderVideo(data);
@@ -348,7 +364,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   Future<void> _colorMatrix() async {
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video)],
-      colorMatrixList: kComplexFilterMatrix,
+      colorFilters: kComplexFilterMatrix,
     );
 
     await _renderVideo(data);
@@ -369,7 +385,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       videoSegments: [VideoSegment(video: _video)],
       transform: const ExportTransform(flipX: true),
       endTime: const Duration(seconds: 20),
-      colorMatrixList: kBasicFilterMatrix,
+      colorFilters: kBasicFilterMatrix,
       imageLayers: [ImageLayer(image: EditorLayerImage.memory(imageBytes))],
     );
 

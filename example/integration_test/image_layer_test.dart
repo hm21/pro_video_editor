@@ -222,7 +222,7 @@ void main() {
         renderModel: VideoRenderData(
           videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           imageLayers: [
             ImageLayer(
               image: overlayImage,
@@ -259,7 +259,7 @@ void main() {
           videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(flipX: true),
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           endTime: const Duration(seconds: 20),
           imageLayers: [
             ImageLayer(

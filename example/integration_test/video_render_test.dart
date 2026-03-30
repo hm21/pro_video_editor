@@ -247,7 +247,7 @@ void main() {
       renderModel: VideoRenderData(
         videoSegments: [VideoSegment(video: inputVideo)],
         outputFormat: VideoOutputFormat.mp4,
-        colorMatrixList: kComplexFilterMatrix,
+        colorFilters: kComplexFilterMatrix,
       ),
     );
   });
@@ -299,7 +299,7 @@ void main() {
         videoSegments: [VideoSegment(video: h264Video)],
         outputFormat: VideoOutputFormat.mp4,
         transform: const ExportTransform(flipX: true),
-        colorMatrixList: kBasicFilterMatrix,
+        colorFilters: kBasicFilterMatrix,
         enableAudio: false,
         endTime: const Duration(seconds: 20),
       ),
@@ -532,7 +532,7 @@ void main() {
         VideoRenderData(
           videoSegments: [VideoSegment(video: hevcVideo)],
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kComplexFilterMatrix,
+          colorFilters: kComplexFilterMatrix,
         ),
       );
       expect(result, isNotNull, reason: 'HEVC with filter failed');
@@ -688,7 +688,7 @@ void main() {
         VideoRenderData(
           videoSegments: [VideoSegment(video: hevcVideo)],
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           blur: 3,
           transform: const ExportTransform(flipX: true, rotateTurns: 1),
           enableAudio: false,
@@ -735,7 +735,7 @@ void main() {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           videoSegments: [
             VideoSegment(
               video: hevcVideo,
@@ -790,7 +790,7 @@ void main() {
         VideoRenderData(
           videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kComplexFilterMatrix,
+          colorFilters: kComplexFilterMatrix,
         ),
       );
       expect(result, isNotNull, reason: 'H.264 with filter failed');
@@ -945,7 +945,7 @@ void main() {
         VideoRenderData(
           videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           blur: 3,
           transform: const ExportTransform(flipX: true, rotateTurns: 1),
           enableAudio: false,
@@ -990,7 +990,7 @@ void main() {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           videoSegments: [
             VideoSegment(
               video: h264Video,
@@ -1060,7 +1060,7 @@ void main() {
           VideoRenderData(
             videoSegments: [VideoSegment(video: video)],
             outputFormat: VideoOutputFormat.mp4,
-            colorMatrixList: kComplexFilterMatrix,
+            colorFilters: kComplexFilterMatrix,
             blur: 5,
           ),
         );
@@ -1158,7 +1158,7 @@ void main() {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           blur: 2,
           videoSegments: [
             VideoSegment(
@@ -1277,7 +1277,7 @@ void main() {
             ImageLayer(image: EditorLayerImage.memory(overlayImage)),
           ],
           // Color filter + Blur
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           blur: 2,
           // Transform: rotate, flip, scale
           transform: const ExportTransform(
@@ -1337,7 +1337,7 @@ void main() {
             ImageLayer(image: EditorLayerImage.memory(overlayImage)),
           ],
           // Color filter + Blur
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           blur: 2,
           // Transform: rotate, flip, scale
           transform: const ExportTransform(
@@ -1397,7 +1397,7 @@ void main() {
             ImageLayer(image: EditorLayerImage.memory(overlayImage)),
           ],
           // Color filter + Blur
-          colorMatrixList: kComplexFilterMatrix,
+          colorFilters: kComplexFilterMatrix,
           blur: 3,
           // Transform: rotate, flip, crop
           transform: const ExportTransform(
@@ -1479,7 +1479,7 @@ void main() {
             ImageLayer(image: EditorLayerImage.memory(overlayImage)),
           ],
           // Color filter + Blur
-          colorMatrixList: kComplexFilterMatrix,
+          colorFilters: kComplexFilterMatrix,
           blur: 4,
           // Transform: all transformations
           transform: const ExportTransform(
@@ -1537,7 +1537,7 @@ void main() {
             ImageLayer(image: EditorLayerImage.memory(overlayImage)),
           ],
           // Complex color filter
-          colorMatrixList: kComplexFilterMatrix,
+          colorFilters: kComplexFilterMatrix,
           // Heavy blur
           blur: 8,
           // Transform

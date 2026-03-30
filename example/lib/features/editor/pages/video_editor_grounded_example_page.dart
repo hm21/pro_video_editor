@@ -638,7 +638,9 @@ class _VideoEditorGroundedExamplePageState
           ? [ImageLayer(image: EditorLayerImage.memory(parameters.image))]
           : null,
       blur: parameters.blur,
-      colorMatrixList: parameters.colorFilters,
+      colorFilters: parameters.colorFilters
+          .map((el) => ColorFilter(matrix: el))
+          .toList(),
       startTime: parameters.startTime,
       endTime: parameters.endTime,
       transform: parameters.isTransformed
