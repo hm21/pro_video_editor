@@ -46,12 +46,11 @@ class RenderVideo(private val context: Context) {
      */
     private fun hasGpuEffects(config: RenderConfig): Boolean {
         // These effects use GPU surfaces and fail with HEVC 10-bit HDR
-        val hasImageOverlay = config.imageBytes != null && config.imageBytes.isNotEmpty()
         val hasImageLayers = config.imageLayers.isNotEmpty()
         val hasBlur = config.blur != null && config.blur > 0.0
-        val hasColorMatrix = config.colorMatrixList.isNotEmpty()
+        val hasColorFilters = config.colorFilters.isNotEmpty()
 
-        return hasImageOverlay || hasImageLayers || hasBlur || hasColorMatrix
+        return hasImageLayers || hasBlur || hasColorFilters
     }
 
     /**
@@ -139,8 +138,8 @@ class RenderVideo(private val context: Context) {
                     val updatedClips = config.videoClips.map { clip ->
                         val newPath = transcodeMap[clip.inputPath] ?: clip.inputPath
                         if (newPath != clip.inputPath) {
-                            // If transcoded, use the new path but keep trim times
-                            VideoClip(newPath, clip.startUs, clip.endUs)
+                            // If transcoded, use the new path but keep trim times and volume
+                            VideoClip(newPath, clip.startUs, clip.endUs, clip.volume)
                         } else {
                             clip
                         }
@@ -240,13 +239,12 @@ class RenderVideo(private val context: Context) {
         lateinit var transformer: Transformer
 
         // Check if we need custom audio mixing with volume control
-        val hasCustomAudio = !config.customAudioPath.isNullOrEmpty()
-        val videoAudioVolume = config.originalAudioVolume ?: 1.0f
-        val customAudioVolume = config.customAudioVolume ?: 1.0f
+        val hasCustomAudio = config.audioTracks.isNotEmpty()
 
         // Determine if video audio will be present in the mix
-        // Video audio is removed when volume is 0 or audio is disabled
-        val videoAudioPresent = config.enableAudio && videoAudioVolume > 0.0f
+        // Video audio is removed when audio is disabled or all clips have volume 0
+        val videoAudioPresent = config.enableAudio &&
+                config.videoClips.any { (it.volume ?: 1.0f) > 0.0f }
 
         // Build transformer with callbacks
         val transformerBuilder = Transformer.Builder(context)
@@ -260,14 +258,14 @@ class RenderVideo(private val context: Context) {
         )
         transformerBuilder.setMuxerFactory(muxerFactory)
 
-        // Use custom audio mixer ONLY when mixing video audio with custom audio
-        // For video-only volume adjustment, VolumeAudioProcessor is used instead
+        // Use custom audio mixer ONLY when mixing video audio with custom audio tracks
+        // For video-only volume adjustment, VolumeAudioProcessor is used per-clip instead
         // (AudioProcessors don't work with parallel sequences, but work fine with single sequence)
         if (hasCustomAudio) {
+            val trackVolumes = config.audioTracks.map { it.volume }
             transformerBuilder.setAudioMixerFactory(
                 VolumeControlAudioMixerFactory(
-                    videoAudioVolume = videoAudioVolume,
-                    customAudioVolume = customAudioVolume,
+                    trackVolumes = trackVolumes,
                     videoAudioPresent = videoAudioPresent
                 )
             )

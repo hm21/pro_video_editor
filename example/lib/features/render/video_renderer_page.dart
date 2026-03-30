@@ -200,6 +200,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
         VideoAudioTrack(
           path: customAudioFile.path,
           volume: 1, // Full volume for custom audio
+          loop: true,
         ),
       ],
     );

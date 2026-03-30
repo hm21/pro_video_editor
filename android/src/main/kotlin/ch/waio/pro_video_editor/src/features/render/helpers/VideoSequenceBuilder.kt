@@ -33,10 +33,8 @@ class VideoSequenceBuilder(
     private var flipX: Boolean = false
     private var flipY: Boolean = false
     private var cropConfig: CropConfig? = null
-    private var imageLayerConfig: ImageLayerConfig? = null
     private var timedImageLayers: List<ImageLayerConfig> = emptyList()
     private var enableAudio: Boolean = true
-    private var originalAudioVolume: Float? = null
     private var needsAudioNormalization: Boolean = false
     private var forceRemoveAudio: Boolean = false
     private var globalStartUs: Long? = null
@@ -57,8 +55,8 @@ class VideoSequenceBuilder(
         val withCropping: Boolean = false,
         val startUs: Long = 0,
         val endUs: Long = -1,
-        val x: Int = 0,
-        val y: Int = 0
+        val x: Int? = null,
+        val y: Int? = null
     )
 
     /**
@@ -103,19 +101,6 @@ class VideoSequenceBuilder(
     }
 
     /**
-     * Sets image layer overlay configuration.
-     */
-    fun setImageLayer(
-        imageBytes: ByteArray?,
-        scaleX: Float?,
-        scaleY: Float?,
-        withCropping: Boolean = false
-    ): VideoSequenceBuilder {
-        this.imageLayerConfig = ImageLayerConfig(imageBytes, scaleX, scaleY, withCropping)
-        return this
-    }
-
-    /**
      * Sets time-based image layer overlays configuration.
      */
     fun setTimedImageLayers(layers: List<ImageLayerConfig>): VideoSequenceBuilder {
@@ -128,14 +113,6 @@ class VideoSequenceBuilder(
      */
     fun setEnableAudio(enabled: Boolean): VideoSequenceBuilder {
         this.enableAudio = enabled
-        return this
-    }
-
-    /**
-     * Sets the volume for original video audio.
-     */
-    fun setOriginalAudioVolume(volume: Float?): VideoSequenceBuilder {
-        this.originalAudioVolume = volume
         return this
     }
 
@@ -455,27 +432,11 @@ class VideoSequenceBuilder(
             croppedHeight = null
         }
 
-        // Apply image layer BEFORE crop if withCropping is enabled
-        // This makes the image get cropped together with the video
-        if (imageLayerConfig?.withCropping == true) {
-            imageLayerConfig?.let { imageLayer ->
-                applyImageLayer(
-                    clipVideoEffects,
-                    inputFile,
-                    imageLayer.imageBytes,
-                    rotationDegrees,
-                    null, // Don't pass crop dimensions - use original video size
-                    null,
-                    imageLayer.scaleX,
-                    imageLayer.scaleY
-                )
-            }
-
-            // Apply time-based image layers BEFORE crop when withCropping is enabled
-            // Use original video dimensions
-            if (timedImageLayers.isNotEmpty()) {
-                applyTimedImageLayers(clipVideoEffects, timedImageLayers, videoWidth, videoHeight)
-            }
+        // Apply timed image layers BEFORE crop if withCropping is enabled
+        // This makes the images get cropped together with the video
+        val hasWithCropping = timedImageLayers.any { it.withCropping }
+        if (hasWithCropping && timedImageLayers.isNotEmpty()) {
+            applyTimedImageLayers(clipVideoEffects, timedImageLayers, videoWidth, videoHeight)
         }
 
         // Apply crop if configured
@@ -497,52 +458,28 @@ class VideoSequenceBuilder(
             if (croppedHeight != null) videoHeight = croppedHeight
         }
 
-        // Apply image layer AFTER crop if withCropping is disabled (default behavior)
-        // This makes the image stretch to the final cropped size
-        if (imageLayerConfig?.withCropping != true) {
-            imageLayerConfig?.let { imageLayer ->
-                applyImageLayer(
-                    clipVideoEffects,
-                    inputFile,
-                    imageLayer.imageBytes,
-                    rotationDegrees,
-                    cropConfig?.width,
-                    cropConfig?.height,
-                    imageLayer.scaleX,
-                    imageLayer.scaleY
-                )
-            }
-        }
-
-        // Apply time-based image layers (if not applied before crop)
-        // Note: Currently only supports applying after effects, not before crop with withCropping
-        // This is because imageBytesWithCropping applies to both single overlay and timed layers
-        if (imageLayerConfig?.withCropping != true && timedImageLayers.isNotEmpty()) {
+        // Apply timed image layers AFTER crop if withCropping is disabled (default)
+        // This makes the images stretch to the final cropped size
+        if (!hasWithCropping && timedImageLayers.isNotEmpty()) {
             applyTimedImageLayers(clipVideoEffects, timedImageLayers, videoWidth, videoHeight)
         }
 
-        // Volume control approach depends on whether we're mixing with custom audio:
-        // - With custom audio: VolumeControlAudioMixer handles volume (AudioProcessors don't work with parallel sequences)
-        // - Without custom audio: VolumeAudioProcessor works because there's only one sequence
-        val volume = originalAudioVolume
-        val finalAudioEffects = if (!hasCustomAudio && volume != null && volume != 1.0f) {
+        // Per-clip volume control:
+        // - Without custom audio: VolumeAudioProcessor per clip works (single sequence)
+        // - With custom audio: AudioProcessors don't work with parallel sequences,
+        //   so per-clip volume is best-effort (applied via VolumeControlAudioMixer globally)
+        val clipVolume = clip.volume
+        val finalAudioEffects = if (!hasCustomAudio && clipVolume != null && clipVolume != 1.0f) {
             Log.d(
                 RENDER_TAG,
-                "Video audio volume: ${volume}x (applied via VolumeAudioProcessor - no custom audio)"
+                "Clip $index volume: ${clipVolume}x (applied via VolumeAudioProcessor)"
             )
-            // Add VolumeAudioProcessor for video-only volume control
-            val volumeProcessor = VolumeAudioProcessor(volume)
+            val volumeProcessor = VolumeAudioProcessor(clipVolume)
             mutableListOf<AudioProcessor>().apply {
                 addAll(normalizedAudioEffects)
                 add(volumeProcessor)
             }
         } else {
-            if (hasCustomAudio && volume != null && volume != 1.0f) {
-                Log.d(
-                    RENDER_TAG,
-                    "Video audio volume: ${volume}x (applied via VolumeControlAudioMixer - mixing with custom audio)"
-                )
-            }
             normalizedAudioEffects
         }
 
@@ -550,12 +487,12 @@ class VideoSequenceBuilder(
 
         // Determine if audio should be removed
         val shouldRemoveAudio = !enableAudio ||
-                (originalAudioVolume != null && originalAudioVolume == 0.0f)
+                (clipVolume != null && clipVolume == 0.0f)
 
         if (shouldRemoveAudio) {
             Log.d(
                 RENDER_TAG,
-                "Removing audio from clip $index (enableAudio=$enableAudio, originalVolume=${originalAudioVolume ?: 1.0f})"
+                "Removing audio from clip $index (enableAudio=$enableAudio, clipVolume=${clipVolume ?: 1.0f})"
             )
         } else {
             Log.d(RENDER_TAG, "Keeping audio for clip $index (for mixing or normal playback)")
@@ -641,7 +578,8 @@ class VideoSequenceBuilder(
                         VideoClip(
                             inputPath = clip.inputPath,
                             startUs = newStartInSource,
-                            endUs = newEndInSource
+                            endUs = newEndInSource,
+                            volume = clip.volume
                         )
                     )
                     val trimmedDuration = newEndInSource - newStartInSource

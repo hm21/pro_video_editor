@@ -52,7 +52,7 @@ class EffectsProcessor {
         applyRotation(videoEffects, rotationDegrees)
         applyFlip(videoEffects, config.flipX, config.flipY)
         applyScale(videoEffects, config.scaleX, config.scaleY)
-        applyColorMatrix(videoEffects, config.colorMatrixList)
+        applyColorMatrix(videoEffects, config.colorFilters)
         applyBlur(videoEffects, config.blur)
         applyPlaybackSpeed(videoEffects, audioEffects, config.playbackSpeed)
 

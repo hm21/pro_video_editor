@@ -19,27 +19,25 @@ import java.nio.ByteBuffer
  * This factory creates mixers that automatically apply the configured volumes
  * to each audio source during the mixing process.
  *
- * @property videoAudioVolume Volume multiplier for the video's audio track (0.0-1.0+)
- * @property customAudioVolume Volume multiplier for the custom audio track (0.0-1.0+)
+ * @property trackVolumes Volume multipliers for each audio track sequence (0.0-1.0+)
  * @property videoAudioPresent Whether video audio is present (not removed due to volume=0)
  */
 @UnstableApi
 class VolumeControlAudioMixerFactory(
-    private val videoAudioVolume: Float,
-    private val customAudioVolume: Float,
+    private val trackVolumes: List<Float>,
     private val videoAudioPresent: Boolean
 ) : AudioMixer.Factory {
 
     init {
         Log.d(
             RENDER_TAG,
-            "VolumeControlAudioMixerFactory created: videoVolume=$videoAudioVolume, customVolume=$customAudioVolume, videoAudioPresent=$videoAudioPresent"
+            "VolumeControlAudioMixerFactory created: trackVolumes=$trackVolumes, videoAudioPresent=$videoAudioPresent"
         )
     }
 
     override fun create(): AudioMixer {
         Log.d(RENDER_TAG, "Creating VolumeControlAudioMixer")
-        return VolumeControlAudioMixer(videoAudioVolume, customAudioVolume, videoAudioPresent)
+        return VolumeControlAudioMixer(trackVolumes, videoAudioPresent)
     }
 }
 
@@ -49,17 +47,16 @@ class VolumeControlAudioMixerFactory(
  * When sources are added, it tracks their IDs and applies the appropriate volume
  * using DefaultAudioMixer.setSourceVolume() after each source is added.
  *
- * If videoAudioPresent is true (mixing both tracks):
- *   Source 0 = Video audio (first sequence) - applies videoAudioVolume
- *   Source 1 = Custom audio (second sequence) - applies customAudioVolume
+ * If videoAudioPresent is true (mixing video + audio tracks):
+ *   Source 0 = Video audio (first sequence) - volume 1.0 (per-clip volume not available in mixer mode)
+ *   Source 1..N = Audio tracks - applies trackVolumes[0], trackVolumes[1], etc.
  * 
- * If videoAudioPresent is false (replacing audio - video audio removed):
- *   Source 0 = Custom audio (only audio source) - applies customAudioVolume
+ * If videoAudioPresent is false (no video audio):
+ *   Source 0..N = Audio tracks - applies trackVolumes[0], trackVolumes[1], etc.
  */
 @UnstableApi
 private class VolumeControlAudioMixer(
-    private val videoAudioVolume: Float,
-    private val customAudioVolume: Float,
+    private val trackVolumes: List<Float>,
     private val videoAudioPresent: Boolean
 ) : AudioMixer {
 
@@ -98,20 +95,21 @@ private class VolumeControlAudioMixer(
         val sourceType: String
 
         if (videoAudioPresent) {
-            // Both video and custom audio present (mixing mode)
-            // Source 0 = Video audio, Source 1+ = Custom audio
+            // Both video and audio tracks present (mixing mode)
+            // Source 0 = Video audio, Source 1..N = Audio tracks
             if (sourceCount == 0) {
-                volume = videoAudioVolume
+                volume = 1.0f  // Video audio at full volume (per-clip volume not available in mixer mode)
                 sourceType = "VIDEO AUDIO"
             } else {
-                volume = customAudioVolume
-                sourceType = "CUSTOM AUDIO"
+                val trackIndex = sourceCount - 1
+                volume = trackVolumes.getOrElse(trackIndex) { 1.0f }
+                sourceType = "AUDIO TRACK $trackIndex"
             }
         } else {
-            // Video audio was removed (replace mode) - only custom audio present
-            // All sources are custom audio
-            volume = customAudioVolume
-            sourceType = "CUSTOM AUDIO (replacing video audio)"
+            // Video audio was removed - only audio tracks present
+            val trackIndex = sourceCount
+            volume = trackVolumes.getOrElse(trackIndex) { 1.0f }
+            sourceType = "AUDIO TRACK $trackIndex (no video audio)"
         }
 
         Log.d(

@@ -2,39 +2,64 @@ import android.util.Log
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.SingleColorLut
+import androidx.media3.effect.TimestampWrapper
+import ch.waio.pro_video_editor.src.features.render.models.ColorFilterConfig
 
 /**
  * Applies color matrix transformation using 3D LUT (Look-Up Table).
  *
- * Supports multiple color matrices that are combined via matrix multiplication.
+ * Supports multiple color filters with optional time ranges.
+ * Untimed filters are combined into a single LUT via matrix multiplication.
+ * Timed filters get individual LUTs wrapped with TimestampWrapper.
  * Each matrix must be 4x5 (20 elements) representing RGBA transformation.
  * Uses 33x33x33 LUT size for optimal quality/performance balance.
  *
  * @param videoEffects List to add color effect to
- * @param colorMatrixList List of 4x5 color matrices to apply
+ * @param colorFilters List of color filter configurations with optional timing
  */
 @UnstableApi
 fun applyColorMatrix(
     videoEffects: MutableList<Effect>,
-    colorMatrixList: List<List<Double>>
+    colorFilters: List<ColorFilterConfig>
 ) {
-    if (colorMatrixList.isEmpty()) return
+    if (colorFilters.isEmpty()) return
 
-    val combinedMatrix = combineColorMatrices(colorMatrixList)
-    if (combinedMatrix.size == 20) {
-        val lutSize = 33  // Optimal LUT size for quality/performance
+    val lutSize = 33  // Optimal LUT size for quality/performance
+
+    // Separate untimed (full-duration) vs timed filters
+    val untimed = colorFilters.filter { it.startUs == null && it.endUs == null }
+    val timed = colorFilters.filter { it.startUs != null || it.endUs != null }
+
+    // Combine all untimed filters into a single LUT
+    if (untimed.isNotEmpty()) {
+        val matrices = untimed.map { it.matrix }
+        val combinedMatrix = combineColorMatrices(matrices)
+        if (combinedMatrix.size == 20) {
+            Log.d(
+                RENDER_TAG,
+                "Applying ${untimed.size} untimed color filter(s) as combined LUT, size=${lutSize}x$lutSize"
+            )
+            val lutData = generateLutFromColorMatrix(combinedMatrix, lutSize)
+            val singleColorLut = SingleColorLut.createFromCube(lutData)
+            videoEffects += singleColorLut
+        }
+    }
+
+    // Apply each timed filter as an individual LUT with TimestampWrapper
+    for (filter in timed) {
+        if (filter.matrix.size != 20) {
+            Log.w(RENDER_TAG, "Skipping timed color filter with invalid matrix size: ${filter.matrix.size}")
+            continue
+        }
+        val lutData = generateLutFromColorMatrix(filter.matrix, lutSize)
+        val lutEffect = SingleColorLut.createFromCube(lutData)
+        val startUs = filter.startUs ?: 0L
+        val endUs = filter.endUs ?: Long.MAX_VALUE
         Log.d(
             RENDER_TAG,
-            "Applying color matrix: ${colorMatrixList.size} matrices combined, LUT size=${lutSize}x$lutSize"
+            "Applying timed color filter: ${startUs / 1000}ms - ${if (endUs == Long.MAX_VALUE) "end" else "${endUs / 1000}ms"}"
         )
-        val lutData = generateLutFromColorMatrix(combinedMatrix, lutSize)
-        val singleColorLut = SingleColorLut.createFromCube(lutData)
-        videoEffects += singleColorLut
-    } else {
-        Log.w(
-            RENDER_TAG,
-            "Invalid color matrix size: ${combinedMatrix.size} (expected 20 elements for 4x5 matrix)"
-        )
+        videoEffects += TimestampWrapper(lutEffect, startUs, endUs)
     }
 }
 

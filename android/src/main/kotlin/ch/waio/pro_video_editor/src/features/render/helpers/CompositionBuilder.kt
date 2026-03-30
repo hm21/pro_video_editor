@@ -8,6 +8,7 @@ import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItemSequence
+import ch.waio.pro_video_editor.src.features.render.models.AudioTrackConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 
 /**
@@ -44,7 +45,7 @@ class CompositionBuilder(
     }
 
     /**
-     * Builds the complete composition with video and optional custom audio.
+     * Builds the complete composition with video and optional custom audio tracks.
      * 
      * @return Composition ready for Media3 Transformer, or null if no video clips
      */
@@ -55,11 +56,11 @@ class CompositionBuilder(
 
         Log.d(RENDER_TAG, "Creating composition with ${config.videoClips.size} video clips")
         Log.d(RENDER_TAG, "Audio enabled: ${config.enableAudio}")
+        Log.d(RENDER_TAG, "Audio tracks: ${config.audioTracks.size}")
 
         val rotationDegrees = (4 - (config.rotateTurns ?: 0)) * 90f
 
-        // Check if custom audio is provided
-        val hasCustomAudio = !config.customAudioPath.isNullOrEmpty()
+        val hasCustomAudio = config.audioTracks.isNotEmpty()
 
         // Build video sequence
         val videoBuilder = VideoSequenceBuilder(config.videoClips)
@@ -68,12 +69,6 @@ class CompositionBuilder(
             .setRotation(rotationDegrees)
             .setFlip(config.flipX, config.flipY)
             .setCrop(config.cropWidth, config.cropHeight, config.cropX, config.cropY)
-            .setImageLayer(
-                config.imageBytes,
-                config.scaleX,
-                config.scaleY,
-                config.imageBytesWithCropping
-            )
             .setTimedImageLayers(config.imageLayers.map { imageLayer ->
                 VideoSequenceBuilder.ImageLayerConfig(
                     imageBytes = imageLayer.imageData,
@@ -87,7 +82,6 @@ class CompositionBuilder(
                 )
             })
             .setEnableAudio(config.enableAudio)
-            .setOriginalAudioVolume(config.originalAudioVolume)
             .setGlobalTrim(config.startUs, config.endUs)
             .setHasCustomAudio(hasCustomAudio)
 
@@ -96,7 +90,6 @@ class CompositionBuilder(
         videoBuilder.setAudioNormalization(needsNormalization)
 
         // Video keeps its audio - Media3 will mix it natively with custom audio sequence
-        // No need to remove original audio anymore!
         videoBuilder.setForceRemoveAudio(false)
 
         // Build video sequence (with audio intact)
@@ -110,37 +103,30 @@ class CompositionBuilder(
             "Created video EditedMediaItemSequence with ${config.videoClips.size} items"
         )
 
-        // Add custom audio as separate sequence - Media3 will mix both tracks natively
+        // Add audio tracks as separate sequences - Media3 will mix all tracks natively
         if (hasCustomAudio) {
             val totalVideoDuration = videoBuilder.calculateTotalDuration()
 
-            val hasOriginalAudio =
-                config.originalAudioVolume != null && config.originalAudioVolume > 0.0f
-
-            if (hasOriginalAudio) {
+            for ((index, track) in config.audioTracks.withIndex()) {
                 Log.d(
                     RENDER_TAG,
-                    "🎵 Native audio mixing: Video audio (${config.originalAudioVolume}x) + Custom audio (${config.customAudioVolume}x)"
+                    "🎵 Adding audio track $index: path=${track.path}, volume=${track.volume}, loop=${track.loop}"
                 )
-                Log.d(
-                    RENDER_TAG,
-                    "Media3 will mix both audio tracks natively via parallel sequences"
-                )
-            } else {
-                Log.d(RENDER_TAG, "Only custom audio (no video audio)")
-            }
 
-            // Add custom audio sequence - Media3 will automatically mix it with video audio
-            val audioSequence = AudioSequenceBuilder(config.customAudioPath!!, totalVideoDuration)
-                .setVolume(config.customAudioVolume ?: 1.0f)
-                .setNormalization(needsNormalization)
-                .setLoop(config.loopCustomAudio)
-                .setStartTime(config.customAudioStartTimeUs)
-                .build()
+                val audioSequence = AudioSequenceBuilder(track.path, totalVideoDuration)
+                    .setVolume(track.volume)
+                    .setNormalization(needsNormalization)
+                    .setLoop(track.loop)
+                    .setStartTime(track.audioStartUs)
+                    .setAudioEndTime(track.audioEndUs)
+                    .setCompositionStartTime(track.startUs)
+                    .setCompositionEndTime(track.endUs)
+                    .build()
 
-            if (audioSequence != null) {
-                sequences.add(audioSequence)
-                Log.d(RENDER_TAG, "Custom audio sequence added (will be mixed natively by Media3)")
+                if (audioSequence != null) {
+                    sequences.add(audioSequence)
+                    Log.d(RENDER_TAG, "Audio track $index added (will be mixed natively by Media3)")
+                }
             }
         }
 
