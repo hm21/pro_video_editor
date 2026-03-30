@@ -381,7 +381,9 @@ class ExtractAudio {
                 }
                 
                 // Calculate time range
-                var timeRange = CMTimeRange(start: .zero, duration: asset.duration)
+                // Use the audio track's actual timeRange for full extraction
+                // Audio tracks may not start at zero due to encoding delays or sync adjustments
+                var timeRange: CMTimeRange
                 if let startUs = config.startUs, let endUs = config.endUs {
                     let startTime = CMTime(value: startUs, timescale: 1_000_000)
                     let endTime = CMTime(value: endUs, timescale: 1_000_000)
@@ -392,6 +394,9 @@ class ExtractAudio {
                 } else if let endUs = config.endUs {
                     let endTime = CMTime(value: endUs, timescale: 1_000_000)
                     timeRange = CMTimeRange(start: .zero, duration: endTime)
+                } else {
+                    // Use the audio track's actual time range to capture all audio data
+                    timeRange = audioTrack.timeRange
                 }
                 
                 // Create asset reader
