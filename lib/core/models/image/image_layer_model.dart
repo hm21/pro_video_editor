@@ -12,7 +12,7 @@ class ImageLayer with TimeRangeMixin {
     required this.image,
     this.startTime,
     this.endTime,
-    this.offset = Offset.zero,
+    this.offset,
   }) : assert(
           startTime == null || endTime == null || startTime < endTime,
           'startTime must be before endTime',
@@ -32,6 +32,8 @@ class ImageLayer with TimeRangeMixin {
   /// [Offset.dx] is the horizontal offset from the left edge.
   /// [Offset.dy] is the vertical offset from the top edge.
   ///
-  /// Defaults to [Offset.zero] (top-left corner).
-  final Offset offset;
+  /// When `null`, the image is stretched to fill the entire video frame.
+  /// When set to a specific value (e.g., [Offset.zero]), the image is
+  /// placed at that position at its original size.
+  final Offset? offset;
 }

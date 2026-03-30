@@ -431,7 +431,6 @@ class VideoRenderData {
             }),
       );
     } else if (video != null) {
-      // ignore: deprecated_member_use_from_same_package
       // Single video: convert to single clip format
       videoSegmentsMaps = [
         {
@@ -496,8 +495,8 @@ class VideoRenderData {
                 'imageData': await layer.image.safeByteArray(),
                 'startUs': layer.startTime?.inMicroseconds,
                 'endUs': layer.endTime?.inMicroseconds,
-                'x': layer.offset.dx.toInt(),
-                'y': layer.offset.dy.toInt(),
+                'x': layer.offset?.dx.toInt(),
+                'y': layer.offset?.dy.toInt(),
               }),
         ),
       // ignore: deprecated_member_use_from_same_package
@@ -507,8 +506,8 @@ class VideoRenderData {
           'imageData': imageBytes,
           'startUs': null,
           'endUs': null,
-          'x': 0,
-          'y': 0,
+          'x': null,
+          'y': null,
         },
     ];
 

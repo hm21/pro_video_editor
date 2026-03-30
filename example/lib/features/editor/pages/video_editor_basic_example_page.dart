@@ -342,12 +342,16 @@ class _VideoEditorBasicExamplePageState
               flipY: parameters.flipY,
             )
           : null,
-      audioTracks: [
-        VideoAudioTrack(
-          path: (await _audioService.safeCustomAudioPath(customAudioTrack))!,
-          volume: overlayVolume,
-        ),
-      ],
+      audioTracks: customAudioTrack != null
+          ? [
+              VideoAudioTrack(
+                path: (await _audioService.safeCustomAudioPath(
+                  customAudioTrack,
+                ))!,
+                volume: overlayVolume,
+              ),
+            ]
+          : [],
     );
 
     final now = DateTime.now().millisecondsSinceEpoch;

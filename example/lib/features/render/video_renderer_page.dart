@@ -266,12 +266,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video, volume: 0)],
       audioTracks: [
-        VideoAudioTrack(
-          path: customAudioFile.path,
-          startTime: const Duration(seconds: 5),
-          volume: 1.0,
-          loop: false,
-        ),
+        VideoAudioTrack(path: customAudioFile.path, volume: 1.0, loop: false),
       ],
     );
 
@@ -304,6 +299,101 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Mix multiple audio tracks at different time ranges.
+  ///
+  /// This example demonstrates timed audio mixing:
+  /// - Audio track 1 plays from 0–10 seconds
+  /// - Audio track 2 plays from 10–20 seconds
+  /// - Both overlap for a brief transition
+  Future<void> _timedAudioTracks() async {
+    final audioFile1 = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio1Path,
+    );
+    final audioFile2 = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio2Path,
+    );
+
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video, volume: 0.3)],
+      audioTracks: [
+        VideoAudioTrack(
+          path: audioFile1.path,
+          volume: 0.8,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 10),
+        ),
+        VideoAudioTrack(
+          path: audioFile2.path,
+          volume: 0.8,
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 20),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Use audioStartTime and audioEndTime to select a specific portion of
+  /// an audio file.
+  ///
+  /// This example demonstrates extracting a section from within the audio
+  /// file itself (5s–15s of the audio) and placing it at a specific position
+  /// in the video timeline (starting at 3s).
+  Future<void> _audioClipRange() async {
+    final customAudioFile = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio1Path,
+    );
+
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video, volume: 0)],
+      audioTracks: [
+        VideoAudioTrack(
+          path: customAudioFile.path,
+          volume: 1.0,
+          audioStartTime: const Duration(seconds: 3),
+          audioEndTime: const Duration(seconds: 8),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Different volume levels per video segment.
+  ///
+  /// This example demonstrates per-clip volume control when concatenating
+  /// multiple video clips:
+  /// - Clip 1: Original audio at 100%
+  /// - Clip 2: Muted (0%)
+  /// - Clip 3: Reduced to 30%
+  Future<void> _perClipVolume() async {
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 0),
+          endTime: const Duration(seconds: 7),
+          volume: 1.0,
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 7),
+          endTime: const Duration(seconds: 14),
+          volume: 0.0,
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 14),
+          endTime: const Duration(seconds: 21),
+          volume: 0.3,
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   Future<void> _layers() async {
     final imageBytes = await _captureLayerContent();
     var data = VideoRenderData(
@@ -327,7 +417,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video)],
       imageLayers: [
-        /// Always visible
+        /// Always visible — positioned at top-left
         ImageLayer(image: layerImage, offset: const Offset(0, 0)),
 
         /// Start at 5s
@@ -370,6 +460,54 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Apply different color filters at specific time ranges.
+  ///
+  /// This example demonstrates timed color filters:
+  /// - A warm filter applied from 0–8 seconds
+  /// - A cool filter applied from 8–16 seconds
+  /// - A high-contrast filter applied from 16 seconds onwards
+  Future<void> _colorMatrixTimed() async {
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      colorFilters: [
+        // Warm tone filter: 0s – 8s
+        ColorFilter(
+          matrix: const [
+            1.2, 0.0, 0.0, 0.0, 20.0, //
+            0.0, 1.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.8, 0.0, -10.0,
+            0.0, 0.0, 0.0, 1.0, 0.0,
+          ],
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 8),
+        ),
+        // Cool tone filter: 8s – 16s
+        ColorFilter(
+          matrix: const [
+            0.8, 0.0, 0.0, 0.0, -10.0, //
+            0.0, 1.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 1.3, 0.0, 30.0,
+            0.0, 0.0, 0.0, 1.0, 0.0,
+          ],
+          startTime: const Duration(seconds: 8),
+          endTime: const Duration(seconds: 16),
+        ),
+        // High contrast filter: 16s – end
+        const ColorFilter(
+          matrix: [
+            1.5, 0.0, 0.0, 0.0, -60.0, //
+            0.0, 1.5, 0.0, 0.0, -60.0,
+            0.0, 0.0, 1.5, 0.0, -60.0,
+            0.0, 0.0, 0.0, 1.0, 0.0,
+          ],
+          startTime: Duration(seconds: 16),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   Future<void> _blur() async {
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video)],
@@ -387,6 +525,83 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       endTime: const Duration(seconds: 20),
       colorFilters: kBasicFilterMatrix,
       imageLayers: [ImageLayer(image: EditorLayerImage.memory(imageBytes))],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Combined timeline-based example.
+  ///
+  /// This example demonstrates how to combine multiple timed features:
+  /// - 2 video segments with different per-clip volume
+  /// - Timed color filters (warm first half, cool second half)
+  /// - A timed image layer that only appears from 3–8 seconds
+  /// - A stretched overlay visible for the entire video
+  /// - Background music that plays during the second half
+  Future<void> _combinedTimeBased() async {
+    final imageBytes = await _captureLayerContent();
+    final stickerImage = EditorLayerImage.asset('assets/sticker.png');
+    final audioFile = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio1Path,
+    );
+
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 10),
+          volume: 1.0,
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 20),
+          volume: 0.3,
+        ),
+      ],
+      colorFilters: [
+        // Warm tone: first 10s
+        ColorFilter(
+          matrix: const [
+            1.2, 0.0, 0.0, 0.0, 20.0, //
+            0.0, 1.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.8, 0.0, -10.0,
+            0.0, 0.0, 0.0, 1.0, 0.0,
+          ],
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 10),
+        ),
+        // Cool tone: 10s – end
+        const ColorFilter(
+          matrix: [
+            0.8, 0.0, 0.0, 0.0, -10.0, //
+            0.0, 1.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 1.3, 0.0, 30.0,
+            0.0, 0.0, 0.0, 1.0, 0.0,
+          ],
+          startTime: Duration(seconds: 10),
+        ),
+      ],
+      imageLayers: [
+        // Stretched overlay for entire video
+        ImageLayer(image: EditorLayerImage.memory(imageBytes)),
+        // Sticker visible only from 3s–8s
+        ImageLayer(
+          image: stickerImage,
+          offset: const Offset(500, 150),
+          startTime: const Duration(seconds: 3),
+          endTime: const Duration(seconds: 8),
+        ),
+      ],
+      audioTracks: [
+        // Background music in second half at low volume
+        VideoAudioTrack(
+          path: audioFile.path,
+          volume: 0.4,
+          startTime: const Duration(seconds: 10),
+        ),
+      ],
     );
 
     await _renderVideo(data);
@@ -832,6 +1047,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           title: const Text('Apply ColorMatrix'),
         ),
         ListTile(
+          onTap: _colorMatrixTimed,
+          leading: const Icon(Icons.palette_outlined),
+          title: const Text('Timed Color Filters'),
+          subtitle: const Text('Warm → Cool → Contrast'),
+        ),
+        ListTile(
           onTap: _blur,
           leading: const Icon(Icons.blur_circular_outlined),
           title: const Text('Blur'),
@@ -840,6 +1061,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           onTap: _multipleChanges,
           leading: const Icon(Icons.web_stories_outlined),
           title: const Text('Multiple changes'),
+        ),
+        ListTile(
+          onTap: _combinedTimeBased,
+          leading: const Icon(Icons.timeline_outlined),
+          title: const Text('Combined Time-Based'),
+          subtitle: const Text('Clips + filters + layers + audio, all timed'),
         ),
         ListTile(
           onTap: _bitrate,
@@ -900,6 +1127,24 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           leading: const Icon(Icons.skip_next_outlined),
           title: const Text('Custom Audio with Start Offset'),
           subtitle: const Text('Start at 5 seconds into audio'),
+        ),
+        ListTile(
+          onTap: _timedAudioTracks,
+          leading: const Icon(Icons.queue_music_outlined),
+          title: const Text('Timed Audio Tracks'),
+          subtitle: const Text('Track 1: 0–10s, Track 2: 10–20s'),
+        ),
+        ListTile(
+          onTap: _audioClipRange,
+          leading: const Icon(Icons.content_cut_outlined),
+          title: const Text('Audio Clip Range'),
+          subtitle: const Text('Extract 3s–8s from audio file'),
+        ),
+        ListTile(
+          onTap: _perClipVolume,
+          leading: const Icon(Icons.tune_outlined),
+          title: const Text('Per-Clip Volume'),
+          subtitle: const Text('100% → 0% → 30% across clips'),
         ),
         ..._buildSectionTitle('Quality'),
         ListTile(

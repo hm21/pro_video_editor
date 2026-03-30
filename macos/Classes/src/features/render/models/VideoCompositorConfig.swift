@@ -3,7 +3,6 @@ import CoreImage
 
 struct VideoCompositorConfig {
     var blurSigma: Double = 0.0
-    var overlayImage: Data? = nil
     var imageLayerConfigs: [ImageLayerConfig] = []
 
     var rotateRadians: Double = 0.0
@@ -19,8 +18,8 @@ struct VideoCompositorConfig {
     var scaleX: CGFloat = 1.0
     var scaleY: CGFloat = 1.0
 
-    var lutData: Data? = nil
-    var lutSize: Int = 33
+    /// Color filter configs with optional time ranges for per-frame LUT switching.
+    var colorFilterConfigs: [ColorFilterConfig] = []
 
     var videoRotationDegrees: Double = 0.0
     var shouldApplyOrientationCorrection: Bool = false
