@@ -11,8 +11,8 @@ import androidx.media3.effect.OverlayEffect
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
 import java.io.File
 import java.nio.ByteBuffer
-import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
+import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.TimestampWrapper
 
 /**
@@ -163,17 +163,21 @@ fun applyTimedImageLayers(
                         " size=${imageWidth}x${imageHeight}, offset=(${layer.x}, ${layer.y})"
             )
 
-            val positionedBitmap = createBitmap(videoWidth, videoHeight)
-            val canvas = android.graphics.Canvas(positionedBitmap)
+            // Use OverlaySettings for positioning instead of allocating a
+            // full-frame (videoWidth×videoHeight) canvas bitmap per layer.
+            val centerX = layer.x.toFloat() + imageWidth / 2f
+            val centerY = layer.y.toFloat() + imageHeight / 2f
+            val normX = (centerX / videoWidth) * 2f - 1f
+            val normY = (centerY / videoHeight) * 2f - 1f
 
-            // The coordinate system in Android Canvas has origin at top-left
-            // convert from bottom-left origin to top-left origin
-            val yTopLeft = videoHeight - layer.y - imageHeight
+            val overlaySettings = StaticOverlaySettings.Builder()
+                .setBackgroundFrameAnchor(normX, normY)
+                .setOverlayFrameAnchor(0f, 0f)
+                .build()
 
-            canvas.drawBitmap(finalOverlay, layer.x.toFloat(), yTopLeft.toFloat(), null)
-            finalOverlay.recycle()
-
-            val bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(positionedBitmap)
+            val bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(
+                finalOverlay, overlaySettings
+            )
             videoEffects += TimestampWrapper(
                 OverlayEffect(listOf(bitmapOverlay)), startTimeUs, endTimeUs
             )
