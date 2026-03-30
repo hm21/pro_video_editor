@@ -1,3 +1,6 @@
+## 1.10.0
+- **FEAT**(android, iOS, macOS): Add time-based image overlay layers. Allows positioning image overlays at specific x/y coordinates with optional start and end times for timed visibility during video rendering.
+
 ## 1.9.3
 - **FIX**(android, iOS, macOS): Fixed rendering failure with HEVC encoded videos.
 
