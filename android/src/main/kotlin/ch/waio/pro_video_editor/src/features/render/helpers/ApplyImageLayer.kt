@@ -137,11 +137,12 @@ fun applyTimedImageLayers(
     )
     for (layer in imageLayers) {
         try {
+            val imageBytes = layer.imageBytes ?: continue
             val options = BitmapFactory.Options().apply {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             val layerBitmap = BitmapFactory.decodeByteArray(
-                layer.imageBytes, 0, layer.imageBytes!!.size, options
+                imageBytes, 0, imageBytes.size, options
             )
 
             val imageWidth = layerBitmap.width
