@@ -420,10 +420,15 @@ class VideoRenderData {
     }
 
     // Convert video clips to map format
+    // ignore: deprecated_member_use_from_same_package
+    final fallbackVolume = originalAudioVolume;
     List<Map<String, dynamic>>? videoSegmentsMaps;
     if (videoSegments != null) {
       videoSegmentsMaps = await Future.wait(
-        videoSegments!.map((clip) => clip.toAsyncMap()),
+        videoSegments!.map((clip) async => {
+              ...await clip.toAsyncMap(),
+              'volume': clip.volume ?? fallbackVolume,
+            }),
       );
     } else if (video != null) {
       // ignore: deprecated_member_use_from_same_package
@@ -434,44 +439,93 @@ class VideoRenderData {
           'inputPath': await video!.safeFilePath(),
           'startUs': startTime?.inMicroseconds,
           'endUs': endTime?.inMicroseconds,
+          'volume': fallbackVolume,
         },
       ];
     }
+
+    // Merge deprecated colorMatrixList into colorFilters
+    // ignore: deprecated_member_use_from_same_package
+    final mergedColorFilters = [
+      ...colorFilters.map((f) => {
+            'matrix': f.matrix,
+            'startUs': f.startTime?.inMicroseconds,
+            'endUs': f.endTime?.inMicroseconds,
+          }),
+      // ignore: deprecated_member_use_from_same_package
+      ...colorMatrixList.map((matrix) => {
+            'matrix': matrix,
+            'startUs': null,
+            'endUs': null,
+          }),
+    ];
+
+    // Merge deprecated customAudio* fields into audioTracks
+    final mergedAudioTracks = [
+      ...audioTracks.map((t) => {
+            'path': t.path,
+            'volume': t.volume,
+            'loop': t.loop,
+            'audioStartUs': t.audioStartTime?.inMicroseconds,
+            'audioEndUs': t.audioEndTime?.inMicroseconds,
+            'startUs': t.startTime?.inMicroseconds,
+            'endUs': t.endTime?.inMicroseconds,
+          }),
+      // ignore: deprecated_member_use_from_same_package
+      if (customAudioPath != null)
+        {
+          // ignore: deprecated_member_use_from_same_package
+          'path': customAudioPath,
+          // ignore: deprecated_member_use_from_same_package
+          'volume': customAudioVolume ?? 1.0,
+          // ignore: deprecated_member_use_from_same_package
+          'loop': loopCustomAudio,
+          // ignore: deprecated_member_use_from_same_package
+          'audioStartUs': customAudioStartTime?.inMicroseconds,
+          'audioEndUs': null,
+          'startUs': null,
+          'endUs': null,
+        },
+    ];
+
+    // Merge deprecated imageBytes into imageLayers
+    final mergedImageLayers = [
+      if (imageLayers != null)
+        ...await Future.wait(
+          imageLayers!.map((layer) async => {
+                'imageData': await layer.image.safeByteArray(),
+                'startUs': layer.startTime?.inMicroseconds,
+                'endUs': layer.endTime?.inMicroseconds,
+                'x': layer.offset.dx.toInt(),
+                'y': layer.offset.dy.toInt(),
+              }),
+        ),
+      // ignore: deprecated_member_use_from_same_package
+      if (imageBytes != null)
+        {
+          // ignore: deprecated_member_use_from_same_package
+          'imageData': imageBytes,
+          'startUs': null,
+          'endUs': null,
+          'x': 0,
+          'y': 0,
+        },
+    ];
 
     return {
       ...transform.toMap(),
       'id': id,
       'videoClips': videoSegmentsMaps,
-      // ignore: deprecated_member_use_from_same_package
-      'imageBytes': imageBytes,
-      'imageLayers': imageLayers == null
-          ? []
-          : await Future.wait(
-              imageLayers!.map((layer) async => {
-                    'imageData': await layer.image.safeByteArray(),
-                    'startUs': layer.startTime?.inMicroseconds,
-                    'endUs': layer.endTime?.inMicroseconds,
-                    'x': layer.offset.dx.toInt(),
-                    'y': layer.offset.dy.toInt(),
-                  }),
-            ),
+      'imageLayers': mergedImageLayers,
+      'colorFilters': mergedColorFilters,
+      'audioTracks': mergedAudioTracks,
       'enableAudio': enableAudio,
       'playbackSpeed': playbackSpeed,
-      // ignore: deprecated_member_use_from_same_package
-      'colorMatrixList': colorMatrixList,
       'outputFormat': outputFormat.name,
       'blur': blur,
       'bitrate': bitrate,
       'scaleX': scaleX,
       'scaleY': scaleY,
-      // ignore: deprecated_member_use_from_same_package
-      'customAudioPath': customAudioPath,
-      // ignore: deprecated_member_use_from_same_package
-      'customAudioStartTimeUs': customAudioStartTime?.inMicroseconds,
-      // ignore: deprecated_member_use_from_same_package
-      'originalAudioVolume': originalAudioVolume,
-      // ignore: deprecated_member_use_from_same_package
-      'customAudioVolume': customAudioVolume,
       // Global trim for entire composition (only for videoSegments,
       // not single video). For single video, startTime/endTime are already
       // applied to the clip itself
@@ -479,8 +533,6 @@ class VideoRenderData {
       'endUs': videoSegments != null ? endTime?.inMicroseconds : null,
       'shouldOptimizeForNetworkUse': shouldOptimizeForNetworkUse,
       'imageBytesWithCropping': imageBytesWithCropping,
-      // ignore: deprecated_member_use_from_same_package
-      'loopCustomAudio': loopCustomAudio,
     };
   }
 
