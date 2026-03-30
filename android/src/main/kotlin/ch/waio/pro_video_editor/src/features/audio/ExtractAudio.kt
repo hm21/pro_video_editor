@@ -111,13 +111,42 @@ class ExtractAudio(private val context: Context) {
 
                 val audioFormat = extractor.getTrackFormat(audioTrackIndex)
 
-                // Get duration for progress tracking
+                // Get the audio track's actual time range
+                // Audio tracks may not start at timestamp 0 due to encoder delays
                 val durationUs = audioFormat.getLong(MediaFormat.KEY_DURATION)
-                val startUs = config.startUs ?: 0L
-                val endUs = config.endUs ?: durationUs
+                
+                // Determine the actual start and end timestamps for extraction
+                val actualStartUs: Long
+                val actualEndUs: Long
+                
+                if (config.startUs != null || config.endUs != null) {
+                    // User specified trim parameters - use them as-is
+                    actualStartUs = config.startUs ?: 0L
+                    actualEndUs = config.endUs ?: (actualStartUs + durationUs)
+                } else {
+                    // Full extraction - need to detect the audio track's actual start time
+                    // Select track first to be able to read samples
+                    extractor.selectTrack(audioTrackIndex)
+                    val firstSampleTimeUs = extractor.sampleTime
+                    
+                    if (firstSampleTimeUs > 0) {
+                        // Audio track has an offset (e.g., AAC encoder delay)
+                        actualStartUs = firstSampleTimeUs
+                        actualEndUs = firstSampleTimeUs + durationUs
+                    } else {
+                        // Audio track starts at or near zero
+                        actualStartUs = 0L
+                        actualEndUs = durationUs
+                    }
+                    
+                    // Seek back to start
+                    if (actualStartUs > 0) {
+                        extractor.seekTo(actualStartUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                    }
+                }
 
                 // Validate end time
-                if (endUs <= startUs) {
+                if (actualEndUs <= actualStartUs) {
                     throw IllegalArgumentException("endUs must be greater than startUs")
                 }
 
@@ -129,8 +158,8 @@ class ExtractAudio(private val context: Context) {
                 wavWriter.extractAndWrite(
                     extractor = extractor,
                     audioTrackIndex = audioTrackIndex,
-                    startUs = startUs,
-                    endUs = endUs,
+                    startUs = actualStartUs,
+                    endUs = actualEndUs,
                     onProgress = { progress ->
                         if (!shouldStop.get()) {
                             mainHandler.post { onProgress(progress) }
@@ -250,20 +279,43 @@ class ExtractAudio(private val context: Context) {
                 val muxerTrackIndex = muxer.addTrack(audioFormat)
                 muxer.start()
 
-                // Calculate duration and seek to start if needed
+                // Get the audio track's actual time range
+                // Audio tracks may not start at timestamp 0 due to encoder delays
                 val durationUs = audioFormat.getLong(MediaFormat.KEY_DURATION)
-                val startUs = config.startUs ?: 0L
-                val endUs = config.endUs ?: durationUs
+                
+                // Determine the actual start and end timestamps for extraction
+                val actualStartUs: Long
+                val actualEndUs: Long
+                
+                if (config.startUs != null || config.endUs != null) {
+                    // User specified trim parameters - use them as-is
+                    actualStartUs = config.startUs ?: 0L
+                    actualEndUs = config.endUs ?: (actualStartUs + durationUs)
+                } else {
+                    // Full extraction - need to detect the audio track's actual start time
+                    // Read the first sample to get the actual start timestamp
+                    val firstSampleTimeUs = extractor.sampleTime
+                    
+                    if (firstSampleTimeUs > 0) {
+                        // Audio track has an offset (e.g., AAC encoder delay)
+                        actualStartUs = firstSampleTimeUs
+                        actualEndUs = firstSampleTimeUs + durationUs
+                    } else {
+                        // Audio track starts at or near zero
+                        actualStartUs = 0L
+                        actualEndUs = durationUs
+                    }
+                }
 
-                if (startUs > 0) {
-                    extractor.seekTo(startUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                if (actualStartUs > 0) {
+                    extractor.seekTo(actualStartUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
                 }
 
                 // Extract and write audio samples
                 val buffer = ByteBuffer.allocate(BUFFER_SIZE)
                 val bufferInfo = MediaCodec.BufferInfo()
-                var extractedUs = startUs
-                val totalDurationUs = endUs - startUs
+                var extractedUs = actualStartUs
+                val totalDurationUs = actualEndUs - actualStartUs
 
                 mainHandler.post { onProgress(0.0) }
 
@@ -278,12 +330,13 @@ class ExtractAudio(private val context: Context) {
                     val presentationTimeUs = extractor.sampleTime
                     
                     // Check if we've reached the end time
-                    if (presentationTimeUs > endUs) {
+                    if (presentationTimeUs > actualEndUs) {
                         break
                     }
 
-                    // Adjust presentation time if we're trimming from start
-                    bufferInfo.presentationTimeUs = presentationTimeUs - startUs
+                    // Adjust presentation time to start at zero in the output
+                    // This ensures extracted audio always has timestamps starting at 0
+                    bufferInfo.presentationTimeUs = presentationTimeUs - actualStartUs
                     bufferInfo.size = sampleSize
                     bufferInfo.offset = 0
                     
@@ -299,7 +352,7 @@ class ExtractAudio(private val context: Context) {
 
                     // Update progress
                     extractedUs = presentationTimeUs
-                    val progress = ((extractedUs - startUs).toDouble() / totalDurationUs).coerceIn(0.0, 1.0)
+                    val progress = ((extractedUs - actualStartUs).toDouble() / totalDurationUs).coerceIn(0.0, 1.0)
                     mainHandler.post { onProgress(progress) }
 
                     // Advance to next sample
