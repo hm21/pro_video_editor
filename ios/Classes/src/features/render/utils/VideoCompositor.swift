@@ -312,11 +312,11 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                                   (layer.endUs == -1 || currentTimeUs <= layer.endUs)
 
                 if inTimeRange {
-                    let scaledLayerOverlay = layer.image.transformed(
-                        by: CGAffineTransform(
-                            scaleX: imageRect.width / layer.image.extent.width,
-                            y: imageRect.height / layer.image.extent.height))
-                    outputImage = scaledLayerOverlay.composited(over: outputImage)
+                    // Convert y from top-left (Dart) to bottom-left (Core Graphics)
+                    let cgY = imageRect.height - CGFloat(layer.y) - layer.image.extent.height
+                    let positionedOverlay = layer.image.transformed(
+                        by: CGAffineTransform(translationX: CGFloat(layer.x), y: cgY))
+                    outputImage = positionedOverlay.composited(over: outputImage)
                 }
             }
         }
@@ -424,8 +424,10 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                                   (layer.endUs == -1 || currentTimeUs <= layer.endUs)
 
                 if inTimeRange {
+                    // Convert y from top-left (Dart) to bottom-left (Core Graphics)
+                    let cgY = imageRect.height - CGFloat(layer.y) - layer.image.extent.height
                     let positionedOverlay = layer.image.transformed(
-                        by: CGAffineTransform(translationX: CGFloat(layer.x), y: CGFloat(layer.y)))
+                        by: CGAffineTransform(translationX: CGFloat(layer.x), y: cgY))
                     outputImage = positionedOverlay.composited(over: outputImage)
                 }
             }

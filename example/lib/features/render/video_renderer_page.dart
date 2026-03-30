@@ -298,6 +298,24 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     var data = VideoRenderData(
       video: _video,
       imageLayers: [
+        /// Always visible
+        ImageLayer(image: layerImage, offset: const Offset(0, 0)),
+
+        /// Start at 5s
+        ImageLayer(
+          image: layerImage,
+          startTime: const Duration(seconds: 5),
+          offset: Offset((videoWidth - stickerSize).toDouble(), 0),
+        ),
+
+        /// End at 7s
+        ImageLayer(
+          image: layerImage,
+          endTime: const Duration(seconds: 7),
+          offset: Offset(0, (videoHeight - stickerSize).toDouble()),
+        ),
+
+        /// Random positions
         for (int i = 0; i < metadata.duration.inSeconds; i++)
           ImageLayer(
             image: layerImage,

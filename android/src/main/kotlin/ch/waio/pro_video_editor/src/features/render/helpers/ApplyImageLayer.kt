@@ -165,10 +165,12 @@ fun applyTimedImageLayers(
 
             // Use OverlaySettings for positioning instead of allocating a
             // full-frame (videoWidth×videoHeight) canvas bitmap per layer.
+            // Media3 uses OpenGL coordinates: x[-1,1] left→right, y[-1,1] bottom→top.
+            // Input uses top-left origin, so y must be flipped.
             val centerX = layer.x.toFloat() + imageWidth / 2f
             val centerY = layer.y.toFloat() + imageHeight / 2f
             val normX = (centerX / videoWidth) * 2f - 1f
-            val normY = (centerY / videoHeight) * 2f - 1f
+            val normY = 1f - (centerY / videoHeight) * 2f
 
             val overlaySettings = StaticOverlaySettings.Builder()
                 .setBackgroundFrameAnchor(normX, normY)
@@ -178,9 +180,19 @@ fun applyTimedImageLayers(
             val bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(
                 finalOverlay, overlaySettings
             )
-            videoEffects += TimestampWrapper(
-                OverlayEffect(listOf(bitmapOverlay)), startTimeUs, endTimeUs
-            )
+
+            val overlayEffect = OverlayEffect(listOf(bitmapOverlay))
+
+            if (startTimeUs == -1L && endTimeUs == -1L) {
+                // No time range set — show for the entire video
+                videoEffects += overlayEffect
+            } else {
+                val effectiveStart = if (startTimeUs == -1L) 0L else startTimeUs
+                val effectiveEnd = if (endTimeUs == -1L) Long.MAX_VALUE else endTimeUs
+                videoEffects += TimestampWrapper(
+                    overlayEffect, effectiveStart, effectiveEnd
+                )
+            }
 
         } catch (e: Exception) {
             Log.e(RENDER_TAG, "Failed to decode image layer: ${e.message}")
