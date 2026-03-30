@@ -11,11 +11,7 @@ internal class CompositionBuilder {
     private let videoClips: [VideoClip]
     private let videoEffects: VideoCompositorConfig
     private var enableAudio: Bool = true
-    private var customAudioPath: String?
-    private var customAudioStartTimeUs: Int64?
-    private var originalAudioVolume: Float = 1.0
-    private var customAudioVolume: Float = 1.0
-    private var loopCustomAudio: Bool = true
+    private var audioTracks: [AudioTrackConfig] = []
 
     /// Initializes builder with configuration.
     ///
@@ -36,48 +32,12 @@ internal class CompositionBuilder {
         return self
     }
 
-    /// Sets custom audio path.
+    /// Sets the audio tracks for mixing.
     ///
-    /// - Parameter path: Path to custom audio file
+    /// - Parameter tracks: Array of audio track configurations
     /// - Returns: Self for chaining
-    func setCustomAudioPath(_ path: String?) -> CompositionBuilder {
-        self.customAudioPath = path
-        return self
-    }
-
-    /// Sets the start time offset for the custom audio.
-    ///
-    /// - Parameter startTimeUs: Start time in microseconds from the beginning of the audio file
-    /// - Returns: Self for chaining
-    func setCustomAudioStartTime(_ startTimeUs: Int64?) -> CompositionBuilder {
-        self.customAudioStartTimeUs = startTimeUs
-        return self
-    }
-
-    /// Sets volume for original video audio.
-    ///
-    /// - Parameter volume: Volume multiplier (0.0 to 1.0+)
-    /// - Returns: Self for chaining
-    func setOriginalAudioVolume(_ volume: Float?) -> CompositionBuilder {
-        self.originalAudioVolume = volume ?? 1.0
-        return self
-    }
-
-    /// Sets volume for custom audio.
-    ///
-    /// - Parameter volume: Volume multiplier (0.0 to 1.0+)
-    /// - Returns: Self for chaining
-    func setCustomAudioVolume(_ volume: Float?) -> CompositionBuilder {
-        self.customAudioVolume = volume ?? 1.0
-        return self
-    }
-
-    /// Sets whether custom audio should loop.
-    ///
-    /// - Parameter loop: If true, audio repeats to match video duration
-    /// - Returns: Self for chaining
-    func setLoopCustomAudio(_ loop: Bool) -> CompositionBuilder {
-        self.loopCustomAudio = loop
+    func setAudioTracks(_ tracks: [AudioTrackConfig]) -> CompositionBuilder {
+        self.audioTracks = tracks
         return self
     }
 
@@ -104,46 +64,38 @@ internal class CompositionBuilder {
         // Build video sequence
         let videoBuilder = VideoSequenceBuilder(videoClips: videoClips)
             .setEnableAudio(enableAudio)
-            .setOriginalAudioVolume(originalAudioVolume)
-
-        // Log audio mixing configuration
-        if customAudioPath != nil && !(customAudioPath?.isEmpty ?? true) && enableAudio
-            && originalAudioVolume > 0.0
-        {
-            print(
-                "✅ Audio mixing ENABLED (original: \(originalAudioVolume)x, custom: \(customAudioVolume)x)"
-            )
-            print("✅ AVFoundation will handle sample rate conversion automatically")
-        }
 
         let videoResult = try await videoBuilder.build(in: composition)
 
-        // Add custom audio track if provided
-        var customAudioTrack: AVMutableCompositionTrack?
-        if let customPath = customAudioPath, !customPath.isEmpty {
-            print("🎵 Adding custom audio track: \(customPath)")
+        // Add custom audio tracks
+        var customAudioTracks: [(track: AVMutableCompositionTrack, config: AudioTrackConfig)] = []
+        for trackConfig in audioTracks {
+            print("🎵 Adding audio track: \(trackConfig.path)")
             let audioBuilder = AudioSequenceBuilder(
-                audioPath: customPath,
+                audioPath: trackConfig.path,
                 targetDuration: videoResult.totalDuration
-            ).setVolume(customAudioVolume)
-                .setLoop(loopCustomAudio)
-                .setStartTime(customAudioStartTimeUs)
+            ).setVolume(trackConfig.volume)
+                .setLoop(trackConfig.loop)
+                .setAudioStartTime(trackConfig.audioStartUs)
+                .setAudioEndTime(trackConfig.audioEndUs)
+                .setCompositionStartTime(trackConfig.startUs == -1 ? nil : trackConfig.startUs)
+                .setCompositionEndTime(trackConfig.endUs == -1 ? nil : trackConfig.endUs)
 
-            customAudioTrack = try await audioBuilder.build(in: composition)
+            if let track = try await audioBuilder.build(in: composition) {
+                customAudioTracks.append((track: track, config: trackConfig))
+            }
         }
 
-        // Create audio mix with volume parameters
-        // Always create audio mix when we have audio tracks to ensure volume control works
+        // Create audio mix with per-clip and per-track volume parameters
         var audioMix: AVAudioMix?
         let hasOriginalAudio = enableAudio && !videoResult.audioTracks.isEmpty
-        let hasCustomAudio = customAudioTrack != nil
+        let hasCustomAudio = !customAudioTracks.isEmpty
 
         if hasOriginalAudio || hasCustomAudio {
             audioMix = createAudioMix(
                 originalTracks: videoResult.audioTracks,
-                customTrack: customAudioTrack,
-                originalVolume: originalAudioVolume,
-                customVolume: customAudioVolume
+                customAudioTracks: customAudioTracks,
+                clipInstructions: videoResult.clipInstructions
             )
         }
 
@@ -220,29 +172,40 @@ internal class CompositionBuilder {
         return (composition, videoCompositionData, videoResult.renderSize, audioMix, sourceTrackID)
     }
 
-    /// Creates audio mix with volume parameters.
+    /// Creates audio mix with per-clip and per-track volume parameters.
     private func createAudioMix(
         originalTracks: [AVMutableCompositionTrack],
-        customTrack: AVMutableCompositionTrack?,
-        originalVolume: Float,
-        customVolume: Float
+        customAudioTracks: [(track: AVMutableCompositionTrack, config: AudioTrackConfig)],
+        clipInstructions: [ClipInstruction]
     ) -> AVAudioMix {
         var audioMixInputParameters: [AVMutableAudioMixInputParameters] = []
 
-        // Apply volume to original audio tracks
+        // Apply per-clip volume to original audio tracks
         for track in originalTracks {
             let inputParameters = AVMutableAudioMixInputParameters(track: track)
-            inputParameters.setVolume(originalVolume, at: .zero)
+
+            // Use setVolumeRamp for each clip's time range to ensure
+            // volume changes are applied precisely per segment
+            for (index, clipInstruction) in clipInstructions.enumerated() {
+                let clipVolume = index < videoClips.count
+                    ? (videoClips[index].volume ?? 1.0) : 1.0
+                inputParameters.setVolumeRamp(
+                    fromStartVolume: clipVolume,
+                    toEndVolume: clipVolume,
+                    timeRange: clipInstruction.timeRange
+                )
+            }
+
             audioMixInputParameters.append(inputParameters)
-            print("🔊 Applied volume \(originalVolume) to original audio track")
+            print("🔊 Applied per-clip volume to original audio track")
         }
 
-        // Apply volume to custom audio track
-        if let customTrack = customTrack {
-            let inputParameters = AVMutableAudioMixInputParameters(track: customTrack)
-            inputParameters.setVolume(customVolume, at: .zero)
+        // Apply volume to custom audio tracks
+        for (track, config) in customAudioTracks {
+            let inputParameters = AVMutableAudioMixInputParameters(track: track)
+            inputParameters.setVolume(config.volume, at: .zero)
             audioMixInputParameters.append(inputParameters)
-            print("🔊 Applied volume \(customVolume) to custom audio track")
+            print("🔊 Applied volume \(config.volume) to custom audio track: \(config.path)")
         }
 
         let audioMix = AVMutableAudioMix()

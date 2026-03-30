@@ -9,7 +9,6 @@ internal class VideoSequenceBuilder {
 
     private let videoClips: [VideoClip]
     private var enableAudio: Bool = true
-    private var originalAudioVolume: Float = 1.0
 
     /// Initializes builder with video clips.
     ///
@@ -24,15 +23,6 @@ internal class VideoSequenceBuilder {
     /// - Returns: Self for chaining
     func setEnableAudio(_ enabled: Bool) -> VideoSequenceBuilder {
         self.enableAudio = enabled
-        return self
-    }
-
-    /// Sets the volume for original video audio.
-    ///
-    /// - Parameter volume: Volume multiplier (0.0 to 1.0+)
-    /// - Returns: Self for chaining
-    func setOriginalAudioVolume(_ volume: Float) -> VideoSequenceBuilder {
-        self.originalAudioVolume = volume
         return self
     }
 

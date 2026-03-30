@@ -6,13 +6,14 @@ struct ImageLayer {
     let image: CIImage
     let startUs: Int64
     let endUs: Int64
-    let x: Int64
-    let y: Int64
+    /// x position in pixels. When nil, the image is stretched to fill the video frame.
+    let x: Int64?
+    /// y position in pixels. When nil, the image is stretched to fill the video frame.
+    let y: Int64?
 }
 
 class VideoCompositor: NSObject, AVVideoCompositing {
     var blurSigma: Double = 0.0
-    var overlayImage: CIImage?
     var overlayImageLayers: [ImageLayer] = []
     var imageBytesWithCropping: Bool = false
 
@@ -33,9 +34,13 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     /// Fallback source track ID for older iOS versions
     var sourceTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
 
-    private let lutQueue = DispatchQueue(label: "lut.queue")
-    private var _lutData: Data?
-    private var _lutSize: Int = 33
+    /// Color filter configs for per-frame LUT computation
+    private var colorFilterConfigs: [ColorFilterConfig] = []
+
+    /// Cache for computed LUTs keyed by active filter indices
+    private let lutCacheQueue = DispatchQueue(label: "lut.cache.queue")
+    private var lutCache: [String: (data: Data, size: Int)] = [:]
+    private let defaultLutSize = 33
 
     static var config = VideoCompositorConfig()
 
@@ -68,20 +73,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         self.originalNaturalSize = config.originalNaturalSize
         self.sourceTrackID = config.sourceTrackID
 
-        self.setOverlayImage(from: config.overlayImage)
         self.setOverlayImageLayers(from: config.imageLayerConfigs)
-        self.setLUT(data: config.lutData, size: config.lutSize)
-    }
-
-    func setOverlayImage(from data: Data?) {
-        guard let data,
-            let uiImage = UIImage(data: data),
-            let cgImage = uiImage.cgImage
-        else {
-            overlayImage = nil
-            return
-        }
-        overlayImage = CIImage(cgImage: cgImage)
+        self.colorFilterConfigs = config.colorFilterConfigs
     }
 
     func setOverlayImageLayers(from layers: [ImageLayerConfig]) {
@@ -103,22 +96,61 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         }
     }
 
-    func clearLUT() {
-        lutQueue.sync {
-            _lutData = nil
+    /// Computes the LUT for a given set of active color filter indices.
+    /// Results are cached so that each unique combination is only computed once.
+    private func getLUTForActiveFilters(at compositionTime: CMTime) -> (data: Data, size: Int)? {
+        guard !colorFilterConfigs.isEmpty else { return nil }
+
+        let currentTimeUs = Int64(CMTimeGetSeconds(compositionTime) * 1_000_000)
+
+        // Determine which filters are active at this time
+        var activeIndices: [Int] = []
+        for (index, filter) in colorFilterConfigs.enumerated() {
+            let inRange =
+                (filter.startUs == -1 || currentTimeUs >= filter.startUs)
+                && (filter.endUs == -1 || currentTimeUs <= filter.endUs)
+            if inRange {
+                activeIndices.append(index)
+            }
         }
-    }
-    func setLUT(data: Data?, size: Int) {
-        lutQueue.sync {
-            _lutData = data
-            _lutSize = size
+
+        guard !activeIndices.isEmpty else { return nil }
+
+        let cacheKey = activeIndices.map { String($0) }.joined(separator: ",")
+
+        // Check cache
+        var cached: (data: Data, size: Int)?
+        lutCacheQueue.sync {
+            cached = lutCache[cacheKey]
         }
+        if let cached = cached {
+            return cached
+        }
+
+        // Compute LUT for active filters
+        let activeMatrices = activeIndices.map { colorFilterConfigs[$0].matrix }
+        let combined = combineColorMatrices(activeMatrices)
+        guard combined.count == 20 else { return nil }
+        guard let data = generateLUTData(from: combined, size: defaultLutSize) else { return nil }
+
+        let result = (data: data, size: defaultLutSize)
+        lutCacheQueue.sync {
+            lutCache[cacheKey] = result
+        }
+        return result
     }
 
-    private func getLUT() -> (data: Data?, size: Int) {
-        lutQueue.sync {
-            (_lutData, _lutSize)
+    /// Applies the LUT for active color filters at the given composition time.
+    private func applyColorFilter(to image: CIImage, at compositionTime: CMTime) -> CIImage {
+        guard let lut = getLUTForActiveFilters(at: compositionTime),
+            let lutFilter = CIFilter(name: "CIColorCube")
+        else {
+            return image
         }
+        lutFilter.setValue(lut.size, forKey: "inputCubeDimension")
+        lutFilter.setValue(lut.data, forKey: "inputCubeData")
+        lutFilter.setValue(image, forKey: kCIInputImageKey)
+        return lutFilter.outputImage ?? image
     }
 
     private let context = CIContext(options: [
@@ -256,18 +288,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         // Apply LUT, blur, and flip BEFORE overlay when imageBytesWithCropping is enabled
         // This ensures these effects only affect the video, not the overlay
         if imageBytesWithCropping {
-            // Apply LUT to video only
-            let (lutData, lutSize) = getLUT()
-            if let lutData,
-                let lutFilter = CIFilter(name: "CIColorCube")
-            {
-                lutFilter.setValue(lutSize, forKey: "inputCubeDimension")
-                lutFilter.setValue(lutData, forKey: "inputCubeData")
-                lutFilter.setValue(outputImage, forKey: kCIInputImageKey)
-                if let filteredImage = lutFilter.outputImage {
-                    outputImage = filteredImage
-                }
-            }
+            // Apply color filter (timed LUT) to video only
+            outputImage = applyColorFilter(to: outputImage, at: request.compositionTime)
 
             // Apply blur to video only
             if blurSigma > 0 {
@@ -302,15 +324,6 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         if imageBytesWithCropping {
             let imageRect = outputImage.extent
 
-            // Apply single overlay image if present
-            if let overlay = overlayImage {
-                let scaledOverlay = overlay.transformed(
-                    by: CGAffineTransform(
-                        scaleX: imageRect.width / overlay.extent.width,
-                        y: imageRect.height / overlay.extent.height))
-                outputImage = scaledOverlay.composited(over: outputImage)
-            }
-
             // Apply time-based overlay layers
             let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
             for layer in overlayImageLayers {
@@ -322,11 +335,23 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                     && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
 
                 if inTimeRange {
-                    // Convert y from top-left (Dart) to bottom-left (Core Graphics)
-                    let cgY = imageRect.height - CGFloat(layer.y) - layer.image.extent.height
-                    let positionedOverlay = layer.image.transformed(
-                        by: CGAffineTransform(translationX: CGFloat(layer.x), y: cgY))
-                    outputImage = positionedOverlay.composited(over: outputImage)
+                    let overlay: CIImage
+                    if layer.x == nil && layer.y == nil {
+                        // Stretch to fill frame when no position is specified
+                        overlay = layer.image.transformed(
+                            by: CGAffineTransform(
+                                scaleX: imageRect.width / layer.image.extent.width,
+                                y: imageRect.height / layer.image.extent.height))
+                    } else {
+                        // Position at specific coordinates
+                        let posX = CGFloat(layer.x ?? 0)
+                        let posY = CGFloat(layer.y ?? 0)
+                        // Convert y from top-left (Dart) to bottom-left (Core Graphics)
+                        let cgY = imageRect.height - posY - layer.image.extent.height
+                        overlay = layer.image.transformed(
+                            by: CGAffineTransform(translationX: posX, y: cgY))
+                    }
+                    outputImage = overlay.composited(over: outputImage)
                 }
             }
         }
@@ -391,19 +416,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
         outputImage = outputImage.transformed(by: transform)
 
-        // Apply LUT (only if NOT imageBytesWithCropping - otherwise already applied before overlay)
+        // Apply color filter (only if NOT imageBytesWithCropping - otherwise already applied before overlay)
         if !imageBytesWithCropping {
-            let (lutData, lutSize) = getLUT()
-            if let lutData,
-                let lutFilter = CIFilter(name: "CIColorCube")
-            {
-                lutFilter.setValue(lutSize, forKey: "inputCubeDimension")
-                lutFilter.setValue(lutData, forKey: "inputCubeData")
-                lutFilter.setValue(outputImage, forKey: kCIInputImageKey)
-                if let filteredImage = lutFilter.outputImage {
-                    outputImage = filteredImage
-                }
-            }
+            outputImage = applyColorFilter(to: outputImage, at: request.compositionTime)
 
             // Apply blur
             if blurSigma > 0 {
@@ -411,18 +426,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
             }
         }
 
-        // Apply overlay image (only if not already applied before crop)
+        // Apply overlay image layers (only if not already applied before crop)
         if !imageBytesWithCropping {
             let imageRect = outputImage.extent
-
-            // Apply single overlay image if present
-            if let overlay = overlayImage {
-                let scaledOverlay = overlay.transformed(
-                    by: CGAffineTransform(
-                        scaleX: imageRect.width / overlay.extent.width,
-                        y: imageRect.height / overlay.extent.height))
-                outputImage = scaledOverlay.composited(over: outputImage)
-            }
 
             // Apply time-based overlay layers with positioning
             let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
@@ -433,13 +439,24 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                 let inTimeRange =
                     (layer.startUs == -1 || currentTimeUs >= layer.startUs)
                     && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
-
                 if inTimeRange {
-                    // Convert y from top-left (Dart) to bottom-left (Core Graphics)
-                    let cgY = imageRect.height - CGFloat(layer.y) - layer.image.extent.height
-                    let positionedOverlay = layer.image.transformed(
-                        by: CGAffineTransform(translationX: CGFloat(layer.x), y: cgY))
-                    outputImage = positionedOverlay.composited(over: outputImage)
+                    let overlay: CIImage
+                    if layer.x == nil && layer.y == nil {
+                        // Stretch to fill frame when no position is specified
+                        overlay = layer.image.transformed(
+                            by: CGAffineTransform(
+                                scaleX: imageRect.width / layer.image.extent.width,
+                                y: imageRect.height / layer.image.extent.height))
+                    } else {
+                        // Position at specific coordinates
+                        let posX = CGFloat(layer.x ?? 0)
+                        let posY = CGFloat(layer.y ?? 0)
+                        // Convert y from top-left (Dart) to bottom-left (Core Graphics)
+                        let cgY = imageRect.height - posY - layer.image.extent.height
+                        overlay = layer.image.transformed(
+                            by: CGAffineTransform(translationX: posX, y: cgY))
+                    }
+                    outputImage = overlay.composited(over: outputImage)
                 }
             }
         }

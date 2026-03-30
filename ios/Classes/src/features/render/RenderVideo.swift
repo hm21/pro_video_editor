@@ -73,7 +73,8 @@ class RenderVideo {
                             return VideoClip(
                                 inputPath: newPath,
                                 startUs: clip.startUs,
-                                endUs: clip.endUs
+                                endUs: clip.endUs,
+                                volume: clip.volume
                             )
                         }
                         return clip
@@ -128,9 +129,8 @@ class RenderVideo {
                     print("   📁 Output format: \(workingConfig.outputFormat)")
                     print("   📹 Output path: \(outputURL.path)")
                     print("   🔊 Enable Audio: \(workingConfig.enableAudio)")
-                    print("   🔊 Original audio volume: \(workingConfig.originalAudioVolume ?? 1.0)")
-                    print("   🔊 Custom audio path: \(workingConfig.customAudioPath ?? "none")")
-                    print("   🔊 Custom audio volume: \(workingConfig.customAudioVolume ?? 1.0)")
+                    print("   🎵 Audio tracks: \(workingConfig.audioTracks.count)")
+                    print("   🎨 Color filters: \(workingConfig.colorFilters.count)")
                     print("===========================")
                     print("")
 
@@ -143,11 +143,7 @@ class RenderVideo {
                             videoClips: workingConfig.videoClips,
                             videoEffects: effectsConfig,
                             enableAudio: workingConfig.enableAudio,
-                            customAudioPath: workingConfig.customAudioPath,
-                            customAudioStartTimeUs: workingConfig.customAudioStartTimeUs,
-                            originalAudioVolume: workingConfig.originalAudioVolume,
-                            customAudioVolume: workingConfig.customAudioVolume,
-                            loopCustomAudio: workingConfig.loopCustomAudio
+                            audioTracks: workingConfig.audioTracks
                         )
                     var videoCompConfig = videoCompData
 
@@ -195,11 +191,10 @@ class RenderVideo {
                         scaleY: workingConfig.scaleY)
                     applyColorMatrix(
                         config: &effectsConfig,
-                        matrixList: workingConfig.colorMatrixList)
+                        filters: workingConfig.colorFilters)
                     applyBlur(config: &effectsConfig, sigma: workingConfig.blur)
                     applyImageLayer(
                         config: &effectsConfig,
-                        imageData: workingConfig.imageData,
                         imageLayers: workingConfig.imageLayers,
                         withCropping: workingConfig.imageBytesWithCropping)
 
