@@ -125,23 +125,27 @@ class ExtractAudio(private val context: Context) {
                     actualEndUs = config.endUs ?: (actualStartUs + durationUs)
                 } else {
                     // Full extraction - need to detect the audio track's actual start time
-                    // Select track first to be able to read samples
-                    extractor.selectTrack(audioTrackIndex)
-                    val firstSampleTimeUs = extractor.sampleTime
-                    
-                    if (firstSampleTimeUs > 0) {
-                        // Audio track has an offset (e.g., AAC encoder delay)
-                        actualStartUs = firstSampleTimeUs
-                        actualEndUs = firstSampleTimeUs + durationUs
-                    } else {
-                        // Audio track starts at or near zero
-                        actualStartUs = 0L
-                        actualEndUs = durationUs
-                    }
-                    
-                    // Seek back to start
-                    if (actualStartUs > 0) {
-                        extractor.seekTo(actualStartUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                    // Use a temporary extractor to avoid track selection conflicts!
+                    // WavFileWriter will call selectTrack() on the main extractor, 
+                    // so we must not pre-select it here
+                    var tempExtractor: MediaExtractor? = null
+                    try {
+                        tempExtractor = MediaExtractor()
+                        tempExtractor.setDataSource(config.inputPath)
+                        tempExtractor.selectTrack(audioTrackIndex)
+                        val firstSampleTimeUs = tempExtractor.sampleTime
+                        
+                        if (firstSampleTimeUs > 0) {
+                            // Audio track has an offset (e.g., AAC encoder delay)
+                            actualStartUs = firstSampleTimeUs
+                            actualEndUs = firstSampleTimeUs + durationUs
+                        } else {
+                            // Audio track starts at or near zero
+                            actualStartUs = 0L
+                            actualEndUs = durationUs
+                        }
+                    } finally {
+                        tempExtractor?.release()
                     }
                 }
 
