@@ -24,17 +24,19 @@ extension ProVideoEditorPlugin: FlutterStreamHandler {
 /// Waveform chunks are streamed to Flutter as they are generated.
 class WaveformStreamHandler: NSObject, FlutterStreamHandler {
     private weak var plugin: ProVideoEditorPlugin?
-    
+
     init(plugin: ProVideoEditorPlugin) {
         self.plugin = plugin
         super.init()
     }
-    
-    func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+
+    func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink)
+        -> FlutterError?
+    {
         plugin?.waveformStreamSink = events
         return nil
     }
-    
+
     func onCancel(withArguments arguments: Any?) -> FlutterError? {
         plugin?.waveformStreamSink = nil
         return nil

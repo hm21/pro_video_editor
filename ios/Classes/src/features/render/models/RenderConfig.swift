@@ -1,5 +1,5 @@
-import Foundation
 import Flutter
+import Foundation
 
 struct ImageLayerConfig {
     let imageData: Data
@@ -44,88 +44,88 @@ struct ImageLayerConfig {
 struct RenderConfig {
     /// List of video clips to render (concatenated in order)
     let videoClips: [VideoClip]
-    
+
     /// Optional image data for image-to-video conversion
     let imageData: Data?
-    
+
     /// List of image layers with timing information for overlaying on the video
     let imageLayers: [ImageLayerConfig]
 
     /// Output format for the rendered video (e.g., "mp4", "mov")
     let outputFormat: String
-    
+
     /// Optional absolute path where output should be saved (nil = return bytes)
     let outputPath: String?
-    
+
     /// Number of 90-degree clockwise rotations to apply (0-3)
     let rotateTurns: Int?
-    
+
     /// Whether to flip video horizontally
     let flipX: Bool
-    
+
     /// Whether to flip video vertically
     let flipY: Bool
-    
+
     /// Crop width in pixels (nil = no crop)
     let cropWidth: Int?
-    
+
     /// Crop height in pixels (nil = no crop)
     let cropHeight: Int?
-    
+
     /// Crop X offset in pixels (nil = centered)
     let cropX: Int?
-    
+
     /// Crop Y offset in pixels (nil = centered)
     let cropY: Int?
-    
+
     /// Horizontal scale factor (nil = no scaling)
     let scaleX: Float?
-    
+
     /// Vertical scale factor (nil = no scaling)
     let scaleY: Float?
-    
+
     /// Target bitrate in bits per second (nil = auto)
     let bitrate: Int?
-    
+
     /// Whether to include audio in output
     let enableAudio: Bool
-    
+
     /// Playback speed multiplier (e.g., 2.0 = 2x speed)
     let playbackSpeed: Float?
-    
+
     /// List of 4x4 color transformation matrices
     let colorMatrixList: [[Double]]
-    
+
     /// Blur radius (nil = no blur, experimental feature)
     let blur: Double?
-    
+
     /// Absolute path to custom audio file to mix in (nil = no custom audio)
     let customAudioPath: String?
-    
+
     /// Start time offset in microseconds for the custom audio track
     let customAudioStartTimeUs: Int64?
-    
+
     /// Volume for original video audio (0.0-1.0, nil = 1.0)
     let originalAudioVolume: Float?
-    
+
     /// Volume for custom audio track (0.0-1.0, nil = 1.0)
     let customAudioVolume: Float?
-    
+
     /// Global start time in microseconds for trimming the final composition
     let startUs: Int64?
-    
+
     /// Global end time in microseconds for trimming the final composition
     let endUs: Int64?
-    
+
     /// Whether to optimize the video for network streaming (fast start).
     /// When true, moves the moov atom to the beginning of the file.
     let shouldOptimizeForNetworkUse: Bool
-    
+
     /// Whether to apply cropping to the image overlay along with the video.
     /// When true, the image overlay is cropped together with the video.
     /// When false (default), the overlay is scaled to the final cropped size.
     let imageBytesWithCropping: Bool
-    
+
     /// Whether to loop the custom audio if it is shorter than the video.
     /// When true (default), audio is repeated to match video duration.
     /// When false, audio plays once and silence fills the rest.
@@ -172,7 +172,7 @@ struct RenderConfig {
         guard let args = arguments else {
             return nil
         }
-        
+
         // Parse video clips (required for video rendering)
         var videoClips: [VideoClip] = []
         if let videoClipsRaw = args["videoClips"] as? [[String: Any]] {
@@ -187,16 +187,18 @@ struct RenderConfig {
                 )
             }
         }
-        
+
         // For single video (legacy support)
         if videoClips.isEmpty, let inputPath = args["inputPath"] as? String {
-            videoClips = [VideoClip(
-                inputPath: inputPath,
-                startUs: (args["startUs"] as? NSNumber)?.int64Value,
-                endUs: (args["endUs"] as? NSNumber)?.int64Value
-            )]
+            videoClips = [
+                VideoClip(
+                    inputPath: inputPath,
+                    startUs: (args["startUs"] as? NSNumber)?.int64Value,
+                    endUs: (args["endUs"] as? NSNumber)?.int64Value
+                )
+            ]
         }
-        
+
         // Parse color matrix list
         var colorMatrixList: [[Double]] = []
         if let matricesRaw = args["colorMatrixList"] as? [[NSNumber]] {
@@ -204,7 +206,7 @@ struct RenderConfig {
                 matrix.map { $0.doubleValue }
             }
         }
-        
+
         // Convert imageBytes from Flutter (FlutterStandardTypedData) to Data
         let imageData: Data?
         if let flutterData = args["imageBytes"] as? FlutterStandardTypedData {
@@ -212,12 +214,14 @@ struct RenderConfig {
         } else {
             imageData = args["imageBytes"] as? Data
         }
-        
+
         // Parse image layers
         // compactMap filters out nil values returned by fromArguments for invalid layers
         var imageLayers: [ImageLayerConfig] = []
         if let layersRaw = args["imageLayers"] as? [[String: Any]] {
-            imageLayers = layersRaw.compactMap { layerMap in ImageLayerConfig.fromArguments(layerMap) }
+            imageLayers = layersRaw.compactMap { layerMap in
+                ImageLayerConfig.fromArguments(layerMap)
+            }
         }
 
         return RenderConfig(

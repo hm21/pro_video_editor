@@ -196,7 +196,8 @@ data class RenderConfig(
                 customAudioVolume = call.argument<Number?>("customAudioVolume")?.toFloat(),
                 startUs = call.argument<Number?>("startUs")?.toLong(),
                 endUs = call.argument<Number?>("endUs")?.toLong(),
-                shouldOptimizeForNetworkUse = call.argument<Boolean>("shouldOptimizeForNetworkUse") ?: true,
+                shouldOptimizeForNetworkUse = call.argument<Boolean>("shouldOptimizeForNetworkUse")
+                    ?: true,
                 imageBytesWithCropping = call.argument<Boolean>("imageBytesWithCropping") ?: false,
                 loopCustomAudio = call.argument<Boolean>("loopCustomAudio") ?: true
             )

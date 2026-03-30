@@ -88,7 +88,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                 eventSink = null
             }
         })
-        
+
         waveformStreamChannel.setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                 waveformStreamSink = events
@@ -444,7 +444,11 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             result.error("INVALID_ARGUMENTS", e.message, null)
         } catch (e: Exception) {
             activeWaveformTasks.remove(id)
-            result.error("WAVEFORM_ERROR", "Failed to start waveform generation: ${e.message}", null)
+            result.error(
+                "WAVEFORM_ERROR",
+                "Failed to start waveform generation: ${e.message}",
+                null
+            )
         }
     }
 
@@ -516,7 +520,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             if (task.isCanceled) {
                 jobHandle.cancel()
             }
-            
+
             // Return immediately - chunks will be sent via event channel
             result.success(null)
         } catch (e: IllegalArgumentException) {
@@ -524,7 +528,11 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             result.error("INVALID_ARGUMENTS", e.message, null)
         } catch (e: Exception) {
             activeWaveformTasks.remove(id)
-            result.error("WAVEFORM_ERROR", "Failed to start streaming waveform generation: ${e.message}", null)
+            result.error(
+                "WAVEFORM_ERROR",
+                "Failed to start streaming waveform generation: ${e.message}",
+                null
+            )
         }
     }
 

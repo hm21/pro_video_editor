@@ -198,7 +198,6 @@ void main() {
     expect(meta.duration.inMilliseconds, 13000);
   });
 
-  // This needs investigation in the native code
   testWidgets('change speed to 2x and 0.8x', (tester) async {
     final originalMeta = await ProVideoEditor.instance.getMetadata(inputVideo);
 
@@ -222,7 +221,7 @@ void main() {
 
     await testSpeed(2.0); // Speed up
     await testSpeed(0.8); // Slow down
-  }, skip: Platform.isMacOS || Platform.isIOS);
+  });
 
   testWidgets('remove audio', (tester) async {
     await testRender(
@@ -653,7 +652,7 @@ void main() {
       );
       expect(result, isNotNull, reason: 'HEVC with slow motion failed');
       expect(result.lengthInBytes, greaterThan(50000));
-    }, skip: Platform.isMacOS || Platform.isIOS);
+    });
 
     testWidgets('remove audio', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
@@ -884,7 +883,6 @@ void main() {
       );
     });
 
-    // FIXME: Speed change tests cause "Operation Stopped" error on macOS
     testWidgets('export with speed change 0.5x', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
@@ -898,7 +896,7 @@ void main() {
       );
       expect(result, isNotNull, reason: 'H.264 with slow motion failed');
       expect(result.lengthInBytes, greaterThan(50000));
-    }, skip: Platform.isMacOS || Platform.isIOS);
+    });
 
     testWidgets('remove audio', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(

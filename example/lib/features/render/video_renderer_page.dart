@@ -121,7 +121,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   }
 
   Future<void> _changeSpeed() async {
-    var data = VideoRenderData(video: _video, playbackSpeed: 2);
+    var data = VideoRenderData(video: _video, playbackSpeed: .5);
 
     await _renderVideo(data);
   }

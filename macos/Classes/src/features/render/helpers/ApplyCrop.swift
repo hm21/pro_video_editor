@@ -37,7 +37,9 @@ func applyCrop(
     config.cropHeight = height
 
     if cropX != 0 || cropY != 0 || cropWidth != nil || cropHeight != nil {
-        print("[\(Tags.render)] ✂️ Applying crop: x=\(Int(x)), y=\(Int(y)), width=\(Int(width)), height=\(Int(height))")
+        print(
+            "[\(Tags.render)] ✂️ Applying crop: x=\(Int(x)), y=\(Int(y)), width=\(Int(width)), height=\(Int(height))"
+        )
     }
 
     let cropRect = CGRect(x: x, y: y, width: width, height: height)

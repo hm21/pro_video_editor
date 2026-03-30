@@ -471,8 +471,6 @@ class _VideoEditorBasicExamplePageState
               editor.callbacks.videoEditorCallbacks ?? VideoEditorCallbacks(),
         );
 
-    /// FIXME: On android video metadata say it's 90deg rotated??
-
     /// Load the new video
     final controller = VideoPlayerController.file(io.File(updatedFile.path));
     await controller.initialize();

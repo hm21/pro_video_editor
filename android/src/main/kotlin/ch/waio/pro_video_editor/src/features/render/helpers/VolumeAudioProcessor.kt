@@ -33,18 +33,21 @@ class VolumeAudioProcessor(private val volumeMultiplier: Float) : BaseAudioProce
 
     private var processedFrames = 0
     private var lastLogTime = 0L
-    
+
     override fun queueInput(inputBuffer: ByteBuffer) {
         val remaining = inputBuffer.remaining()
         if (remaining == 0) {
             return
         }
-        
+
         processedFrames++
         val now = System.currentTimeMillis()
         // Log every second to avoid spam
         if (now - lastLogTime > 1000) {
-            Log.d(RENDER_TAG, "VolumeAudioProcessor.queueInput: processing frame $processedFrames, bytes=$remaining, volume=$volumeMultiplier")
+            Log.d(
+                RENDER_TAG,
+                "VolumeAudioProcessor.queueInput: processing frame $processedFrames, bytes=$remaining, volume=$volumeMultiplier"
+            )
             lastLogTime = now
         }
 

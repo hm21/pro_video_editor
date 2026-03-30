@@ -29,7 +29,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
     // New properties for handling iPhone orientation
     var originalNaturalSize: CGSize = .zero
-    
+
     /// Fallback source track ID for older iOS versions
     var sourceTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
 
@@ -92,13 +92,14 @@ class VideoCompositor: NSObject, AVVideoCompositing {
             else {
                 continue
             }
-            overlayImageLayers.append(ImageLayer(
-                image: CIImage(cgImage: cgImage),
-                startUs: layer.startUs,
-                endUs: layer.endUs,
-                x: layer.x,
-                y: layer.y
-            ))
+            overlayImageLayers.append(
+                ImageLayer(
+                    image: CIImage(cgImage: cgImage),
+                    startUs: layer.startUs,
+                    endUs: layer.endUs,
+                    x: layer.x,
+                    y: layer.y
+                ))
         }
     }
 
@@ -138,36 +139,43 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
         // Try to get source buffer from the first available track
         var sourceBuffer: CVPixelBuffer?
-        
+
         if !request.sourceTrackIDs.isEmpty {
             sourceBuffer = request.sourceFrame(byTrackID: request.sourceTrackIDs[0].int32Value)
         }
-        
+
         // Fallback 1: Try to get track ID from layer instruction if sourceTrackIDs is empty
         // This can happen on older iOS versions (iPhone 7, iOS 15)
         if sourceBuffer == nil,
-           let instruction = request.videoCompositionInstruction as? AVMutableVideoCompositionInstruction,
-           let layerInstruction = instruction.layerInstructions.first as? AVMutableVideoCompositionLayerInstruction {
+            let instruction = request.videoCompositionInstruction
+                as? CustomVideoCompositionInstruction,
+            let layerInstruction = instruction.layerInstructions.first
+                as? AVMutableVideoCompositionLayerInstruction
+        {
             let trackID = layerInstruction.trackID
             if trackID != kCMPersistentTrackID_Invalid {
                 sourceBuffer = request.sourceFrame(byTrackID: trackID)
             }
         }
-        
+
         // Fallback 2: Use the pre-configured sourceTrackID from VideoCompositorConfig
         // This is set during composition building and guarantees we have the correct track ID
         if sourceBuffer == nil && sourceTrackID != kCMPersistentTrackID_Invalid {
             sourceBuffer = request.sourceFrame(byTrackID: sourceTrackID)
         }
-        
+
         guard let sourceBuffer = sourceBuffer else {
-            request.finish(with: NSError(domain: "VideoCompositor", code: 0, userInfo: [
-                NSLocalizedDescriptionKey: "No source tracks available for compositing (sourceTrackIDs: \(request.sourceTrackIDs.count), configTrackID: \(sourceTrackID))"
-            ]))
+            request.finish(
+                with: NSError(
+                    domain: "VideoCompositor", code: 0,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "No source tracks available for compositing (sourceTrackIDs: \(request.sourceTrackIDs.count), configTrackID: \(sourceTrackID))"
+                    ]))
             return
         }
         var outputImage = CIImage(cvPixelBuffer: sourceBuffer)
-        
+
         // Apply layer instruction transform first (video scaling/centering/rotation)
         // This ensures all videos are properly sized and oriented before applying user effects.
         // The layerInstruction contains the preferredTransform which already handles video rotation
@@ -176,22 +184,22 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         // IMPORTANT: AVFoundation uses a top-left origin coordinate system (Y points down),
         // while CIImage uses a bottom-left origin (Y points up). We need to convert the transform
         // to work correctly with CIImage's coordinate system.
-        
-        // Extract layer instruction from either AVMutableVideoCompositionInstruction or CustomVideoCompositionInstruction
+
+        // Extract layer instruction from CustomVideoCompositionInstruction
         var layerInstruction: AVMutableVideoCompositionLayerInstruction?
-        if let customInstruction = request.videoCompositionInstruction as? CustomVideoCompositionInstruction,
-           let firstLayerInstruction = customInstruction.layerInstructions.first as? AVMutableVideoCompositionLayerInstruction {
-            layerInstruction = firstLayerInstruction
-        } else if let standardInstruction = request.videoCompositionInstruction as? AVMutableVideoCompositionInstruction,
-                  let firstLayerInstruction = standardInstruction.layerInstructions.first as? AVMutableVideoCompositionLayerInstruction {
+        if let customInstruction = request.videoCompositionInstruction
+            as? CustomVideoCompositionInstruction,
+            let firstLayerInstruction = customInstruction.layerInstructions.first
+                as? AVMutableVideoCompositionLayerInstruction
+        {
             layerInstruction = firstLayerInstruction
         }
-        
+
         if let layerInstruction = layerInstruction {
             var startTransform = CGAffineTransform.identity
             var endTransform = CGAffineTransform.identity
             var timeRange = CMTimeRange.zero
-            
+
             // Get the transform at the current composition time
             let hasTransform = layerInstruction.getTransformRamp(
                 for: request.compositionTime,
@@ -199,34 +207,35 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                 end: &endTransform,
                 timeRange: &timeRange
             )
-            
+
             if hasTransform && !startTransform.isIdentity {
                 // Convert AVFoundation transform to CIImage coordinate system:
                 // 1. Flip Y axis before transform (go from CIImage coords to AVFoundation coords)
                 // 2. Apply the AVFoundation transform
                 // 3. Flip Y axis after transform (go back to CIImage coords)
                 let imageHeight = outputImage.extent.height
-                
+
                 // Flip Y: translate to top, scale Y by -1
                 let flipY = CGAffineTransform(scaleX: 1, y: -1)
                     .translatedBy(x: 0, y: -imageHeight)
-                
+
                 // Convert transform: flipY * transform * flipY^-1
                 // But since flipY is its own inverse (when combined with translate), we use:
                 // result = flipY * transform * flipY (adjusted for new height after transform)
-                let convertedTransform = flipY
+                let convertedTransform =
+                    flipY
                     .concatenating(startTransform)
-                
+
                 outputImage = outputImage.transformed(by: convertedTransform)
-                
+
                 // After transform, we need to flip back and normalize
                 let transformedExtent = outputImage.extent
                 let newHeight = transformedExtent.height
                 let flipBack = CGAffineTransform(scaleX: 1, y: -1)
                     .translatedBy(x: 0, y: -newHeight)
-                
+
                 outputImage = outputImage.transformed(by: flipBack)
-                
+
                 // Normalize position to origin
                 let finalExtent = outputImage.extent
                 if finalExtent.origin.x != 0 || finalExtent.origin.y != 0 {
@@ -243,7 +252,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
         // Apply user-defined effects (crop, rotation, flip, scale)
         var transform = CGAffineTransform.identity
-        
+
         // Apply LUT, blur, and flip BEFORE overlay when imageBytesWithCropping is enabled
         // This ensures these effects only affect the video, not the overlay
         if imageBytesWithCropping {
@@ -259,12 +268,12 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                     outputImage = filteredImage
                 }
             }
-            
+
             // Apply blur to video only
             if blurSigma > 0 {
                 outputImage = outputImage.applyingGaussianBlur(sigma: blurSigma)
             }
-            
+
             // Apply flip to video only (before adding overlay)
             if flipX || flipY {
                 let flipScaleX: CGFloat = flipX ? -1 : 1
@@ -275,7 +284,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                     .translatedBy(x: -center.x, y: -center.y)
 
                 outputImage = outputImage.transformed(by: flipTransform)
-                
+
                 // Normalize position after flip
                 let flippedExtent = outputImage.extent
                 if flippedExtent.origin.x != 0 || flippedExtent.origin.y != 0 {
@@ -288,7 +297,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                 center = CGPoint(x: outputImage.extent.midX, y: outputImage.extent.midY)
             }
         }
-        
+
         // Apply overlay BEFORE crop if imageBytesWithCropping is enabled
         if imageBytesWithCropping {
             let imageRect = outputImage.extent
@@ -308,8 +317,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                 // Check if current time is within the layer's time range
                 // startUs of -1 means "from the start of the video"
                 // endUs of -1 means "until the end of the video"
-                let inTimeRange = (layer.startUs == -1 || currentTimeUs >= layer.startUs) &&
-                                  (layer.endUs == -1 || currentTimeUs <= layer.endUs)
+                let inTimeRange =
+                    (layer.startUs == -1 || currentTimeUs >= layer.startUs)
+                    && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
 
                 if inTimeRange {
                     // Convert y from top-left (Dart) to bottom-left (Core Graphics)
@@ -420,8 +430,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                 // Check if current time is within the layer's time range
                 // startUs of -1 means "from the start of the video"
                 // endUs of -1 means "until the end of the video"
-                let inTimeRange = (layer.startUs == -1 || currentTimeUs >= layer.startUs) &&
-                                  (layer.endUs == -1 || currentTimeUs <= layer.endUs)
+                let inTimeRange =
+                    (layer.startUs == -1 || currentTimeUs >= layer.startUs)
+                    && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
 
                 if inTimeRange {
                     // Convert y from top-left (Dart) to bottom-left (Core Graphics)

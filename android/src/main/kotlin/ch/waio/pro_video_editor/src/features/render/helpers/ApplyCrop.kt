@@ -58,7 +58,7 @@ fun applyCrop(
             var cropHeight = cropHeight ?: (videoHeight - cropY).toInt()
 
             //  Swap crop dimensions if rotated 90° or 270°
-            var rotation = rotationDegrees.toInt() % 360;
+            val rotation = rotationDegrees.toInt() % 360;
             when (rotation) {
                 90, 270 -> {
                     val tempWidth = cropWidth

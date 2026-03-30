@@ -23,7 +23,7 @@ class CompositionBuilder(
     private val context: Context,
     private val config: RenderConfig
 ) {
-    
+
     private var videoEffects: List<Effect> = emptyList()
     private var audioEffects: List<AudioProcessor> = emptyList()
 
@@ -68,7 +68,12 @@ class CompositionBuilder(
             .setRotation(rotationDegrees)
             .setFlip(config.flipX, config.flipY)
             .setCrop(config.cropWidth, config.cropHeight, config.cropX, config.cropY)
-            .setImageLayer(config.imageBytes, config.scaleX, config.scaleY, config.imageBytesWithCropping)
+            .setImageLayer(
+                config.imageBytes,
+                config.scaleX,
+                config.scaleY,
+                config.imageBytesWithCropping
+            )
             .setTimedImageLayers(config.imageLayers.map { imageLayer ->
                 VideoSequenceBuilder.ImageLayerConfig(
                     imageBytes = imageLayer.imageData,
@@ -85,7 +90,7 @@ class CompositionBuilder(
             .setOriginalAudioVolume(config.originalAudioVolume)
             .setGlobalTrim(config.startUs, config.endUs)
             .setHasCustomAudio(hasCustomAudio)
-        
+
         // Detect if audio normalization is needed (check both video and custom audio)
         val needsNormalization = videoBuilder.detectAudioNormalizationNeeded() || hasCustomAudio
         videoBuilder.setAudioNormalization(needsNormalization)
@@ -96,28 +101,35 @@ class CompositionBuilder(
 
         // Build video sequence (with audio intact)
         val videoSequence = videoBuilder.build()
-        
+
         // Prepare sequences list
         val sequences = mutableListOf<EditedMediaItemSequence>()
         sequences.add(videoSequence)
-        Log.d(RENDER_TAG, "Created video EditedMediaItemSequence with ${config.videoClips.size} items")
+        Log.d(
+            RENDER_TAG,
+            "Created video EditedMediaItemSequence with ${config.videoClips.size} items"
+        )
 
         // Add custom audio as separate sequence - Media3 will mix both tracks natively
         if (hasCustomAudio) {
             val totalVideoDuration = videoBuilder.calculateTotalDuration()
-            
-            val hasOriginalAudio = config.originalAudioVolume != null && config.originalAudioVolume > 0.0f
-            
+
+            val hasOriginalAudio =
+                config.originalAudioVolume != null && config.originalAudioVolume > 0.0f
+
             if (hasOriginalAudio) {
                 Log.d(
                     RENDER_TAG,
                     "🎵 Native audio mixing: Video audio (${config.originalAudioVolume}x) + Custom audio (${config.customAudioVolume}x)"
                 )
-                Log.d(RENDER_TAG, "Media3 will mix both audio tracks natively via parallel sequences")
+                Log.d(
+                    RENDER_TAG,
+                    "Media3 will mix both audio tracks natively via parallel sequences"
+                )
             } else {
                 Log.d(RENDER_TAG, "Only custom audio (no video audio)")
             }
-            
+
             // Add custom audio sequence - Media3 will automatically mix it with video audio
             val audioSequence = AudioSequenceBuilder(config.customAudioPath!!, totalVideoDuration)
                 .setVolume(config.customAudioVolume ?: 1.0f)

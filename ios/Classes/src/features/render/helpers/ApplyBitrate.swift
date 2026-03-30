@@ -25,8 +25,12 @@ import AVFoundation
 /// - <1 Mbps: Low quality
 public func applyBitrate(requestedBitrate: Int?, presetHint: String? = nil) -> String {
     if let bitrate = requestedBitrate {
-        print("[\(Tags.render)] 📊 Requested bitrate: \(bitrate) bps (\(String(format: "%.1f", Double(bitrate) / 1_000_000)) Mbps)")
-        print("[\(Tags.render)] ⚠️ AVAssetExportSession does not support custom bitrate directly - using closest preset")
+        print(
+            "[\(Tags.render)] 📊 Requested bitrate: \(bitrate) bps (\(String(format: "%.1f", Double(bitrate) / 1_000_000)) Mbps)"
+        )
+        print(
+            "[\(Tags.render)] ⚠️ AVAssetExportSession does not support custom bitrate directly - using closest preset"
+        )
 
         if bitrate >= 50_000_000 {
             if #available(iOS 11.0, *) {

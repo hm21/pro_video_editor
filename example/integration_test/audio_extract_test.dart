@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:path_provider/path_provider.dart';
@@ -171,48 +172,58 @@ void main() {
     }
   }, skip: skipPlatform);
 
-  testWidgets(
-    'extractAudio can be cancelled',
-    (tester) async {
-      // Use platform-specific format
-      final format = Platform.isAndroid ? AudioFormat.mp3 : AudioFormat.m4a;
+  testWidgets('extractAudio can be cancelled', (tester) async {
+    // Use platform-specific format
+    final format = Platform.isAndroid ? AudioFormat.mp3 : AudioFormat.m4a;
 
-      final directory = await getTemporaryDirectory();
-      final outputPath =
-          '${directory.path}/test_audio_cancel_${DateTime.now().millisecondsSinceEpoch}.${format.extension}';
+    final directory = await getTemporaryDirectory();
+    final outputPath =
+        '${directory.path}/test_audio_cancel_${DateTime.now().millisecondsSinceEpoch}.${format.extension}';
 
-      final config = AudioExtractConfigs(video: testVideo, format: format);
+    final config = AudioExtractConfigs(video: testVideo, format: format);
 
-      // Start extraction
-      final extractionFuture = ProVideoEditor.instance.extractAudioToFile(
-        outputPath,
-        config,
-      );
+    // Start extraction in a non-blocking way
+    final extractionFuture = ProVideoEditor.instance.extractAudioToFile(
+      outputPath,
+      config,
+    );
 
-      // Wait a bit to ensure extraction has started
-      await Future.delayed(const Duration(milliseconds: 100));
+    // Capture error before cancel to prevent unhandled async exception
+    final capturedError = extractionFuture.then<Object?>(
+      (_) => null,
+      onError: (Object e) => e,
+    );
 
-      // Cancel the task
+    // Small delay to let extraction start
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+
+    // Cancel the task — extraction may already be finished on fast machines,
+    // so handle TASK_NOT_FOUND gracefully.
+    bool cancelledInTime = true;
+    try {
       await ProVideoEditor.instance.cancel(config.id);
-
-      // Extraction should throw or complete with error
-      try {
-        await extractionFuture;
-        // If it completes without error, it might have been too fast to cancel
-        // This is acceptable behavior
-      } catch (e) {
-        // Expected: cancellation should cause an error
-        expect(e, isNotNull);
+    } on PlatformException catch (e) {
+      if (e.code == 'TASK_NOT_FOUND') {
+        cancelledInTime = false;
+      } else {
+        rethrow;
       }
+    }
 
-      // Clean up if file was created
-      final file = File(outputPath);
-      if (await file.exists()) {
-        await file.delete();
-      }
-    },
-    skip: skipPlatform || true, // TODO: Fix that test
-  );
+    final error = await capturedError;
+    if (cancelledInTime) {
+      expect(error, isA<RenderCanceledException>());
+    } else {
+      // Task completed before cancel — no error expected
+      expect(error, isNull);
+    }
+
+    // Clean up if file was created
+    final file = File(outputPath);
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }, skip: skipPlatform);
 
   testWidgets('extractAudio handles invalid time ranges gracefully', (
     tester,

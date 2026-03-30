@@ -134,7 +134,8 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
         result(hasAudio)
       } catch {
         result(
-          FlutterError(code: "AUDIO_CHECK_ERROR", message: error.localizedDescription, details: nil))
+          FlutterError(code: "AUDIO_CHECK_ERROR", message: error.localizedDescription, details: nil)
+        )
       }
     }
   }
@@ -270,7 +271,8 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     if activeAudioTasks[id] != nil {
       result(
         FlutterError(
-          code: "TASK_ALREADY_RUNNING", message: "Audio extraction task with id \(id) is already running",
+          code: "TASK_ALREADY_RUNNING",
+          message: "Audio extraction task with id \(id) is already running",
           details: nil))
       return
     }
@@ -278,7 +280,8 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     guard let config = AudioExtractConfig.fromArguments(args) else {
       result(
         FlutterError(
-          code: "INVALID_ARGUMENTS", message: "Invalid audio extraction configuration", details: nil))
+          code: "INVALID_ARGUMENTS", message: "Invalid audio extraction configuration", details: nil
+        ))
       return
     }
 
@@ -477,7 +480,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
           let errorData: [String: Any] = [
             "id": id,
             "error": error.localizedDescription,
-            "errorCode": code
+            "errorCode": code,
           ]
           self.waveformStreamSink?(errorData)
         }
@@ -485,7 +488,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     )
 
     task.attachHandle(handle)
-    
+
     // Return immediately - chunks will be sent via event channel
     result(nil)
   }
@@ -534,7 +537,8 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    result(FlutterError(code: "TASK_NOT_FOUND", message: "No task found for id \(id)", details: nil))
+    result(
+      FlutterError(code: "TASK_NOT_FOUND", message: "No task found for id \(id)", details: nil))
   }
 
   // MARK: - Helper Methods

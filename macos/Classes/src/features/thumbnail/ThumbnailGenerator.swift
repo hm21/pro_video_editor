@@ -13,7 +13,7 @@ import Foundation
 class ThumbnailGenerator {
 
     // MARK: - Public Methods
-    
+
     /// Asynchronously generates thumbnails from a video file.
     ///
     /// This method determines the extraction mode based on the configuration:
@@ -55,7 +55,7 @@ class ThumbnailGenerator {
             }
 
             // MARK: - Frame Extraction
-            
+
             let timeIndexMap: [Double: Int] = Dictionary(
                 uniqueKeysWithValues:
                     times.enumerated().map { (index, time) in
@@ -64,47 +64,48 @@ class ThumbnailGenerator {
             )
 
             let results = await withCheckedContinuation { continuation in
-                    var resultData = [Data?](repeating: nil, count: times.count)
-                    var completed = 0
-                    let start = Date().timeIntervalSince1970
-                    let totalCount = times.count
+                var resultData = [Data?](repeating: nil, count: times.count)
+                var completed = 0
+                let start = Date().timeIntervalSince1970
+                let totalCount = times.count
 
-                    generator.generateCGImagesAsynchronously(forTimes: times) {
-                        requestedTime, cgImage, actualTime, result, error in
+                generator.generateCGImagesAsynchronously(forTimes: times) {
+                    requestedTime, cgImage, actualTime, result, error in
 
-                        let key = requestedTime.seconds
-                        guard let index = timeIndexMap[key] else {
-                            print("⚠️ Unexpected time: \(Int(key * 1000)) ms")
-                            return
-                        }
+                    let key = requestedTime.seconds
+                    guard let index = timeIndexMap[key] else {
+                        print("⚠️ Unexpected time: \(Int(key * 1000)) ms")
+                        return
+                    }
 
-                        if let cgImage = cgImage {
-                            let resized = resizeCGImageKeepingAspect(
-                                cgImage: cgImage,
-                                targetWidth: config.outputWidth,
-                                targetHeight: config.outputHeight,
-                                boxFit: config.boxFit
-                            )
-                            let data = compressCGImage(resized, format: config.outputFormat, jpegQuality: config.jpegQuality)
-                            resultData[index] = data
+                    if let cgImage = cgImage {
+                        let resized = resizeCGImageKeepingAspect(
+                            cgImage: cgImage,
+                            targetWidth: config.outputWidth,
+                            targetHeight: config.outputHeight,
+                            boxFit: config.boxFit
+                        )
+                        let data = compressCGImage(
+                            resized, format: config.outputFormat, jpegQuality: config.jpegQuality)
+                        resultData[index] = data
 
-                            let elapsed = Int((Date().timeIntervalSince1970 - start) * 1000)
-                            print(
-                                "[\(index)] ✅ \(Int(key * 1000)) ms in \(elapsed) ms (\(data.count) bytes)"
-                            )
-                        } else {
-                            let message = error?.localizedDescription ?? "Unknown error"
-                            print("[\(index)] ❌ Failed at \(Int(key * 1000)) ms: \(message)")
-                        }
+                        let elapsed = Int((Date().timeIntervalSince1970 - start) * 1000)
+                        print(
+                            "[\(index)] ✅ \(Int(key * 1000)) ms in \(elapsed) ms (\(data.count) bytes)"
+                        )
+                    } else {
+                        let message = error?.localizedDescription ?? "Unknown error"
+                        print("[\(index)] ❌ Failed at \(Int(key * 1000)) ms: \(message)")
+                    }
 
-                        completed += 1
-                        onProgress(Double(completed) / Double(totalCount))
+                    completed += 1
+                    onProgress(Double(completed) / Double(totalCount))
 
-                        if completed == totalCount {
-                            continuation.resume(returning: resultData.compactMap { $0 })
-                        }
+                    if completed == totalCount {
+                        continuation.resume(returning: resultData.compactMap { $0 })
                     }
                 }
+            }
 
             let filteredResults = results.filter { !$0.isEmpty }
             onComplete(filteredResults)
@@ -112,7 +113,7 @@ class ThumbnailGenerator {
     }
 
     // MARK: - Image Processing
-    
+
     /// Resizes a CGImage while maintaining aspect ratio.
     ///
     /// This method supports two scaling modes:
@@ -173,7 +174,9 @@ class ThumbnailGenerator {
     ///   - format: Output format ("png", "jpeg", or "jpg")
     ///   - jpegQuality: JPEG compression quality (0-100). Only affects JPEG format.
     /// - Returns: Compressed image as Data
-    private static func compressCGImage(_ cgImage: CGImage, format: String, jpegQuality: Int) -> Data {
+    private static func compressCGImage(_ cgImage: CGImage, format: String, jpegQuality: Int)
+        -> Data
+    {
         let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
         let imageType: NSBitmapImageRep.FileType = {
             switch format.lowercased() {
@@ -191,7 +194,7 @@ class ThumbnailGenerator {
     }
 
     // MARK: - Keyframe Extraction
-    
+
     /// Extracts evenly distributed timestamps for keyframe extraction.
     ///
     /// This method calculates timestamps evenly spaced across the video duration

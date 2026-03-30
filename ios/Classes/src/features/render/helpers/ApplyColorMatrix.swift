@@ -10,7 +10,6 @@ import CoreImage
 ///
 /// - Parameters:
 ///   - config: Video compositor configuration to modify.
-///   - composition: Video composition (not currently used but kept for API consistency).
 ///   - matrixList: Array of 4x5 color matrices (20 elements each). Multiple matrices
 ///                 are combined through matrix multiplication.
 ///   - lutSize: Size of the 3D LUT cube (default 33x33x33 = 35,937 color samples).
@@ -18,7 +17,6 @@ import CoreImage
 /// - Note: The LUT is generated once and applied to every frame by the video compositor.
 func applyColorMatrix(
     config: inout VideoCompositorConfig,
-    to composition: AVMutableVideoComposition,
     matrixList: [[Double]],
     lutSize: Int = 33
 ) {
@@ -28,11 +26,15 @@ func applyColorMatrix(
 
     let combined = combineColorMatrices(matrixList)
     guard combined.count == 20 else {
-        print("[\(Tags.render)] ⚠️ Invalid color matrix: expected 20 elements, got \(combined.count) - skipping")
+        print(
+            "[\(Tags.render)] ⚠️ Invalid color matrix: expected 20 elements, got \(combined.count) - skipping"
+        )
         return
     }
 
-    print("[\(Tags.render)] 🎨 Applying color grading: \(matrixList.count) matrices combined into \(lutSize)x\(lutSize)x\(lutSize) LUT")
+    print(
+        "[\(Tags.render)] 🎨 Applying color grading: \(matrixList.count) matrices combined into \(lutSize)x\(lutSize)x\(lutSize) LUT"
+    )
 
     guard let data = generateLUTData(from: combined, size: lutSize) else {
         print("[\(Tags.render)] ❌ Failed to generate LUT data")

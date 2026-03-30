@@ -228,7 +228,7 @@ class VideoSequenceBuilder(
     fun calculateTotalDuration(): Long {
         // Apply global trim first to get accurate duration
         val trimmedClips = applyGlobalTrim(videoClips)
-        
+
         var totalDurationUs = 0L
         trimmedClips.forEach { clip ->
             val clipDurationUs = when {
@@ -250,7 +250,7 @@ class VideoSequenceBuilder(
     fun build(): EditedMediaItemSequence {
         Log.d(RENDER_TAG, "Building video sequence with ${videoClips.size} clips")
         Log.d(RENDER_TAG, "Audio enabled: $enableAudio")
-        
+
         // Apply global trim to clips if set
         val trimmedClips = applyGlobalTrim(videoClips)
         Log.d(RENDER_TAG, "After global trim: ${trimmedClips.size} clips (was ${videoClips.size})")
@@ -286,33 +286,15 @@ class VideoSequenceBuilder(
             editedMediaItems
         }
 
-        // Check if first clip has no audio but later clips do
-        val firstClipHasAudio = if (enableAudio && videoClips.isNotEmpty()) {
-            MediaInfoExtractor.getAudioChannelCount(videoClips[0].inputPath)?.let { it > 0 } ?: false
-        } else {
-            true // If audio disabled, doesn't matter
+        // Determine track types for the sequence
+        val trackTypes = mutableSetOf<@C.TrackType Int>(C.TRACK_TYPE_VIDEO)
+        if (enableAudio) {
+            trackTypes.add(C.TRACK_TYPE_AUDIO)
         }
 
-        val laterClipHasAudio = if (enableAudio && videoClips.size > 1) {
-            videoClips.drop(1).any { clip ->
-                MediaInfoExtractor.getAudioChannelCount(clip.inputPath)?.let { it > 0 } ?: false
-            }
-        } else {
-            false
-        }
-
-        val needsForceAudioTrack = !firstClipHasAudio && laterClipHasAudio
-
-        if (needsForceAudioTrack) {
-            Log.w(
-                RENDER_TAG,
-                "First clip has no audio but later clips do - using experimentalSetForceAudioTrack"
-            )
-        }
-
-        return EditedMediaItemSequence.Builder(finalVideoItems)
+        return EditedMediaItemSequence.Builder(trackTypes)
+            .addItems(finalVideoItems)
             .setIsLooping(false)
-            .experimentalSetForceAudioTrack(needsForceAudioTrack)
             .build()
     }
 
@@ -339,8 +321,22 @@ class VideoSequenceBuilder(
         // Channel order: FL, FR, FC, LFE, BL, BR, SL, SR
         // Boosted coefficients to maintain loudness
         val eightToTwo = floatArrayOf(
-            1.0f * boost, 0.0f, 0.707f * boost, 0.0f, 0.707f * boost, 0.0f, 0.707f * boost, 0.0f,  // Left output
-            0.0f, 1.0f * boost, 0.707f * boost, 0.0f, 0.0f, 0.707f * boost, 0.0f, 0.707f * boost   // Right output
+            1.0f * boost,
+            0.0f,
+            0.707f * boost,
+            0.0f,
+            0.707f * boost,
+            0.0f,
+            0.707f * boost,
+            0.0f,  // Left output
+            0.0f,
+            1.0f * boost,
+            0.707f * boost,
+            0.0f,
+            0.0f,
+            0.707f * boost,
+            0.0f,
+            0.707f * boost   // Right output
         )
         channelMixer.putChannelMixingMatrix(
             ChannelMixingMatrix(8, 2, eightToTwo)
@@ -379,7 +375,10 @@ class VideoSequenceBuilder(
             ChannelMixingMatrix.create(1, 2)
         )
 
-        Log.d(RENDER_TAG, "Channel normalization configured with boosted coefficients for loudness preservation")
+        Log.d(
+            RENDER_TAG,
+            "Channel normalization configured with boosted coefficients for loudness preservation"
+        )
 
         return mutableListOf<AudioProcessor>(channelMixer).apply { addAll(audioEffects) }
     }
@@ -440,10 +439,10 @@ class VideoSequenceBuilder(
             inputFile,
             rotationDegrees
         )
-        
+
         // Adjust dimensions based on rotation
         val isRotated90Deg = videoRotation == 90 || videoRotation == 270
-        
+
         // If crop is applied, update dimensions for AFTER crop scenario
         val croppedWidth: Int?
         val croppedHeight: Int?
@@ -471,7 +470,7 @@ class VideoSequenceBuilder(
                     imageLayer.scaleY
                 )
             }
-            
+
             // Apply time-based image layers BEFORE crop when withCropping is enabled
             // Use original video dimensions
             if (timedImageLayers.isNotEmpty()) {
@@ -492,7 +491,7 @@ class VideoSequenceBuilder(
                 crop.x,
                 crop.y
             )
-            
+
             // Update dimensions after crop for image layers applied AFTER crop
             if (croppedWidth != null) videoWidth = croppedWidth
             if (croppedHeight != null) videoHeight = croppedHeight
@@ -583,7 +582,10 @@ class VideoSequenceBuilder(
             return clips
         }
 
-        Log.d(RENDER_TAG, "Applying global trim: start=${globalStartUs?.div(1000)}ms, end=${globalEndUs?.div(1000)}ms")
+        Log.d(
+            RENDER_TAG,
+            "Applying global trim: start=${globalStartUs?.div(1000)}ms, end=${globalEndUs?.div(1000)}ms"
+        )
 
         val result = mutableListOf<VideoClip>()
         var compositionTimeUs = 0L
@@ -621,24 +623,32 @@ class VideoSequenceBuilder(
                 if (clipEndInComposition > globalEnd) {
                     val offsetUs = clipEndInComposition - globalEnd
                     newEndInSource = clipEndInSource - offsetUs
-                    
+
                     // Subtract ~1 frame (33ms for 30fps) to ensure encoder doesn't overshoot
                     // This compensates for encoder rounding to next frame/audio sample boundary
                     val frameCompensationUs = 33333L // ~33ms = 1 frame at 30fps
                     newEndInSource = maxOf(newStartInSource, newEndInSource - frameCompensationUs)
-                    
-                    Log.d(RENDER_TAG, "Adjusting clip end by ${offsetUs / 1000}ms (with frame compensation)")
+
+                    Log.d(
+                        RENDER_TAG,
+                        "Adjusting clip end by ${offsetUs / 1000}ms (with frame compensation)"
+                    )
                 }
 
                 // Only add if there's still content left
                 if (newEndInSource > newStartInSource) {
-                    result.add(VideoClip(
-                        inputPath = clip.inputPath,
-                        startUs = newStartInSource,
-                        endUs = newEndInSource
-                    ))
+                    result.add(
+                        VideoClip(
+                            inputPath = clip.inputPath,
+                            startUs = newStartInSource,
+                            endUs = newEndInSource
+                        )
+                    )
                     val trimmedDuration = newEndInSource - newStartInSource
-                    Log.d(RENDER_TAG, "Added trimmed clip: start=${newStartInSource / 1000}ms, end=${newEndInSource / 1000}ms, duration=${trimmedDuration / 1000}ms")
+                    Log.d(
+                        RENDER_TAG,
+                        "Added trimmed clip: start=${newStartInSource / 1000}ms, end=${newEndInSource / 1000}ms, duration=${trimmedDuration / 1000}ms"
+                    )
                 }
             }
 
@@ -651,7 +661,12 @@ class VideoSequenceBuilder(
             val end = clip.endUs ?: 0L
             end - start
         }
-        Log.d(RENDER_TAG, "Total duration after global trim: ${totalTrimmedDuration / 1000}ms (target: ${globalEndUs?.minus(globalStartUs ?: 0L)?.div(1000)}ms)")
+        Log.d(
+            RENDER_TAG,
+            "Total duration after global trim: ${totalTrimmedDuration / 1000}ms (target: ${
+                globalEndUs?.minus(globalStartUs ?: 0L)?.div(1000)
+            }ms)"
+        )
 
         return result
     }

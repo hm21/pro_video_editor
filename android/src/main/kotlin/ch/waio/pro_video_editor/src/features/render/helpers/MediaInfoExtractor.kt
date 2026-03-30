@@ -173,20 +173,20 @@ object MediaInfoExtractor {
         return try {
             val extractor = MediaExtractor()
             extractor.setDataSource(videoPath)
-            
+
             var isHevc = false
             var bitDepth = 8
             var isHdr = false
-            var profile: String? = null
+            val profile: String? = null
 
             for (i in 0 until extractor.trackCount) {
                 val format = extractor.getTrackFormat(i)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                
+
                 if (mime.startsWith("video/")) {
                     // Check if HEVC
                     isHevc = mime == "video/hevc" || mime == "video/h265"
-                    
+
                     // Try to get bit depth (API 24+)
                     try {
                         if (format.containsKey("color-bit-depth")) {
@@ -195,7 +195,7 @@ object MediaInfoExtractor {
                     } catch (e: Exception) {
                         // Key not available on older devices
                     }
-                    
+
                     // Check for HDR transfer function (API 24+)
                     try {
                         if (format.containsKey(MediaFormat.KEY_COLOR_TRANSFER)) {
@@ -206,7 +206,7 @@ object MediaInfoExtractor {
                     } catch (e: Exception) {
                         // Key not available
                     }
-                    
+
                     // Check color standard for wide color gamut (usually indicates HDR)
                     try {
                         if (format.containsKey(MediaFormat.KEY_COLOR_STANDARD)) {
@@ -219,7 +219,7 @@ object MediaInfoExtractor {
                     } catch (e: Exception) {
                         // Key not available
                     }
-                    
+
                     // Try to get codec profile string
                     try {
                         if (format.containsKey("csd-0")) {
@@ -230,7 +230,7 @@ object MediaInfoExtractor {
                     } catch (e: Exception) {
                         // Key not available
                     }
-                    
+
                     // If HEVC and no explicit bit-depth found, check profile level
                     // Main 10 profile typically uses 10-bit
                     if (isHevc && bitDepth == 8) {
@@ -246,8 +246,11 @@ object MediaInfoExtractor {
                             // Key not available
                         }
                     }
-                    
-                    Log.d(RENDER_TAG, "Video format: mime=$mime, isHevc=$isHevc, bitDepth=$bitDepth, isHdr=$isHdr")
+
+                    Log.d(
+                        RENDER_TAG,
+                        "Video format: mime=$mime, isHevc=$isHevc, bitDepth=$bitDepth, isHdr=$isHdr"
+                    )
                     break
                 }
             }

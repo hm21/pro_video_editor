@@ -273,6 +273,7 @@ void main() {
     });
 
     testWidgets('image layer on HEVC video', (_) async {
+      // FIXME:
       await testRender(
         description: 'Image layer on HEVC',
         renderModel: VideoRenderData(
@@ -283,6 +284,60 @@ void main() {
               image: overlayImage,
               startTime: Duration.zero,
               endTime: const Duration(seconds: 2),
+            ),
+          ],
+        ),
+      );
+    });
+
+    testWidgets('image layer with offset (top left)', (_) async {
+      await testRender(
+        description: 'Image layer with offset (top left)',
+        renderModel: VideoRenderData(
+          video: inputVideo,
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            ImageLayer(
+              image: overlayImage,
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 4),
+              offset: const ui.Offset(0, 0),
+            ),
+          ],
+        ),
+      );
+    });
+
+    testWidgets('image layer with offset (center)', (_) async {
+      await testRender(
+        description: 'Image layer with offset (center)',
+        renderModel: VideoRenderData(
+          video: inputVideo,
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            ImageLayer(
+              image: overlayImage,
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 4),
+              offset: const ui.Offset(250, 150),
+            ),
+          ],
+        ),
+      );
+    });
+
+    testWidgets('image layer with offset (bottom right)', (_) async {
+      await testRender(
+        description: 'Image layer with offset (bottom right)',
+        renderModel: VideoRenderData(
+          video: inputVideo,
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            ImageLayer(
+              image: overlayImage,
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 4),
+              offset: const ui.Offset(400, 300),
             ),
           ],
         ),

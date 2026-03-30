@@ -18,7 +18,7 @@ import Foundation
 ///
 /// - Returns: A tuple containing:
 ///   - AVMutableComposition: The concatenated video/audio composition
-///   - AVMutableVideoComposition: Video composition with effects and instructions
+///   - VideoCompositionData: Video composition data with instructions and render size
 ///   - CGSize: Final render size (max dimensions from all clips)
 ///   - AVAudioMix?: Audio mix with volume controls (nil if no audio mixing needed)
 ///   - CMPersistentTrackID: The track ID of the video composition track (for fallback on older macOS)
@@ -33,7 +33,9 @@ func applyComposition(
     originalAudioVolume: Float?,
     customAudioVolume: Float?,
     loopCustomAudio: Bool
-) async throws -> (AVMutableComposition, AVMutableVideoComposition, CGSize, AVAudioMix?, CMPersistentTrackID) {
+) async throws -> (
+    AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID
+) {
     return try await CompositionBuilder(videoClips: videoClips, videoEffects: videoEffects)
         .setEnableAudio(enableAudio)
         .setCustomAudioPath(customAudioPath)

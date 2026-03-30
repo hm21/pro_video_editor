@@ -30,7 +30,9 @@ func applyImageLayer(
 
     if let data = imageData {
         let sizeKB = Double(data.count) / 1024.0
-        print("[\(Tags.render)] 🖼️ Applying overlay image (\(String(format: "%.1f", sizeKB)) KB, withCropping: \(withCropping))")
+        print(
+            "[\(Tags.render)] 🖼️ Applying overlay image (\(String(format: "%.1f", sizeKB)) KB, withCropping: \(withCropping))"
+        )
     }
 
     if !imageLayers.isEmpty {

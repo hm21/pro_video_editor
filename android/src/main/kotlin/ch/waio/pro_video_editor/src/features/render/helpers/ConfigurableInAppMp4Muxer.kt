@@ -56,7 +56,7 @@ class ConfigurableInAppMp4Muxer private constructor(
 
             val builder = Mp4Muxer.Builder(SeekableMuxerOutput.of(outputStream))
                 .setAttemptStreamableOutputEnabled(attemptStreamableOutput)
-            
+
             val muxer = builder.build()
 
             return ConfigurableInAppMp4Muxer(muxer, videoDurationUs)

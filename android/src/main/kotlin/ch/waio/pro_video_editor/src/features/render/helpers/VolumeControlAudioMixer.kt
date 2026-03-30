@@ -31,7 +31,10 @@ class VolumeControlAudioMixerFactory(
 ) : AudioMixer.Factory {
 
     init {
-        Log.d(RENDER_TAG, "VolumeControlAudioMixerFactory created: videoVolume=$videoAudioVolume, customVolume=$customAudioVolume, videoAudioPresent=$videoAudioPresent")
+        Log.d(
+            RENDER_TAG,
+            "VolumeControlAudioMixerFactory created: videoVolume=$videoAudioVolume, customVolume=$customAudioVolume, videoAudioPresent=$videoAudioPresent"
+        )
     }
 
     override fun create(): AudioMixer {
@@ -60,10 +63,11 @@ private class VolumeControlAudioMixer(
     private val videoAudioPresent: Boolean
 ) : AudioMixer {
 
-    private val delegate: DefaultAudioMixer = DefaultAudioMixer.Factory().create() as DefaultAudioMixer
+    private val delegate: DefaultAudioMixer =
+        DefaultAudioMixer.Factory().create() as DefaultAudioMixer
     private var sourceCount = 0
     private var isConfigured = false
-    
+
     // Track source volumes to ensure they stay applied
     private val sourceVolumes = mutableMapOf<Int, Float>()
 
@@ -72,7 +76,10 @@ private class VolumeControlAudioMixer(
         bufferSizeMs: Int,
         startTimeUs: Long
     ) {
-        Log.d(RENDER_TAG, "VolumeControlAudioMixer.configure: format=$outputAudioFormat, bufferSizeMs=$bufferSizeMs, startTimeUs=$startTimeUs")
+        Log.d(
+            RENDER_TAG,
+            "VolumeControlAudioMixer.configure: format=$outputAudioFormat, bufferSizeMs=$bufferSizeMs, startTimeUs=$startTimeUs"
+        )
         delegate.configure(outputAudioFormat, bufferSizeMs, startTimeUs)
         isConfigured = true
         sourceCount = 0
@@ -85,11 +92,11 @@ private class VolumeControlAudioMixer(
 
     override fun addSource(sourceFormat: AudioProcessor.AudioFormat, startTimeUs: Long): Int {
         val sourceId = delegate.addSource(sourceFormat, startTimeUs)
-        
+
         // Determine which volume to apply based on source order and whether video audio is present
         val volume: Float
         val sourceType: String
-        
+
         if (videoAudioPresent) {
             // Both video and custom audio present (mixing mode)
             // Source 0 = Video audio, Source 1+ = Custom audio
@@ -106,16 +113,19 @@ private class VolumeControlAudioMixer(
             volume = customAudioVolume
             sourceType = "CUSTOM AUDIO (replacing video audio)"
         }
-        
-        Log.d(RENDER_TAG, "VolumeControlAudioMixer: Source $sourceId added ($sourceType), applying volume: $volume")
-        
+
+        Log.d(
+            RENDER_TAG,
+            "VolumeControlAudioMixer: Source $sourceId added ($sourceType), applying volume: $volume"
+        )
+
         // Store the volume we want for this source
         sourceVolumes[sourceId] = volume
-        
+
         // Apply volume to this source
         delegate.setSourceVolume(sourceId, volume)
         Log.d(RENDER_TAG, "VolumeControlAudioMixer: setSourceVolume($sourceId, $volume) called")
-        
+
         sourceCount++
         return sourceId
     }
@@ -128,11 +138,17 @@ private class VolumeControlAudioMixer(
         // This is called externally - log it and check if it differs from our intended volume
         val intendedVolume = sourceVolumes[sourceId]
         if (intendedVolume != null && intendedVolume != volume) {
-            Log.w(RENDER_TAG, "VolumeControlAudioMixer: External setSourceVolume($sourceId, $volume) differs from intended $intendedVolume - IGNORING external call!")
+            Log.w(
+                RENDER_TAG,
+                "VolumeControlAudioMixer: External setSourceVolume($sourceId, $volume) differs from intended $intendedVolume - IGNORING external call!"
+            )
             // Re-apply our intended volume
             delegate.setSourceVolume(sourceId, intendedVolume)
         } else {
-            Log.d(RENDER_TAG, "VolumeControlAudioMixer.setSourceVolume called externally: sourceId=$sourceId, volume=$volume")
+            Log.d(
+                RENDER_TAG,
+                "VolumeControlAudioMixer.setSourceVolume called externally: sourceId=$sourceId, volume=$volume"
+            )
             delegate.setSourceVolume(sourceId, volume)
         }
     }
