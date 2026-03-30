@@ -81,7 +81,7 @@ void main() {
       await testRender(
         description: 'Single image layer (full duration)',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(image: overlayImage, startTime: Duration.zero),
@@ -94,7 +94,7 @@ void main() {
       await testRender(
         description: 'Single image layer (1s-4s)',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(
@@ -114,7 +114,7 @@ void main() {
       await testRender(
         description: 'Multiple image layers',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(
@@ -139,7 +139,7 @@ void main() {
       await testRender(
         description: 'Overlapping image layers',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(
@@ -161,7 +161,7 @@ void main() {
       await testRender(
         description: 'Image layer + rotation',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(rotateTurns: 1),
           imageLayers: [
@@ -179,7 +179,7 @@ void main() {
       await testRender(
         description: 'Image layer + flip',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(flipX: true, flipY: true),
           imageLayers: [
@@ -197,7 +197,7 @@ void main() {
       await testRender(
         description: 'Image layer + crop',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(
             x: 100,
@@ -220,7 +220,7 @@ void main() {
       await testRender(
         description: 'Image layer + color filter',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           colorMatrixList: kBasicFilterMatrix,
           imageLayers: [
@@ -238,7 +238,7 @@ void main() {
       await testRender(
         description: 'Image layer + blur',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           blur: 3,
           imageLayers: [
@@ -256,7 +256,7 @@ void main() {
       await testRender(
         description: 'Image layer + multiple effects',
         renderModel: VideoRenderData(
-          video: h264Video,
+          videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(flipX: true),
           colorMatrixList: kBasicFilterMatrix,
@@ -276,7 +276,7 @@ void main() {
       await testRender(
         description: 'Image layer on HEVC',
         renderModel: VideoRenderData(
-          video: h264Video,
+          videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(
@@ -292,7 +292,7 @@ void main() {
       await testRender(
         description: 'Image layer on HEVC',
         renderModel: VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [VideoSegment(video: hevcVideo)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(
@@ -308,7 +308,7 @@ void main() {
       await testRender(
         description: 'Image layer with offset (top left)',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(
@@ -326,7 +326,7 @@ void main() {
       await testRender(
         description: 'Image layer with offset (center)',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(
@@ -344,7 +344,7 @@ void main() {
       await testRender(
         description: 'Image layer with offset (bottom right)',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(

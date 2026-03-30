@@ -16,10 +16,10 @@ class VideoRenderData {
   ///   own trim settings
   VideoRenderData({
     this.outputFormat = VideoOutputFormat.mp4,
-    this.video,
+    @Deprecated('Use videoSegments instead.') this.video,
     this.videoSegments,
-    this.imageBytes,
-    this.imageLayers = const [],
+    @Deprecated('Use imageLayers instead.') this.imageBytes,
+    this.imageLayers,
     this.transform,
     this.enableAudio = true,
     this.playbackSpeed,
@@ -27,14 +27,15 @@ class VideoRenderData {
     this.endTime,
     this.blur,
     this.bitrate,
-    this.colorMatrixList = const [],
     this.qualityConfig,
-    this.customAudioPath,
-    this.customAudioStartTime,
     this.originalAudioVolume,
-    this.customAudioVolume,
     this.shouldOptimizeForNetworkUse = false,
     this.imageBytesWithCropping = false,
+    // TODO(hm21): convert to timeline based.
+    this.colorMatrixList = const [],
+    this.customAudioPath,
+    this.customAudioStartTime,
+    this.customAudioVolume,
     this.loopCustomAudio = true,
     String? id,
   })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
@@ -90,10 +91,11 @@ class VideoRenderData {
   /// [transform] with scale or crop settings. The bitrate from the preset
   /// will still be used unless explicitly overridden with [bitrateOverride].
   factory VideoRenderData.withQualityPreset({
-    required EditorVideo video,
+    @Deprecated('Use videoSegments instead.') EditorVideo? video,
+    List<VideoSegment>? videoSegments,
     required VideoQualityPreset qualityPreset,
     VideoOutputFormat outputFormat = VideoOutputFormat.mp4,
-    Uint8List? imageBytes,
+    @Deprecated('Use imageLayers instead.') Uint8List? imageBytes,
     List<ImageLayer> imageLayers = const [],
     ExportTransform? transform,
     bool enableAudio = true,
@@ -118,6 +120,7 @@ class VideoRenderData {
       id: id,
       outputFormat: outputFormat,
       video: video,
+      videoSegments: videoSegments,
       imageBytes: imageBytes,
       imageLayers: imageLayers,
       transform: transform,
@@ -158,6 +161,7 @@ class VideoRenderData {
   /// both.
   /// Use this field for a single video. For concatenating multiple videos,
   /// use [videoSegments] instead.
+  @Deprecated('Use videoSegments instead.')
   final EditorVideo? video;
 
   /// A list of video clips to be concatenated into a single output video.
@@ -188,10 +192,11 @@ class VideoRenderData {
   final List<VideoSegment>? videoSegments;
 
   /// A transparent image which will overlay the video.
+  @Deprecated('Use imageLayers instead.')
   final Uint8List? imageBytes;
 
   /// A list of image layers with timing information for overlaying on the video
-  final List<ImageLayer> imageLayers;
+  final List<ImageLayer>? imageLayers;
 
   /// Transformation settings like resize, rotation, offset, and flipping.
   ///
@@ -209,10 +214,12 @@ class VideoRenderData {
   /// For example, `0.5` for half speed, `2.0` for double speed.
   final double? playbackSpeed;
 
-  /// Optional start time for trimming the video.
+  /// Optional start time for trimming the entire composition across all
+  /// segments.
   final Duration? startTime;
 
-  /// Optional end time for trimming the video.
+  /// Optional end time for trimming the entire composition across all
+  /// segments.
   final Duration? endTime;
 
   /// A 4x5 matrix used to apply color filters (e.g., saturation, brightness).
@@ -347,16 +354,21 @@ class VideoRenderData {
     double? scaleX = transform.scaleX;
     double? scaleY = transform.scaleY;
 
-    // Handle quality config for single video
-    if (qualityConfig != null &&
-        scaleX == null &&
-        scaleY == null &&
-        video != null) {
-      final meta = await ProVideoEditor.instance.getMetadata(video!);
-      final originalResolution = meta.resolution;
-      final targetResolution = qualityConfig!.resolution ?? originalResolution;
-      scaleX = targetResolution.width / originalResolution.width;
-      scaleY = targetResolution.height / originalResolution.height;
+    // Handle quality config
+    if (qualityConfig != null && scaleX == null && scaleY == null) {
+      // ignore: deprecated_member_use_from_same_package
+      final targetVideo = video ??
+          (videoSegments != null && videoSegments!.isNotEmpty
+              ? videoSegments!.first.video
+              : null);
+      if (targetVideo != null) {
+        final meta = await ProVideoEditor.instance.getMetadata(targetVideo);
+        final originalResolution = meta.resolution;
+        final targetResolution =
+            qualityConfig!.resolution ?? originalResolution;
+        scaleX = targetResolution.width / originalResolution.width;
+        scaleY = targetResolution.height / originalResolution.height;
+      }
     }
 
     // Convert video clips to map format
@@ -366,9 +378,11 @@ class VideoRenderData {
         videoSegments!.map((clip) => clip.toAsyncMap()),
       );
     } else if (video != null) {
+      // ignore: deprecated_member_use_from_same_package
       // Single video: convert to single clip format
       videoSegmentsMaps = [
         {
+          // ignore: deprecated_member_use_from_same_package
           'inputPath': await video!.safeFilePath(),
           'startUs': startTime?.inMicroseconds,
           'endUs': endTime?.inMicroseconds,
@@ -380,16 +394,19 @@ class VideoRenderData {
       ...transform.toMap(),
       'id': id,
       'videoClips': videoSegmentsMaps,
+      // ignore: deprecated_member_use_from_same_package
       'imageBytes': imageBytes,
-      'imageLayers': await Future.wait(
-        imageLayers.map((layer) async => {
-              'imageData': await layer.image.safeByteArray(),
-              'startUs': layer.startTime?.inMicroseconds,
-              'endUs': layer.endTime?.inMicroseconds,
-              'x': layer.offset.dx.toInt(),
-              'y': layer.offset.dy.toInt(),
-            }),
-      ),
+      'imageLayers': imageLayers == null
+          ? []
+          : await Future.wait(
+              imageLayers!.map((layer) async => {
+                    'imageData': await layer.image.safeByteArray(),
+                    'startUs': layer.startTime?.inMicroseconds,
+                    'endUs': layer.endTime?.inMicroseconds,
+                    'x': layer.offset.dx.toInt(),
+                    'y': layer.offset.dy.toInt(),
+                  }),
+            ),
       'enableAudio': enableAudio,
       'playbackSpeed': playbackSpeed,
       'colorMatrixList': colorMatrixList,
@@ -441,8 +458,10 @@ class VideoRenderData {
     return VideoRenderData(
       id: id ?? this.id,
       outputFormat: outputFormat ?? this.outputFormat,
+      // ignore: deprecated_member_use_from_same_package
       video: video ?? this.video,
       videoSegments: videoSegments ?? this.videoSegments,
+      // ignore: deprecated_member_use_from_same_package
       imageBytes: imageBytes ?? this.imageBytes,
       imageLayers: imageLayers ?? this.imageLayers,
       transform: transform ?? this.transform,

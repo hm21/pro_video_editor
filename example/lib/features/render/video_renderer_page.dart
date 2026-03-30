@@ -76,7 +76,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   Future<void> _rotate() async {
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       transform: const ExportTransform(rotateTurns: 1),
     );
 
@@ -85,7 +85,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   Future<void> _flip() async {
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       transform: const ExportTransform(flipX: true),
     );
 
@@ -94,7 +94,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   Future<void> _crop() async {
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       transform: const ExportTransform(x: 100, y: 250, width: 700, height: 300),
     );
 
@@ -103,7 +103,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   Future<void> _scale() async {
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       transform: const ExportTransform(scaleX: 0.2, scaleY: 0.2),
     );
 
@@ -112,22 +112,32 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   Future<void> _trim() async {
     var data = VideoRenderData(
-      video: _video,
-      startTime: const Duration(seconds: 7),
-      endTime: const Duration(seconds: 20),
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 7),
+          endTime: const Duration(seconds: 20),
+        ),
+      ],
     );
 
     await _renderVideo(data);
   }
 
   Future<void> _changeSpeed() async {
-    var data = VideoRenderData(video: _video, playbackSpeed: .5);
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      playbackSpeed: .5,
+    );
 
     await _renderVideo(data);
   }
 
   Future<void> _removeAudio() async {
-    var data = VideoRenderData(video: _video, enableAudio: false);
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      enableAudio: false,
+    );
 
     await _renderVideo(data);
   }
@@ -180,7 +190,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     );
 
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       customAudioPath: customAudioFile.path,
       originalAudioVolume: 0.0,
       // Mute original audio
@@ -203,7 +213,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     );
 
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       customAudioPath: customAudioFile.path,
       originalAudioVolume: 0.9,
       // Original audio at 90%
@@ -226,7 +236,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// - `2.0`: Doubled volume
   Future<void> _adjustOriginalVolume() async {
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       originalAudioVolume: 0.2, // Reduce original audio to 20%
     );
 
@@ -244,7 +254,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     );
 
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       customAudioPath: customAudioFile.path,
       originalAudioVolume: 0.0,
       customAudioVolume: 1.0,
@@ -266,7 +276,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     );
 
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       customAudioPath: customAudioFile.path,
       customAudioStartTime: const Duration(seconds: 5),
       // Start at 5 seconds
@@ -280,7 +290,10 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   Future<void> _layers() async {
     final imageBytes = await _captureLayerContent();
-    var data = VideoRenderData(video: _video, imageBytes: imageBytes);
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      imageLayers: [ImageLayer(image: EditorLayerImage.memory(imageBytes))],
+    );
 
     await _renderVideo(data);
   }
@@ -296,7 +309,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     const videoHeight = 720;
 
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       imageLayers: [
         /// Always visible
         ImageLayer(image: layerImage, offset: const Offset(0, 0)),
@@ -334,7 +347,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   Future<void> _colorMatrix() async {
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       colorMatrixList: kComplexFilterMatrix,
     );
 
@@ -342,7 +355,10 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   }
 
   Future<void> _blur() async {
-    var data = VideoRenderData(video: _video, blur: 5);
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      blur: 5,
+    );
 
     await _renderVideo(data);
   }
@@ -350,18 +366,21 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   Future<void> _multipleChanges() async {
     final imageBytes = await _captureLayerContent();
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       transform: const ExportTransform(flipX: true),
-      colorMatrixList: kBasicFilterMatrix,
-      imageBytes: imageBytes,
       endTime: const Duration(seconds: 20),
+      colorMatrixList: kBasicFilterMatrix,
+      imageLayers: [ImageLayer(image: EditorLayerImage.memory(imageBytes))],
     );
 
     await _renderVideo(data);
   }
 
   Future<void> _bitrate() async {
-    var data = VideoRenderData(video: _video, bitrate: 1000000);
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      bitrate: 1000000,
+    );
 
     await _renderVideo(data);
   }
@@ -369,7 +388,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   Future<void> _generateMov() async {
     var data = VideoRenderData(
       outputFormat: VideoOutputFormat.mov,
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
     );
 
     await _renderVideo(data);
@@ -377,7 +396,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   Future<void> _qualityPreset1080p() async {
     var data = VideoRenderData.withQualityPreset(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       qualityPreset: VideoQualityPreset.p1080,
     );
 
@@ -386,7 +405,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   Future<void> _qualityPreset720p() async {
     var data = VideoRenderData.withQualityPreset(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       qualityPreset: VideoQualityPreset.p720,
     );
 
@@ -395,7 +414,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   Future<void> _qualityPreset4K() async {
     var data = VideoRenderData.withQualityPreset(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       qualityPreset: VideoQualityPreset.k4,
     );
 
@@ -429,7 +448,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   Future<void> _concatenateWithTransforms() async {
     final imageBytes = await _captureLayerContent();
     var data = VideoRenderData(
-      imageBytes: imageBytes,
+      imageLayers: [ImageLayer(image: EditorLayerImage.memory(imageBytes))],
       videoSegments: [
         VideoSegment(
           video: _video,
@@ -464,7 +483,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// streaming in browsers.
   Future<void> _optimizeForNetworkUse() async {
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       shouldOptimizeForNetworkUse: true, // Default, but explicit for demo
     );
 
@@ -478,7 +497,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// streaming in browsers.
   Future<void> _noNetworkOptimization() async {
     var data = VideoRenderData(
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       shouldOptimizeForNetworkUse: false,
     );
 
@@ -489,7 +508,10 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     final sourceMeta = await _pve.getMetadata(_video);
 
     final result = await _pve.renderVideo(
-      VideoRenderData(video: _video, outputFormat: VideoOutputFormat.mp4),
+      VideoRenderData(
+        videoSegments: [VideoSegment(video: _video)],
+        outputFormat: VideoOutputFormat.mp4,
+      ),
     );
 
     final renderedMeta = await _pve.getMetadata(EditorVideo.memory(result));

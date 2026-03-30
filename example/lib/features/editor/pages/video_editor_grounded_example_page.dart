@@ -631,10 +631,12 @@ class _VideoEditorGroundedExamplePageState
 
     var exportModel = VideoRenderData(
       id: _taskId,
-      video: _video,
+      videoSegments: [VideoSegment(video: _video)],
       outputFormat: _outputFormat,
       enableAudio: _proVideoController?.isAudioEnabled ?? true,
-      imageBytes: parameters.layers.isNotEmpty ? parameters.image : null,
+      imageLayers: parameters.layers.isNotEmpty
+          ? [ImageLayer(image: EditorLayerImage.memory(parameters.image))]
+          : null,
       blur: parameters.blur,
       colorMatrixList: parameters.colorFilters,
       startTime: parameters.startTime,
