@@ -121,6 +121,8 @@ data class LayerAnimationConfig(
  * @property endUs End time in microseconds when the layer should disappear (-1 = until end of video)
  * @property x Horizontal offset in pixels (null = stretch to fill)
  * @property y Vertical offset in pixels (null = stretch to fill)
+ * @property width Target width in pixels (null = original width)
+ * @property height Target height in pixels (null = original height)
  * @property animations List of animations to apply to this layer
  */
 data class ImageLayer(
@@ -129,6 +131,8 @@ data class ImageLayer(
     val endUs: Long,
     val x: Int? = null,
     val y: Int? = null,
+    val width: Double? = null,
+    val height: Double? = null,
     val animations: List<LayerAnimationConfig> = emptyList()
 ) {
     override fun equals(other: Any?): Boolean {
@@ -140,6 +144,8 @@ data class ImageLayer(
                 endUs == other.endUs &&
                 x == other.x &&
                 y == other.y &&
+                width == other.width &&
+                height == other.height &&
                 animations == other.animations
     }
 
@@ -149,6 +155,8 @@ data class ImageLayer(
         result = 31 * result + endUs.hashCode()
         result = 31 * result + (x?.hashCode() ?: 0)
         result = 31 * result + (y?.hashCode() ?: 0)
+        result = 31 * result + (width?.hashCode() ?: 0)
+        result = 31 * result + (height?.hashCode() ?: 0)
         result = 31 * result + animations.hashCode()
         return result
     }
@@ -240,6 +248,8 @@ data class RenderConfig(
                 val endUs = (layerMap["endUs"] as? Number)?.toLong() ?: -1L
                 val x = (layerMap["x"] as? Number)?.toInt()
                 val y = (layerMap["y"] as? Number)?.toInt()
+                val width = (layerMap["width"] as? Number)?.toDouble()
+                val height = (layerMap["height"] as? Number)?.toDouble()
 
                 // Parse animations
                 @Suppress("UNCHECKED_CAST")
@@ -249,7 +259,7 @@ data class RenderConfig(
                 if (imageData == null || imageData.isEmpty()) {
                     null
                 } else {
-                    ImageLayer(imageData, startUs, endUs, x, y, animations)
+                    ImageLayer(imageData, startUs, endUs, x, y, width, height, animations)
                 }
             } ?: emptyList()
 

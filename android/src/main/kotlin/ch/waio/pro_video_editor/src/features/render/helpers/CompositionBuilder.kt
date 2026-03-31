@@ -79,6 +79,8 @@ class CompositionBuilder(
                     endUs = imageLayer.endUs,
                     x = imageLayer.x,
                     y = imageLayer.y,
+                    width = imageLayer.width,
+                    height = imageLayer.height,
                     animations = imageLayer.animations
                 )
             })

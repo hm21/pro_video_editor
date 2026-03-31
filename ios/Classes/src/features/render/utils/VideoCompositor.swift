@@ -10,6 +10,10 @@ struct ImageLayer {
     let x: Int64?
     /// y position in pixels. When nil, the image is stretched to fill the video frame.
     let y: Int64?
+    /// Target width in pixels. When nil, the image is used at its original width.
+    let width: Double?
+    /// Target height in pixels. When nil, the image is used at its original height.
+    let height: Double?
     /// Animations applied to this layer.
     let animations: [LayerAnimationConfig]
 }
@@ -94,6 +98,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                     endUs: layer.endUs,
                     x: layer.x,
                     y: layer.y,
+                    width: layer.width,
+                    height: layer.height,
                     animations: layer.animations
                 ))
         }
@@ -336,20 +342,28 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                     && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
 
                 if inTimeRange {
+                    var img = layer.image
+
+                    if let w = layer.width, let h = layer.height {
+                        let sx = CGFloat(w) / img.extent.width
+                        let sy = CGFloat(h) / img.extent.height
+                        img = img.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+                    }
+
                     let overlay: CIImage
                     if layer.x == nil && layer.y == nil {
                         // Stretch to fill frame when no position is specified
-                        overlay = layer.image.transformed(
+                        overlay = img.transformed(
                             by: CGAffineTransform(
-                                scaleX: imageRect.width / layer.image.extent.width,
-                                y: imageRect.height / layer.image.extent.height))
+                                scaleX: imageRect.width / img.extent.width,
+                                y: imageRect.height / img.extent.height))
                     } else {
                         // Position at specific coordinates
                         let posX = CGFloat(layer.x ?? 0)
                         let posY = CGFloat(layer.y ?? 0)
                         // Convert y from top-left (Dart) to bottom-left (Core Graphics)
-                        let cgY = imageRect.height - posY - layer.image.extent.height
-                        overlay = layer.image.transformed(
+                        let cgY = imageRect.height - posY - img.extent.height
+                        overlay = img.transformed(
                             by: CGAffineTransform(translationX: posX, y: cgY))
                     }
 
@@ -449,20 +463,28 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                     (layer.startUs == -1 || currentTimeUs >= layer.startUs)
                     && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
                 if inTimeRange {
+                    var img = layer.image
+
+                    if let w = layer.width, let h = layer.height {
+                        let sx = CGFloat(w) / img.extent.width
+                        let sy = CGFloat(h) / img.extent.height
+                        img = img.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+                    }
+
                     let overlay: CIImage
                     if layer.x == nil && layer.y == nil {
                         // Stretch to fill frame when no position is specified
-                        overlay = layer.image.transformed(
+                        overlay = img.transformed(
                             by: CGAffineTransform(
-                                scaleX: imageRect.width / layer.image.extent.width,
-                                y: imageRect.height / layer.image.extent.height))
+                                scaleX: imageRect.width / img.extent.width,
+                                y: imageRect.height / img.extent.height))
                     } else {
                         // Position at specific coordinates
                         let posX = CGFloat(layer.x ?? 0)
                         let posY = CGFloat(layer.y ?? 0)
                         // Convert y from top-left (Dart) to bottom-left (Core Graphics)
-                        let cgY = imageRect.height - posY - layer.image.extent.height
-                        overlay = layer.image.transformed(
+                        let cgY = imageRect.height - posY - img.extent.height
+                        overlay = img.transformed(
                             by: CGAffineTransform(translationX: posX, y: cgY))
                     }
 

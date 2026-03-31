@@ -452,6 +452,34 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  Future<void> _layersWithSize() async {
+    final stickerImage = EditorLayerImage.asset('assets/sticker.png');
+
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      imageLayers: [
+        /// Scaled to 200×200 at top-left
+        ImageLayer(
+          image: stickerImage,
+          offset: const Offset(20, 20),
+          size: const Size(100, 100),
+        ),
+
+        /// Scaled to 400×100 (stretched) at bottom-right area
+        ImageLayer(
+          image: stickerImage,
+          offset: const Offset(800, 550),
+          size: const Size(400, 100),
+        ),
+
+        /// Original size (no size set) in the center
+        ImageLayer(image: stickerImage, offset: const Offset(500, 230)),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   Future<void> _colorMatrix() async {
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video)],
@@ -1160,6 +1188,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           onTap: _layersTimed,
           leading: const Icon(Icons.av_timer_outlined),
           title: const Text('Parse with timed layers'),
+        ),
+        ListTile(
+          onTap: _layersWithSize,
+          leading: const Icon(Icons.photo_size_select_large_outlined),
+          title: const Text('Layers with custom size'),
+          subtitle: const Text('Scale layers to specific dimensions'),
         ),
         ListTile(
           onTap: _colorMatrix,

@@ -19,6 +19,7 @@ class ImageLayer with TimeRangeMixin {
     this.startTime,
     this.endTime,
     this.offset,
+    this.size,
     this.animations = const [],
   }) : assert(
           startTime == null || endTime == null || startTime < endTime,
@@ -44,6 +45,17 @@ class ImageLayer with TimeRangeMixin {
   /// placed at that position at its original size.
   final Offset? offset;
 
+  /// The display size of the image layer, in pixels.
+  ///
+  /// [Size.width] is the target width of the image.
+  /// [Size.height] is the target height of the image.
+  ///
+  /// When `null`, the image is used at its original size (or stretched to
+  /// fill the frame when [offset] is also `null`).
+  final Size? size;
+
+
+
   /// Animations to apply to this layer (e.g. fade, slide, scale).
   ///
   /// Multiple animations can be combined. Each animation specifies its
@@ -56,6 +68,7 @@ class ImageLayer with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     Offset? offset,
+    Size? size,
     List<LayerAnimation>? animations,
   }) {
     return ImageLayer(
@@ -63,6 +76,7 @@ class ImageLayer with TimeRangeMixin {
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       offset: offset ?? this.offset,
+      size: size ?? this.size,
       animations: animations ?? this.animations,
     );
   }
@@ -73,6 +87,9 @@ class ImageLayer with TimeRangeMixin {
       'startTime': startTime?.inMicroseconds,
       'endTime': endTime?.inMicroseconds,
       'offset': offset != null ? {'dx': offset!.dx, 'dy': offset!.dy} : null,
+      'size': size != null
+          ? {'width': size!.width, 'height': size!.height}
+          : null,
       'animations': animations.map((a) => a.toMap()).toList(),
     };
   }
@@ -90,6 +107,12 @@ class ImageLayer with TimeRangeMixin {
           ? Offset(
               safeParseDouble((map['offset'] as Map<String, dynamic>)['dx']),
               safeParseDouble((map['offset'] as Map<String, dynamic>)['dy']),
+            )
+          : null,
+      size: map['size'] != null
+          ? Size(
+              safeParseDouble((map['size'] as Map<String, dynamic>)['width']),
+              safeParseDouble((map['size'] as Map<String, dynamic>)['height']),
             )
           : null,
       animations: (map['animations'] as List<dynamic>?)
@@ -111,6 +134,7 @@ class ImageLayer with TimeRangeMixin {
         'startTime: $startTime, '
         'endTime: $endTime, '
         'offset: $offset, '
+        'size: $size, '
         'animations: $animations'
         ')';
   }
@@ -123,6 +147,7 @@ class ImageLayer with TimeRangeMixin {
         other.startTime == startTime &&
         other.endTime == endTime &&
         other.offset == offset &&
+        other.size == size &&
         listEquals(other.animations, animations);
   }
 
@@ -132,6 +157,7 @@ class ImageLayer with TimeRangeMixin {
         startTime.hashCode ^
         endTime.hashCode ^
         offset.hashCode ^
+        size.hashCode ^
         animations.hashCode;
   }
 }

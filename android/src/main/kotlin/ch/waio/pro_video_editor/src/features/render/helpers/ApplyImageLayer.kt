@@ -87,6 +87,15 @@ fun applyTimedImageLayers(
                 imageBytes, 0, imageBytes.size, options
             )
 
+            // Scale to target size if provided
+            val sizedBitmap = if (layer.width != null && layer.height != null) {
+                val scaled = layerBitmap.scale(layer.width.toInt(), layer.height.toInt())
+                layerBitmap.recycle()
+                scaled
+            } else {
+                layerBitmap
+            }
+
             // Determine if this layer should stretch or be positioned
             val isStretched = layer.x == null && layer.y == null
 
@@ -97,12 +106,12 @@ fun applyTimedImageLayers(
 
             if (isStretched) {
                 // Stretch image to fill the entire video frame
-                val scaledOverlay = if (layerBitmap.width != videoWidth || layerBitmap.height != videoHeight) {
-                    val scaled = layerBitmap.scale(videoWidth, videoHeight)
-                    layerBitmap.recycle()
+                val scaledOverlay = if (sizedBitmap.width != videoWidth || sizedBitmap.height != videoHeight) {
+                    val scaled = sizedBitmap.scale(videoWidth, videoHeight)
+                    sizedBitmap.recycle()
                     scaled
                 } else {
-                    layerBitmap
+                    sizedBitmap
                 }
 
                 val unpremultiplied = unpremultiplyAlpha(scaledOverlay)
@@ -117,11 +126,11 @@ fun applyTimedImageLayers(
                 Log.d(RENDER_TAG, "Layer: stretched to ${videoWidth}x$videoHeight")
             } else {
                 // Position image at specified x/y offset
-                val imageWidth = layerBitmap.width
-                val imageHeight = layerBitmap.height
+                val imageWidth = sizedBitmap.width
+                val imageHeight = sizedBitmap.height
 
-                val unpremultiplied = unpremultiplyAlpha(layerBitmap)
-                if (unpremultiplied !== layerBitmap) layerBitmap.recycle()
+                val unpremultiplied = unpremultiplyAlpha(sizedBitmap)
+                if (unpremultiplied !== sizedBitmap) sizedBitmap.recycle()
                 finalOverlay = unpremultiplied
 
                 val x = layer.x ?: 0

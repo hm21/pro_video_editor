@@ -43,6 +43,10 @@ struct ImageLayerConfig {
     let x: Int64?
     /// y position in pixels. When nil, the image is stretched to fill the video frame.
     let y: Int64?
+    /// Target width in pixels. When nil, the image is used at its original width.
+    let width: Double?
+    /// Target height in pixels. When nil, the image is used at its original height.
+    let height: Double?
     /// Animations to apply to this layer.
     let animations: [LayerAnimationConfig]
 
@@ -68,6 +72,10 @@ struct ImageLayerConfig {
             animations = animsRaw.compactMap { LayerAnimationConfig.fromArguments($0) }
         }
 
+        // Parse optional size
+        let width = (args["width"] as? NSNumber)?.doubleValue
+        let height = (args["height"] as? NSNumber)?.doubleValue
+
         // Use -1 as sentinel value for "from start" when startUs is null
         // Use -1 for endUs to signify "until the end of the video"
         return ImageLayerConfig(
@@ -76,6 +84,8 @@ struct ImageLayerConfig {
             endUs: (args["endUs"] as? NSNumber)?.int64Value ?? -1,
             x: (args["x"] as? NSNumber)?.int64Value,
             y: (args["y"] as? NSNumber)?.int64Value,
+            width: width,
+            height: height,
             animations: animations
         )
     }

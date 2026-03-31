@@ -58,6 +58,8 @@ class VideoSequenceBuilder(
         val endUs: Long = -1,
         val x: Int? = null,
         val y: Int? = null,
+        val width: Double? = null,
+        val height: Double? = null,
         val animations: List<LayerAnimationConfig> = emptyList()
     )
 
