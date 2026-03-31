@@ -60,7 +60,11 @@ void main() {
 
         final header = file.openSync().readSync(defaultMagicNumbersMaxLength);
         final mimeType = lookupMimeType(result, headerBytes: header);
-        expect(mimeType, format.mimeType);
+        // WAV files may be detected as either 'audio/wav' or 'audio/x-wav'
+        final expectedMimeTypes = format == AudioFormat.wav
+            ? ['audio/wav', 'audio/x-wav']
+            : [format.mimeType];
+        expect(expectedMimeTypes, contains(mimeType));
 
         // Verify file has content
         final fileSize = await file.length();
