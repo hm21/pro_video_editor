@@ -1,5 +1,8 @@
 import 'dart:ui';
 
+import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
+import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
+
 import 'video_quality_preset.dart';
 
 /// Configuration class that defines video quality parameters.
@@ -8,6 +11,20 @@ import 'video_quality_preset.dart';
 /// quality preset. It provides factory constructors to create configurations
 /// from presets or custom values.
 class VideoQualityConfig {
+
+  /// Creates a [VideoQualityConfig] from a [Map] representation.
+  factory VideoQualityConfig.fromMap(Map<String, dynamic> map) {
+    final preset = VideoQualityPreset.values.byName(map['preset'] as String);
+    final width = tryParseDouble(map['width']);
+    final height = tryParseDouble(map['height']);
+    return VideoQualityConfig(
+      bitrate: safeParseInt(map['bitrate']),
+      resolution: width != null && height != null
+          ? Size(width, height)
+          : null,
+      preset: preset,
+    );
+  }
   /// Creates a video quality configuration with the given parameters.
   const VideoQualityConfig({
     required this.bitrate,
@@ -87,4 +104,14 @@ class VideoQualityConfig {
 
   @override
   int get hashCode => Object.hash(bitrate, resolution, preset);
+
+  /// Converts this configuration into a serializable [Map].
+  Map<String, dynamic> toMap() {
+    return <String, dynamic>{
+      'bitrate': bitrate,
+      'width': resolution?.width,
+      'height': resolution?.height,
+      'preset': preset.name,
+    };
+  }
 }

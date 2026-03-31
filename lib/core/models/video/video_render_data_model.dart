@@ -1,5 +1,11 @@
+// ignore_for_file: public_member_api_docs, sort_constructors_first
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+
 import 'package:pro_video_editor/pro_video_editor.dart';
+import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
+import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 
 /// A model describing settings for rendering or exporting a video.
 ///
@@ -15,6 +21,8 @@ class VideoRenderData {
   /// - Use [videoSegments] for concatenating multiple videos, each with their
   ///   own trim settings
   VideoRenderData({
+    String? id,
+    this.qualityConfig,
     this.outputFormat = VideoOutputFormat.mp4,
     @Deprecated('Use videoSegments instead.') this.video,
     this.videoSegments,
@@ -25,20 +33,18 @@ class VideoRenderData {
     this.playbackSpeed,
     this.startTime,
     this.endTime,
-    this.blur,
-    this.bitrate,
-    this.qualityConfig,
-    @Deprecated('Use VideoSegment.volume instead.') this.originalAudioVolume,
-    this.shouldOptimizeForNetworkUse = false,
-    this.imageBytesWithCropping = false,
     @Deprecated('Use colorFilters instead.') this.colorMatrixList = const [],
     this.colorFilters = const [],
     this.audioTracks = const [],
+    this.blur,
+    this.bitrate,
     @Deprecated('Use audioTracks instead.') this.customAudioPath,
     @Deprecated('Use audioTracks instead.') this.customAudioStartTime,
+    @Deprecated('Use VideoSegment.volume instead.') this.originalAudioVolume,
     @Deprecated('Use audioTracks instead.') this.customAudioVolume,
+    this.shouldOptimizeForNetworkUse = false,
+    this.imageBytesWithCropping = false,
     @Deprecated('Use audioTracks instead.') this.loopCustomAudio = true,
-    String? id,
   })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
         assert(
           (video != null) != (videoSegments != null),
@@ -538,6 +544,7 @@ class VideoRenderData {
   /// Creates a copy with updated values.
   VideoRenderData copyWith({
     String? id,
+    VideoQualityConfig? qualityConfig,
     VideoOutputFormat? outputFormat,
     EditorVideo? video,
     List<VideoSegment>? videoSegments,
@@ -553,7 +560,6 @@ class VideoRenderData {
     List<VideoAudioTrack>? audioTracks,
     double? blur,
     int? bitrate,
-    VideoQualityConfig? qualityConfig,
     String? customAudioPath,
     Duration? customAudioStartTime,
     double? originalAudioVolume,
@@ -564,11 +570,10 @@ class VideoRenderData {
   }) {
     return VideoRenderData(
       id: id ?? this.id,
+      qualityConfig: qualityConfig ?? this.qualityConfig,
       outputFormat: outputFormat ?? this.outputFormat,
-      // ignore: deprecated_member_use_from_same_package
       video: video ?? this.video,
       videoSegments: videoSegments ?? this.videoSegments,
-      // ignore: deprecated_member_use_from_same_package
       imageBytes: imageBytes ?? this.imageBytes,
       imageLayers: imageLayers ?? this.imageLayers,
       transform: transform ?? this.transform,
@@ -576,28 +581,211 @@ class VideoRenderData {
       playbackSpeed: playbackSpeed ?? this.playbackSpeed,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
-      // ignore: deprecated_member_use_from_same_package
       colorMatrixList: colorMatrixList ?? this.colorMatrixList,
       colorFilters: colorFilters ?? this.colorFilters,
       audioTracks: audioTracks ?? this.audioTracks,
       blur: blur ?? this.blur,
       bitrate: bitrate ?? this.bitrate,
-      qualityConfig: qualityConfig ?? this.qualityConfig,
-      // ignore: deprecated_member_use_from_same_package
       customAudioPath: customAudioPath ?? this.customAudioPath,
-      // ignore: deprecated_member_use_from_same_package
       customAudioStartTime: customAudioStartTime ?? this.customAudioStartTime,
-      // ignore: deprecated_member_use_from_same_package
       originalAudioVolume: originalAudioVolume ?? this.originalAudioVolume,
-      // ignore: deprecated_member_use_from_same_package
       customAudioVolume: customAudioVolume ?? this.customAudioVolume,
       shouldOptimizeForNetworkUse:
           shouldOptimizeForNetworkUse ?? this.shouldOptimizeForNetworkUse,
       imageBytesWithCropping:
           imageBytesWithCropping ?? this.imageBytesWithCropping,
-      // ignore: deprecated_member_use_from_same_package
       loopCustomAudio: loopCustomAudio ?? this.loopCustomAudio,
     );
+  }
+
+  Map<String, dynamic> toMap() {
+    return <String, dynamic>{
+      'id': id,
+      'qualityConfig': qualityConfig?.toMap(),
+      'outputFormat': outputFormat.name,
+      'video': video?.toMap(),
+      'videoSegments': videoSegments?.map((x) => x.toMap()).toList(),
+      'imageBytes': imageBytes?.toList(),
+      'imageLayers': imageLayers?.map((x) => x.toMap()).toList(),
+      'transform': transform?.toMap(),
+      'enableAudio': enableAudio,
+      'playbackSpeed': playbackSpeed,
+      'startTime': startTime?.inMicroseconds,
+      'endTime': endTime?.inMicroseconds,
+      'colorMatrixList': colorMatrixList,
+      'colorFilters': colorFilters.map((x) => x.toMap()).toList(),
+      'audioTracks': audioTracks.map((x) => x.toMap()).toList(),
+      'blur': blur,
+      'bitrate': bitrate,
+      'customAudioPath': customAudioPath,
+      'customAudioStartTime': customAudioStartTime?.inMicroseconds,
+      'originalAudioVolume': originalAudioVolume,
+      'customAudioVolume': customAudioVolume,
+      'shouldOptimizeForNetworkUse': shouldOptimizeForNetworkUse,
+      'imageBytesWithCropping': imageBytesWithCropping,
+      'loopCustomAudio': loopCustomAudio,
+    };
+  }
+
+  factory VideoRenderData.fromMap(Map<String, dynamic> map) {
+    return VideoRenderData(
+      id: map['id'] as String,
+      qualityConfig: map['qualityConfig'] != null
+          ? VideoQualityConfig.fromMap(
+              map['qualityConfig'] as Map<String, dynamic>)
+          : null,
+      outputFormat:
+          VideoOutputFormat.values.byName(map['outputFormat'] as String),
+      video: map['video'] != null
+          ? EditorVideo.fromMap(map['video'] as Map<String, dynamic>)
+          : null,
+      videoSegments: map['videoSegments'] != null
+          ? List<VideoSegment>.from(
+              (map['videoSegments'] as List).map<VideoSegment>(
+                (x) => VideoSegment.fromMap(x as Map<String, dynamic>),
+              ),
+            )
+          : null,
+      imageBytes: map['imageBytes'] != null
+          ? Uint8List.fromList(List<int>.from(map['imageBytes'] as List))
+          : null,
+      imageLayers: map['imageLayers'] != null
+          ? List<ImageLayer>.from(
+              (map['imageLayers'] as List).map<ImageLayer>(
+                (x) => ImageLayer.fromMap(x as Map<String, dynamic>),
+              ),
+            )
+          : null,
+      transform: map['transform'] != null
+          ? ExportTransform.fromMap(map['transform'] as Map<String, dynamic>)
+          : null,
+      enableAudio: map['enableAudio'] as bool,
+      playbackSpeed: tryParseDouble(map['playbackSpeed']),
+      startTime: map['startTime'] != null
+          ? Duration(microseconds: safeParseInt(map['startTime']))
+          : null,
+      endTime: map['endTime'] != null
+          ? Duration(microseconds: safeParseInt(map['endTime']))
+          : null,
+      colorMatrixList: List<List<double>>.from(
+        (map['colorMatrixList'] as List).map<List<double>>(
+          (x) => List<double>.from(x as List),
+        ),
+      ),
+      colorFilters: List<ColorFilter>.from(
+        (map['colorFilters'] as List).map<ColorFilter>(
+          (x) => ColorFilter.fromMap(x as Map<String, dynamic>),
+        ),
+      ),
+      audioTracks: List<VideoAudioTrack>.from(
+        (map['audioTracks'] as List).map<VideoAudioTrack>(
+          (x) => VideoAudioTrack.fromMap(x as Map<String, dynamic>),
+        ),
+      ),
+      blur: tryParseDouble(map['blur']),
+      bitrate: map['bitrate'] != null ? safeParseInt(map['bitrate']) : null,
+      customAudioPath: map['customAudioPath'] != null
+          ? map['customAudioPath'] as String
+          : null,
+      customAudioStartTime: map['customAudioStartTime'] != null
+          ? Duration(microseconds: safeParseInt(map['customAudioStartTime']))
+          : null,
+      originalAudioVolume: tryParseDouble(map['originalAudioVolume']),
+      customAudioVolume: tryParseDouble(map['customAudioVolume']),
+      shouldOptimizeForNetworkUse: map['shouldOptimizeForNetworkUse'] as bool,
+      imageBytesWithCropping: map['imageBytesWithCropping'] as bool,
+      loopCustomAudio: map['loopCustomAudio'] as bool,
+    );
+  }
+
+  String toJson() => json.encode(toMap());
+
+  factory VideoRenderData.fromJson(String source) =>
+      VideoRenderData.fromMap(json.decode(source) as Map<String, dynamic>);
+
+  @override
+  String toString() {
+    return 'VideoRenderData(id: $id, '
+        'qualityConfig: $qualityConfig, '
+        'outputFormat: $outputFormat, video: $video, '
+        'videoSegments: $videoSegments, '
+        'imageBytes: $imageBytes, '
+        'imageLayers: $imageLayers, '
+        'transform: $transform, '
+        'enableAudio: $enableAudio, '
+        'playbackSpeed: $playbackSpeed, '
+        'startTime: $startTime, '
+        'endTime: $endTime, '
+        'colorMatrixList: $colorMatrixList, '
+        'colorFilters: $colorFilters, '
+        'audioTracks: $audioTracks, '
+        'blur: $blur, '
+        'bitrate: $bitrate, '
+        'customAudioPath: $customAudioPath, '
+        'customAudioStartTime: $customAudioStartTime, '
+        'originalAudioVolume: $originalAudioVolume, '
+        'customAudioVolume: $customAudioVolume, '
+        'shouldOptimizeForNetworkUse: $shouldOptimizeForNetworkUse, '
+        'imageBytesWithCropping: $imageBytesWithCropping, '
+        'loopCustomAudio: $loopCustomAudio)';
+  }
+
+  @override
+  bool operator ==(covariant VideoRenderData other) {
+    if (identical(this, other)) return true;
+
+    return other.id == id &&
+        other.qualityConfig == qualityConfig &&
+        other.outputFormat == outputFormat &&
+        other.video == video &&
+        listEquals(other.videoSegments, videoSegments) &&
+        other.imageBytes == imageBytes &&
+        listEquals(other.imageLayers, imageLayers) &&
+        other.transform == transform &&
+        other.enableAudio == enableAudio &&
+        other.playbackSpeed == playbackSpeed &&
+        other.startTime == startTime &&
+        other.endTime == endTime &&
+        listEquals(other.colorMatrixList, colorMatrixList) &&
+        listEquals(other.colorFilters, colorFilters) &&
+        listEquals(other.audioTracks, audioTracks) &&
+        other.blur == blur &&
+        other.bitrate == bitrate &&
+        other.customAudioPath == customAudioPath &&
+        other.customAudioStartTime == customAudioStartTime &&
+        other.originalAudioVolume == originalAudioVolume &&
+        other.customAudioVolume == customAudioVolume &&
+        other.shouldOptimizeForNetworkUse == shouldOptimizeForNetworkUse &&
+        other.imageBytesWithCropping == imageBytesWithCropping &&
+        other.loopCustomAudio == loopCustomAudio;
+  }
+
+  @override
+  int get hashCode {
+    return id.hashCode ^
+        qualityConfig.hashCode ^
+        outputFormat.hashCode ^
+        video.hashCode ^
+        videoSegments.hashCode ^
+        imageBytes.hashCode ^
+        imageLayers.hashCode ^
+        transform.hashCode ^
+        enableAudio.hashCode ^
+        playbackSpeed.hashCode ^
+        startTime.hashCode ^
+        endTime.hashCode ^
+        colorMatrixList.hashCode ^
+        colorFilters.hashCode ^
+        audioTracks.hashCode ^
+        blur.hashCode ^
+        bitrate.hashCode ^
+        customAudioPath.hashCode ^
+        customAudioStartTime.hashCode ^
+        originalAudioVolume.hashCode ^
+        customAudioVolume.hashCode ^
+        shouldOptimizeForNetworkUse.hashCode ^
+        imageBytesWithCropping.hashCode ^
+        loopCustomAudio.hashCode;
   }
 }
 

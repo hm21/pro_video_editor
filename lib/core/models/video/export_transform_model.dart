@@ -1,7 +1,26 @@
+import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
+import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
+
 /// Represents a set of transformations to apply during video export.
 ///
 /// This includes resizing, rotation, flipping, and positional offsets.
 class ExportTransform {
+  /// Creates an [ExportTransform] from a [Map] representation.
+  factory ExportTransform.fromMap(Map<String, dynamic> map) {
+    return ExportTransform(
+      rotateTurns: safeParseInt(map['rotateTurns']),
+      flipX: map['flipX'] as bool? ?? false,
+      flipY: map['flipY'] as bool? ?? false,
+      width: map['cropWidth'] != null ? safeParseInt(map['cropWidth']) : null,
+      height:
+          map['cropHeight'] != null ? safeParseInt(map['cropHeight']) : null,
+      x: map['cropX'] != null ? safeParseInt(map['cropX']) : null,
+      y: map['cropY'] != null ? safeParseInt(map['cropY']) : null,
+      scaleX: tryParseDouble(map['scaleX']),
+      scaleY: tryParseDouble(map['scaleY']),
+    );
+  }
+
   /// Creates an [ExportTransform] with optional transformations.
   const ExportTransform({
     this.width,

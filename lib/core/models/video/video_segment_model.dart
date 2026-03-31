@@ -1,4 +1,9 @@
+// ignore_for_file: public_member_api_docs, sort_constructors_first
+import 'dart:convert';
+
 import 'package:pro_video_editor/pro_video_editor.dart';
+import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
+import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 
 /// Represents a single video clip to be included in a video composition.
 ///
@@ -73,25 +78,55 @@ class VideoSegment {
   }
 
   @override
-  bool operator ==(Object other) {
+  bool operator ==(covariant VideoSegment other) {
     if (identical(this, other)) return true;
 
-    return other is VideoSegment &&
-        other.video == video &&
+    return other.video == video &&
         other.startTime == startTime &&
         other.endTime == endTime &&
         other.volume == volume;
   }
 
   @override
-  int get hashCode => Object.hash(video, startTime, endTime, volume);
+  int get hashCode {
+    return video.hashCode ^
+        startTime.hashCode ^
+        endTime.hashCode ^
+        volume.hashCode;
+  }
 
   @override
   String toString() {
-    return 'VideoSegment('
-        'video: $video, '
+    return 'VideoSegment(video: $video, '
         'startTime: $startTime, '
         'endTime: $endTime, '
         'volume: $volume)';
   }
+
+  Map<String, dynamic> toMap() {
+    return <String, dynamic>{
+      'video': video.toMap(),
+      'startTime': startTime?.inMicroseconds,
+      'endTime': endTime?.inMicroseconds,
+      'volume': volume,
+    };
+  }
+
+  factory VideoSegment.fromMap(Map<String, dynamic> map) {
+    return VideoSegment(
+      video: EditorVideo.fromMap(map['video'] as Map<String, dynamic>),
+      startTime: map['startTime'] != null
+          ? Duration(microseconds: safeParseInt(map['startTime']))
+          : null,
+      endTime: map['endTime'] != null
+          ? Duration(microseconds: safeParseInt(map['endTime']))
+          : null,
+      volume: tryParseDouble(map['volume']),
+    );
+  }
+
+  String toJson() => json.encode(toMap());
+
+  factory VideoSegment.fromJson(String source) =>
+      VideoSegment.fromMap(json.decode(source) as Map<String, dynamic>);
 }

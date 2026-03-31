@@ -1,4 +1,10 @@
+// ignore_for_file: public_member_api_docs, sort_constructors_first
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+
 import 'package:pro_video_editor/shared/models/time_range_mixin.dart';
+import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 
 /// A model representing a color filter with timing information.
 ///
@@ -28,4 +34,57 @@ class ColorFilter with TimeRangeMixin {
 
   @override
   final Duration? endTime;
+
+  ColorFilter copyWith({
+    List<double>? matrix,
+    Duration? startTime,
+    Duration? endTime,
+  }) {
+    return ColorFilter(
+      matrix: matrix ?? this.matrix,
+      startTime: startTime ?? this.startTime,
+      endTime: endTime ?? this.endTime,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return <String, dynamic>{
+      'matrix': matrix,
+      'startTime': startTime?.inMicroseconds,
+      'endTime': endTime?.inMicroseconds,
+    };
+  }
+
+  factory ColorFilter.fromMap(Map<String, dynamic> map) {
+    return ColorFilter(
+      matrix: List<double>.from(map['matrix'] as List),
+      startTime: map['startTime'] != null
+          ? Duration(microseconds: safeParseInt(map['startTime']))
+          : null,
+      endTime: map['endTime'] != null
+          ? Duration(microseconds: safeParseInt(map['endTime']))
+          : null,
+    );
+  }
+
+  String toJson() => json.encode(toMap());
+
+  factory ColorFilter.fromJson(String source) =>
+      ColorFilter.fromMap(json.decode(source) as Map<String, dynamic>);
+
+  @override
+  String toString() =>
+      'ColorFilter(matrix: $matrix, startTime: $startTime, endTime: $endTime)';
+
+  @override
+  bool operator ==(covariant ColorFilter other) {
+    if (identical(this, other)) return true;
+
+    return listEquals(other.matrix, matrix) &&
+        other.startTime == startTime &&
+        other.endTime == endTime;
+  }
+
+  @override
+  int get hashCode => matrix.hashCode ^ startTime.hashCode ^ endTime.hashCode;
 }

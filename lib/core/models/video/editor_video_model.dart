@@ -12,6 +12,19 @@ import '/shared/utils/file_constructor_utils.dart';
 /// or asset bundle. It provides convenience methods for identifying the
 /// source type and safely retrieving video bytes.
 class EditorVideo {
+  /// Creates an [EditorVideo] from a [Map] representation.
+  factory EditorVideo.fromMap(Map<String, dynamic> map) {
+    return EditorVideo.autoSource(
+      byteArray: map['byteArray'] != null
+          ? Uint8List.fromList(List<int>.from(map['byteArray'] as List))
+          : null,
+      file: map['file'] != null ? map['file'] as String : null,
+      networkUrl:
+          map['networkUrl'] != null ? map['networkUrl'] as String : null,
+      assetPath: map['assetPath'] != null ? map['assetPath'] as String : null,
+    );
+  }
+
   /// Creates an instance of the `EditorVideo` class with the specified
   /// properties.
   ///
@@ -283,6 +296,16 @@ class EditorVideo {
   int _hashUint8List(Uint8List? list) {
     if (list == null) return 0;
     return list.fold(0, (hash, byte) => hash * 31 + byte);
+  }
+
+  /// Converts this [EditorVideo] into a serializable [Map].
+  Map<String, dynamic> toMap() {
+    return <String, dynamic>{
+      if (byteArray != null) 'byteArray': byteArray!.toList(),
+      if (file != null) 'file': file!.path,
+      if (networkUrl != null) 'networkUrl': networkUrl,
+      if (assetPath != null) 'assetPath': assetPath,
+    };
   }
 }
 
