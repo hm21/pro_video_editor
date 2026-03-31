@@ -127,11 +127,6 @@ internal class CompositionBuilder {
             )
 
             // Create layer instruction for this clip segment
-            let layerInstruction = AVMutableVideoCompositionLayerInstruction(
-                assetTrack: videoResult.videoTrack
-            )
-
-            // Calculate transform to center and scale the video in the render size
             let transform = calculateTransform(
                 from: clipInstruction.naturalSize,
                 to: videoResult.renderSize,
@@ -139,8 +134,20 @@ internal class CompositionBuilder {
                 clipIndex: index
             )
 
-            // Set transform at the start of THIS instruction's time range (relative to instruction start)
-            layerInstruction.setTransform(transform, at: .zero)
+            let layerInstruction: AVVideoCompositionLayerInstruction
+            if #available(macOS 26.0, *) {
+                var config = AVVideoCompositionLayerInstruction.Configuration(
+                    assetTrack: videoResult.videoTrack
+                )
+                config.setTransform(transform, at: .zero)
+                layerInstruction = AVVideoCompositionLayerInstruction(configuration: config)
+            } else {
+                let mutableInstruction = AVMutableVideoCompositionLayerInstruction(
+                    assetTrack: videoResult.videoTrack
+                )
+                mutableInstruction.setTransform(transform, at: .zero)
+                layerInstruction = mutableInstruction
+            }
 
             // Use custom instruction that explicitly provides requiredSourceTrackIDs
             let instruction = CustomVideoCompositionInstruction(

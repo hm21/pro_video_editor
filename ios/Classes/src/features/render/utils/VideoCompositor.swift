@@ -185,7 +185,6 @@ class VideoCompositor: NSObject, AVVideoCompositing {
             let instruction = request.videoCompositionInstruction
                 as? CustomVideoCompositionInstruction,
             let layerInstruction = instruction.layerInstructions.first
-                as? AVMutableVideoCompositionLayerInstruction
         {
             let trackID = layerInstruction.trackID
             if trackID != kCMPersistentTrackID_Invalid {
@@ -221,11 +220,10 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         // to work correctly with CIImage's coordinate system.
 
         // Extract layer instruction from CustomVideoCompositionInstruction
-        var layerInstruction: AVMutableVideoCompositionLayerInstruction?
+        var layerInstruction: AVVideoCompositionLayerInstruction?
         if let customInstruction = request.videoCompositionInstruction
             as? CustomVideoCompositionInstruction,
             let firstLayerInstruction = customInstruction.layerInstructions.first
-                as? AVMutableVideoCompositionLayerInstruction
         {
             layerInstruction = firstLayerInstruction
         }
