@@ -60,7 +60,8 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
     if (!_isFormatSupported(_selectedFormat)) {
       // Find first supported format
       _selectedFormat = AudioFormat.values.firstWhere(
-        _isFormatSupported, orElse: () => AudioFormat.m4a, // Fallback to M4A
+        _isFormatSupported,
+        orElse: () => AudioFormat.m4a, // Fallback to M4A
       );
     }
   }
@@ -132,7 +133,8 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
         if (_selectedFormat == AudioFormat.wav) {
           try {
             var wav = Wav.read(File(outputPath).readAsBytesSync());
-            info += ' channels:${wav.channels.length}'
+            info +=
+                ' channels:${wav.channels.length}'
                 ' sampleRate:${wav.samplesPerSecond}'
                 ' format:${wav.format.name}';
           } catch (_) {
