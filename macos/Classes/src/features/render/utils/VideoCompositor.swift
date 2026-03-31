@@ -10,6 +10,8 @@ struct ImageLayer {
     let x: Int64?
     /// y position in pixels. When nil, the image is stretched to fill the video frame.
     let y: Int64?
+    /// Animations applied to this layer.
+    let animations: [LayerAnimationConfig]
 }
 
 class VideoCompositor: NSObject, AVVideoCompositing {
@@ -89,7 +91,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                     startUs: layer.startUs,
                     endUs: layer.endUs,
                     x: layer.x,
-                    y: layer.y
+                    y: layer.y,
+                    animations: layer.animations
                 ))
         }
     }
@@ -325,9 +328,6 @@ class VideoCompositor: NSObject, AVVideoCompositing {
             // Apply time-based overlay layers
             let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
             for layer in overlayImageLayers {
-                // Check if current time is within the layer's time range
-                // startUs of -1 means "from the start of the video"
-                // endUs of -1 means "until the end of the video"
                 let inTimeRange =
                     (layer.startUs == -1 || currentTimeUs >= layer.startUs)
                     && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
@@ -335,21 +335,26 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                 if inTimeRange {
                     let overlay: CIImage
                     if layer.x == nil && layer.y == nil {
-                        // Stretch to fill frame when no position is specified
                         overlay = layer.image.transformed(
                             by: CGAffineTransform(
                                 scaleX: imageRect.width / layer.image.extent.width,
                                 y: imageRect.height / layer.image.extent.height))
                     } else {
-                        // Position at specific coordinates
                         let posX = CGFloat(layer.x ?? 0)
                         let posY = CGFloat(layer.y ?? 0)
-                        // Convert y from top-left (Dart) to bottom-left (Core Graphics)
                         let cgY = imageRect.height - posY - layer.image.extent.height
                         overlay = layer.image.transformed(
                             by: CGAffineTransform(translationX: posX, y: cgY))
                     }
-                    outputImage = overlay.composited(over: outputImage)
+
+                    let (opacity, animTransform) = computeAnimation(
+                        layer: layer,
+                        currentTimeUs: currentTimeUs,
+                        overlayExtent: overlay.extent,
+                        frameExtent: imageRect
+                    )
+                    outputImage = compositeOverlay(
+                        overlay, over: outputImage, opacity: opacity, transform: animTransform)
                 }
             }
         }
@@ -428,33 +433,34 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         if !imageBytesWithCropping {
             let imageRect = outputImage.extent
 
-            // Apply time-based overlay layers with positioning
             let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
             for layer in overlayImageLayers {
-                // Check if current time is within the layer's time range
-                // startUs of -1 means "from the start of the video"
-                // endUs of -1 means "until the end of the video"
                 let inTimeRange =
                     (layer.startUs == -1 || currentTimeUs >= layer.startUs)
                     && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
                 if inTimeRange {
                     let overlay: CIImage
                     if layer.x == nil && layer.y == nil {
-                        // Stretch to fill frame when no position is specified
                         overlay = layer.image.transformed(
                             by: CGAffineTransform(
                                 scaleX: imageRect.width / layer.image.extent.width,
                                 y: imageRect.height / layer.image.extent.height))
                     } else {
-                        // Position at specific coordinates
                         let posX = CGFloat(layer.x ?? 0)
                         let posY = CGFloat(layer.y ?? 0)
-                        // Convert y from top-left (Dart) to bottom-left (Core Graphics)
                         let cgY = imageRect.height - posY - layer.image.extent.height
                         overlay = layer.image.transformed(
                             by: CGAffineTransform(translationX: posX, y: cgY))
                     }
-                    outputImage = overlay.composited(over: outputImage)
+
+                    let (opacity, animTransform) = computeAnimation(
+                        layer: layer,
+                        currentTimeUs: currentTimeUs,
+                        overlayExtent: overlay.extent,
+                        frameExtent: imageRect
+                    )
+                    outputImage = compositeOverlay(
+                        overlay, over: outputImage, opacity: opacity, transform: animTransform)
                 }
             }
         }

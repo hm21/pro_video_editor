@@ -1,6 +1,39 @@
 import FlutterMacOS
 import Foundation
 
+/// Configuration for a single animation on an image layer.
+struct LayerAnimationConfig {
+    /// The kind of animation: "fade", "slide", or "scale".
+    let type: String
+    /// When the animation plays: "animateIn", "animateOut", or "animateInOut".
+    let phase: String
+    /// Duration in microseconds.
+    let durationUs: Int64
+    /// Easing curve: "linear", "easeIn", "easeOut", or "easeInOut".
+    let curve: String
+    /// Slide direction: "left", "right", "top", or "bottom". Only for slide animations.
+    let slideDirection: String?
+    /// Starting scale factor for scale animations (e.g. 0.0 = invisible, 0.5 = half size).
+    let scaleFrom: Double?
+
+    static func fromArguments(_ args: [String: Any]?) -> LayerAnimationConfig? {
+        guard let args = args,
+            let type = args["type"] as? String,
+            let phase = args["phase"] as? String,
+            let durationUs = (args["durationUs"] as? NSNumber)?.int64Value
+        else { return nil }
+
+        return LayerAnimationConfig(
+            type: type,
+            phase: phase,
+            durationUs: durationUs,
+            curve: args["curve"] as? String ?? "linear",
+            slideDirection: args["slideDirection"] as? String,
+            scaleFrom: (args["scaleFrom"] as? NSNumber)?.doubleValue
+        )
+    }
+}
+
 struct ImageLayerConfig {
     let imageData: Data
     let startUs: Int64
@@ -10,6 +43,8 @@ struct ImageLayerConfig {
     let x: Int64?
     /// y position in pixels. When nil, the image is stretched to fill the video frame.
     let y: Int64?
+    /// Animations to apply to this layer.
+    let animations: [LayerAnimationConfig]
 
     static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
         guard let args = args else { return nil }
@@ -27,6 +62,12 @@ struct ImageLayerConfig {
             return nil
         }
 
+        // Parse animations array
+        var animations: [LayerAnimationConfig] = []
+        if let animsRaw = args["animations"] as? [[String: Any]] {
+            animations = animsRaw.compactMap { LayerAnimationConfig.fromArguments($0) }
+        }
+
         // Use -1 as sentinel value for "from start" when startUs is null
         // Use -1 for endUs to signify "until the end of the video"
         return ImageLayerConfig(
@@ -34,7 +75,8 @@ struct ImageLayerConfig {
             startUs: (args["startUs"] as? NSNumber)?.int64Value ?? -1,
             endUs: (args["endUs"] as? NSNumber)?.int64Value ?? -1,
             x: (args["x"] as? NSNumber)?.int64Value,
-            y: (args["y"] as? NSNumber)?.int64Value
+            y: (args["y"] as? NSNumber)?.int64Value,
+            animations: animations
         )
     }
 }
