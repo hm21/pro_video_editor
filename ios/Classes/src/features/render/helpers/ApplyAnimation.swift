@@ -146,6 +146,9 @@ func computeAnimation(
         }
     }
 
+    // Clamp values — elastic/bounce curves can overshoot [0,1]
+    opacity = max(0, min(1, opacity))
+
     return (opacity, animTransform)
 }
 

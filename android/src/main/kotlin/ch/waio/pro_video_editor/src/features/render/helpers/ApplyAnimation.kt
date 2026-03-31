@@ -147,11 +147,15 @@ internal class AnimatedBitmapOverlay(
             }
         }
 
+        // Clamp values — elastic/bounce curves can overshoot [0,1]
+        val clampedAlpha = alpha.coerceIn(0f, 1f)
+        val clampedScale = scaleVal.coerceAtLeast(0f)
+
         return StaticOverlaySettings.Builder()
-            .setAlphaScale(alpha)
+            .setAlphaScale(clampedAlpha)
             .setBackgroundFrameAnchor(baseNormX + offsetX, baseNormY + offsetY)
             .setOverlayFrameAnchor(0f, 0f)
-            .setScale(scaleVal, scaleVal)
+            .setScale(clampedScale, clampedScale)
             .build()
     }
 }

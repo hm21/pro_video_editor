@@ -77,159 +77,100 @@ void main() {
       overlayImage = EditorLayerImage.memory(bytes);
     });
 
-    testWidgets('fade in animation', (_) async {
-      await testRender(
-        description: 'Fade in animation',
-        renderModel: VideoRenderData(
-          videoSegments: [VideoSegment(video: inputVideo)],
-          outputFormat: VideoOutputFormat.mp4,
-          imageLayers: [
-            ImageLayer(
-              image: overlayImage,
-              startTime: const Duration(seconds: 1),
-              endTime: const Duration(seconds: 5),
-              animations: [
-                const LayerAnimation(
-                  type: LayerAnimationType.fade,
-                  phase: AnimationPhase.animateIn,
-                  duration: Duration(milliseconds: 500),
+    // ── All animation types × all phases ──────────────────────
+    for (final type in LayerAnimationType.values) {
+      for (final phase in AnimationPhase.values) {
+        testWidgets('${type.name} / ${phase.name}', (_) async {
+          await testRender(
+            description: '${type.name} ${phase.name}',
+            renderModel: VideoRenderData(
+              videoSegments: [VideoSegment(video: inputVideo)],
+              outputFormat: VideoOutputFormat.mp4,
+              imageLayers: [
+                ImageLayer(
+                  image: overlayImage,
+                  offset: const Offset(100, 100),
+                  startTime: const Duration(seconds: 1),
+                  endTime: const Duration(seconds: 5),
+                  animations: [
+                    LayerAnimation(
+                      type: type,
+                      phase: phase,
+                      duration: const Duration(milliseconds: 500),
+                      slideDirection: type == LayerAnimationType.slide
+                          ? SlideDirection.left
+                          : null,
+                      scaleFrom: type == LayerAnimationType.scale ? 0.3 : null,
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
-        ),
-      );
-    });
+          );
+        });
+      }
+    }
 
-    testWidgets('fade out animation', (_) async {
-      await testRender(
-        description: 'Fade out animation',
-        renderModel: VideoRenderData(
-          videoSegments: [VideoSegment(video: inputVideo)],
-          outputFormat: VideoOutputFormat.mp4,
-          imageLayers: [
-            ImageLayer(
-              image: overlayImage,
-              startTime: const Duration(seconds: 1),
-              endTime: const Duration(seconds: 5),
-              animations: [
-                const LayerAnimation(
-                  type: LayerAnimationType.fade,
-                  phase: AnimationPhase.animateOut,
-                  duration: Duration(milliseconds: 300),
-                ),
-              ],
-            ),
-          ],
-        ),
-      );
-    });
+    // ── All easing curves ─────────────────────────────────────
+    for (final curve in AnimationCurve.values) {
+      testWidgets('easing curve: ${curve.name}', (_) async {
+        await testRender(
+          description: 'easing ${curve.name}',
+          renderModel: VideoRenderData(
+            videoSegments: [VideoSegment(video: inputVideo)],
+            outputFormat: VideoOutputFormat.mp4,
+            imageLayers: [
+              ImageLayer(
+                image: overlayImage,
+                offset: const Offset(100, 100),
+                startTime: const Duration(seconds: 1),
+                endTime: const Duration(seconds: 5),
+                animations: [
+                  LayerAnimation(
+                    type: LayerAnimationType.fade,
+                    phase: AnimationPhase.animateIn,
+                    duration: const Duration(milliseconds: 500),
+                    curve: curve,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      });
+    }
 
-    testWidgets('fade in and out animation', (_) async {
-      await testRender(
-        description: 'Fade in and out animation',
-        renderModel: VideoRenderData(
-          videoSegments: [VideoSegment(video: inputVideo)],
-          outputFormat: VideoOutputFormat.mp4,
-          imageLayers: [
-            ImageLayer(
-              image: overlayImage,
-              startTime: const Duration(seconds: 1),
-              endTime: const Duration(seconds: 6),
-              animations: [
-                const LayerAnimation(
-                  type: LayerAnimationType.fade,
-                  phase: AnimationPhase.animateInOut,
-                  duration: Duration(milliseconds: 500),
-                ),
-              ],
-            ),
-          ],
-        ),
-      );
-    });
+    // ── All slide directions ──────────────────────────────────
+    for (final dir in SlideDirection.values) {
+      testWidgets('slide direction: ${dir.name}', (_) async {
+        await testRender(
+          description: 'slide ${dir.name}',
+          renderModel: VideoRenderData(
+            videoSegments: [VideoSegment(video: inputVideo)],
+            outputFormat: VideoOutputFormat.mp4,
+            imageLayers: [
+              ImageLayer(
+                image: overlayImage,
+                offset: const Offset(200, 200),
+                startTime: const Duration(seconds: 1),
+                endTime: const Duration(seconds: 5),
+                animations: [
+                  LayerAnimation(
+                    type: LayerAnimationType.slide,
+                    phase: AnimationPhase.animateIn,
+                    duration: const Duration(milliseconds: 500),
+                    slideDirection: dir,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      });
+    }
 
-    testWidgets('slide in from left', (_) async {
-      await testRender(
-        description: 'Slide in from left',
-        renderModel: VideoRenderData(
-          videoSegments: [VideoSegment(video: inputVideo)],
-          outputFormat: VideoOutputFormat.mp4,
-          imageLayers: [
-            ImageLayer(
-              image: overlayImage,
-              offset: const Offset(200, 200),
-              startTime: const Duration(seconds: 1),
-              endTime: const Duration(seconds: 5),
-              animations: [
-                const LayerAnimation(
-                  type: LayerAnimationType.slide,
-                  phase: AnimationPhase.animateIn,
-                  duration: Duration(milliseconds: 600),
-                  slideDirection: SlideDirection.left,
-                  curve: AnimationCurve.easeOut,
-                ),
-              ],
-            ),
-          ],
-        ),
-      );
-    });
-
-    testWidgets('slide out to bottom', (_) async {
-      await testRender(
-        description: 'Slide out to bottom',
-        renderModel: VideoRenderData(
-          videoSegments: [VideoSegment(video: inputVideo)],
-          outputFormat: VideoOutputFormat.mp4,
-          imageLayers: [
-            ImageLayer(
-              image: overlayImage,
-              offset: const Offset(100, 100),
-              startTime: const Duration(seconds: 1),
-              endTime: const Duration(seconds: 5),
-              animations: [
-                const LayerAnimation(
-                  type: LayerAnimationType.slide,
-                  phase: AnimationPhase.animateOut,
-                  duration: Duration(milliseconds: 400),
-                  slideDirection: SlideDirection.bottom,
-                ),
-              ],
-            ),
-          ],
-        ),
-      );
-    });
-
-    testWidgets('scale animation', (_) async {
-      await testRender(
-        description: 'Scale animation',
-        renderModel: VideoRenderData(
-          videoSegments: [VideoSegment(video: inputVideo)],
-          outputFormat: VideoOutputFormat.mp4,
-          imageLayers: [
-            ImageLayer(
-              image: overlayImage,
-              offset: const Offset(200, 200),
-              startTime: const Duration(seconds: 1),
-              endTime: const Duration(seconds: 5),
-              animations: [
-                const LayerAnimation(
-                  type: LayerAnimationType.scale,
-                  phase: AnimationPhase.animateIn,
-                  duration: Duration(milliseconds: 400),
-                  scaleFrom: 0.3,
-                  curve: AnimationCurve.easeOutCubic,
-                ),
-              ],
-            ),
-          ],
-        ),
-      );
-    });
-
-    testWidgets('combined fade + slide + scale animations', (_) async {
+    // ── Combined animations (all types at once) ───────────────
+    testWidgets('combined fade + slide + scale', (_) async {
       await testRender(
         description: 'Combined fade + slide + scale',
         renderModel: VideoRenderData(
@@ -241,21 +182,21 @@ void main() {
               offset: const Offset(300, 150),
               startTime: const Duration(seconds: 2),
               endTime: const Duration(seconds: 8),
-              animations: [
-                const LayerAnimation(
+              animations: const [
+                LayerAnimation(
                   type: LayerAnimationType.fade,
                   phase: AnimationPhase.animateInOut,
                   duration: Duration(milliseconds: 500),
                   curve: AnimationCurve.easeInOut,
                 ),
-                const LayerAnimation(
+                LayerAnimation(
                   type: LayerAnimationType.slide,
                   phase: AnimationPhase.animateIn,
                   duration: Duration(milliseconds: 600),
                   slideDirection: SlideDirection.left,
                   curve: AnimationCurve.bounceOut,
                 ),
-                const LayerAnimation(
+                LayerAnimation(
                   type: LayerAnimationType.scale,
                   phase: AnimationPhase.animateIn,
                   duration: Duration(milliseconds: 400),
@@ -269,38 +210,7 @@ void main() {
       );
     });
 
-    testWidgets('animation with easing curves', (_) async {
-      await testRender(
-        description: 'Animation with various easing curves',
-        renderModel: VideoRenderData(
-          videoSegments: [VideoSegment(video: inputVideo)],
-          outputFormat: VideoOutputFormat.mp4,
-          imageLayers: [
-            ImageLayer(
-              image: overlayImage,
-              offset: const Offset(100, 100),
-              startTime: const Duration(seconds: 1),
-              endTime: const Duration(seconds: 8),
-              animations: [
-                const LayerAnimation(
-                  type: LayerAnimationType.fade,
-                  phase: AnimationPhase.animateIn,
-                  duration: Duration(milliseconds: 500),
-                  curve: AnimationCurve.easeInCubic,
-                ),
-                const LayerAnimation(
-                  type: LayerAnimationType.fade,
-                  phase: AnimationPhase.animateOut,
-                  duration: Duration(milliseconds: 500),
-                  curve: AnimationCurve.bounceOut,
-                ),
-              ],
-            ),
-          ],
-        ),
-      );
-    });
-
+    // ── Multiple layers with different animations ─────────────
     testWidgets('multiple layers with different animations', (_) async {
       final overlay2 = EditorLayerImage.memory(
         await createTestOverlayImage(width: 150, height: 80),
@@ -316,8 +226,8 @@ void main() {
               offset: const Offset(50, 50),
               startTime: const Duration(seconds: 1),
               endTime: const Duration(seconds: 5),
-              animations: [
-                const LayerAnimation(
+              animations: const [
+                LayerAnimation(
                   type: LayerAnimationType.fade,
                   phase: AnimationPhase.animateIn,
                   duration: Duration(milliseconds: 400),
@@ -329,15 +239,15 @@ void main() {
               offset: const Offset(400, 300),
               startTime: const Duration(seconds: 3),
               endTime: const Duration(seconds: 7),
-              animations: [
-                const LayerAnimation(
+              animations: const [
+                LayerAnimation(
                   type: LayerAnimationType.slide,
                   phase: AnimationPhase.animateIn,
                   duration: Duration(milliseconds: 500),
                   slideDirection: SlideDirection.right,
                   curve: AnimationCurve.easeOut,
                 ),
-                const LayerAnimation(
+                LayerAnimation(
                   type: LayerAnimationType.scale,
                   phase: AnimationPhase.animateOut,
                   duration: Duration(milliseconds: 300),
@@ -350,6 +260,7 @@ void main() {
       );
     });
 
+    // ── Animation on full-duration layer (no time range) ──────
     testWidgets('animation on layer without time range (full duration)', (
       _,
     ) async {
@@ -361,8 +272,8 @@ void main() {
           imageLayers: [
             ImageLayer(
               image: overlayImage,
-              animations: [
-                const LayerAnimation(
+              animations: const [
+                LayerAnimation(
                   type: LayerAnimationType.fade,
                   phase: AnimationPhase.animateInOut,
                   duration: Duration(seconds: 1),
