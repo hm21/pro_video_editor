@@ -10,6 +10,8 @@ struct ImageLayer {
     let x: Int64?
     /// y position in pixels. When nil, the image is stretched to fill the video frame.
     let y: Int64?
+    /// Animations applied to this layer.
+    let animations: [LayerAnimationConfig]
 }
 
 class VideoCompositor: NSObject, AVVideoCompositing {
@@ -91,7 +93,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                     startUs: layer.startUs,
                     endUs: layer.endUs,
                     x: layer.x,
-                    y: layer.y
+                    y: layer.y,
+                    animations: layer.animations
                 ))
         }
     }
@@ -351,7 +354,15 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                         overlay = layer.image.transformed(
                             by: CGAffineTransform(translationX: posX, y: cgY))
                     }
-                    outputImage = overlay.composited(over: outputImage)
+
+                    let (opacity, animTransform) = computeAnimation(
+                        layer: layer,
+                        currentTimeUs: currentTimeUs,
+                        overlayExtent: overlay.extent,
+                        frameExtent: imageRect
+                    )
+                    outputImage = compositeOverlay(
+                        overlay, over: outputImage, opacity: opacity, transform: animTransform)
                 }
             }
         }
@@ -456,7 +467,15 @@ class VideoCompositor: NSObject, AVVideoCompositing {
                         overlay = layer.image.transformed(
                             by: CGAffineTransform(translationX: posX, y: cgY))
                     }
-                    outputImage = overlay.composited(over: outputImage)
+
+                    let (opacity, animTransform) = computeAnimation(
+                        layer: layer,
+                        currentTimeUs: currentTimeUs,
+                        overlayExtent: overlay.extent,
+                        frameExtent: imageRect
+                    )
+                    outputImage = compositeOverlay(
+                        overlay, over: outputImage, opacity: opacity, transform: animTransform)
                 }
             }
         }
