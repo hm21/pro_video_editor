@@ -11,7 +11,6 @@ import 'video_quality_preset.dart';
 /// quality preset. It provides factory constructors to create configurations
 /// from presets or custom values.
 class VideoQualityConfig {
-
   /// Creates a [VideoQualityConfig] from a [Map] representation.
   factory VideoQualityConfig.fromMap(Map<String, dynamic> map) {
     final preset = VideoQualityPreset.values.byName(map['preset'] as String);
@@ -19,12 +18,11 @@ class VideoQualityConfig {
     final height = tryParseDouble(map['height']);
     return VideoQualityConfig(
       bitrate: safeParseInt(map['bitrate']),
-      resolution: width != null && height != null
-          ? Size(width, height)
-          : null,
+      resolution: width != null && height != null ? Size(width, height) : null,
       preset: preset,
     );
   }
+
   /// Creates a video quality configuration with the given parameters.
   const VideoQualityConfig({
     required this.bitrate,

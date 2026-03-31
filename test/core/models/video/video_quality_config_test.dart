@@ -123,5 +123,51 @@ void main() {
 
       expect(config1.hashCode, equals(config2.hashCode));
     });
+
+    group('toMap / fromMap', () {
+      test('roundtrip with resolution', () {
+        final config = VideoQualityConfig.fromPreset(VideoQualityPreset.p1080);
+        final map = config.toMap();
+        final restored = VideoQualityConfig.fromMap(map);
+
+        expect(restored.bitrate, config.bitrate);
+        expect(restored.resolution, config.resolution);
+        expect(restored.preset, config.preset);
+      });
+
+      test('roundtrip without resolution (custom)', () {
+        final config = VideoQualityConfig.fromPreset(VideoQualityPreset.custom);
+        final map = config.toMap();
+        final restored = VideoQualityConfig.fromMap(map);
+
+        expect(restored.bitrate, config.bitrate);
+        expect(restored.resolution, isNull);
+        expect(restored.preset, VideoQualityPreset.custom);
+      });
+
+      test('fromMap parses string values via safe parsers', () {
+        final map = <String, dynamic>{
+          'bitrate': '5000000',
+          'width': '1280',
+          'height': '720',
+          'preset': 'p720',
+        };
+        final restored = VideoQualityConfig.fromMap(map);
+
+        expect(restored.bitrate, 5000000);
+        expect(restored.resolution, equals(const Size(1280, 720)));
+        expect(restored.preset, VideoQualityPreset.p720);
+      });
+
+      test('toMap contains expected keys', () {
+        final config = VideoQualityConfig.fromPreset(VideoQualityPreset.p720);
+        final map = config.toMap();
+
+        expect(map['bitrate'], config.bitrate);
+        expect(map['width'], 1280.0);
+        expect(map['height'], 720.0);
+        expect(map['preset'], 'p720');
+      });
+    });
   });
 }
