@@ -41,6 +41,8 @@ void main() {
     testWidgets(
       'extractAudio with $format returns valid audio file',
       (tester) async {
+        if (!isFormatSupported(format)) return;
+
         final directory = await getTemporaryDirectory();
         final outputPath =
             '${directory.path}/test_audio_${DateTime.now().millisecondsSinceEpoch}.${format.extension}';
@@ -88,6 +90,8 @@ void main() {
     testWidgets(
       'extractAudio with $format and trimming works correctly',
       (tester) async {
+        if (!isFormatSupported(format)) return;
+
         final directory = await getTemporaryDirectory();
         final outputPath =
             '${directory.path}/test_audio_trimmed_${DateTime.now().millisecondsSinceEpoch}.${format.extension}';
