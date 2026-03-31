@@ -60,17 +60,16 @@ void main() {
           reason: 'Audio file should exist at $outputPath',
         );
 
-        final raf = file.openSync();
-        final header = raf.readSync(defaultMagicNumbersMaxLength);
-        raf.closeSync();
-        final mimeType = lookupMimeType(result, headerBytes: header);
-        // Some formats may be detected under alternative MIME types depending
-        // on the file extension used on the current platform:
-        // - WAV: 'audio/wav' or 'audio/x-wav'
-        // - AAC on iOS/macOS: saved as .m4a, detected as 'audio/mp4'
+        // Use extension-based MIME detection — header-based detection is
+        // unreliable for MP4-container formats (AAC/M4A/MP3 on Android all
+        // share the same magic bytes regardless of audio content).
+        final mimeType = lookupMimeType(result);
+        // AAC on iOS/macOS is saved with a .m4a extension (the only container
+        // Apple supports for AAC export), so it resolves to 'audio/mp4'.
+        // The mime package maps .wav to 'audio/x-wav' rather than 'audio/wav'.
         final expectedMimeTypes = switch (format) {
-          AudioFormat.wav => ['audio/wav', 'audio/x-wav'],
-          AudioFormat.aac => ['audio/aac', 'audio/mp4'],
+          AudioFormat.aac => [format.mimeType, 'audio/mp4'],
+          AudioFormat.wav => [format.mimeType, 'audio/x-wav'],
           _ => [format.mimeType],
         };
         expect(expectedMimeTypes, contains(mimeType));

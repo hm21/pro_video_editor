@@ -223,9 +223,7 @@ class ExtractAudio(private val context: Context) {
         return AudioExtractJobHandle {
             shouldStop.set(true)
             mainHandler.removeCallbacksAndMessages(null)
-            if (outputFile.exists()) {
-                outputFile.delete()
-            }
+            // File cleanup is handled by the background thread once it detects shouldStop
         }
     }
 
@@ -428,9 +426,7 @@ class ExtractAudio(private val context: Context) {
         return AudioExtractJobHandle {
             shouldStop.set(true)
             mainHandler.removeCallbacksAndMessages(null)
-            if (config.outputPath == null && outputFile.exists()) {
-                outputFile.delete()
-            }
+            // File cleanup is handled by the background thread once it detects shouldStop
         }
     }
 

@@ -30,7 +30,6 @@ class WavFileWriter(private val outputFile: File) {
         private const val FMT_HEADER = 0x20746d66  // "fmt " in little-endian
         private const val DATA_HEADER = 0x61746164 // "data" in little-endian
         private const val PCM_FORMAT = 1.toShort()
-        private const val IEEE_FLOAT_FORMAT = 3.toShort()
         private const val BUFFER_SIZE = 1024 * 1024 // 1MB buffer
     }
 
@@ -70,7 +69,7 @@ class WavFileWriter(private val outputFile: File) {
         val isPcm = mime.equals("audio/raw", ignoreCase = true) ||
                            mime.equals("audio/pcm", ignoreCase = true)
         if (isPcm) {
-            extractPcmToWav(extractor, audioTrackIndex, startUs, endUs, onProgress, shouldStop)
+            extractPcmToWav(extractor, audioFormat, audioTrackIndex, startUs, endUs, onProgress, shouldStop)
         } else {
             extractAndDecodeToWav(extractor, audioFormat, audioTrackIndex, startUs, endUs, onProgress, shouldStop)
         }
@@ -252,35 +251,35 @@ class WavFileWriter(private val outputFile: File) {
                         // If format changed, rewrite the header
                         if (formatChanged) {
                             outputStream.flush()
-                            val raf = RandomAccessFile(outputFile, "rw")
-                            raf.seek(0L)
+                            RandomAccessFile(outputFile, "rw").use { raf ->
+                                raf.seek(0L)
                             
-                            val byteRate = sampleRate * numChannels * bitsPerSample / 8
-                            val blockAlign = (numChannels * bitsPerSample / 8).toShort()
+                                val byteRate = sampleRate * numChannels * bitsPerSample / 8
+                                val blockAlign = (numChannels * bitsPerSample / 8).toShort()
                             
-                            val headerBytes = ByteBuffer.allocate(44).apply {
-                                // All values written in little-endian order
-                                // Magic number constants are pre-encoded for little-endian
-                                order(ByteOrder.LITTLE_ENDIAN)
-                                putInt(RIFF_HEADER)
-                                putInt(0)  // Will update at end
-                                putInt(WAVE_HEADER)
-                                
-                                putInt(FMT_HEADER)
-                                putInt(16)
-                                putShort(PCM_FORMAT)
-                                putShort(numChannels.toShort())
-                                putInt(sampleRate)
-                                putInt(byteRate)
-                                putShort(blockAlign)
-                                putShort(bitsPerSample.toShort())
-                                
-                                putInt(DATA_HEADER)
-                                putInt(0)  // Will update at end
-                            }.array()
+                                val headerBytes = ByteBuffer.allocate(44).apply {
+                                    // All values written in little-endian order
+                                    // Magic number constants are pre-encoded for little-endian
+                                    order(ByteOrder.LITTLE_ENDIAN)
+                                    putInt(RIFF_HEADER)
+                                    putInt(0)  // Will update at end
+                                    putInt(WAVE_HEADER)
+                                    
+                                    putInt(FMT_HEADER)
+                                    putInt(16)
+                                    putShort(PCM_FORMAT)
+                                    putShort(numChannels.toShort())
+                                    putInt(sampleRate)
+                                    putInt(byteRate)
+                                    putShort(blockAlign)
+                                    putShort(bitsPerSample.toShort())
+                                    
+                                    putInt(DATA_HEADER)
+                                    putInt(0)  // Will update at end
+                                }.array()
                             
-                            raf.write(headerBytes)
-                            raf.close()
+                                raf.write(headerBytes)
+                            }
                         }
                     }
                     outputBufferId >= 0 -> {
@@ -345,6 +344,7 @@ class WavFileWriter(private val outputFile: File) {
      */
     private fun extractPcmToWav(
         extractor: MediaExtractor,
+        audioFormat: MediaFormat,
         audioTrackIndex: Int,
         startUs: Long,
         endUs: Long,
@@ -356,6 +356,33 @@ class WavFileWriter(private val outputFile: File) {
         try {
             // Reset total data size for this extraction
             totalDataSize = 0
+
+            // Determine bits per sample from the source PCM encoding
+            if (audioFormat.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                val pcmEncoding = audioFormat.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                when (pcmEncoding) {
+                    AudioFormat.ENCODING_PCM_16BIT -> {
+                        bitsPerSample = 16
+                        isFloatPcm = false
+                    }
+                    AudioFormat.ENCODING_PCM_8BIT -> {
+                        bitsPerSample = 8
+                        isFloatPcm = false
+                    }
+                    AudioFormat.ENCODING_PCM_FLOAT -> {
+                        // Convert float to 16-bit for better compatibility
+                        bitsPerSample = 16
+                        isFloatPcm = true
+                    }
+                    else -> {
+                        bitsPerSample = 16
+                        isFloatPcm = false
+                    }
+                }
+            } else {
+                bitsPerSample = 16
+                isFloatPcm = false
+            }
 
             // Select the audio track in the extractor
             extractor.selectTrack(audioTrackIndex)
@@ -396,8 +423,23 @@ class WavFileWriter(private val outputFile: File) {
 
                 val pcmData = ByteArray(sampleSize)
                 buffer.get(pcmData)
-                outputStream.write(pcmData)
-                totalDataSize += sampleSize
+
+                if (isFloatPcm) {
+                    // Convert float PCM to 16-bit integer PCM
+                    val floatBuffer = ByteBuffer.wrap(pcmData).order(ByteOrder.LITTLE_ENDIAN)
+                    val floatSamples = pcmData.size / 4
+                    val int16Buffer = ByteBuffer.allocate(floatSamples * 2).order(ByteOrder.LITTLE_ENDIAN)
+                    for (i in 0 until floatSamples) {
+                        val floatValue = floatBuffer.float
+                        val intValue = (floatValue.coerceIn(-1.0f, 1.0f) * 32767.0f).toInt().toShort()
+                        int16Buffer.putShort(intValue)
+                    }
+                    outputStream.write(int16Buffer.array())
+                    totalDataSize += int16Buffer.array().size
+                } else {
+                    outputStream.write(pcmData)
+                    totalDataSize += sampleSize
+                }
 
                 currentTimeUs = presentationTimeUs
                 if (totalDurationUs != Long.MAX_VALUE) {
@@ -434,10 +476,10 @@ class WavFileWriter(private val outputFile: File) {
         val byteRate = sampleRate * numChannels * bitsPerSample / 8
         val blockAlign = (numChannels * bitsPerSample / 8).toShort()
 
-        // Ensure dataSize doesn't exceed 32-bit signed integer limit for WAV format
-        // WAV files are limited to 4GB due to 32-bit size fields in RIFF format
-        val safeSizeForHeader = if (dataSize > 0x7FFFFFFFL) {
-            0x7FFFFFFF
+        // RIFF chunk sizes are unsigned 32-bit, so the actual WAV limit is ~4GB.
+        // Clamp to 0xFFFFFFFF; .toInt() gives the correct bit pattern for ByteBuffer.putInt.
+        val safeSizeForHeader = if (dataSize > 0xFFFFFFFFL) {
+            0xFFFFFFFF.toInt()
         } else {
             dataSize.toInt()
         }
@@ -468,13 +510,14 @@ class WavFileWriter(private val outputFile: File) {
     /**
      * Updates the WAV header with the actual file sizes after writing is complete.
      * 
-     * Note: WAV files are limited to 4GB due to 32-bit size fields. If the file exceeds this,
-     * the header size fields will be clamped to the maximum 32-bit signed integer value.
+     * Note: WAV files are limited to ~4GB due to unsigned 32-bit size fields in the RIFF spec.
+     * If the file exceeds this, the header size fields are clamped to 0xFFFFFFFF.
      */
     private fun updateWavHeader() {
-        // Ensure totalDataSize doesn't exceed 32-bit limit
-        val safeSizeForHeader = if (totalDataSize > 0x7FFFFFFFL) {
-            0x7FFFFFFF
+        // RIFF chunk sizes are unsigned 32-bit; clamp to 0xFFFFFFFF (~4GB).
+        // .toInt() gives the correct bit pattern for ByteBuffer.putInt.
+        val safeSizeForHeader = if (totalDataSize > 0xFFFFFFFFL) {
+            0xFFFFFFFF.toInt()
         } else {
             totalDataSize.toInt()
         }
