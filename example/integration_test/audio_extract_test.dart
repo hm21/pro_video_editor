@@ -60,10 +60,15 @@ void main() {
 
         final header = file.openSync().readSync(defaultMagicNumbersMaxLength);
         final mimeType = lookupMimeType(result, headerBytes: header);
-        // WAV files may be detected as either 'audio/wav' or 'audio/x-wav'
-        final expectedMimeTypes = format == AudioFormat.wav
-            ? ['audio/wav', 'audio/x-wav']
-            : [format.mimeType];
+        // Some formats may be detected under alternative MIME types depending
+        // on the file extension used on the current platform:
+        // - WAV: 'audio/wav' or 'audio/x-wav'
+        // - AAC on iOS/macOS: saved as .m4a, detected as 'audio/mp4'
+        final expectedMimeTypes = switch (format) {
+          AudioFormat.wav => ['audio/wav', 'audio/x-wav'],
+          AudioFormat.aac => ['audio/aac', 'audio/mp4'],
+          _ => [format.mimeType],
+        };
         expect(expectedMimeTypes, contains(mimeType));
 
         // Verify file has content
@@ -115,11 +120,15 @@ void main() {
           greaterThan(500),
           reason: 'Trimmed audio should have some content',
         );
-        expect(
-          fileSize,
-          lessThan(500000),
-          reason: 'Trimmed audio should be smaller than full extraction',
-        );
+        // WAV is uncompressed — 5 seconds can be several MB depending on
+        // sample rate and bit depth, so only cap compressed formats.
+        if (format != AudioFormat.wav && format != AudioFormat.caf) {
+          expect(
+            fileSize,
+            lessThan(500000),
+            reason: 'Trimmed audio should be smaller than full extraction',
+          );
+        }
 
         // Clean up
         await file.delete();
