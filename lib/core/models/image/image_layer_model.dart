@@ -2,11 +2,13 @@
 import 'dart:convert';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:pro_video_editor/shared/models/time_range_mixin.dart';
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 
 import 'editor_layer_image_model.dart';
+import 'layer_animation_model.dart';
 
 /// A model representing a video overlay layer with timing information.
 class ImageLayer with TimeRangeMixin {
@@ -17,6 +19,7 @@ class ImageLayer with TimeRangeMixin {
     this.startTime,
     this.endTime,
     this.offset,
+    this.animations = const [],
   }) : assert(
           startTime == null || endTime == null || startTime < endTime,
           'startTime must be before endTime',
@@ -41,17 +44,26 @@ class ImageLayer with TimeRangeMixin {
   /// placed at that position at its original size.
   final Offset? offset;
 
+  /// Animations to apply to this layer (e.g. fade, slide, scale).
+  ///
+  /// Multiple animations can be combined. Each animation specifies its
+  /// [LayerAnimation.phase] (in or out), [LayerAnimation.duration],
+  /// and optional [LayerAnimation.curve].
+  final List<LayerAnimation> animations;
+
   ImageLayer copyWith({
     EditorLayerImage? image,
     Duration? startTime,
     Duration? endTime,
     Offset? offset,
+    List<LayerAnimation>? animations,
   }) {
     return ImageLayer(
       image: image ?? this.image,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       offset: offset ?? this.offset,
+      animations: animations ?? this.animations,
     );
   }
 
@@ -61,6 +73,7 @@ class ImageLayer with TimeRangeMixin {
       'startTime': startTime?.inMicroseconds,
       'endTime': endTime?.inMicroseconds,
       'offset': offset != null ? {'dx': offset!.dx, 'dy': offset!.dy} : null,
+      'animations': animations.map((a) => a.toMap()).toList(),
     };
   }
 
@@ -79,6 +92,10 @@ class ImageLayer with TimeRangeMixin {
               safeParseDouble((map['offset'] as Map<String, dynamic>)['dy']),
             )
           : null,
+      animations: (map['animations'] as List<dynamic>?)
+              ?.map((a) => LayerAnimation.fromMap(a as Map<String, dynamic>))
+              .toList() ??
+          const [],
     );
   }
 
@@ -89,8 +106,13 @@ class ImageLayer with TimeRangeMixin {
 
   @override
   String toString() {
-    return 'ImageLayer(image: $image, startTime: $startTime, '
-        'endTime: $endTime, offset: $offset)';
+    return 'ImageLayer('
+        'image: $image, '
+        'startTime: $startTime, '
+        'endTime: $endTime, '
+        'offset: $offset, '
+        'animations: $animations'
+        ')';
   }
 
   @override
@@ -100,7 +122,8 @@ class ImageLayer with TimeRangeMixin {
     return other.image == image &&
         other.startTime == startTime &&
         other.endTime == endTime &&
-        other.offset == offset;
+        other.offset == offset &&
+        listEquals(other.animations, animations);
   }
 
   @override
@@ -108,6 +131,7 @@ class ImageLayer with TimeRangeMixin {
     return image.hashCode ^
         startTime.hashCode ^
         endTime.hashCode ^
-        offset.hashCode;
+        offset.hashCode ^
+        animations.hashCode;
   }
 }

@@ -608,6 +608,125 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Fade animation on image layer.
+  ///
+  /// This example demonstrates a simple fade-in and fade-out animation
+  /// on an image layer. The layer fades in over 500ms and fades out
+  /// over 300ms.
+  Future<void> _layerFadeAnimation() async {
+    final stickerImage = EditorLayerImage.asset('assets/sticker.png');
+
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      imageLayers: [
+        ImageLayer(
+          image: stickerImage,
+          offset: const Offset(100, 100),
+          startTime: const Duration(seconds: 2),
+          endTime: const Duration(seconds: 8),
+          animations: [
+            const LayerAnimation(
+              type: LayerAnimationType.fade,
+              phase: AnimationPhase.animateIn,
+              duration: Duration(milliseconds: 500),
+              curve: AnimationCurve.easeIn,
+            ),
+            const LayerAnimation(
+              type: LayerAnimationType.fade,
+              phase: AnimationPhase.animateOut,
+              duration: Duration(milliseconds: 300),
+              curve: AnimationCurve.easeOut,
+            ),
+          ],
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Slide animation on image layer.
+  ///
+  /// This example slides a sticker in from the left and slides it out
+  /// to the bottom, using different easing curves.
+  Future<void> _layerSlideAnimation() async {
+    final stickerImage = EditorLayerImage.asset('assets/sticker.png');
+
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      imageLayers: [
+        ImageLayer(
+          image: stickerImage,
+          offset: const Offset(200, 200),
+          startTime: const Duration(seconds: 1),
+          endTime: const Duration(seconds: 7),
+          animations: [
+            const LayerAnimation(
+              type: LayerAnimationType.slide,
+              phase: AnimationPhase.animateIn,
+              duration: Duration(milliseconds: 600),
+              slideDirection: SlideDirection.left,
+              curve: AnimationCurve.easeOutCubic,
+            ),
+            const LayerAnimation(
+              type: LayerAnimationType.slide,
+              phase: AnimationPhase.animateOut,
+              duration: Duration(milliseconds: 400),
+              slideDirection: SlideDirection.bottom,
+              curve: AnimationCurve.easeIn,
+            ),
+          ],
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Combined animations on image layer.
+  ///
+  /// This example combines fade, slide, and scale animations on a single
+  /// layer, using the `animateInOut` phase for convenience.
+  Future<void> _layerCombinedAnimations() async {
+    final stickerImage = EditorLayerImage.asset('assets/sticker.png');
+
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      imageLayers: [
+        ImageLayer(
+          image: stickerImage,
+          offset: const Offset(300, 150),
+          startTime: const Duration(seconds: 2),
+          endTime: const Duration(seconds: 10),
+          animations: [
+            const LayerAnimation(
+              type: LayerAnimationType.fade,
+              phase: AnimationPhase.animateInOut,
+              duration: Duration(milliseconds: 500),
+              curve: AnimationCurve.easeInOut,
+            ),
+            const LayerAnimation(
+              type: LayerAnimationType.slide,
+              phase: AnimationPhase.animateIn,
+              duration: Duration(milliseconds: 600),
+              slideDirection: SlideDirection.left,
+              curve: AnimationCurve.bounceOut,
+            ),
+            const LayerAnimation(
+              type: LayerAnimationType.scale,
+              phase: AnimationPhase.animateIn,
+              duration: Duration(milliseconds: 400),
+              scaleFrom: 0.3,
+              curve: AnimationCurve.elasticOut,
+            ),
+          ],
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   Future<void> _bitrate() async {
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video)],
@@ -1080,6 +1199,25 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
             leading: const Icon(Icons.video_file_outlined),
             title: const Text('Output-Format "mov"'),
           ),
+        ..._buildSectionTitle('Layer Animations'),
+        ListTile(
+          onTap: _layerFadeAnimation,
+          leading: const Icon(Icons.animation_outlined),
+          title: const Text('Fade Animation'),
+          subtitle: const Text('Fade in 500ms + fade out 300ms'),
+        ),
+        ListTile(
+          onTap: _layerSlideAnimation,
+          leading: const Icon(Icons.swap_horiz_outlined),
+          title: const Text('Slide Animation'),
+          subtitle: const Text('Slide in from left, out to bottom'),
+        ),
+        ListTile(
+          onTap: _layerCombinedAnimations,
+          leading: const Icon(Icons.auto_awesome_outlined),
+          title: const Text('Combined Animations'),
+          subtitle: const Text('Fade + slide + scale with curves'),
+        ),
         ..._buildSectionTitle('Video Concatenation'),
         ListTile(
           onTap: _concatenateVideos,

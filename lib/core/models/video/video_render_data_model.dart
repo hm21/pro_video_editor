@@ -503,6 +503,7 @@ class VideoRenderData {
                 'endUs': layer.endTime?.inMicroseconds,
                 'x': layer.offset?.dx.toInt(),
                 'y': layer.offset?.dy.toInt(),
+                'animations': layer.animations.map((a) => a.toMap()).toList(),
               }),
         ),
       // ignore: deprecated_member_use_from_same_package
