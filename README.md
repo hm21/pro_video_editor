@@ -180,10 +180,14 @@ No additional setup required.
 #### Basic Example
 ```dart
 var data = VideoRenderData(
-    video: EditorVideo.asset('assets/my-video.mp4'),
-    // video: EditorVideo.file(File('/path/to/video.mp4')),
-    // video: EditorVideo.network('https://example.com/video.mp4'),
-    // video: EditorVideo.memory(videoBytes),
+    videoSegments: [
+        VideoSegment(
+            video: EditorVideo.asset('assets/my-video.mp4'),
+            // video: EditorVideo.file(File('/path/to/video.mp4')),
+            // video: EditorVideo.network('https://example.com/video.mp4'),
+            // video: EditorVideo.memory(videoBytes),
+        ),
+    ],
     enableAudio: false,
     startTime: const Duration(seconds: 5),
     endTime: const Duration(seconds: 20),
@@ -214,7 +218,9 @@ StreamBuilder<ProgressModel>(
 /// Use quality presets for simplified video export configuration
 /// Available presets: ultra4K, k4, p1080High, p1080, p720High, p720, p480, low, custom
 var data = VideoRenderData.withQualityPreset(
-    video: EditorVideo.asset('assets/my-video.mp4'),
+    videoSegments: [
+        VideoSegment(video: EditorVideo.asset('assets/my-video.mp4')),
+    ],
     qualityPreset: VideoQualityPreset.p1080,  // 1080p at 8 Mbps
     startTime: const Duration(seconds: 5),
     endTime: const Duration(seconds: 20),
@@ -224,7 +230,9 @@ Uint8List result = await ProVideoEditor.instance.renderVideo(data);
 
 /// Override the preset's bitrate if needed
 var customData = VideoRenderData.withQualityPreset(
-    video: EditorVideo.asset('assets/my-video.mp4'),
+    videoSegments: [
+        VideoSegment(video: EditorVideo.asset('assets/my-video.mp4')),
+    ],
     qualityPreset: VideoQualityPreset.p720,
     bitrateOverride: 5000000,  // 5 Mbps instead of default 3 Mbps
 );
@@ -393,7 +401,9 @@ When you cancel a render started with `renderVideoToFile`, the returned `Future`
 
 ```dart
 final renderModel = VideoRenderData(
-  video: EditorVideo.asset('assets/sample.mp4'),
+  videoSegments: [
+    VideoSegment(video: EditorVideo.asset('assets/sample.mp4')),
+  ],
 );
 
 final outputPath = '${(await getTemporaryDirectory()).path}/video.mp4';
@@ -422,11 +432,15 @@ if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
 
 #### Advanced Example
 ```dart
-/// Every option except videoBytes is optional.
+/// Every option except videoSegments is optional.
 var task = VideoRenderData(
-    id: 'my-special-task'
-    video: EditorVideo.asset('assets/my-video.mp4'),
-    imageBytes: imageBytes, /// A image "Layer" which will overlay the video.
+    id: 'my-special-task',
+    videoSegments: [
+        VideoSegment(
+            video: EditorVideo.asset('assets/my-video.mp4'),
+            volume: 0.7, // Original audio at 70%
+        ),
+    ],
     imageLayers: [
       ImageLayer(
         imageBytes: layerBytes,
@@ -442,9 +456,12 @@ var task = VideoRenderData(
     blur: 10,
     bitrate: 5000000,
     enableAudio: false,
-    originalAudioVolume: 0.7, // Original audio at 70%
-    customAudioVolume: 0.3, // Background music at 30%
-    customAudioPath: customAudioPath,
+    audioTracks: [
+      VideoAudioTrack(
+        path: customAudioPath,
+        volume: 0.3, // Background music at 30%
+      ),
+    ],
     transform: const ExportTransform(
         flipX: true,
         flipY: true,
@@ -456,9 +473,9 @@ var task = VideoRenderData(
         scaleX: .5,
         scaleY: .5,
     ),
-    colorMatrixList: [
-         [ 1.0, 0.0, 0.0, 0.0, 50.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0 ],
-         [ 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0 ],
+    colorFilters: [
+         ColorFilter(matrix: [ 1.0, 0.0, 0.0, 0.0, 50.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0 ]),
+         ColorFilter(matrix: [ 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0 ]),
     ],
 );
 
