@@ -54,8 +54,6 @@ class ImageLayer with TimeRangeMixin {
   /// fill the frame when [offset] is also `null`).
   final Size? size;
 
-
-
   /// Animations to apply to this layer (e.g. fade, slide, scale).
   ///
   /// Multiple animations can be combined. Each animation specifies its
@@ -87,9 +85,8 @@ class ImageLayer with TimeRangeMixin {
       'startTime': startTime?.inMicroseconds,
       'endTime': endTime?.inMicroseconds,
       'offset': offset != null ? {'dx': offset!.dx, 'dy': offset!.dy} : null,
-      'size': size != null
-          ? {'width': size!.width, 'height': size!.height}
-          : null,
+      'size':
+          size != null ? {'width': size!.width, 'height': size!.height} : null,
       'animations': animations.map((a) => a.toMap()).toList(),
     };
   }
