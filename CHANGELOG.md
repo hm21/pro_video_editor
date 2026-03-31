@@ -1,3 +1,10 @@
+## 1.11.0
+- **FEAT**(android, iOS, macOS): Add timeline-based color filters via `ColorFilter` with optional `startTime`/`endTime` for applying different filters to specific time ranges.
+- **FEAT**(android, iOS, macOS): Add multi-track audio support via `VideoAudioTrack` with per-track volume, loop, and timeline placement (`startTime`, `endTime`, `audioStartTime`, `audioEndTime`).
+- **FEAT**(android, iOS, macOS): Add per-clip volume control via `VideoSegment.volume` for adjusting audio levels on individual video segments.
+- **FEAT**(android, iOS, macOS): Add `VideoSegment` model replacing single `video` field for concatenating multiple clips with individual trim and volume settings.
+- **DEPRECATED**: `video`, `imageBytes`, `colorMatrixList`, `customAudioPath`, `customAudioStartTime`, `customAudioVolume`, `loopCustomAudio`, and `originalAudioVolume` on `VideoRenderData`. Use `videoSegments`, `imageLayers`, `colorFilters`, and `audioTracks` instead.
+
 ## 1.10.0
 - **FEAT**(android, iOS, macOS): Add time-based image overlay layers. Allows positioning image overlays at specific x/y coordinates with optional start and end times for timed visibility during video rendering.
 
