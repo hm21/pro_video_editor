@@ -26,26 +26,30 @@ import Foundation
 /// - <1 Mbps: Low quality
 public func applyBitrate(requestedBitrate: Int?, presetHint: String? = nil) -> String {
     if let bitrate = requestedBitrate {
-        print("[\(Tags.render)] 📊 Requested bitrate: \(bitrate) bps (\(String(format: "%.1f", Double(bitrate) / 1_000_000)) Mbps)")
-        print("[\(Tags.render)] ⚠️ AVAssetExportSession does not support custom bitrate directly - using closest preset")
+        print(
+            "[\(Tags.render)] 📊 Requested bitrate: \(bitrate) bps (\(String(format: "%.1f", Double(bitrate) / 1_000_000)) Mbps)"
+        )
+        print(
+            "[\(Tags.render)] ⚠️ AVAssetExportSession does not support custom bitrate directly - using closest preset"
+        )
     }
 
     if let bitrate = requestedBitrate {
         if bitrate >= 50_000_000 {
             if #available(macOS 12.1, *) {
-                return AVAssetExportPresetHEVC7680x4320 // 8K
+                return AVAssetExportPresetHEVC7680x4320  // 8K
             }
         } else if bitrate >= 40_000_000 {
             if #available(macOS 10.13, *) {
-                return AVAssetExportPresetHEVC3840x2160 // 4K HEVC
+                return AVAssetExportPresetHEVC3840x2160  // 4K HEVC
             } else {
-                return AVAssetExportPreset3840x2160 // 4K H264
+                return AVAssetExportPreset3840x2160  // 4K H264
             }
         } else if bitrate >= 30_000_000 {
             if #available(macOS 10.13, *) {
-                return AVAssetExportPresetHEVC1920x1080 // 1080p HEVC
+                return AVAssetExportPresetHEVC1920x1080  // 1080p HEVC
             } else {
-                return AVAssetExportPreset1920x1080 // 1080p H264
+                return AVAssetExportPreset1920x1080  // 1080p H264
             }
         } else if bitrate >= 20_000_000 {
             if #available(macOS 10.13, *) {

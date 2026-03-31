@@ -102,16 +102,26 @@ class Metadata(private val context: Context) {
             )
 
             // Extract duration and bitrate
-            metadata["duration"] = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDoubleOrNull() ?: 0.0
-            metadata["bitrate"] = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull() ?: 0
+            metadata["duration"] =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toDoubleOrNull() ?: 0.0
+            metadata["bitrate"] =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
+                    ?.toIntOrNull() ?: 0
 
             // Extract rotation
-            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            val rotation =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                    ?.toIntOrNull() ?: 0
             metadata["rotation"] = rotation
 
             // Extract raw dimensions
-            val rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-            val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            val rawWidth =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                    ?.toIntOrNull() ?: 0
+            val rawHeight =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                    ?.toIntOrNull() ?: 0
 
             // Apply rotation to get display dimensions (consistent with iOS/macOS)
             // For 90° or 270° rotation, swap width and height
@@ -149,9 +159,10 @@ class Metadata(private val context: Context) {
             textMetadata.forEach { (key, metadataKey) ->
                 metadata[key] = retriever.extractMetadata(metadataKey) ?: ""
             }
-            
+
             // Extract GPS location (format: "+47.3769+008.5417/")
-            val locationString = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION)
+            val locationString =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION)
             if (locationString != null) {
                 val (latitude, longitude) = parseLocationString(locationString)
                 if (latitude != null) {
@@ -161,16 +172,17 @@ class Metadata(private val context: Context) {
                     metadata["longitude"] = longitude
                 }
             }
-            
+
             // Extract frame rate (capture framerate, available from API 23+)
-            val captureFrameRate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
+            val captureFrameRate =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
             if (captureFrameRate != null) {
                 val frameRate = captureFrameRate.toDoubleOrNull()
                 if (frameRate != null && frameRate > 0) {
                     metadata["frameRate"] = frameRate
                 }
             }
-            
+
             // Camera make and model are not directly available in MediaMetadataRetriever
             // They would need to be extracted from EXIF data, which is typically for images.
             // For videos, these are often stored in proprietary formats.
@@ -219,7 +231,7 @@ class Metadata(private val context: Context) {
             retriever.release()
         }
     }
-    
+
     /**
      * Parses a GPS location string into latitude and longitude coordinates.
      *
@@ -232,7 +244,7 @@ class Metadata(private val context: Context) {
     private fun parseLocationString(locationString: String): Pair<Double?, Double?> {
         // Remove trailing slash and whitespace
         val cleaned = locationString.trim().trimEnd('/')
-        
+
         // Pattern: +/-DD.DDDD+/-DDD.DDDD (ISO 6709 format)
         // First coordinate is latitude, second is longitude
         val signPositions = mutableListOf<Int>()
@@ -241,17 +253,17 @@ class Metadata(private val context: Context) {
                 signPositions.add(index)
             }
         }
-        
+
         if (signPositions.size >= 2) {
             val latString = cleaned.substring(signPositions[0], signPositions[1])
             val lonString = cleaned.substring(signPositions[1])
-            
+
             val latitude = latString.toDoubleOrNull()
             val longitude = lonString.toDoubleOrNull()
-            
+
             return Pair(latitude, longitude)
         }
-        
+
         return Pair(null, null)
     }
 
@@ -268,12 +280,12 @@ class Metadata(private val context: Context) {
         val extractor = MediaExtractor()
         try {
             extractor.setDataSource(filePath)
-            
+
             // Find the audio track
             for (i in 0 until extractor.trackCount) {
                 val format = extractor.getTrackFormat(i)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
-                
+
                 if (mime.startsWith("audio/")) {
                     // Extract duration from audio track format
                     if (format.containsKey(MediaFormat.KEY_DURATION)) {
@@ -283,7 +295,7 @@ class Metadata(private val context: Context) {
                     }
                 }
             }
-            
+
             return null
         } catch (e: Exception) {
             return null

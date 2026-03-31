@@ -1,6 +1,6 @@
 import AVFoundation
-import Foundation
 import FlutterMacOS
+import Foundation
 
 /// Exception thrown when no audio track is found in the video file.
 class NoAudioTrackException: NSError, @unchecked Sendable {
@@ -11,7 +11,7 @@ class NoAudioTrackException: NSError, @unchecked Sendable {
             userInfo: [NSLocalizedDescriptionKey: "No audio track found in video"]
         )
     }
-    
+
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -26,7 +26,7 @@ class NoAudioTrackException: NSError, @unchecked Sendable {
 /// - Provides progress tracking during extraction
 /// - Supports cancellation of active extraction jobs
 class ExtractAudio {
-    
+
     /// Extracts audio from a video file asynchronously.
     ///
     /// This method uses AVAssetExportSession for fast Passthrough export,
@@ -44,7 +44,7 @@ class ExtractAudio {
         onComplete: @escaping (FlutterStandardTypedData?) -> Void,
         onError: @escaping (Error) -> Void
     ) -> AudioExtractJobHandle {
-        
+
         // Check if WAV format is requested - requires transcoding
         let outputExtension = config.getOutputExtension().lowercased()
         if outputExtension == "wav" {
@@ -55,7 +55,7 @@ class ExtractAudio {
                 onError: onError
             )
         }
-        
+
         // Use passthrough export for other formats
         return extractPassthrough(
             config: config,
@@ -64,7 +64,7 @@ class ExtractAudio {
             onError: onError
         )
     }
-    
+
     /// Extracts audio using passthrough (no transcoding) for M4A, AAC, CAF formats.
     private static func extractPassthrough(
         config: AudioExtractConfig,
@@ -72,26 +72,26 @@ class ExtractAudio {
         onComplete: @escaping (FlutterStandardTypedData?) -> Void,
         onError: @escaping (Error) -> Void
     ) -> AudioExtractJobHandle {
-        
+
         var exportSession: AVAssetExportSession?
         var progressTimer: Timer?
         var isCancelled = false
-        
+
         // Execute extraction on background queue
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 // Load source video asset
                 let sourceURL = URL(fileURLWithPath: config.inputPath)
                 let asset = AVURLAsset(url: sourceURL)
-                
+
                 // Wait for tracks to be loaded
                 let loadSemaphore = DispatchSemaphore(value: 0)
                 var loadError: Error?
-                
+
                 asset.loadValuesAsynchronously(forKeys: ["tracks", "duration"]) {
                     let tracksStatus = asset.statusOfValue(forKey: "tracks", error: nil)
                     let durationStatus = asset.statusOfValue(forKey: "duration", error: nil)
-                    
+
                     if tracksStatus == .failed || durationStatus == .failed {
                         loadError = NSError(
                             domain: "ExtractAudio",
@@ -101,30 +101,31 @@ class ExtractAudio {
                     }
                     loadSemaphore.signal()
                 }
-                
+
                 loadSemaphore.wait()
-                
+
                 if let error = loadError {
                     throw error
                 }
-                
+
                 // Determine output file location
                 let outputURL: URL
                 if let outputPath = config.outputPath {
                     outputURL = URL(fileURLWithPath: outputPath)
                 } else {
                     let tempDir = FileManager.default.temporaryDirectory
-                    let filename = "audio_\(Date().timeIntervalSince1970).\(config.getOutputExtension())"
+                    let filename =
+                        "audio_\(Date().timeIntervalSince1970).\(config.getOutputExtension())"
                     outputURL = tempDir.appendingPathComponent(filename)
                 }
-                
+
                 // Remove existing file if present
                 try? FileManager.default.removeItem(at: outputURL)
-                
+
                 // Determine output file type based on extension
                 let fileExtension = outputURL.pathExtension.lowercased()
                 let outputFileType: AVFileType
-                
+
                 switch fileExtension {
                 case "m4a":
                     outputFileType = .m4a
@@ -198,7 +199,7 @@ class ExtractAudio {
                         userInfo: [NSLocalizedDescriptionKey: "Failed to create export session"]
                     )
                 }
-                
+
                 exportSession = session
                 session.outputURL = outputURL
                 session.outputFileType = outputFileType
@@ -208,34 +209,38 @@ class ExtractAudio {
                 // Start progress tracking on main thread
                 DispatchQueue.main.async {
                     onProgress(0.0)
-                    
-                    progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+
+                    progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) {
+                        _ in
                         guard !isCancelled else { return }
                         let progress = Double(session.progress)
                         onProgress(progress)
                     }
                 }
-                
+
                 // Start export
                 session.exportAsynchronously {
                     DispatchQueue.main.async {
                         progressTimer?.invalidate()
                         progressTimer = nil
                     }
-                    
+
                     // Check cancellation
                     if isCancelled {
                         try? FileManager.default.removeItem(at: outputURL)
                         DispatchQueue.main.async {
-                            onError(NSError(
-                                domain: "ExtractAudio",
-                                code: -3,
-                                userInfo: [NSLocalizedDescriptionKey: "Extraction was cancelled"]
-                            ))
+                            onError(
+                                NSError(
+                                    domain: "ExtractAudio",
+                                    code: -3,
+                                    userInfo: [
+                                        NSLocalizedDescriptionKey: "Extraction was cancelled"
+                                    ]
+                                ))
                         }
                         return
                     }
-                    
+
                     // Check export status - handle on background queue
                     DispatchQueue.global(qos: .userInitiated).async {
                         switch session.status {
@@ -251,10 +256,10 @@ class ExtractAudio {
                                     // Memory output - read file and return bytes (on background thread)
                                     let data = try Data(contentsOf: outputURL)
                                     let flutterData = FlutterStandardTypedData(bytes: data)
-                                    
+
                                     // Clean up temporary file
                                     try? FileManager.default.removeItem(at: outputURL)
-                                    
+
                                     DispatchQueue.main.async {
                                         onProgress(1.0)
                                         onComplete(flutterData)
@@ -266,41 +271,53 @@ class ExtractAudio {
                                     onError(error)
                                 }
                             }
-                            
+
                         case .failed:
                             try? FileManager.default.removeItem(at: outputURL)
-                            let error = session.error ?? NSError(
-                                domain: "ExtractAudio",
-                                code: -4,
-                                userInfo: [NSLocalizedDescriptionKey: "Export failed with unknown error"]
-                            )
+                            let error =
+                                session.error
+                                ?? NSError(
+                                    domain: "ExtractAudio",
+                                    code: -4,
+                                    userInfo: [
+                                        NSLocalizedDescriptionKey:
+                                            "Export failed with unknown error"
+                                    ]
+                                )
                             DispatchQueue.main.async {
                                 onError(error)
                             }
-                            
+
                         case .cancelled:
                             try? FileManager.default.removeItem(at: outputURL)
                             DispatchQueue.main.async {
-                                onError(NSError(
-                                    domain: "ExtractAudio",
-                                    code: -5,
-                                    userInfo: [NSLocalizedDescriptionKey: "Export was cancelled"]
-                                ))
+                                onError(
+                                    NSError(
+                                        domain: "ExtractAudio",
+                                        code: -5,
+                                        userInfo: [
+                                            NSLocalizedDescriptionKey: "Export was cancelled"
+                                        ]
+                                    ))
                             }
-                            
+
                         default:
                             try? FileManager.default.removeItem(at: outputURL)
                             DispatchQueue.main.async {
-                                onError(NSError(
-                                    domain: "ExtractAudio",
-                                    code: -6,
-                                    userInfo: [NSLocalizedDescriptionKey: "Export ended with unexpected status: \(session.status.rawValue)"]
-                                ))
+                                onError(
+                                    NSError(
+                                        domain: "ExtractAudio",
+                                        code: -6,
+                                        userInfo: [
+                                            NSLocalizedDescriptionKey:
+                                                "Export ended with unexpected status: \(session.status.rawValue)"
+                                        ]
+                                    ))
                             }
                         }
                     }
                 }
-                
+
             } catch {
                 DispatchQueue.main.async {
                     progressTimer?.invalidate()
@@ -308,7 +325,7 @@ class ExtractAudio {
                 }
             }
         }
-        
+
         // Return cancellation handle
         return {
             isCancelled = true
@@ -318,7 +335,7 @@ class ExtractAudio {
             }
         }
     }
-    
+
     /// Extracts audio to WAV format using AVAssetReader/AVAssetWriter for PCM transcoding.
     private static func extractToWav(
         config: AudioExtractConfig,
@@ -326,25 +343,25 @@ class ExtractAudio {
         onComplete: @escaping (FlutterStandardTypedData?) -> Void,
         onError: @escaping (Error) -> Void
     ) -> AudioExtractJobHandle {
-        
+
         var assetReader: AVAssetReader?
         var assetWriter: AVAssetWriter?
         var isCancelled = false
-        
+
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 // Load source video asset
                 let sourceURL = URL(fileURLWithPath: config.inputPath)
                 let asset = AVURLAsset(url: sourceURL)
-                
+
                 // Wait for tracks to be loaded
                 let loadSemaphore = DispatchSemaphore(value: 0)
                 var loadError: Error?
-                
+
                 asset.loadValuesAsynchronously(forKeys: ["tracks", "duration"]) {
                     let tracksStatus = asset.statusOfValue(forKey: "tracks", error: nil)
                     let durationStatus = asset.statusOfValue(forKey: "duration", error: nil)
-                    
+
                     if tracksStatus == .failed || durationStatus == .failed {
                         loadError = NSError(
                             domain: "ExtractAudio",
@@ -354,13 +371,13 @@ class ExtractAudio {
                     }
                     loadSemaphore.signal()
                 }
-                
+
                 loadSemaphore.wait()
-                
+
                 if let error = loadError {
                     throw error
                 }
-                
+
                 // Determine output file location
                 let outputURL: URL
                 if let outputPath = config.outputPath {
@@ -370,26 +387,28 @@ class ExtractAudio {
                     let filename = "audio_\(Date().timeIntervalSince1970).wav"
                     outputURL = tempDir.appendingPathComponent(filename)
                 }
-                
+
                 // Remove existing file if present
                 try? FileManager.default.removeItem(at: outputURL)
-                
+
                 // Get audio track
                 let audioTracks = asset.tracks(withMediaType: .audio)
                 guard let audioTrack = audioTracks.first else {
                     throw NoAudioTrackException()
                 }
-                
+
                 // Calculate time range
                 // Audio tracks may not start at zero due to encoding delays or sync adjustments
                 var timeRange: CMTimeRange
                 if let startUs = config.startUs, let endUs = config.endUs {
                     let startTime = CMTime(value: startUs, timescale: 1_000_000)
                     let endTime = CMTime(value: endUs, timescale: 1_000_000)
-                    timeRange = CMTimeRange(start: startTime, duration: CMTimeSubtract(endTime, startTime))
+                    timeRange = CMTimeRange(
+                        start: startTime, duration: CMTimeSubtract(endTime, startTime))
                 } else if let startUs = config.startUs {
                     let startTime = CMTime(value: startUs, timescale: 1_000_000)
-                    timeRange = CMTimeRange(start: startTime, duration: CMTimeSubtract(asset.duration, startTime))
+                    timeRange = CMTimeRange(
+                        start: startTime, duration: CMTimeSubtract(asset.duration, startTime))
                 } else if let endUs = config.endUs {
                     let endTime = CMTime(value: endUs, timescale: 1_000_000)
                     timeRange = CMTimeRange(start: .zero, duration: endTime)
@@ -397,24 +416,25 @@ class ExtractAudio {
                     // Use the audio track's actual time range to capture all audio data
                     timeRange = audioTrack.timeRange
                 }
-                
+
                 // Create asset reader
                 let reader = try AVAssetReader(asset: asset)
                 assetReader = reader
                 reader.timeRange = timeRange
-                
+
                 // Configure reader output for PCM
                 let readerOutputSettings: [String: Any] = [
                     AVFormatIDKey: kAudioFormatLinearPCM,
                     AVLinearPCMBitDepthKey: 16,
                     AVLinearPCMIsFloatKey: false,
                     AVLinearPCMIsBigEndianKey: false,
-                    AVLinearPCMIsNonInterleaved: false
+                    AVLinearPCMIsNonInterleaved: false,
                 ]
-                
-                let readerOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: readerOutputSettings)
+
+                let readerOutput = AVAssetReaderTrackOutput(
+                    track: audioTrack, outputSettings: readerOutputSettings)
                 readerOutput.alwaysCopiesSampleData = false
-                
+
                 guard reader.canAdd(readerOutput) else {
                     throw NSError(
                         domain: "ExtractAudio",
@@ -423,11 +443,11 @@ class ExtractAudio {
                     )
                 }
                 reader.add(readerOutput)
-                
+
                 // Create asset writer
                 let writer = try AVAssetWriter(outputURL: outputURL, fileType: .wav)
                 assetWriter = writer
-                
+
                 // Get audio format description for writer input
                 let formatDescriptions = audioTrack.formatDescriptions as! [CMFormatDescription]
                 guard let formatDescription = formatDescriptions.first else {
@@ -437,8 +457,9 @@ class ExtractAudio {
                         userInfo: [NSLocalizedDescriptionKey: "No audio format description found"]
                     )
                 }
-                
-                let audioStreamBasicDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)?.pointee
+
+                let audioStreamBasicDescription = CMAudioFormatDescriptionGetStreamBasicDescription(
+                    formatDescription)?.pointee
                 let sampleRate = audioStreamBasicDescription?.mSampleRate ?? 44100
                 let channels = audioStreamBasicDescription?.mChannelsPerFrame ?? 2
                 
@@ -469,10 +490,11 @@ class ExtractAudio {
                     AVLinearPCMIsNonInterleaved: false,
                     AVChannelLayoutKey: Data(bytes: &channelLayout, count: MemoryLayout<AudioChannelLayout>.size)
                 ]
-                
-                let writerInput = AVAssetWriterInput(mediaType: .audio, outputSettings: writerInputSettings)
+
+                let writerInput = AVAssetWriterInput(
+                    mediaType: .audio, outputSettings: writerInputSettings)
                 writerInput.expectsMediaDataInRealTime = false
-                
+
                 guard writer.canAdd(writerInput) else {
                     throw NSError(
                         domain: "ExtractAudio",
@@ -481,49 +503,52 @@ class ExtractAudio {
                     )
                 }
                 writer.add(writerInput)
-                
+
                 // Start reading and writing
                 guard reader.startReading() else {
-                    throw reader.error ?? NSError(
-                        domain: "ExtractAudio",
-                        code: -10,
-                        userInfo: [NSLocalizedDescriptionKey: "Failed to start reading"]
-                    )
+                    throw reader.error
+                        ?? NSError(
+                            domain: "ExtractAudio",
+                            code: -10,
+                            userInfo: [NSLocalizedDescriptionKey: "Failed to start reading"]
+                        )
                 }
-                
+
                 guard writer.startWriting() else {
-                    throw writer.error ?? NSError(
-                        domain: "ExtractAudio",
-                        code: -11,
-                        userInfo: [NSLocalizedDescriptionKey: "Failed to start writing"]
-                    )
+                    throw writer.error
+                        ?? NSError(
+                            domain: "ExtractAudio",
+                            code: -11,
+                            userInfo: [NSLocalizedDescriptionKey: "Failed to start writing"]
+                        )
                 }
                 
                 writer.startSession(atSourceTime: .zero)
                 
                 // Calculate total duration for progress
                 let totalDuration = CMTimeGetSeconds(timeRange.duration)
-                
+
                 DispatchQueue.main.async {
                     onProgress(0.0)
                 }
-                
+
                 // Process samples
                 let processingQueue = DispatchQueue(label: "com.provideo.wav.processing")
                 let semaphore = DispatchSemaphore(value: 0)
                 var processingError: Error?
-                
+
                 writerInput.requestMediaDataWhenReady(on: processingQueue) {
                     while writerInput.isReadyForMoreMediaData && !isCancelled {
                         if let sampleBuffer = readerOutput.copyNextSampleBuffer() {
                             // Update progress
                             let currentTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-                            let elapsed = CMTimeGetSeconds(currentTime) - CMTimeGetSeconds(timeRange.start)
+                            let elapsed =
+                                CMTimeGetSeconds(currentTime) - CMTimeGetSeconds(timeRange.start)
                             let progress = min(max(elapsed / totalDuration, 0.0), 1.0)
                             DispatchQueue.main.async {
                                 onProgress(progress)
                             }
-                            
+
                             if !writerInput.append(sampleBuffer) {
                                 processingError = writer.error
                                 break
@@ -534,30 +559,31 @@ class ExtractAudio {
                             break
                         }
                     }
-                    
+
                     if isCancelled {
                         reader.cancelReading()
                         writer.cancelWriting()
                     }
-                    
+
                     semaphore.signal()
                 }
-                
+
                 // Wait for processing to complete
                 semaphore.wait()
-                
+
                 if isCancelled {
                     try? FileManager.default.removeItem(at: outputURL)
                     DispatchQueue.main.async {
-                        onError(NSError(
-                            domain: "ExtractAudio",
-                            code: -3,
-                            userInfo: [NSLocalizedDescriptionKey: "Extraction was cancelled"]
-                        ))
+                        onError(
+                            NSError(
+                                domain: "ExtractAudio",
+                                code: -3,
+                                userInfo: [NSLocalizedDescriptionKey: "Extraction was cancelled"]
+                            ))
                     }
                     return
                 }
-                
+
                 if let error = processingError {
                     try? FileManager.default.removeItem(at: outputURL)
                     DispatchQueue.main.async {
@@ -565,14 +591,14 @@ class ExtractAudio {
                     }
                     return
                 }
-                
+
                 // Finish writing
                 let finishSemaphore = DispatchSemaphore(value: 0)
                 writer.finishWriting {
                     finishSemaphore.signal()
                 }
                 finishSemaphore.wait()
-                
+
                 if writer.status == .completed {
                     if config.outputPath != nil {
                         DispatchQueue.main.async {
@@ -590,23 +616,25 @@ class ExtractAudio {
                     }
                 } else {
                     try? FileManager.default.removeItem(at: outputURL)
-                    let error = writer.error ?? NSError(
-                        domain: "ExtractAudio",
-                        code: -12,
-                        userInfo: [NSLocalizedDescriptionKey: "WAV export failed"]
-                    )
+                    let error =
+                        writer.error
+                        ?? NSError(
+                            domain: "ExtractAudio",
+                            code: -12,
+                            userInfo: [NSLocalizedDescriptionKey: "WAV export failed"]
+                        )
                     DispatchQueue.main.async {
                         onError(error)
                     }
                 }
-                
+
             } catch {
                 DispatchQueue.main.async {
                     onError(error)
                 }
             }
         }
-        
+
         // Return cancellation handle
         return {
             isCancelled = true

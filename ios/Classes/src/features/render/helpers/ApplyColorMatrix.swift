@@ -1,51 +1,38 @@
 import AVFoundation
 import CoreImage
 
-/// Applies color grading using a 4x5 color matrix converted to a 3D LUT.
+/// Applies color grading using color filter configurations with optional time ranges.
 ///
-/// Color matrices are powerful tools for color correction and grading. Each matrix
-/// is a 4x5 transformation matrix (R, G, B, A + offset). Multiple matrices are
-/// combined by multiplication and then converted to a 3D lookup table for efficient
-/// GPU-based color transformation during rendering.
+/// Color filters contain 4x5 transformation matrices (R, G, B, A + offset).
+/// Filters without time ranges apply to the entire video, while timed filters
+/// are evaluated per-frame by the video compositor.
 ///
 /// - Parameters:
 ///   - config: Video compositor configuration to modify.
-///   - composition: Video composition (not currently used but kept for API consistency).
-///   - matrixList: Array of 4x5 color matrices (20 elements each). Multiple matrices
-///                 are combined through matrix multiplication.
-///   - lutSize: Size of the 3D LUT cube (default 33x33x33 = 35,937 color samples).
+///   - filters: Array of color filter configurations with optional time ranges.
 ///
-/// - Note: The LUT is generated once and applied to every frame by the video compositor.
+/// - Note: The filters are stored in the compositor config and processed per-frame
+///         to support time-based color grading.
 func applyColorMatrix(
     config: inout VideoCompositorConfig,
-    to composition: AVMutableVideoComposition,
-    matrixList: [[Double]],
-    lutSize: Int = 33
+    filters: [ColorFilterConfig]
 ) {
-    guard !matrixList.isEmpty else {
+    guard !filters.isEmpty else {
         return
     }
 
-    let combined = combineColorMatrices(matrixList)
-    guard combined.count == 20 else {
-        print("[\(Tags.render)] ⚠️ Invalid color matrix: expected 20 elements, got \(combined.count) - skipping")
-        return
-    }
+    config.colorFilterConfigs = filters
 
-    print("[\(Tags.render)] 🎨 Applying color grading: \(matrixList.count) matrices combined into \(lutSize)x\(lutSize)x\(lutSize) LUT")
-
-    guard let data = generateLUTData(from: combined, size: lutSize) else {
-        print("[\(Tags.render)] ❌ Failed to generate LUT data")
-        return
-    }
-
-    config.lutData = data
-    config.lutSize = lutSize
+    let globalCount = filters.filter { $0.startUs == -1 && $0.endUs == -1 }.count
+    let timedCount = filters.count - globalCount
+    print(
+        "[\(Tags.render)] 🎨 Applying color grading: \(filters.count) filter(s) (\(globalCount) global, \(timedCount) timed)"
+    )
 }
 
 // MARK: - Matrix Combination Logic
 
-private func multiplyColorMatrices(_ m1: [Double], _ m2: [Double]) -> [Double] {
+func multiplyColorMatrices(_ m1: [Double], _ m2: [Double]) -> [Double] {
     guard m1.count == 20, m2.count == 20 else {
         print("Invalid matrix dimensions for multiplication")
         return m1
@@ -62,14 +49,14 @@ private func multiplyColorMatrices(_ m1: [Double], _ m2: [Double]) -> [Double] {
     return result
 }
 
-private func combineColorMatrices(_ matrices: [[Double]]) -> [Double] {
+func combineColorMatrices(_ matrices: [[Double]]) -> [Double] {
     guard !matrices.isEmpty else { return [] }
     return matrices.dropFirst().reduce(matrices.first!) { acc, next in
         multiplyColorMatrices(next, acc)
     }
 }
 
-private func generateLUTData(from matrix: [Double], size: Int) -> Data? {
+func generateLUTData(from matrix: [Double], size: Int) -> Data? {
     let floatCount = size * size * size * 4
     var cubeData = [Float](repeating: 0, count: floatCount)
 

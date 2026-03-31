@@ -28,21 +28,21 @@ import java.util.concurrent.atomic.AtomicReference
  */
 @UnstableApi
 object VideoTranscoder {
-    
+
     /**
      * Result of a transcoding operation.
      */
     sealed class TranscodeResult {
         /** Transcoding succeeded, contains path to transcoded file */
         data class Success(val outputPath: String) : TranscodeResult()
-        
+
         /** No transcoding needed, original file is compatible */
         data class NotNeeded(val originalPath: String) : TranscodeResult()
-        
+
         /** Transcoding failed with error */
         data class Error(val exception: Throwable) : TranscodeResult()
     }
-    
+
     /**
      * Checks if a video needs transcoding for effect compatibility.
      * 
@@ -52,14 +52,16 @@ object VideoTranscoder {
     fun needsTranscoding(videoPath: String): Boolean {
         val formatInfo = MediaInfoExtractor.getVideoFormatInfo(videoPath)
         val needsTranscode = formatInfo.needsTranscodingForEffects()
-        
-        Log.d(RENDER_TAG, "Video transcoding check: path=$videoPath, " +
-            "isHevc=${formatInfo.isHevc}, bitDepth=${formatInfo.bitDepth}, " +
-            "isHdr=${formatInfo.isHdr}, needsTranscoding=$needsTranscode")
-        
+
+        Log.d(
+            RENDER_TAG, "Video transcoding check: path=$videoPath, " +
+                    "isHevc=${formatInfo.isHevc}, bitDepth=${formatInfo.bitDepth}, " +
+                    "isHdr=${formatInfo.isHdr}, needsTranscoding=$needsTranscode"
+        )
+
         return needsTranscode
     }
-    
+
     /**
      * Transcodes a video to H.264 8-bit SDR format for effect compatibility.
      * 
@@ -79,41 +81,44 @@ object VideoTranscoder {
             Log.d(RENDER_TAG, "No transcoding needed for: $inputPath")
             return TranscodeResult.NotNeeded(inputPath)
         }
-        
+
         Log.i(RENDER_TAG, "Starting HEVC 10-bit HDR -> H.264 8-bit SDR transcoding for: $inputPath")
-        
+
         val outputFile = File(
             context.cacheDir,
             "transcoded_${System.currentTimeMillis()}.mp4"
         )
-        
+
         val resultRef = AtomicReference<TranscodeResult>()
         val latch = CountDownLatch(1)
         val mainHandler = Handler(Looper.getMainLooper())
-        
+
         mainHandler.post {
             try {
                 // Create encoder factory that forces H.264
                 val encoderFactory = DefaultEncoderFactory.Builder(context)
                     .setEnableFallback(true)
                     .build()
-                
+
                 val transformer = Transformer.Builder(context)
                     .setVideoMimeType(MimeTypes.VIDEO_H264)  // Force H.264 output
                     .setEncoderFactory(encoderFactory)
                     .addListener(object : Transformer.Listener {
                         override fun onCompleted(composition: Composition, result: ExportResult) {
                             Log.i(RENDER_TAG, "Transcoding completed: ${outputFile.absolutePath}")
-                            
+
                             // Verify the output is actually H.264
-                            val outputInfo = MediaInfoExtractor.getVideoFormatInfo(outputFile.absolutePath)
-                            Log.i(RENDER_TAG, "Transcoded output: isHevc=${outputInfo.isHevc}, " +
-                                "bitDepth=${outputInfo.bitDepth}, isHdr=${outputInfo.isHdr}")
-                            
+                            val outputInfo =
+                                MediaInfoExtractor.getVideoFormatInfo(outputFile.absolutePath)
+                            Log.i(
+                                RENDER_TAG, "Transcoded output: isHevc=${outputInfo.isHevc}, " +
+                                        "bitDepth=${outputInfo.bitDepth}, isHdr=${outputInfo.isHdr}"
+                            )
+
                             resultRef.set(TranscodeResult.Success(outputFile.absolutePath))
                             latch.countDown()
                         }
-                        
+
                         override fun onError(
                             composition: Composition,
                             result: ExportResult,
@@ -126,47 +131,47 @@ object VideoTranscoder {
                         }
                     })
                     .build()
-                
+
                 // Create composition with HDR tonemapping to force SDR output
                 val mediaItem = MediaItem.Builder()
                     .setUri(inputPath)
                     .build()
-                
+
                 // Use HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL to convert HDR to SDR
                 // This forces 8-bit output which then allows H.264 encoding
                 val editedMediaItem = EditedMediaItem.Builder(mediaItem)
                     .setRemoveAudio(false)
                     .setRemoveVideo(false)
                     .build()
-                
+
                 // Build composition with HDR tonemapping enabled
                 val sequence = EditedMediaItemSequence.Builder(editedMediaItem).build()
                 val composition = Composition.Builder(sequence)
                     // Force HDR to SDR conversion - this enables H.264 encoding
                     .setHdrMode(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL)
                     .build()
-                
+
                 transformer.start(composition, outputFile.absolutePath)
-                
+
             } catch (e: Exception) {
                 Log.e(RENDER_TAG, "Failed to start transcoding: ${e.message}")
                 resultRef.set(TranscodeResult.Error(e))
                 latch.countDown()
             }
         }
-        
+
         // Wait for transcoding to complete
         try {
             latch.await()
         } catch (e: InterruptedException) {
             return TranscodeResult.Error(e)
         }
-        
+
         return resultRef.get() ?: TranscodeResult.Error(
             IllegalStateException("Transcoding result not set")
         )
     }
-    
+
     /**
      * Async version of transcoding.
      * 
@@ -186,7 +191,7 @@ object VideoTranscoder {
             }
         }.start()
     }
-    
+
     /**
      * Transcodes multiple video clips if needed.
      * 
@@ -199,25 +204,27 @@ object VideoTranscoder {
         inputPaths: List<String>
     ): Map<String, String> {
         val result = mutableMapOf<String, String>()
-        
+
         for (inputPath in inputPaths) {
             when (val transcodeResult = transcodeToH264Sync(context, inputPath)) {
                 is TranscodeResult.Success -> {
                     result[inputPath] = transcodeResult.outputPath
                 }
+
                 is TranscodeResult.NotNeeded -> {
                     result[inputPath] = transcodeResult.originalPath
                 }
+
                 is TranscodeResult.Error -> {
                     Log.e(RENDER_TAG, "Transcoding failed for $inputPath, using original")
                     result[inputPath] = inputPath
                 }
             }
         }
-        
+
         return result
     }
-    
+
     /**
      * Cleans up transcoded temporary files.
      * 

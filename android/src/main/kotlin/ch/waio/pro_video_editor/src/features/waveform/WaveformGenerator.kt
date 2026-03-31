@@ -94,9 +94,10 @@ class WaveformGenerator(private val context: Context) {
                 val durationMs = (actualDurationUs / 1000).toInt()
 
                 // Calculate samples needed
-                val totalSamples = ((actualDurationUs / 1_000_000.0) * config.samplesPerSecond).toInt()
-                    .coerceAtLeast(1)
-                
+                val totalSamples =
+                    ((actualDurationUs / 1_000_000.0) * config.samplesPerSecond).toInt()
+                        .coerceAtLeast(1)
+
                 // Samples per waveform point (PCM samples to average)
                 val samplesPerBlock = (sampleRate.toDouble() / config.samplesPerSecond).toInt()
                     .coerceAtLeast(1)
@@ -143,7 +144,7 @@ class WaveformGenerator(private val context: Context) {
                                     inputDone = true
                                 } else {
                                     val presentationTimeUs = extractor.sampleTime
-                                    
+
                                     // Check if we've passed the end time
                                     if (presentationTimeUs > endUs) {
                                         decoder.queueInputBuffer(
@@ -183,8 +184,10 @@ class WaveformGenerator(private val context: Context) {
 
                                     // Read right channel if stereo
                                     if (channelCount >= 2 && i + 1 < pcmData.size) {
-                                        val rightSample = abs(pcmData[i + 1].toFloat() / Short.MAX_VALUE)
-                                        accumulatedRightPeak = max(accumulatedRightPeak, rightSample)
+                                        val rightSample =
+                                            abs(pcmData[i + 1].toFloat() / Short.MAX_VALUE)
+                                        accumulatedRightPeak =
+                                            max(accumulatedRightPeak, rightSample)
                                         i += 2
                                     } else {
                                         i += 1
@@ -197,22 +200,35 @@ class WaveformGenerator(private val context: Context) {
                                     if (samplesInCurrentBlock >= samplesPerBlock) {
                                         if (currentSampleIndex < totalSamples) {
                                             leftPeaks[currentSampleIndex] = accumulatedLeftPeak
-                                            rightPeaks?.set(currentSampleIndex, accumulatedRightPeak)
+                                            rightPeaks?.set(
+                                                currentSampleIndex,
+                                                accumulatedRightPeak
+                                            )
                                             currentSampleIndex++
-                                            
+
                                             // Streaming mode: emit chunk when chunkSize is reached
-                                            if (streaming && onChunk != null && 
-                                                (currentSampleIndex % config.chunkSize == 0 || 
-                                                 currentSampleIndex == totalSamples)) {
-                                                val chunkStartIndex = currentSampleIndex - config.chunkSize
-                                                    .coerceAtMost(currentSampleIndex)
+                                            if (streaming && onChunk != null &&
+                                                (currentSampleIndex % config.chunkSize == 0 ||
+                                                        currentSampleIndex == totalSamples)
+                                            ) {
+                                                val chunkStartIndex =
+                                                    currentSampleIndex - config.chunkSize
+                                                        .coerceAtMost(currentSampleIndex)
                                                 val chunkEndIndex = currentSampleIndex
-                                                val actualChunkStart = chunkStartIndex.coerceAtLeast(0)
-                                                
-                                                val chunkLeftPeaks = leftPeaks.copyOfRange(actualChunkStart, chunkEndIndex)
-                                                val chunkRightPeaks = rightPeaks?.copyOfRange(actualChunkStart, chunkEndIndex)
-                                                
-                                                val progress = currentSampleIndex.toDouble() / totalSamples
+                                                val actualChunkStart =
+                                                    chunkStartIndex.coerceAtLeast(0)
+
+                                                val chunkLeftPeaks = leftPeaks.copyOfRange(
+                                                    actualChunkStart,
+                                                    chunkEndIndex
+                                                )
+                                                val chunkRightPeaks = rightPeaks?.copyOfRange(
+                                                    actualChunkStart,
+                                                    chunkEndIndex
+                                                )
+
+                                                val progress =
+                                                    currentSampleIndex.toDouble() / totalSamples
                                                 val chunk = buildChunkMap(
                                                     id = config.id,
                                                     leftPeaks = chunkLeftPeaks,
@@ -233,8 +249,16 @@ class WaveformGenerator(private val context: Context) {
 
                                         // Update progress periodically (non-streaming mode)
                                         if (!streaming && currentSampleIndex % 100 == 0) {
-                                            val progress = currentSampleIndex.toDouble() / totalSamples
-                                            mainHandler.post { onProgress(progress.coerceIn(0.0, 1.0)) }
+                                            val progress =
+                                                currentSampleIndex.toDouble() / totalSamples
+                                            mainHandler.post {
+                                                onProgress(
+                                                    progress.coerceIn(
+                                                        0.0,
+                                                        1.0
+                                                    )
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -246,6 +270,7 @@ class WaveformGenerator(private val context: Context) {
                                 outputDone = true
                             }
                         }
+
                         outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                             // Format changed, continue processing
                             Log.d(TAG, "Output format changed")
@@ -282,11 +307,14 @@ class WaveformGenerator(private val context: Context) {
 
                 if (streaming && onChunk != null) {
                     // Streaming mode: emit final chunk with remaining samples
-                    val lastEmittedIndex = (currentSampleIndex / config.chunkSize) * config.chunkSize
+                    val lastEmittedIndex =
+                        (currentSampleIndex / config.chunkSize) * config.chunkSize
                     if (lastEmittedIndex < currentSampleIndex) {
-                        val remainingLeftPeaks = finalLeftPeaks.copyOfRange(lastEmittedIndex, currentSampleIndex)
-                        val remainingRightPeaks = finalRightPeaks?.copyOfRange(lastEmittedIndex, currentSampleIndex)
-                        
+                        val remainingLeftPeaks =
+                            finalLeftPeaks.copyOfRange(lastEmittedIndex, currentSampleIndex)
+                        val remainingRightPeaks =
+                            finalRightPeaks?.copyOfRange(lastEmittedIndex, currentSampleIndex)
+
                         val finalChunk = buildChunkMap(
                             id = config.id,
                             leftPeaks = remainingLeftPeaks,
@@ -314,7 +342,7 @@ class WaveformGenerator(private val context: Context) {
                         )
                         mainHandler.post { onChunk(completeChunk) }
                     }
-                    
+
                     // Also call onComplete for cleanup
                     mainHandler.post { onComplete(emptyMap()) }
                 } else {
@@ -383,11 +411,11 @@ class WaveformGenerator(private val context: Context) {
             "samplesPerSecond" to samplesPerSecond,
             "isComplete" to isComplete
         )
-        
+
         if (rightPeaks != null) {
             result["rightChannel"] = rightPeaks.toList()
         }
-        
+
         return result
     }
 

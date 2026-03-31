@@ -91,7 +91,10 @@ void main() {
     required String description,
   }) async {
     final result = await ProVideoEditor.instance.renderVideo(
-      VideoRenderData(video: inputVideo, outputFormat: format),
+      VideoRenderData(
+        videoSegments: [VideoSegment(video: inputVideo)],
+        outputFormat: format,
+      ),
     );
 
     expect(result, isNotNull, reason: '$description failed — result is null');
@@ -123,7 +126,7 @@ void main() {
     var meta = await testRender(
       description: 'Rotate 90°',
       renderModel: VideoRenderData(
-        video: inputVideo,
+        videoSegments: [VideoSegment(video: inputVideo)],
         outputFormat: VideoOutputFormat.mp4,
         transform: const ExportTransform(rotateTurns: 1),
       ),
@@ -140,7 +143,7 @@ void main() {
     await testRender(
       description: 'Flip X/Y',
       renderModel: VideoRenderData(
-        video: inputVideo,
+        videoSegments: [VideoSegment(video: inputVideo)],
         outputFormat: VideoOutputFormat.mp4,
         transform: const ExportTransform(flipX: true, flipY: true),
       ),
@@ -152,7 +155,7 @@ void main() {
     var meta = await testRender(
       description: 'Crop (700x300)',
       renderModel: VideoRenderData(
-        video: inputVideo,
+        videoSegments: [VideoSegment(video: inputVideo)],
         outputFormat: VideoOutputFormat.mp4,
         transform: ExportTransform(
           x: 100,
@@ -172,7 +175,7 @@ void main() {
     var meta = await testRender(
       description: 'Scale 0.2x',
       renderModel: VideoRenderData(
-        video: inputVideo,
+        videoSegments: [VideoSegment(video: inputVideo)],
         outputFormat: VideoOutputFormat.mp4,
         transform: const ExportTransform(
           scaleX: 1 / factor,
@@ -189,22 +192,25 @@ void main() {
     var meta = await testRender(
       description: 'Trim 7s to 20s',
       renderModel: VideoRenderData(
-        video: h264Video,
+        videoSegments: [
+          VideoSegment(
+            video: h264Video,
+            startTime: const Duration(seconds: 7),
+            endTime: const Duration(seconds: 20),
+          ),
+        ],
         outputFormat: VideoOutputFormat.mp4,
-        startTime: const Duration(seconds: 7),
-        endTime: const Duration(seconds: 20),
       ),
     );
     expect(meta.duration.inMilliseconds, 13000);
   });
 
-  // This needs investigation in the native code
   testWidgets('change speed to 2x and 0.8x', (tester) async {
     final originalMeta = await ProVideoEditor.instance.getMetadata(inputVideo);
 
     Future<void> testSpeed(double speed) async {
       final renderModel = VideoRenderData(
-        video: inputVideo,
+        videoSegments: [VideoSegment(video: inputVideo)],
         outputFormat: VideoOutputFormat.mp4,
         playbackSpeed: speed,
       );
@@ -222,13 +228,13 @@ void main() {
 
     await testSpeed(2.0); // Speed up
     await testSpeed(0.8); // Slow down
-  }, skip: Platform.isMacOS || Platform.isIOS);
+  });
 
   testWidgets('remove audio', (tester) async {
     await testRender(
       description: 'Audio removed',
       renderModel: VideoRenderData(
-        video: inputVideo,
+        videoSegments: [VideoSegment(video: inputVideo)],
         outputFormat: VideoOutputFormat.mp4,
         enableAudio: false,
       ),
@@ -239,9 +245,9 @@ void main() {
     await testRender(
       description: 'Color filter applied',
       renderModel: VideoRenderData(
-        video: inputVideo,
+        videoSegments: [VideoSegment(video: inputVideo)],
         outputFormat: VideoOutputFormat.mp4,
-        colorMatrixList: kComplexFilterMatrix,
+        colorFilters: kComplexFilterMatrix,
       ),
     );
   });
@@ -250,7 +256,7 @@ void main() {
     await testRender(
       description: 'Apply blur',
       renderModel: VideoRenderData(
-        video: inputVideo,
+        videoSegments: [VideoSegment(video: inputVideo)],
         outputFormat: VideoOutputFormat.mp4,
         blur: 5,
       ),
@@ -264,7 +270,7 @@ void main() {
     var meta = await testRender(
       description: 'Bitrate set to 2.5 Mbps',
       renderModel: VideoRenderData(
-        video: inputVideo,
+        videoSegments: [VideoSegment(video: inputVideo)],
         outputFormat: VideoOutputFormat.mp4,
         bitrate: expectedBitrate,
       ),
@@ -290,10 +296,10 @@ void main() {
     await testRender(
       description: 'Multiple transformations',
       renderModel: VideoRenderData(
-        video: h264Video,
+        videoSegments: [VideoSegment(video: h264Video)],
         outputFormat: VideoOutputFormat.mp4,
         transform: const ExportTransform(flipX: true),
-        colorMatrixList: kBasicFilterMatrix,
+        colorFilters: kBasicFilterMatrix,
         enableAudio: false,
         endTime: const Duration(seconds: 20),
       ),
@@ -304,7 +310,7 @@ void main() {
     final List<double> progressValues = [];
 
     var task = VideoRenderData(
-      video: inputVideo,
+      videoSegments: [VideoSegment(video: inputVideo)],
       outputFormat: VideoOutputFormat.mp4,
       // Using blur to ensure rendering takes time with consistent progress
       blur: 3.0,
@@ -508,7 +514,10 @@ void main() {
   group('HEVC 10-bit HDR video', () {
     testWidgets('basic export to mp4', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
-        VideoRenderData(video: hevcVideo, outputFormat: VideoOutputFormat.mp4),
+        VideoRenderData(
+          videoSegments: [VideoSegment(video: hevcVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+        ),
       );
       expect(result, isNotNull, reason: 'HEVC export failed');
       expect(
@@ -521,9 +530,9 @@ void main() {
     testWidgets('export with color filter', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [VideoSegment(video: hevcVideo)],
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kComplexFilterMatrix,
+          colorFilters: kComplexFilterMatrix,
         ),
       );
       expect(result, isNotNull, reason: 'HEVC with filter failed');
@@ -533,7 +542,7 @@ void main() {
     testWidgets('export with blur effect', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [VideoSegment(video: hevcVideo)],
           outputFormat: VideoOutputFormat.mp4,
           blur: 5,
         ),
@@ -545,7 +554,7 @@ void main() {
     testWidgets('export with rotation', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [VideoSegment(video: hevcVideo)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(rotateTurns: 1),
         ),
@@ -557,7 +566,7 @@ void main() {
     testWidgets('export with flip', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [VideoSegment(video: hevcVideo)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(flipX: true, flipY: true),
         ),
@@ -569,7 +578,7 @@ void main() {
     testWidgets('export with crop', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [VideoSegment(video: hevcVideo)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(
             x: 100,
@@ -586,7 +595,7 @@ void main() {
     testWidgets('export with scale', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [VideoSegment(video: hevcVideo)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(scaleX: 0.5, scaleY: 0.5),
         ),
@@ -599,10 +608,14 @@ void main() {
       // hevc.mp4 is ~2.5s, so trim from 0-2s for ~2s output
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [
+            VideoSegment(
+              video: hevcVideo,
+              startTime: Duration.zero,
+              endTime: const Duration(seconds: 2),
+            ),
+          ],
           outputFormat: VideoOutputFormat.mp4,
-          startTime: Duration.zero,
-          endTime: const Duration(seconds: 2),
         ),
       );
       expect(result, isNotNull, reason: 'HEVC trim failed');
@@ -622,7 +635,7 @@ void main() {
       final originalMeta = await ProVideoEditor.instance.getMetadata(hevcVideo);
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [VideoSegment(video: hevcVideo)],
           outputFormat: VideoOutputFormat.mp4,
           playbackSpeed: 2.0,
         ),
@@ -643,22 +656,25 @@ void main() {
     testWidgets('export with speed change 0.5x', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [
+            VideoSegment(
+              video: hevcVideo,
+              startTime: Duration.zero,
+              endTime: const Duration(seconds: 2),
+            ),
+          ],
           outputFormat: VideoOutputFormat.mp4,
           playbackSpeed: 0.5,
-          // Trim to avoid very long output
-          startTime: Duration.zero,
-          endTime: const Duration(seconds: 2),
         ),
       );
       expect(result, isNotNull, reason: 'HEVC with slow motion failed');
       expect(result.lengthInBytes, greaterThan(50000));
-    }, skip: Platform.isMacOS || Platform.isIOS);
+    });
 
     testWidgets('remove audio', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [VideoSegment(video: hevcVideo)],
           outputFormat: VideoOutputFormat.mp4,
           enableAudio: false,
         ),
@@ -670,9 +686,9 @@ void main() {
     testWidgets('export with combined effects', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [VideoSegment(video: hevcVideo)],
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           blur: 3,
           transform: const ExportTransform(flipX: true, rotateTurns: 1),
           enableAudio: false,
@@ -719,7 +735,7 @@ void main() {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           videoSegments: [
             VideoSegment(
               video: hevcVideo,
@@ -740,7 +756,10 @@ void main() {
 
     testWidgets('export to mov (Apple)', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
-        VideoRenderData(video: hevcVideo, outputFormat: VideoOutputFormat.mov),
+        VideoRenderData(
+          videoSegments: [VideoSegment(video: hevcVideo)],
+          outputFormat: VideoOutputFormat.mov,
+        ),
       );
       expect(result, isNotNull, reason: 'HEVC to MOV failed');
       expect(result.lengthInBytes, greaterThan(100000));
@@ -753,7 +772,10 @@ void main() {
   group('Standard H.264 video (demo.mp4)', () {
     testWidgets('basic export to mp4', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
-        VideoRenderData(video: h264Video, outputFormat: VideoOutputFormat.mp4),
+        VideoRenderData(
+          videoSegments: [VideoSegment(video: h264Video)],
+          outputFormat: VideoOutputFormat.mp4,
+        ),
       );
       expect(result, isNotNull, reason: 'H.264 export failed');
       expect(
@@ -766,9 +788,9 @@ void main() {
     testWidgets('export with color filter', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: h264Video,
+          videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kComplexFilterMatrix,
+          colorFilters: kComplexFilterMatrix,
         ),
       );
       expect(result, isNotNull, reason: 'H.264 with filter failed');
@@ -778,7 +800,7 @@ void main() {
     testWidgets('export with blur effect', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: h264Video,
+          videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
           blur: 5,
         ),
@@ -790,7 +812,7 @@ void main() {
     testWidgets('export with rotation', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: h264Video,
+          videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(rotateTurns: 1),
         ),
@@ -802,7 +824,7 @@ void main() {
     testWidgets('export with flip', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: h264Video,
+          videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(flipX: true, flipY: true),
         ),
@@ -814,7 +836,7 @@ void main() {
     testWidgets('export with crop', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: h264Video,
+          videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(
             x: 100,
@@ -831,7 +853,7 @@ void main() {
     testWidgets('export with scale', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: h264Video,
+          videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(scaleX: 0.5, scaleY: 0.5),
         ),
@@ -843,10 +865,14 @@ void main() {
     testWidgets('trim video', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: h264Video,
+          videoSegments: [
+            VideoSegment(
+              video: h264Video,
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 4),
+            ),
+          ],
           outputFormat: VideoOutputFormat.mp4,
-          startTime: const Duration(seconds: 1),
-          endTime: const Duration(seconds: 4),
         ),
       );
       expect(result, isNotNull, reason: 'H.264 trim failed');
@@ -866,7 +892,7 @@ void main() {
       final originalMeta = await ProVideoEditor.instance.getMetadata(h264Video);
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: h264Video,
+          videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
           playbackSpeed: 2.0,
         ),
@@ -884,26 +910,28 @@ void main() {
       );
     });
 
-    // FIXME: Speed change tests cause "Operation Stopped" error on macOS
     testWidgets('export with speed change 0.5x', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: h264Video,
+          videoSegments: [
+            VideoSegment(
+              video: h264Video,
+              startTime: Duration.zero,
+              endTime: const Duration(seconds: 2),
+            ),
+          ],
           outputFormat: VideoOutputFormat.mp4,
           playbackSpeed: 0.5,
-          // Trim to avoid very long output
-          startTime: Duration.zero,
-          endTime: const Duration(seconds: 2),
         ),
       );
       expect(result, isNotNull, reason: 'H.264 with slow motion failed');
       expect(result.lengthInBytes, greaterThan(50000));
-    }, skip: Platform.isMacOS || Platform.isIOS);
+    });
 
     testWidgets('remove audio', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: h264Video,
+          videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
           enableAudio: false,
         ),
@@ -915,9 +943,9 @@ void main() {
     testWidgets('export with combined effects', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: h264Video,
+          videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           blur: 3,
           transform: const ExportTransform(flipX: true, rotateTurns: 1),
           enableAudio: false,
@@ -962,7 +990,7 @@ void main() {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           videoSegments: [
             VideoSegment(
               video: h264Video,
@@ -983,7 +1011,10 @@ void main() {
 
     testWidgets('export to mov (Apple)', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
-        VideoRenderData(video: h264Video, outputFormat: VideoOutputFormat.mov),
+        VideoRenderData(
+          videoSegments: [VideoSegment(video: h264Video)],
+          outputFormat: VideoOutputFormat.mov,
+        ),
       );
       expect(result, isNotNull, reason: 'H.264 to MOV failed');
       expect(result.lengthInBytes, greaterThan(100000));
@@ -996,11 +1027,17 @@ void main() {
   group('Codec comparison (HEVC vs H.264)', () {
     testWidgets('both codecs produce valid output', (_) async {
       final hevcResult = await ProVideoEditor.instance.renderVideo(
-        VideoRenderData(video: hevcVideo, outputFormat: VideoOutputFormat.mp4),
+        VideoRenderData(
+          videoSegments: [VideoSegment(video: hevcVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+        ),
       );
 
       final h264Result = await ProVideoEditor.instance.renderVideo(
-        VideoRenderData(video: h264Video, outputFormat: VideoOutputFormat.mp4),
+        VideoRenderData(
+          videoSegments: [VideoSegment(video: h264Video)],
+          outputFormat: VideoOutputFormat.mp4,
+        ),
       );
 
       expect(hevcResult, isNotNull, reason: 'HEVC result is null');
@@ -1021,9 +1058,9 @@ void main() {
       Future<Uint8List> renderWithEffects(EditorVideo video) async {
         return ProVideoEditor.instance.renderVideo(
           VideoRenderData(
-            video: video,
+            videoSegments: [VideoSegment(video: video)],
             outputFormat: VideoOutputFormat.mp4,
-            colorMatrixList: kComplexFilterMatrix,
+            colorFilters: kComplexFilterMatrix,
             blur: 5,
           ),
         );
@@ -1121,7 +1158,7 @@ void main() {
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           blur: 2,
           videoSegments: [
             VideoSegment(
@@ -1159,10 +1196,10 @@ void main() {
       }) async {
         final result = await ProVideoEditor.instance.renderVideo(
           VideoRenderData(
-            video: video,
+            videoSegments: [
+              VideoSegment(video: video, startTime: start, endTime: end),
+            ],
             outputFormat: VideoOutputFormat.mp4,
-            startTime: start,
-            endTime: end,
           ),
         );
         return ProVideoEditor.instance.getMetadata(EditorVideo.memory(result));
@@ -1195,12 +1232,15 @@ void main() {
       }) async {
         return ProVideoEditor.instance.renderVideo(
           VideoRenderData(
-            video: video,
+            videoSegments: [
+              VideoSegment(
+                video: video,
+                startTime: Duration.zero,
+                endTime: end,
+              ),
+            ],
             outputFormat: VideoOutputFormat.mp4,
             playbackSpeed: 2.0,
-            // Trim to keep test fast
-            startTime: Duration.zero,
-            endTime: end,
           ),
         );
       }
@@ -1233,9 +1273,11 @@ void main() {
         VideoRenderData(
           outputFormat: VideoOutputFormat.mp4,
           // Overlay
-          imageBytes: overlayImage,
+          imageLayers: [
+            ImageLayer(image: EditorLayerImage.memory(overlayImage)),
+          ],
           // Color filter + Blur
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           blur: 2,
           // Transform: rotate, flip, scale
           transform: const ExportTransform(
@@ -1291,9 +1333,11 @@ void main() {
         VideoRenderData(
           outputFormat: VideoOutputFormat.mp4,
           // Overlay
-          imageBytes: overlayImage,
+          imageLayers: [
+            ImageLayer(image: EditorLayerImage.memory(overlayImage)),
+          ],
           // Color filter + Blur
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           blur: 2,
           // Transform: rotate, flip, scale
           transform: const ExportTransform(
@@ -1349,9 +1393,11 @@ void main() {
         VideoRenderData(
           outputFormat: VideoOutputFormat.mp4,
           // Overlay
-          imageBytes: overlayImage,
+          imageLayers: [
+            ImageLayer(image: EditorLayerImage.memory(overlayImage)),
+          ],
           // Color filter + Blur
-          colorMatrixList: kComplexFilterMatrix,
+          colorFilters: kComplexFilterMatrix,
           blur: 3,
           // Transform: rotate, flip, crop
           transform: const ExportTransform(
@@ -1426,12 +1472,14 @@ void main() {
 
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [VideoSegment(video: hevcVideo)],
           outputFormat: VideoOutputFormat.mp4,
           // Overlay
-          imageBytes: overlayImage,
+          imageLayers: [
+            ImageLayer(image: EditorLayerImage.memory(overlayImage)),
+          ],
           // Color filter + Blur
-          colorMatrixList: kComplexFilterMatrix,
+          colorFilters: kComplexFilterMatrix,
           blur: 4,
           // Transform: all transformations
           transform: const ExportTransform(
@@ -1485,9 +1533,11 @@ void main() {
         VideoRenderData(
           outputFormat: VideoOutputFormat.mp4,
           // Large overlay
-          imageBytes: overlayImage,
+          imageLayers: [
+            ImageLayer(image: EditorLayerImage.memory(overlayImage)),
+          ],
           // Complex color filter
-          colorMatrixList: kComplexFilterMatrix,
+          colorFilters: kComplexFilterMatrix,
           // Heavy blur
           blur: 8,
           // Transform
@@ -1553,7 +1603,10 @@ void main() {
 
       // Render the video
       final result = await ProVideoEditor.instance.renderVideo(
-        VideoRenderData(video: inputVideo, outputFormat: VideoOutputFormat.mp4),
+        VideoRenderData(
+          videoSegments: [VideoSegment(video: inputVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+        ),
       );
 
       // Check that the rendered video has no metadata

@@ -27,7 +27,7 @@ import androidx.media3.effect.TimestampWrapper
  *
  * @param videoEffects List to add overlay effect to
  * @param inputFile Video file for dimension detection
- * @param imageBytes PNG/JPEG image as byte array
+ * @param imageLayers List of image layers from config
  * @param rotationDegrees Applied rotation (affects dimensions)
  * @param cropWidth Applied crop width (affects overlay size)
  * @param cropHeight Applied crop height (affects overlay size)
@@ -38,76 +38,17 @@ import androidx.media3.effect.TimestampWrapper
 fun applyImageLayer(
     videoEffects: MutableList<Effect>,
     inputFile: File,
-    imageBytes: ByteArray?,
+    imageLayers: List<ch.waio.pro_video_editor.src.features.render.models.ImageLayer>,
     rotationDegrees: Float,
     cropWidth: Int?,
     cropHeight: Int?,
     scaleX: Float?,
     scaleY: Float?,
 ) {
-    if (imageBytes == null) return
+    if (imageLayers.isEmpty()) return
 
-    var (videoWidth, videoHeight, videoRotation) = getRotatedVideoDimensions(
-        inputFile,
-        rotationDegrees
-    )
-
-    val isRotated90Deg = videoRotation == 90 || videoRotation == 270
-    if (cropWidth != null) {
-        if (isRotated90Deg) {
-            videoHeight = cropWidth
-        } else {
-            videoWidth = cropWidth
-        }
-    }
-    if (cropHeight != null) {
-        if (isRotated90Deg) {
-            videoWidth = cropHeight
-        } else {
-            videoHeight = cropHeight
-        }
-    }
-
-    if (scaleX != null) videoWidth = (videoWidth * scaleX).toInt()
-    if (scaleY != null) videoHeight = (videoHeight * scaleY).toInt()
-
-    Log.d(
-        RENDER_TAG,
-        "Applying image overlay: ${imageBytes.size / 1024} KB, scaled to ${videoWidth}x$videoHeight"
-    )
-
-    // Decode as premultiplied (default) so Canvas-based scaling works
-    val options = BitmapFactory.Options().apply {
-        inPreferredConfig = Bitmap.Config.ARGB_8888
-    }
-    val overlayBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, options)
-
-    // Use createScaledBitmap for cleaner scaling that preserves alpha correctly
-    val scaledOverlay = if (overlayBitmap.width != videoWidth || overlayBitmap.height != videoHeight) {
-        val scaled = overlayBitmap.scale(videoWidth, videoHeight)
-        overlayBitmap.recycle()
-        scaled
-    } else {
-        overlayBitmap
-    }
-
-    // Media3's overlay GLSL shader uses straight-alpha blending:
-    //   output.rgb = overlay.rgb * overlay.a + video.rgb * (1 - overlay.a)
-    // But Android's BitmapFactory produces premultiplied alpha (RGB already
-    // multiplied by A). This causes double alpha multiplication and darkens
-    // semi-transparent areas.
-    // Fix: manually convert pixels from premultiplied to straight alpha.
-    // We keep isPremultiplied=true on the Bitmap so Canvas/Media3 don't
-    // complain - only the actual pixel data is converted to straight alpha.
-    val finalOverlay = unpremultiplyAlpha(scaledOverlay)
-    if (finalOverlay !== scaledOverlay) scaledOverlay.recycle()
-
-    // Create static bitmap overlay
-    // Color issues are fixed by using WORKING_COLOR_SPACE_ORIGINAL in RenderVideo.kt
-    val bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(finalOverlay)
-    val overlayEffect = OverlayEffect(listOf(bitmapOverlay))
-
-    videoEffects += overlayEffect
+    // The old single-image overlay is now handled via imageLayers.
+    // Nothing to do here — timed layers are handled by applyTimedImageLayers.
 }
 
 /**
@@ -115,7 +56,8 @@ fun applyImageLayer(
  *
  * Each image layer has a start and end time, and will only be visible during that time range.
  * Multiple layers can be active simultaneously.
- * Images are positioned at the specified x/y offset from the bottom-left of the video frame.
+ * When x/y are null, the image is stretched to fill the video frame.
+ * When x/y are set, the image is positioned at the specified offset.
  *
  * @param videoEffects List to add overlay effects to
  * @param imageLayers List of image layers with timing information
@@ -145,42 +87,108 @@ fun applyTimedImageLayers(
                 imageBytes, 0, imageBytes.size, options
             )
 
-            val imageWidth = layerBitmap.width
-            val imageHeight = layerBitmap.height
+            // Scale to target size if provided
+            val sizedBitmap = if (layer.width != null && layer.height != null) {
+                val scaled = layerBitmap.scale(layer.width.toInt(), layer.height.toInt())
+                layerBitmap.recycle()
+                scaled
+            } else {
+                layerBitmap
+            }
 
-            // Convert from premultiplied to straight alpha
-            val finalOverlay = unpremultiplyAlpha(layerBitmap)
-            if (finalOverlay !== layerBitmap) layerBitmap.recycle()
+            // Determine if this layer should stretch or be positioned
+            val isStretched = layer.x == null && layer.y == null
 
-            // Convert times from microseconds to seconds
+            val finalOverlay: Bitmap
+            val overlaySettings: StaticOverlaySettings
+            var baseNormX = 0f
+            var baseNormY = 0f
+
+            if (isStretched) {
+                // Stretch image to fill the entire video frame
+                val scaledOverlay = if (sizedBitmap.width != videoWidth || sizedBitmap.height != videoHeight) {
+                    val scaled = sizedBitmap.scale(videoWidth, videoHeight)
+                    sizedBitmap.recycle()
+                    scaled
+                } else {
+                    sizedBitmap
+                }
+
+                val unpremultiplied = unpremultiplyAlpha(scaledOverlay)
+                if (unpremultiplied !== scaledOverlay) scaledOverlay.recycle()
+                finalOverlay = unpremultiplied
+
+                overlaySettings = StaticOverlaySettings.Builder()
+                    .setOverlayFrameAnchor(0f, 0f)
+                    .setBackgroundFrameAnchor(0f, 0f)
+                    .build()
+
+                Log.d(RENDER_TAG, "Layer: stretched to ${videoWidth}x$videoHeight")
+            } else {
+                // Position image at specified x/y offset
+                val imageWidth = sizedBitmap.width
+                val imageHeight = sizedBitmap.height
+
+                val unpremultiplied = unpremultiplyAlpha(sizedBitmap)
+                if (unpremultiplied !== sizedBitmap) sizedBitmap.recycle()
+                finalOverlay = unpremultiplied
+
+                val x = layer.x ?: 0
+                val y = layer.y ?: 0
+
+                // Use OverlaySettings for positioning
+                // Media3 uses OpenGL coordinates: x[-1,1] left→right, y[-1,1] bottom→top.
+                // Input uses top-left origin, so y must be flipped.
+                val centerX = x.toFloat() + imageWidth / 2f
+                val centerY = y.toFloat() + imageHeight / 2f
+                baseNormX = (centerX / videoWidth) * 2f - 1f
+                baseNormY = 1f - (centerY / videoHeight) * 2f
+
+                overlaySettings = StaticOverlaySettings.Builder()
+                    .setBackgroundFrameAnchor(baseNormX, baseNormY)
+                    .setOverlayFrameAnchor(0f, 0f)
+                    .build()
+
+                Log.d(
+                    RENDER_TAG,
+                    "Layer: positioned at ($x, $y), size=${imageWidth}x${imageHeight}"
+                )
+            }
+
+            // Convert times from microseconds
             val startTimeUs = layer.startUs
             val endTimeUs = layer.endUs
 
             Log.d(
                 RENDER_TAG,
-                "Layer: ${if (startTimeUs == -1L) "from start" else "start=${startTimeUs}us"}," +
-                        " ${if (endTimeUs == -1L) "until end" else "end=${endTimeUs}us"}," +
-                        " size=${imageWidth}x${imageHeight}, offset=(${layer.x}, ${layer.y})"
+                "Layer timing: ${if (startTimeUs == -1L) "from start" else "start=${startTimeUs}us"}," +
+                        " ${if (endTimeUs == -1L) "until end" else "end=${endTimeUs}us"}"
             )
 
-            // Use OverlaySettings for positioning instead of allocating a
-            // full-frame (videoWidth×videoHeight) canvas bitmap per layer.
-            // Media3 uses OpenGL coordinates: x[-1,1] left→right, y[-1,1] bottom→top.
-            // Input uses top-left origin, so y must be flipped.
-            val centerX = layer.x.toFloat() + imageWidth / 2f
-            val centerY = layer.y.toFloat() + imageHeight / 2f
-            val normX = (centerX / videoWidth) * 2f - 1f
-            val normY = 1f - (centerY / videoHeight) * 2f
+            val hasAnimations = layer.animations.isNotEmpty()
+            val bitmapOverlay: BitmapOverlay
 
-            val overlaySettings = StaticOverlaySettings.Builder()
-                .setBackgroundFrameAnchor(normX, normY)
-                .setOverlayFrameAnchor(0f, 0f)
-                .build()
-
-            val bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(
-                finalOverlay, overlaySettings
-            )
-
+            if (hasAnimations) {
+                val imageWidth = finalOverlay.width
+                val imageHeight = finalOverlay.height
+                bitmapOverlay = AnimatedBitmapOverlay(
+                    bitmap = finalOverlay,
+                    baseNormX = baseNormX,
+                    baseNormY = baseNormY,
+                    imageWidth = imageWidth,
+                    imageHeight = imageHeight,
+                    videoWidth = videoWidth,
+                    videoHeight = videoHeight,
+                    layerStartUs = startTimeUs,
+                    layerEndUs = endTimeUs,
+                    animations = layer.animations
+                )
+                Log.d(RENDER_TAG, "Layer: using AnimatedBitmapOverlay with ${layer.animations.size} animation(s)")
+            } else {
+                bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(
+                    finalOverlay, overlaySettings
+                )
+            }
             val overlayEffect = OverlayEffect(listOf(bitmapOverlay))
 
             if (startTimeUs == -1L && endTimeUs == -1L) {

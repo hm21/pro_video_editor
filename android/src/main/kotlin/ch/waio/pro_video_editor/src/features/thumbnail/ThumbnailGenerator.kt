@@ -61,8 +61,14 @@ class ThumbnailGenerator(private val context: Context) {
                 val result = when {
                     config.timestampsUs.isNotEmpty() -> {
                         getThumbnailsFromTimestamps(
-                            config.inputPath, config.outputFormat, config.jpegQuality, config.boxFit,
-                            config.outputWidth, config.outputHeight, config.timestampsUs, onProgress
+                            config.inputPath,
+                            config.outputFormat,
+                            config.jpegQuality,
+                            config.boxFit,
+                            config.outputWidth,
+                            config.outputHeight,
+                            config.timestampsUs,
+                            onProgress
                         )
                     }
 

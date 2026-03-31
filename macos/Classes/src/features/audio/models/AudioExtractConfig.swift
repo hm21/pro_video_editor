@@ -7,42 +7,43 @@ import Foundation
 struct AudioExtractConfig {
     /// The unique task identifier for progress tracking and cancellation
     let id: String
-    
+
     /// The absolute file path to the source video file
     let inputPath: String
-    
+
     /// The file extension of the source video (e.g., "mp4", "mov")
     let fileExtension: String
-    
+
     /// The desired output audio format (e.g., "mp3", "aac", "m4a")
     let format: String
-    
+
     /// Optional start time in microseconds for trimming
     let startUs: Int64?
-    
+
     /// Optional end time in microseconds for trimming
     let endUs: Int64?
-    
+
     /// Optional output file path (nil = return bytes)
     let outputPath: String?
-    
+
     /// Creates an AudioExtractConfig from Flutter method call arguments.
     ///
     /// - Parameter arguments: Dictionary containing the method call arguments
     /// - Returns: A configured AudioExtractConfig instance, or nil if required parameters are missing
     static func fromArguments(_ arguments: [String: Any]?) -> AudioExtractConfig? {
         guard let args = arguments,
-              let id = args["id"] as? String,
-              let inputPath = args["inputPath"] as? String,
-              let extensionStr = args["extension"] as? String,
-              let format = args["format"] as? String else {
+            let id = args["id"] as? String,
+            let inputPath = args["inputPath"] as? String,
+            let extensionStr = args["extension"] as? String,
+            let format = args["format"] as? String
+        else {
             return nil
         }
-        
+
         let startUs = args["startTime"] as? Int64
         let endUs = args["endTime"] as? Int64
         let outputPath = args["outputPath"] as? String
-        
+
         return AudioExtractConfig(
             id: id,
             inputPath: inputPath,
@@ -53,7 +54,7 @@ struct AudioExtractConfig {
             outputPath: outputPath
         )
     }
-    
+
     /// Returns the file extension for the output audio file based on the format.
     ///
     /// - Returns: The file extension string (e.g., "mp3", "aac", "m4a", "wav")
@@ -67,15 +68,15 @@ struct AudioExtractConfig {
         default: return "m4a"
         }
     }
-    
+
     /// Returns the AVFileType for the output audio format.
     ///
     /// - Returns: The AVFileType constant for the specified format
     func getAVFileType() -> String {
         switch format.lowercased() {
-        case "mp3": return "com.apple.m4a-audio" // MP3 in M4A container
-        case "aac": return "com.apple.m4a-audio" // AAC in M4A container
-        case "m4a": return "com.apple.m4a-audio" // M4A container
+        case "mp3": return "com.apple.m4a-audio"  // MP3 in M4A container
+        case "aac": return "com.apple.m4a-audio"  // AAC in M4A container
+        case "m4a": return "com.apple.m4a-audio"  // M4A container
         default: return "com.apple.m4a-audio"
         }
     }

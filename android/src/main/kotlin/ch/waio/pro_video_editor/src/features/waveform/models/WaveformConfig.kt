@@ -32,10 +32,10 @@ data class WaveformConfig(
         fun fromMethodCall(call: MethodCall): WaveformConfig {
             val id = call.argument<String>("id")
                 ?: throw IllegalArgumentException("id is required")
-            
+
             val inputPath = call.argument<String>("inputPath")
                 ?: throw IllegalArgumentException("inputPath is required")
-            
+
             val fileExtension = call.argument<String>("extension") ?: "mp4"
             val samplesPerSecond = call.argument<Int>("samplesPerSecond") ?: 50
             val startUs = call.argument<Number>("startTime")?.toLong()

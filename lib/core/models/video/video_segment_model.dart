@@ -1,4 +1,9 @@
+// ignore_for_file: public_member_api_docs, sort_constructors_first
+import 'dart:convert';
+
 import 'package:pro_video_editor/pro_video_editor.dart';
+import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
+import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 
 /// Represents a single video clip to be included in a video composition.
 ///
@@ -10,9 +15,14 @@ class VideoSegment {
     required this.video,
     this.startTime,
     this.endTime,
-  }) : assert(
+    this.volume,
+  })  : assert(
           startTime == null || endTime == null || startTime < endTime,
           'startTime must be before endTime',
+        ),
+        assert(
+          volume == null || volume >= 0,
+          '[volume] must be greater than or equal to 0',
         );
 
   /// The video source for this clip.
@@ -31,6 +41,15 @@ class VideoSegment {
   /// If null, the clip plays until the end of the video.
   final Duration? endTime;
 
+  /// Volume multiplier for this segment's audio.
+  ///
+  /// - `0.0`: Mute
+  /// - `1.0`: Original volume
+  /// - `> 1.0`: Amplified
+  ///
+  /// If null, the original volume is used.
+  final double? volume;
+
   /// Converts this clip to a map for platform channel communication.
   Future<Map<String, dynamic>> toAsyncMap() async {
     final inputPath = await video.safeFilePath();
@@ -39,6 +58,7 @@ class VideoSegment {
       'inputPath': inputPath,
       'startUs': startTime?.inMicroseconds,
       'endUs': endTime?.inMicroseconds,
+      'volume': volume,
     };
   }
 
@@ -47,32 +67,66 @@ class VideoSegment {
     EditorVideo? video,
     Duration? startTime,
     Duration? endTime,
+    double? volume,
   }) {
     return VideoSegment(
       video: video ?? this.video,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
+      volume: volume ?? this.volume,
     );
   }
 
   @override
-  bool operator ==(Object other) {
+  bool operator ==(covariant VideoSegment other) {
     if (identical(this, other)) return true;
 
-    return other is VideoSegment &&
-        other.video == video &&
+    return other.video == video &&
         other.startTime == startTime &&
-        other.endTime == endTime;
+        other.endTime == endTime &&
+        other.volume == volume;
   }
 
   @override
-  int get hashCode => Object.hash(video, startTime, endTime);
+  int get hashCode {
+    return video.hashCode ^
+        startTime.hashCode ^
+        endTime.hashCode ^
+        volume.hashCode;
+  }
 
   @override
   String toString() {
-    return 'VideoClipModel('
-        'video: $video, '
+    return 'VideoSegment(video: $video, '
         'startTime: $startTime, '
-        'endTime: $endTime)';
+        'endTime: $endTime, '
+        'volume: $volume)';
   }
+
+  Map<String, dynamic> toMap() {
+    return <String, dynamic>{
+      'video': video.toMap(),
+      'startTime': startTime?.inMicroseconds,
+      'endTime': endTime?.inMicroseconds,
+      'volume': volume,
+    };
+  }
+
+  factory VideoSegment.fromMap(Map<String, dynamic> map) {
+    return VideoSegment(
+      video: EditorVideo.fromMap(map['video'] as Map<String, dynamic>),
+      startTime: map['startTime'] != null
+          ? Duration(microseconds: safeParseInt(map['startTime']))
+          : null,
+      endTime: map['endTime'] != null
+          ? Duration(microseconds: safeParseInt(map['endTime']))
+          : null,
+      volume: tryParseDouble(map['volume']),
+    );
+  }
+
+  String toJson() => json.encode(toMap());
+
+  factory VideoSegment.fromJson(String source) =>
+      VideoSegment.fromMap(json.decode(source) as Map<String, dynamic>);
 }

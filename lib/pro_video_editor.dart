@@ -2,6 +2,7 @@
 
 export '/core/models/audio/audio_extract_configs_model.dart';
 export '/core/models/audio/audio_format_model.dart';
+export '/core/models/audio/audio_track_model.dart';
 export '/core/models/audio/waveform_chunk_model.dart';
 export '/core/models/audio/waveform_configs_model.dart';
 export '/core/models/audio/waveform_data_model.dart';
@@ -9,6 +10,8 @@ export 'features/audio/widgets/audio_waveform.dart';
 export 'features/audio/models/waveform_style.dart';
 export 'core/models/image/editor_layer_image_model.dart';
 export 'core/models/image/image_layer_model.dart';
+export 'core/models/image/layer_animation_model.dart';
+export 'core/models/video/color_filter_model.dart';
 export 'core/models/video/progress_model.dart';
 export 'core/models/video/editor_video_model.dart';
 export 'core/models/video/export_transform_model.dart';
@@ -20,6 +23,7 @@ export 'core/models/video/video_quality_config.dart';
 export 'core/models/exceptions/render_exceptions.dart';
 export 'core/models/exceptions/audio_exceptions.dart';
 export 'core/platform/platform_interface.dart';
+export 'shared/models/time_range_mixin.dart';
 export 'shared/utils/converters.dart';
 
 /// Thumbnails

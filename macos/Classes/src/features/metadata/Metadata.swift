@@ -25,12 +25,14 @@ class VideoMetadata {
     ///   - checkStreamingOptimization: Whether to check if the video is optimized for streaming
     /// - Returns: Dictionary containing all extracted metadata with string keys and typed values
     /// - Throws: Error if the file cannot be accessed or metadata extraction fails
-    static func processVideo(inputPath: String, ext: String, checkStreamingOptimization: Bool = false) async throws -> [String: Any] {
-       let tempFileURL = URL(fileURLWithPath: inputPath)
-       let asset = AVURLAsset(url: tempFileURL)
+    static func processVideo(
+        inputPath: String, ext: String, checkStreamingOptimization: Bool = false
+    ) async throws -> [String: Any] {
+        let tempFileURL = URL(fileURLWithPath: inputPath)
+        let asset = AVURLAsset(url: tempFileURL)
 
         // MARK: - File Properties
-        
+
         // Extract file size from file system attributes
         let fileSize: Int64
         do {
@@ -41,7 +43,7 @@ class VideoMetadata {
         }
 
         // MARK: - Duration Extraction
-        
+
         // Load duration using async API on macOS 13+ or fallback to synchronous API
         let duration: CMTime
         if #available(macOS 13.0, *) {
@@ -52,7 +54,7 @@ class VideoMetadata {
         let durationMs = CMTimeGetSeconds(duration) * 1000.0
 
         // MARK: - Audio Track Duration
-        
+
         // Extract audio track duration if present
         var audioDurationMs: Double? = nil
         if #available(macOS 13.0, *) {
@@ -69,15 +71,15 @@ class VideoMetadata {
         }
 
         // MARK: - Video Track Properties
-        
+
         // Initialize numeric properties with default values
         var numericMetadata: [String: Int] = [
             "width": 0,
             "height": 0,
             "rotation": 0,
-            "bitrate": 0
+            "bitrate": 0,
         ]
-        
+
         // Frame rate variable
         var frameRate: Double? = nil
 
@@ -95,7 +97,7 @@ class VideoMetadata {
             if let track = videoTracks.first {
                 let size = try await track.load(.naturalSize)
                 let transform = try await track.load(.preferredTransform)
-                
+
                 // Apply transform to get actual display dimensions
                 let transformedSize = size.applying(transform)
                 numericMetadata["width"] = Int(abs(transformedSize.width))
@@ -105,7 +107,7 @@ class VideoMetadata {
                 // atan2(b, a) gives the rotation angle in radians
                 let angle = atan2(transform.b, transform.a)
                 numericMetadata["rotation"] = (Int(round(angle * 180 / .pi)) + 360) % 360
-                
+
                 // Extract frame rate
                 let nominalFrameRate = try await track.load(.nominalFrameRate)
                 if nominalFrameRate > 0 {
@@ -121,7 +123,7 @@ class VideoMetadata {
 
                 let angle = atan2(track.preferredTransform.b, track.preferredTransform.a)
                 numericMetadata["rotation"] = (Int(round(angle * 180 / .pi)) + 360) % 360
-                
+
                 // Extract frame rate
                 if track.nominalFrameRate > 0 {
                     frameRate = Double(track.nominalFrameRate)
@@ -130,7 +132,7 @@ class VideoMetadata {
         }
 
         // MARK: - Descriptive Metadata
-        
+
         // Extract text-based metadata (title, artist, album information)
         // These values are stored in the video file's common metadata
         // Using a map-based approach for cleaner, more maintainable code
@@ -139,38 +141,41 @@ class VideoMetadata {
             "artist": "artist",
             "author": "author",
             "album": "albumName",
-            "albumArtist": "albumArtist"
+            "albumArtist": "albumArtist",
         ]
-        
+
         var textMetadata: [String: String] = [:]
-        
+
         // GPS coordinates
         var latitude: Double? = nil
         var longitude: Double? = nil
-        
+
         // Camera information
         var cameraMake: String = ""
         var cameraModel: String = ""
-        
+
         if #available(macOS 13.0, *) {
             // Use async API to load metadata items
             let metadataItems = try await asset.load(.commonMetadata)
             for (resultKey, metadataKey) in textMetadataKeys {
-                textMetadata[resultKey] = try await loadMetadataString(from: metadataItems, key: metadataKey)
+                textMetadata[resultKey] = try await loadMetadataString(
+                    from: metadataItems, key: metadataKey)
             }
-            
+
             // Extract GPS location from common metadata
-            if let locationItem = metadataItems.first(where: { $0.commonKey?.rawValue == "location" }) {
+            if let locationItem = metadataItems.first(where: {
+                $0.commonKey?.rawValue == "location"
+            }) {
                 if let locationString = try? await locationItem.load(.stringValue) {
                     let coords = parseLocationString(locationString)
                     latitude = coords.latitude
                     longitude = coords.longitude
                 }
             }
-            
+
             // Extract camera make and model from QuickTime metadata
             let allMetadata = try await asset.load(.metadata)
-            
+
             for item in allMetadata {
                 // Check by string key
                 if let key = item.key as? String {
@@ -179,8 +184,11 @@ class VideoMetadata {
                         cameraMake = try await item.load(.stringValue) ?? ""
                     } else if key == "com.apple.quicktime.model" {
                         cameraModel = try await item.load(.stringValue) ?? ""
-                    } else if latitude == nil && (key == "com.apple.quicktime.location.ISO6709" ||
-                              keyLower.contains("location") || keyLower.contains("gps") || key.contains("©xyz")) {
+                    } else if latitude == nil
+                        && (key == "com.apple.quicktime.location.ISO6709"
+                            || keyLower.contains("location") || keyLower.contains("gps")
+                            || key.contains("©xyz"))
+                    {
                         // Try string value first
                         if let locationString = try? await item.load(.stringValue) {
                             let coords = parseLocationString(locationString)
@@ -195,17 +203,16 @@ class VideoMetadata {
                         }
                     }
                 }
-                
+
                 // Also check by identifier (important for MP4 files)
                 if latitude == nil, let identifier = item.identifier {
                     let idRaw = identifier.rawValue.lowercased()
                     // Check for ©xyz (URL-encoded as %A9xyz)
-                    if identifier == .quickTimeMetadataLocationISO6709 ||
-                       identifier == .identifier3GPUserDataLocation ||
-                       idRaw.contains("location") ||
-                       idRaw.contains("gps") ||
-                       idRaw.contains("%a9xyz") ||
-                       idRaw.contains("©xyz") {
+                    if identifier == .quickTimeMetadataLocationISO6709
+                        || identifier == .identifier3GPUserDataLocation
+                        || idRaw.contains("location") || idRaw.contains("gps")
+                        || idRaw.contains("%a9xyz") || idRaw.contains("©xyz")
+                    {
                         // Try string value first
                         if let locationString = try? await item.load(.stringValue) {
                             let coords = parseLocationString(locationString)
@@ -219,7 +226,7 @@ class VideoMetadata {
                             longitude = coords.longitude
                         }
                     }
-                    
+
                     // Extract camera model from Samsung's auth field
                     if cameraModel.isEmpty && idRaw.contains("auth") {
                         if let model = try? await item.load(.stringValue) {
@@ -228,7 +235,7 @@ class VideoMetadata {
                     }
                 }
             }
-            
+
             // Try to get location from QuickTime user data as fallback
             if latitude == nil {
                 let qtUserDataMetadata = AVMetadataItem.metadataItems(
@@ -243,7 +250,7 @@ class VideoMetadata {
                     }
                 }
             }
-            
+
             // Try 3GP location format (used by some MP4 encoders)
             if latitude == nil {
                 let threeGPMetadata = AVMetadataItem.metadataItems(
@@ -262,20 +269,25 @@ class VideoMetadata {
             // Fallback for macOS versions before 13.0 using synchronous API
             let metadataItems = asset.commonMetadata
             for (resultKey, metadataKey) in textMetadataKeys {
-                textMetadata[resultKey] = metadataItems.first(where: { $0.commonKey?.rawValue == metadataKey })?.stringValue ?? ""
+                textMetadata[resultKey] =
+                    metadataItems.first(where: { $0.commonKey?.rawValue == metadataKey })?
+                    .stringValue ?? ""
             }
-            
+
             // Extract GPS location from common metadata
-            if let locationItem = metadataItems.first(where: { $0.commonKey?.rawValue == "location" }),
-               let locationString = locationItem.stringValue {
+            if let locationItem = metadataItems.first(where: {
+                $0.commonKey?.rawValue == "location"
+            }),
+                let locationString = locationItem.stringValue
+            {
                 let coords = parseLocationString(locationString)
                 latitude = coords.latitude
                 longitude = coords.longitude
             }
-            
+
             // Extract camera make and model from all metadata
             let allMetadata = asset.metadata
-            
+
             for item in allMetadata {
                 // Check by string key
                 if let key = item.key as? String {
@@ -284,8 +296,11 @@ class VideoMetadata {
                         cameraMake = item.stringValue ?? ""
                     } else if key == "com.apple.quicktime.model" {
                         cameraModel = item.stringValue ?? ""
-                    } else if latitude == nil && (key == "com.apple.quicktime.location.ISO6709" ||
-                              keyLower.contains("location") || keyLower.contains("gps") || key.contains("©xyz")) {
+                    } else if latitude == nil
+                        && (key == "com.apple.quicktime.location.ISO6709"
+                            || keyLower.contains("location") || keyLower.contains("gps")
+                            || key.contains("©xyz"))
+                    {
                         // Try string value first
                         if let locationString = item.stringValue {
                             let coords = parseLocationString(locationString)
@@ -300,17 +315,16 @@ class VideoMetadata {
                         }
                     }
                 }
-                
+
                 // Also check by identifier (important for MP4 files)
                 if latitude == nil, let identifier = item.identifier {
                     let idRaw = identifier.rawValue.lowercased()
                     // Check for ©xyz (URL-encoded as %A9xyz)
-                    if identifier == .quickTimeMetadataLocationISO6709 ||
-                       identifier == .identifier3GPUserDataLocation ||
-                       idRaw.contains("location") ||
-                       idRaw.contains("gps") ||
-                       idRaw.contains("%a9xyz") ||
-                       idRaw.contains("©xyz") {
+                    if identifier == .quickTimeMetadataLocationISO6709
+                        || identifier == .identifier3GPUserDataLocation
+                        || idRaw.contains("location") || idRaw.contains("gps")
+                        || idRaw.contains("%a9xyz") || idRaw.contains("©xyz")
+                    {
                         // Try string value first
                         if let locationString = item.stringValue {
                             let coords = parseLocationString(locationString)
@@ -324,7 +338,7 @@ class VideoMetadata {
                             longitude = coords.longitude
                         }
                     }
-                    
+
                     // Extract camera model from Samsung's auth field
                     if cameraModel.isEmpty && idRaw.contains("auth") {
                         if let model = item.stringValue {
@@ -333,7 +347,7 @@ class VideoMetadata {
                     }
                 }
             }
-            
+
             // Try to get location from QuickTime user data as fallback
             if latitude == nil {
                 let qtUserDataMetadata = AVMetadataItem.metadataItems(
@@ -341,13 +355,14 @@ class VideoMetadata {
                     filteredByIdentifier: .quickTimeMetadataLocationISO6709
                 )
                 if let locationItem = qtUserDataMetadata.first,
-                   let locationString = locationItem.stringValue {
+                    let locationString = locationItem.stringValue
+                {
                     let coords = parseLocationString(locationString)
                     latitude = coords.latitude
                     longitude = coords.longitude
                 }
             }
-            
+
             // Try 3GP location format (used by some MP4 encoders)
             if latitude == nil {
                 let threeGPMetadata = AVMetadataItem.metadataItems(
@@ -355,7 +370,8 @@ class VideoMetadata {
                     filteredByIdentifier: .identifier3GPUserDataLocation
                 )
                 if let locationItem = threeGPMetadata.first,
-                   let locationString = locationItem.stringValue {
+                    let locationString = locationItem.stringValue
+                {
                     let coords = parseLocationString(locationString)
                     latitude = coords.latitude
                     longitude = coords.longitude
@@ -364,7 +380,7 @@ class VideoMetadata {
         }
 
         // MARK: - Creation Date
-        
+
         // Extract creation date, first from metadata, then fallback to file system
         var dateStr = ""
         if #available(macOS 13.0, *) {
@@ -385,30 +401,30 @@ class VideoMetadata {
         }
 
         // MARK: - Return Metadata Dictionary
-        
+
         // Compile all extracted metadata into a dictionary for Flutter
         var metadataDict: [String: Any] = [
-            "fileSize": fileSize,                                   // File size in bytes
-            "duration": durationMs,                                 // Duration in milliseconds
-            "width": numericMetadata["width"] ?? 0,                 // Video width in pixels
-            "height": numericMetadata["height"] ?? 0,               // Video height in pixels
-            "rotation": numericMetadata["rotation"] ?? 0,           // Rotation in degrees (0, 90, 180, 270)
-            "bitrate": numericMetadata["bitrate"] ?? 0,             // Bitrate in bits per second
-            "title": textMetadata["title"] ?? "",                   // Video title metadata
-            "artist": textMetadata["artist"] ?? "",                 // Artist metadata
-            "author": textMetadata["author"] ?? "",                 // Author metadata
-            "album": textMetadata["album"] ?? "",                   // Album metadata
-            "albumArtist": textMetadata["albumArtist"] ?? "",       // Album artist metadata
-            "date": dateStr,                                        // Creation date in ISO8601 format
-            "cameraMake": cameraMake,                               // Camera manufacturer
-            "cameraModel": cameraModel,                             // Camera model
+            "fileSize": fileSize,  // File size in bytes
+            "duration": durationMs,  // Duration in milliseconds
+            "width": numericMetadata["width"] ?? 0,  // Video width in pixels
+            "height": numericMetadata["height"] ?? 0,  // Video height in pixels
+            "rotation": numericMetadata["rotation"] ?? 0,  // Rotation in degrees (0, 90, 180, 270)
+            "bitrate": numericMetadata["bitrate"] ?? 0,  // Bitrate in bits per second
+            "title": textMetadata["title"] ?? "",  // Video title metadata
+            "artist": textMetadata["artist"] ?? "",  // Artist metadata
+            "author": textMetadata["author"] ?? "",  // Author metadata
+            "album": textMetadata["album"] ?? "",  // Album metadata
+            "albumArtist": textMetadata["albumArtist"] ?? "",  // Album artist metadata
+            "date": dateStr,  // Creation date in ISO8601 format
+            "cameraMake": cameraMake,  // Camera manufacturer
+            "cameraModel": cameraModel,  // Camera model
         ]
-        
+
         // Add audio duration if present
         if let audioDuration = audioDurationMs {
             metadataDict["audioDuration"] = audioDuration
         }
-        
+
         // Add GPS coordinates if present
         if let lat = latitude {
             metadataDict["latitude"] = lat
@@ -416,12 +432,12 @@ class VideoMetadata {
         if let lon = longitude {
             metadataDict["longitude"] = lon
         }
-        
+
         // Add frame rate if present
         if let fps = frameRate {
             metadataDict["frameRate"] = fps
         }
-        
+
         // Check if video is optimized for streaming (moov before mdat)
         // Only perform this check if explicitly requested (performance optimization)
         if checkStreamingOptimization {
@@ -431,12 +447,12 @@ class VideoMetadata {
                 }
             }
         }
-        
+
         return metadataDict
     }
 
     // MARK: - Audio Track Check
-    
+
     /// Asynchronously checks if a video file has an audio track.
     ///
     /// This method inspects the video file to determine if it contains at least
@@ -449,7 +465,7 @@ class VideoMetadata {
     static func checkAudioTrack(inputPath: String) async throws -> Bool {
         let tempFileURL = URL(fileURLWithPath: inputPath)
         let asset = AVURLAsset(url: tempFileURL)
-        
+
         // Check for audio tracks
         if #available(macOS 13.0, *) {
             let audioTracks = try await asset.loadTracks(withMediaType: .audio)
@@ -462,7 +478,7 @@ class VideoMetadata {
     }
 
     // MARK: - Helper Methods
-    
+
     /// Asynchronously loads a string value from metadata items by key.
     ///
     /// - Parameters:
@@ -478,7 +494,7 @@ class VideoMetadata {
         }
         return ""
     }
-    
+
     /// Parses a GPS location string into latitude and longitude coordinates.
     ///
     /// The location string format from QuickTime/macOS videos is typically:
@@ -486,15 +502,17 @@ class VideoMetadata {
     ///
     /// - Parameter locationString: The raw location string from video metadata
     /// - Returns: A tuple containing the parsed latitude and longitude, or nil values if parsing fails
-    private static func parseLocationString(_ locationString: String) -> (latitude: Double?, longitude: Double?) {
+    private static func parseLocationString(_ locationString: String) -> (
+        latitude: Double?, longitude: Double?
+    ) {
         // Remove trailing slash and whitespace
         let cleaned = locationString.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
-        
+
         // Pattern: +/-DD.DDDD+/-DDD.DDDD (ISO 6709 format)
         // First coordinate is latitude, second is longitude
         var latitude: Double? = nil
         var longitude: Double? = nil
-        
+
         // Find positions of + or - signs to split coordinates
         var signPositions: [Int] = []
         for (index, char) in cleaned.enumerated() {
@@ -502,21 +520,21 @@ class VideoMetadata {
                 signPositions.append(index)
             }
         }
-        
+
         if signPositions.count >= 2 {
             let latStartIndex = cleaned.index(cleaned.startIndex, offsetBy: signPositions[0])
             let lonStartIndex = cleaned.index(cleaned.startIndex, offsetBy: signPositions[1])
-            
+
             let latString = String(cleaned[latStartIndex..<lonStartIndex])
             let lonString = String(cleaned[lonStartIndex...])
-            
+
             latitude = Double(latString)
             longitude = Double(lonString)
         }
-        
+
         return (latitude, longitude)
     }
-    
+
     /// Parses GPS location from binary data (used by Samsung/Android devices).
     ///
     /// The ©xyz atom stores location as a UTF-8 or UTF-16 encoded string in binary form,
@@ -532,7 +550,7 @@ class VideoMetadata {
                 return coords
             }
         }
-        
+
         // Try UTF-16 (some devices use this)
         if let locationString = String(data: data, encoding: .utf16) {
             let coords = parseLocationString(locationString)
@@ -540,35 +558,39 @@ class VideoMetadata {
                 return coords
             }
         }
-        
+
         // Try to parse as raw IEEE 754 floats (32-bit each)
         // Format: [4 bytes latitude][4 bytes longitude]
         if data.count >= 8 {
             let latBytes = data.subdata(in: 0..<4)
             let lonBytes = data.subdata(in: 4..<8)
-            
+
             let lat = latBytes.withUnsafeBytes { $0.load(as: Float32.self) }
             let lon = lonBytes.withUnsafeBytes { $0.load(as: Float32.self) }
-            
+
             // Validate coordinates are in reasonable range
             if lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 {
                 return (Double(lat), Double(lon))
             }
-            
+
             // Try big-endian format
-            let latBE = Float32(bitPattern: UInt32(bigEndian: latBytes.withUnsafeBytes { $0.load(as: UInt32.self) }))
-            let lonBE = Float32(bitPattern: UInt32(bigEndian: lonBytes.withUnsafeBytes { $0.load(as: UInt32.self) }))
-            
+            let latBE = Float32(
+                bitPattern: UInt32(bigEndian: latBytes.withUnsafeBytes { $0.load(as: UInt32.self) })
+            )
+            let lonBE = Float32(
+                bitPattern: UInt32(bigEndian: lonBytes.withUnsafeBytes { $0.load(as: UInt32.self) })
+            )
+
             if latBE >= -90 && latBE <= 90 && lonBE >= -180 && lonBE <= 180 {
                 return (Double(latBE), Double(lonBE))
             }
         }
-        
+
         return (nil, nil)
     }
-    
+
     // MARK: - Streaming Optimization Check
-    
+
     /// Checks if the video file is optimized for progressive streaming.
     ///
     /// For MP4/MOV files, this checks if the moov atom appears before the mdat atom.
@@ -585,35 +607,35 @@ class VideoMetadata {
         guard ["mp4", "mov", "m4v", "m4a"].contains(ext) else {
             return nil
         }
-        
+
         guard let fileHandle = try? FileHandle(forReadingFrom: url) else {
             return nil
         }
-        
+
         defer {
             try? fileHandle.close()
         }
-        
+
         var moovPosition: UInt64? = nil
         var mdatPosition: UInt64? = nil
         var position: UInt64 = 0
-        
+
         while true {
             // Read atom header (4 bytes size + 4 bytes type)
             guard let headerData = try? fileHandle.read(upToCount: 8),
-                  headerData.count == 8 else {
+                headerData.count == 8
+            else {
                 break
             }
-            
+
             // Parse atom size (big-endian)
-            let atomSize = UInt64(headerData[0]) << 24 |
-                          UInt64(headerData[1]) << 16 |
-                          UInt64(headerData[2]) << 8 |
-                          UInt64(headerData[3])
-            
+            let atomSize =
+                UInt64(headerData[0]) << 24 | UInt64(headerData[1]) << 16 | UInt64(headerData[2])
+                << 8 | UInt64(headerData[3])
+
             // Parse atom type
             let atomType = String(data: headerData[4..<8], encoding: .ascii) ?? ""
-            
+
             // Track positions of moov and mdat atoms
             switch atomType {
             case "moov":
@@ -623,18 +645,19 @@ class VideoMetadata {
             default:
                 break
             }
-            
+
             // If we found both, we can determine the result
             if let moov = moovPosition, let mdat = mdatPosition {
                 return moov < mdat
             }
-            
+
             // Handle extended size (atomSize == 1 means 64-bit size follows)
             var actualSize: UInt64
             if atomSize == 1 {
                 // Read 64-bit size
                 guard let extData = try? fileHandle.read(upToCount: 8),
-                      extData.count == 8 else {
+                    extData.count == 8
+                else {
                     break
                 }
                 let byte0: UInt64 = UInt64(extData[0]) << 56
@@ -652,25 +675,25 @@ class VideoMetadata {
             } else {
                 actualSize = atomSize
             }
-            
+
             // Skip to next atom
             _ = actualSize - 8 - (atomSize == 1 ? 8 : 0)  // skipBytes calculated but seek uses absolute position
             position += actualSize
-            
+
             do {
                 try fileHandle.seek(toOffset: position)
             } catch {
                 break
             }
         }
-        
+
         // If we only found one of them, determine based on what we found
         if moovPosition != nil && mdatPosition == nil {
             return true  // moov found, no mdat yet
         } else if moovPosition == nil && mdatPosition != nil {
-            return false // mdat found first, no moov
+            return false  // mdat found first, no moov
         }
-        
-        return nil // Neither found or couldn't determine
+
+        return nil  // Neither found or couldn't determine
     }
 }

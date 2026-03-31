@@ -3,7 +3,6 @@ import CoreImage
 
 struct VideoCompositorConfig {
     var blurSigma: Double = 0.0
-    var overlayImage: Data? = nil
     var imageLayerConfigs: [ImageLayerConfig] = []
 
     var rotateRadians: Double = 0.0
@@ -19,20 +18,20 @@ struct VideoCompositorConfig {
     var scaleX: CGFloat = 1.0
     var scaleY: CGFloat = 1.0
 
-    var lutData: Data? = nil
-    var lutSize: Int = 33
+    /// Color filter configs with optional time ranges for per-frame LUT switching.
+    var colorFilterConfigs: [ColorFilterConfig] = []
 
     var videoRotationDegrees: Double = 0.0
     var shouldApplyOrientationCorrection: Bool = false
 
     var preferredTransform: CGAffineTransform = .identity
     var originalNaturalSize: CGSize = .zero
-    
+
     /// Whether to apply cropping to the image overlay along with the video.
     /// When true, the overlay is applied before cropping and gets cropped together with the video.
     /// When false (default), the overlay is scaled to the final cropped size.
     var imageBytesWithCropping: Bool = false
-    
+
     /// Fallback source track ID for older iOS versions where sourceTrackIDs may be empty.
     /// This is used when the custom compositor doesn't receive track IDs properly.
     var sourceTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid

@@ -28,6 +28,9 @@ class AudioSequenceBuilder(
     private var needsNormalization: Boolean = false
     private var loopAudio: Boolean = true
     private var startTimeUs: Long = 0
+    private var audioEndTimeUs: Long? = null
+    private var compositionStartTimeUs: Long? = null
+    private var compositionEndTimeUs: Long? = null
 
     /**
      * Sets the volume multiplier for the custom audio.
@@ -71,6 +74,36 @@ class AudioSequenceBuilder(
     }
 
     /**
+     * Sets the end time within the audio source file.
+     *
+     * @param endTimeUs End time in microseconds within the audio file (null = use full file)
+     */
+    fun setAudioEndTime(endTimeUs: Long?): AudioSequenceBuilder {
+        this.audioEndTimeUs = endTimeUs
+        return this
+    }
+
+    /**
+     * Sets when this audio track should start playing in the composition timeline.
+     *
+     * @param startTimeUs Composition time in microseconds (null = from beginning)
+     */
+    fun setCompositionStartTime(startTimeUs: Long?): AudioSequenceBuilder {
+        this.compositionStartTimeUs = startTimeUs
+        return this
+    }
+
+    /**
+     * Sets when this audio track should stop playing in the composition timeline.
+     *
+     * @param endTimeUs Composition time in microseconds (null = until end)
+     */
+    fun setCompositionEndTime(endTimeUs: Long?): AudioSequenceBuilder {
+        this.compositionEndTimeUs = endTimeUs
+        return this
+    }
+
+    /**
      * Builds the audio sequence with looping to match video duration.
      *
      * @return EditedMediaItemSequence for custom audio, or null if file not found
@@ -94,25 +127,67 @@ class AudioSequenceBuilder(
             return null
         }
 
-        // Calculate effective audio duration after start offset
-        val effectiveAudioDurationUs = totalAudioDurationUs - startTimeUs
+        // Calculate effective audio duration considering source clipping
+        val sourceEndUs = audioEndTimeUs?.coerceAtMost(totalAudioDurationUs) ?: totalAudioDurationUs
+        val effectiveAudioDurationUs = sourceEndUs - startTimeUs
         if (effectiveAudioDurationUs <= 0) {
-            Log.w(RENDER_TAG, "Start time ($startTimeUs us) exceeds audio duration ($totalAudioDurationUs us)")
+            Log.w(
+                RENDER_TAG,
+                "Start time ($startTimeUs us) exceeds audio end ($sourceEndUs us)"
+            )
             return null
         }
+
+        // Calculate target duration based on composition placement
+        val compStart = compositionStartTimeUs ?: 0L
+        val compEnd = compositionEndTimeUs ?: videoDurationUs
+        val targetDurationUs = (compEnd - compStart).coerceAtLeast(0L)
 
         // Build audio effects
         val audioProcessors = buildAudioProcessors()
         val audioEffects = Effects(audioProcessors, emptyList())
 
-        // Create audio items with looping or single play
-        val audioItems = if (loopAudio) {
-            createLoopedAudioItems(audioFile, totalAudioDurationUs, effectiveAudioDurationUs, audioEffects)
+        // Create audio content items with looping or single play
+        val audioContentItems = if (loopAudio) {
+            createLoopedAudioItems(
+                audioFile,
+                sourceEndUs,
+                effectiveAudioDurationUs,
+                targetDurationUs,
+                audioEffects
+            )
         } else {
-            createSingleAudioItem(audioFile, effectiveAudioDurationUs, audioEffects)
+            createSingleAudioItem(audioFile, sourceEndUs, effectiveAudioDurationUs, targetDurationUs, audioEffects)
         }
 
-        return EditedMediaItemSequence.Builder(audioItems).build()
+        val allItems = mutableListOf<EditedMediaItem>()
+
+        // Add leading silence if audio starts after composition time 0.
+        // Media3 parallel sequences always start at time 0, so we need
+        // silence padding to offset the audio to the correct position.
+        if (compStart > 0) {
+            val silentItem = createSilentAudioItem(compStart, audioEffects)
+            if (silentItem != null) {
+                allItems.add(silentItem)
+                Log.d(RENDER_TAG, "Added ${compStart / 1000}ms leading silence for composition offset")
+            }
+        }
+
+        allItems.addAll(audioContentItems)
+
+        // Add trailing silence so the sequence spans the full video duration.
+        // This ensures all parallel sequences have matching lengths.
+        val totalContentDurationUs = compStart + targetDurationUs
+        if (totalContentDurationUs < videoDurationUs) {
+            val trailingDurationUs = videoDurationUs - totalContentDurationUs
+            val silentItem = createSilentAudioItem(trailingDurationUs, audioEffects)
+            if (silentItem != null) {
+                allItems.add(silentItem)
+                Log.d(RENDER_TAG, "Added ${trailingDurationUs / 1000}ms trailing silence")
+            }
+        }
+
+        return EditedMediaItemSequence.Builder(allItems).build()
     }
 
     /**
@@ -176,42 +251,48 @@ class AudioSequenceBuilder(
         // The VolumeAudioProcessor was being configured but never actually processing audio.
         // See VolumeControlAudioMixer which applies volumes during the mixing stage.
         if (volume != 1.0f) {
-            Log.d(RENDER_TAG, "Custom audio volume: ${volume}x (applied via VolumeControlAudioMixer)")
+            Log.d(
+                RENDER_TAG,
+                "Custom audio volume: ${volume}x (applied via VolumeControlAudioMixer)"
+            )
         }
 
         return processors
     }
 
     /**
-     * Creates audio items with looping to match video duration.
+     * Creates audio items with looping to match target duration.
      * First iteration uses startTimeUs offset, subsequent loops start from beginning.
      */
     private fun createLoopedAudioItems(
         audioFile: File,
-        totalAudioDurationUs: Long,
+        sourceEndUs: Long,
         effectiveAudioDurationUs: Long,
+        targetDurationUs: Long,
         effects: Effects
     ): List<EditedMediaItem> {
         val audioItems = mutableListOf<EditedMediaItem>()
 
-        if (effectiveAudioDurationUs <= 0 || videoDurationUs <= 0) {
+        if (effectiveAudioDurationUs <= 0 || targetDurationUs <= 0) {
             // Fallback: add audio once without duration constraints
             val audioItem = createAudioItem(audioFile, startTimeUs, null, effects)
             audioItems.add(audioItem)
             return audioItems
         }
 
-        var remainingDurationUs = videoDurationUs
+        var remainingDurationUs = targetDurationUs
         var loopCount = 0
         var isFirstLoop = true
 
         while (remainingDurationUs > 0) {
             loopCount++
-            
+
             // First loop uses startTimeUs offset, subsequent loops start from 0
             val loopStartUs = if (isFirstLoop) startTimeUs else 0L
-            val loopAudioDurationUs = if (isFirstLoop) effectiveAudioDurationUs else totalAudioDurationUs
-            
+            val loopEndUs = if (isFirstLoop) sourceEndUs else sourceEndUs
+            val loopAudioDurationUs =
+                if (isFirstLoop) effectiveAudioDurationUs else (sourceEndUs - 0L)
+
             val endPositionUs = if (remainingDurationUs < loopAudioDurationUs) {
                 Log.d(
                     RENDER_TAG,
@@ -222,9 +303,9 @@ class AudioSequenceBuilder(
                 Log.d(
                     RENDER_TAG,
                     "Loop $loopCount: Using audio duration ${loopAudioDurationUs / 1000} ms" +
-                    if (isFirstLoop && startTimeUs > 0) " (starting at ${startTimeUs / 1000} ms)" else ""
+                            if (isFirstLoop && startTimeUs > 0) " (starting at ${startTimeUs / 1000} ms)" else ""
                 )
-                null // Use full remaining audio
+                if (audioEndTimeUs != null) loopEndUs else null
             }
 
             val audioItem = createAudioItem(audioFile, loopStartUs, endPositionUs, effects)
@@ -233,24 +314,34 @@ class AudioSequenceBuilder(
             isFirstLoop = false
         }
 
-        Log.d(RENDER_TAG, "Custom audio will loop $loopCount times to match video duration")
+        Log.d(RENDER_TAG, "Custom audio will loop $loopCount times to match target duration")
         return audioItems
     }
 
     /**
-     * Creates a single audio item (no looping). Trims if audio is longer than video.
+     * Creates a single audio item (no looping). Trims if audio is longer than target duration.
      */
     private fun createSingleAudioItem(
         audioFile: File,
+        sourceEndUs: Long,
         effectiveAudioDurationUs: Long,
+        targetDurationUs: Long,
         effects: Effects
     ): List<EditedMediaItem> {
-        val endPositionUs = if (effectiveAudioDurationUs > videoDurationUs && videoDurationUs > 0) {
-            Log.d(RENDER_TAG, "Trimming audio to ${videoDurationUs / 1000} ms (no loop)")
-            startTimeUs + videoDurationUs
+        val endPositionUs = if (effectiveAudioDurationUs > targetDurationUs && targetDurationUs > 0) {
+            Log.d(RENDER_TAG, "Trimming audio to ${targetDurationUs / 1000} ms (no loop)")
+            startTimeUs + targetDurationUs
+        } else if (audioEndTimeUs != null) {
+            Log.d(
+                RENDER_TAG, "Playing audio once (${effectiveAudioDurationUs / 1000} ms, no loop)" +
+                        if (startTimeUs > 0) " starting at ${startTimeUs / 1000} ms" else ""
+            )
+            sourceEndUs
         } else {
-            Log.d(RENDER_TAG, "Playing audio once (${effectiveAudioDurationUs / 1000} ms, no loop)" +
-                if (startTimeUs > 0) " starting at ${startTimeUs / 1000} ms" else "")
+            Log.d(
+                RENDER_TAG, "Playing audio once (${effectiveAudioDurationUs / 1000} ms, no loop)" +
+                        if (startTimeUs > 0) " starting at ${startTimeUs / 1000} ms" else ""
+            )
             null
         }
         return listOf(createAudioItem(audioFile, startTimeUs, endPositionUs, effects))
@@ -270,11 +361,11 @@ class AudioSequenceBuilder(
         if (startPositionUs > 0 || endPositionUs != null) {
             val clippingConfig = MediaItem.ClippingConfiguration.Builder()
                 .setStartPositionMs(startPositionUs / 1000)
-            
+
             if (endPositionUs != null) {
                 clippingConfig.setEndPositionMs(endPositionUs / 1000)
             }
-            
+
             mediaItemBuilder.setClippingConfiguration(clippingConfig.build())
         }
 
@@ -283,5 +374,88 @@ class AudioSequenceBuilder(
             .setRemoveVideo(true)
             .setEffects(effects)
             .build()
+    }
+
+    /**
+     * Creates a silent audio EditedMediaItem of the specified duration.
+     *
+     * Media3 parallel sequences always start at time 0, so we use silence
+     * to offset audio to the correct composition position.
+     */
+    private fun createSilentAudioItem(durationUs: Long, effects: Effects): EditedMediaItem? {
+        if (durationUs <= 0) return null
+
+        val silentFile = generateSilentWavFile(durationUs)
+        if (silentFile == null) {
+            Log.e(RENDER_TAG, "Failed to create silent audio item")
+            return null
+        }
+
+        val mediaItem = MediaItem.Builder().setUri(Uri.fromFile(silentFile)).build()
+        return EditedMediaItem.Builder(mediaItem)
+            .setRemoveVideo(true)
+            .setEffects(effects)
+            .build()
+    }
+
+    /**
+     * Generates a temporary WAV file containing silence of the specified duration.
+     *
+     * Creates a valid PCM WAV file with stereo 44100Hz 16-bit silence.
+     */
+    private fun generateSilentWavFile(durationUs: Long): File? {
+        try {
+            val sampleRate = 44100
+            val channels = 2
+            val bitsPerSample = 16
+            val bytesPerSample = bitsPerSample / 8
+            val numSamples = (sampleRate * durationUs / 1_000_000.0).toInt()
+            val dataSize = numSamples * channels * bytesPerSample
+            val fileSize = 36 + dataSize
+
+            val file = File.createTempFile("silence_", ".wav")
+            file.deleteOnExit()
+
+            file.outputStream().use { out ->
+                // RIFF header
+                out.write("RIFF".toByteArray(Charsets.US_ASCII))
+                out.write(toLittleEndian(fileSize, 4))
+                out.write("WAVE".toByteArray(Charsets.US_ASCII))
+
+                // fmt subchunk
+                out.write("fmt ".toByteArray(Charsets.US_ASCII))
+                out.write(toLittleEndian(16, 4))  // Subchunk1Size (PCM)
+                out.write(toLittleEndian(1, 2))   // AudioFormat (PCM = 1)
+                out.write(toLittleEndian(channels, 2))
+                out.write(toLittleEndian(sampleRate, 4))
+                out.write(toLittleEndian(sampleRate * channels * bytesPerSample, 4))
+                out.write(toLittleEndian(channels * bytesPerSample, 2))
+                out.write(toLittleEndian(bitsPerSample, 2))
+
+                // data subchunk
+                out.write("data".toByteArray(Charsets.US_ASCII))
+                out.write(toLittleEndian(dataSize, 4))
+
+                // Write silence (all zeros)
+                val buffer = ByteArray(8192)
+                var remaining = dataSize
+                while (remaining > 0) {
+                    val toWrite = minOf(remaining, buffer.size)
+                    out.write(buffer, 0, toWrite)
+                    remaining -= toWrite
+                }
+            }
+
+            Log.d(RENDER_TAG, "Generated ${durationUs / 1000}ms silent WAV: ${file.absolutePath}")
+            return file
+        } catch (e: Exception) {
+            Log.e(RENDER_TAG, "Failed to generate silent WAV: ${e.message}")
+            return null
+        }
+    }
+
+    /** Converts an integer to little-endian byte array. */
+    private fun toLittleEndian(value: Int, numBytes: Int): ByteArray {
+        return ByteArray(numBytes) { i -> ((value shr (8 * i)) and 0xFF).toByte() }
     }
 }

@@ -9,6 +9,22 @@ import '/core/platform/io/io_helper.dart';
 /// or asset bundle. It provides convenience methods for identifying the
 /// source type and safely retrieving image bytes.
 class EditorLayerImage {
+  /// Creates an [EditorLayerImage] from a [Map] representation.
+  factory EditorLayerImage.fromMap(Map<String, dynamic> map) {
+    if (map.containsKey('byteArray')) {
+      return EditorLayerImage.memory(
+        Uint8List.fromList(List<int>.from(map['byteArray'] as List)),
+      );
+    } else if (map.containsKey('file')) {
+      return EditorLayerImage.file(map['file'] as String);
+    } else if (map.containsKey('networkUrl')) {
+      return EditorLayerImage.network(map['networkUrl'] as String);
+    } else if (map.containsKey('assetPath')) {
+      return EditorLayerImage.asset(map['assetPath'] as String);
+    }
+    throw ArgumentError('Invalid EditorLayerImage map: $map');
+  }
+
   /// Creates an instance of the `EditorImage` class with the specified
   /// properties.
   ///
@@ -143,6 +159,16 @@ class EditorLayerImage {
 
     byteArray = bytes;
     return bytes;
+  }
+
+  /// Converts this [EditorLayerImage] into a serializable [Map].
+  Map<String, dynamic> toMap() {
+    return <String, dynamic>{
+      if (byteArray != null) 'byteArray': byteArray!.toList(),
+      if (file != null) 'file': file!.path,
+      if (networkUrl != null) 'networkUrl': networkUrl,
+      if (assetPath != null) 'assetPath': assetPath,
+    };
   }
 }
 

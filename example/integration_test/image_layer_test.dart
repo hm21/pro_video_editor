@@ -81,7 +81,7 @@ void main() {
       await testRender(
         description: 'Single image layer (full duration)',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(image: overlayImage, startTime: Duration.zero),
@@ -94,7 +94,7 @@ void main() {
       await testRender(
         description: 'Single image layer (1s-4s)',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(
@@ -114,7 +114,7 @@ void main() {
       await testRender(
         description: 'Multiple image layers',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(
@@ -139,7 +139,7 @@ void main() {
       await testRender(
         description: 'Overlapping image layers',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(
@@ -161,7 +161,7 @@ void main() {
       await testRender(
         description: 'Image layer + rotation',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(rotateTurns: 1),
           imageLayers: [
@@ -179,7 +179,7 @@ void main() {
       await testRender(
         description: 'Image layer + flip',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(flipX: true, flipY: true),
           imageLayers: [
@@ -197,7 +197,7 @@ void main() {
       await testRender(
         description: 'Image layer + crop',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(
             x: 100,
@@ -220,9 +220,9 @@ void main() {
       await testRender(
         description: 'Image layer + color filter',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           imageLayers: [
             ImageLayer(
               image: overlayImage,
@@ -238,7 +238,7 @@ void main() {
       await testRender(
         description: 'Image layer + blur',
         renderModel: VideoRenderData(
-          video: inputVideo,
+          videoSegments: [VideoSegment(video: inputVideo)],
           outputFormat: VideoOutputFormat.mp4,
           blur: 3,
           imageLayers: [
@@ -256,10 +256,10 @@ void main() {
       await testRender(
         description: 'Image layer + multiple effects',
         renderModel: VideoRenderData(
-          video: h264Video,
+          videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
           transform: const ExportTransform(flipX: true),
-          colorMatrixList: kBasicFilterMatrix,
+          colorFilters: kBasicFilterMatrix,
           endTime: const Duration(seconds: 20),
           imageLayers: [
             ImageLayer(
@@ -272,17 +272,86 @@ void main() {
       );
     });
 
-    testWidgets('image layer on HEVC video', (_) async {
+    testWidgets('image layer on h264 video', (_) async {
       await testRender(
         description: 'Image layer on HEVC',
         renderModel: VideoRenderData(
-          video: hevcVideo,
+          videoSegments: [VideoSegment(video: h264Video)],
           outputFormat: VideoOutputFormat.mp4,
           imageLayers: [
             ImageLayer(
               image: overlayImage,
-              startTime: Duration.zero,
               endTime: const Duration(seconds: 2),
+            ),
+          ],
+        ),
+      );
+    });
+
+    testWidgets('image layer on HEVC video', (_) async {
+      await testRender(
+        description: 'Image layer on HEVC',
+        renderModel: VideoRenderData(
+          videoSegments: [VideoSegment(video: hevcVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            ImageLayer(
+              image: overlayImage,
+              endTime: const Duration(seconds: 2),
+            ),
+          ],
+        ),
+      );
+    });
+
+    testWidgets('image layer with offset (top left)', (_) async {
+      await testRender(
+        description: 'Image layer with offset (top left)',
+        renderModel: VideoRenderData(
+          videoSegments: [VideoSegment(video: inputVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            ImageLayer(
+              image: overlayImage,
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 4),
+              offset: const ui.Offset(0, 0),
+            ),
+          ],
+        ),
+      );
+    });
+
+    testWidgets('image layer with offset (center)', (_) async {
+      await testRender(
+        description: 'Image layer with offset (center)',
+        renderModel: VideoRenderData(
+          videoSegments: [VideoSegment(video: inputVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            ImageLayer(
+              image: overlayImage,
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 4),
+              offset: const ui.Offset(250, 150),
+            ),
+          ],
+        ),
+      );
+    });
+
+    testWidgets('image layer with offset (bottom right)', (_) async {
+      await testRender(
+        description: 'Image layer with offset (bottom right)',
+        renderModel: VideoRenderData(
+          videoSegments: [VideoSegment(video: inputVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            ImageLayer(
+              image: overlayImage,
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 4),
+              offset: const ui.Offset(400, 300),
             ),
           ],
         ),

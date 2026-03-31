@@ -1,5 +1,5 @@
-import Foundation
 import FlutterMacOS
+import Foundation
 
 /// AudioExtractTask - Manages lifecycle and state of an audio extraction operation.
 ///

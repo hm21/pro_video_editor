@@ -23,7 +23,8 @@ data class MetadataConfig(
             return MetadataConfig(
                 inputPath = inputPath,
                 extension = extension,
-                checkStreamingOptimization = call.argument<Boolean>("checkStreamingOptimization") ?: false
+                checkStreamingOptimization = call.argument<Boolean>("checkStreamingOptimization")
+                    ?: false
             )
         }
     }

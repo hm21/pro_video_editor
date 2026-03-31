@@ -272,7 +272,7 @@ class ExtractAudio(private val context: Context) {
 
                 // Determine output format based on config
                 val outputFormat = determineOutputFormat(config.format)
-                
+
                 // Initialize muxer
                 muxer = MediaMuxer(
                     outputFile.absolutePath,
@@ -325,14 +325,14 @@ class ExtractAudio(private val context: Context) {
 
                 while (!shouldStop.get()) {
                     val sampleSize = extractor.readSampleData(buffer, 0)
-                    
+
                     if (sampleSize < 0) {
                         // End of stream
                         break
                     }
 
                     val presentationTimeUs = extractor.sampleTime
-                    
+
                     // Check if we've reached the end time
                     if (presentationTimeUs > actualEndUs) {
                         break
@@ -343,13 +343,14 @@ class ExtractAudio(private val context: Context) {
                     bufferInfo.presentationTimeUs = presentationTimeUs - actualStartUs
                     bufferInfo.size = sampleSize
                     bufferInfo.offset = 0
-                    
+
                     // Convert MediaExtractor flags to MediaCodec flags
-                    bufferInfo.flags = if ((extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0) {
-                        MediaCodec.BUFFER_FLAG_KEY_FRAME
-                    } else {
-                        0
-                    }
+                    bufferInfo.flags =
+                        if ((extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0) {
+                            MediaCodec.BUFFER_FLAG_KEY_FRAME
+                        } else {
+                            0
+                        }
 
                     // Write sample to muxer
                     muxer.writeSampleData(muxerTrackIndex, buffer, bufferInfo)
@@ -414,7 +415,7 @@ class ExtractAudio(private val context: Context) {
                 } catch (e: Exception) {
                     Log.w(TAG, "Error releasing muxer: ${e.message}")
                 }
-                
+
                 try {
                     extractor?.release()
                 } catch (e: Exception) {

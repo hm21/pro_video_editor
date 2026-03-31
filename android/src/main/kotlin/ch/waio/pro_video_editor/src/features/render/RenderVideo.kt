@@ -46,13 +46,13 @@ class RenderVideo(private val context: Context) {
      */
     private fun hasGpuEffects(config: RenderConfig): Boolean {
         // These effects use GPU surfaces and fail with HEVC 10-bit HDR
-        val hasImageOverlay = config.imageBytes != null && config.imageBytes.isNotEmpty()
+        val hasImageLayers = config.imageLayers.isNotEmpty()
         val hasBlur = config.blur != null && config.blur > 0.0
-        val hasColorMatrix = config.colorMatrixList.isNotEmpty()
-        
-        return hasImageOverlay || hasBlur || hasColorMatrix
+        val hasColorFilters = config.colorFilters.isNotEmpty()
+
+        return hasImageLayers || hasBlur || hasColorFilters
     }
-    
+
     /**
      * Checks if transcoding is needed for video compatibility.
      * 
@@ -66,7 +66,7 @@ class RenderVideo(private val context: Context) {
         if (hasGpuEffects(config)) {
             return true
         }
-        
+
         // When multiple clips are being merged, check if any need transcoding
         // Mixing different codecs (HEVC + H.264) can cause frame processing errors
         if (config.videoClips.size > 1) {
@@ -74,12 +74,14 @@ class RenderVideo(private val context: Context) {
                 VideoTranscoder.needsTranscoding(clip.inputPath)
             }
             if (hasAnyHevc10bit) {
-                Log.d(RENDER_TAG, "Multiple video clips with HEVC 10-bit detected, " +
-                    "pre-transcoding to ensure codec compatibility")
+                Log.d(
+                    RENDER_TAG, "Multiple video clips with HEVC 10-bit detected, " +
+                            "pre-transcoding to ensure codec compatibility"
+                )
                 return true
             }
         }
-        
+
         return false
     }
 
@@ -107,41 +109,44 @@ class RenderVideo(private val context: Context) {
         var transcodedFiles: List<String> = emptyList()
         val transformerRef = AtomicReference<Transformer?>(null)
         val outputFileRef = AtomicReference<File?>(null)
-        
+
         // Check if we need to pre-transcode HEVC 10-bit videos
         val needsPreTranscode = needsPreTranscoding(config)
-        
+
         if (needsPreTranscode) {
             Log.d(RENDER_TAG, "Pre-transcoding needed, checking for HEVC 10-bit videos...")
-            
+
             // Pre-transcode in background thread
             Thread {
                 try {
                     val inputPaths = config.videoClips.map { it.inputPath }
                     val transcodeMap = VideoTranscoder.transcodeClipsIfNeeded(context, inputPaths)
-                    
+
                     // Track transcoded files for cleanup
-                    transcodedFiles = transcodeMap.values.filter { 
-                        it.contains("transcoded_") 
+                    transcodedFiles = transcodeMap.values.filter {
+                        it.contains("transcoded_")
                     }
-                    
+
                     if (transcodedFiles.isNotEmpty()) {
-                        Log.i(RENDER_TAG, "Pre-transcoded ${transcodedFiles.size} HEVC 10-bit videos to H.264")
+                        Log.i(
+                            RENDER_TAG,
+                            "Pre-transcoded ${transcodedFiles.size} HEVC 10-bit videos to H.264"
+                        )
                     }
-                    
+
                     // Create new config with transcoded paths
                     val updatedClips = config.videoClips.map { clip ->
                         val newPath = transcodeMap[clip.inputPath] ?: clip.inputPath
                         if (newPath != clip.inputPath) {
-                            // If transcoded, use the new path but keep trim times
-                            VideoClip(newPath, clip.startUs, clip.endUs)
+                            // If transcoded, use the new path but keep trim times and volume
+                            VideoClip(newPath, clip.startUs, clip.endUs, clip.volume)
                         } else {
                             clip
                         }
                     }
-                    
+
                     val updatedConfig = config.copy(videoClips = updatedClips)
-                    
+
                     mainHandler.post {
                         if (!shouldStopPolling.get()) {
                             renderInternal(
@@ -184,7 +189,7 @@ class RenderVideo(private val context: Context) {
                 outputFileRef = outputFileRef
             )
         }
-        
+
         // Return cancellation handle
         return RenderJobHandle {
             shouldStopPolling.set(true)
@@ -196,7 +201,7 @@ class RenderVideo(private val context: Context) {
             }
         }
     }
-    
+
     /**
      * Internal render implementation after optional pre-transcoding.
      */
@@ -234,19 +239,18 @@ class RenderVideo(private val context: Context) {
         lateinit var transformer: Transformer
 
         // Check if we need custom audio mixing with volume control
-        val hasCustomAudio = !config.customAudioPath.isNullOrEmpty()
-        val videoAudioVolume = config.originalAudioVolume ?: 1.0f
-        val customAudioVolume = config.customAudioVolume ?: 1.0f
-        
+        val hasCustomAudio = config.audioTracks.isNotEmpty()
+
         // Determine if video audio will be present in the mix
-        // Video audio is removed when volume is 0 or audio is disabled
-        val videoAudioPresent = config.enableAudio && videoAudioVolume > 0.0f
+        // Video audio is removed when audio is disabled or all clips have volume 0
+        val videoAudioPresent = config.enableAudio &&
+                config.videoClips.any { (it.volume ?: 1.0f) > 0.0f }
 
         // Build transformer with callbacks
         val transformerBuilder = Transformer.Builder(context)
             .setEncoderFactory(encoderFactoryBuilder.build())
             .setVideoMimeType(outputMimeType)
-        
+
         // Configure muxer for streaming optimization (moov atom placement)
         // true = moov at start (streamable), false = moov at end (smaller file)
         val muxerFactory = ConfigurableInAppMp4Muxer.Factory(
@@ -254,14 +258,14 @@ class RenderVideo(private val context: Context) {
         )
         transformerBuilder.setMuxerFactory(muxerFactory)
 
-        // Use custom audio mixer ONLY when mixing video audio with custom audio
-        // For video-only volume adjustment, VolumeAudioProcessor is used instead
+        // Use custom audio mixer ONLY when mixing video audio with custom audio tracks
+        // For video-only volume adjustment, VolumeAudioProcessor is used per-clip instead
         // (AudioProcessors don't work with parallel sequences, but work fine with single sequence)
         if (hasCustomAudio) {
+            val trackVolumes = config.audioTracks.map { it.volume }
             transformerBuilder.setAudioMixerFactory(
                 VolumeControlAudioMixerFactory(
-                    videoAudioVolume = videoAudioVolume,
-                    customAudioVolume = customAudioVolume,
+                    trackVolumes = trackVolumes,
                     videoAudioPresent = videoAudioPresent
                 )
             )
@@ -302,7 +306,7 @@ class RenderVideo(private val context: Context) {
             })
             .build()
         transformerRef.set(transformer)
-        
+
         // Create composition (now fast - no manual audio mixing needed, Media3 handles it natively)
         Thread {
             try {
@@ -316,7 +320,7 @@ class RenderVideo(private val context: Context) {
                 mainHandler.post {
                     if (composition != null) {
                         transformer.start(composition, outputFile.absolutePath)
-                        
+
                         // Start progress tracking loop
                         val progressHolder = ProgressHolder()
                         mainHandler.post(object : Runnable {

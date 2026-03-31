@@ -19,24 +19,25 @@ import java.nio.ByteBuffer
  * This factory creates mixers that automatically apply the configured volumes
  * to each audio source during the mixing process.
  *
- * @property videoAudioVolume Volume multiplier for the video's audio track (0.0-1.0+)
- * @property customAudioVolume Volume multiplier for the custom audio track (0.0-1.0+)
+ * @property trackVolumes Volume multipliers for each audio track sequence (0.0-1.0+)
  * @property videoAudioPresent Whether video audio is present (not removed due to volume=0)
  */
 @UnstableApi
 class VolumeControlAudioMixerFactory(
-    private val videoAudioVolume: Float,
-    private val customAudioVolume: Float,
+    private val trackVolumes: List<Float>,
     private val videoAudioPresent: Boolean
 ) : AudioMixer.Factory {
 
     init {
-        Log.d(RENDER_TAG, "VolumeControlAudioMixerFactory created: videoVolume=$videoAudioVolume, customVolume=$customAudioVolume, videoAudioPresent=$videoAudioPresent")
+        Log.d(
+            RENDER_TAG,
+            "VolumeControlAudioMixerFactory created: trackVolumes=$trackVolumes, videoAudioPresent=$videoAudioPresent"
+        )
     }
 
     override fun create(): AudioMixer {
         Log.d(RENDER_TAG, "Creating VolumeControlAudioMixer")
-        return VolumeControlAudioMixer(videoAudioVolume, customAudioVolume, videoAudioPresent)
+        return VolumeControlAudioMixer(trackVolumes, videoAudioPresent)
     }
 }
 
@@ -46,24 +47,24 @@ class VolumeControlAudioMixerFactory(
  * When sources are added, it tracks their IDs and applies the appropriate volume
  * using DefaultAudioMixer.setSourceVolume() after each source is added.
  *
- * If videoAudioPresent is true (mixing both tracks):
- *   Source 0 = Video audio (first sequence) - applies videoAudioVolume
- *   Source 1 = Custom audio (second sequence) - applies customAudioVolume
+ * If videoAudioPresent is true (mixing video + audio tracks):
+ *   Source 0 = Video audio (first sequence) - volume 1.0 (per-clip volume not available in mixer mode)
+ *   Source 1..N = Audio tracks - applies trackVolumes[0], trackVolumes[1], etc.
  * 
- * If videoAudioPresent is false (replacing audio - video audio removed):
- *   Source 0 = Custom audio (only audio source) - applies customAudioVolume
+ * If videoAudioPresent is false (no video audio):
+ *   Source 0..N = Audio tracks - applies trackVolumes[0], trackVolumes[1], etc.
  */
 @UnstableApi
 private class VolumeControlAudioMixer(
-    private val videoAudioVolume: Float,
-    private val customAudioVolume: Float,
+    private val trackVolumes: List<Float>,
     private val videoAudioPresent: Boolean
 ) : AudioMixer {
 
-    private val delegate: DefaultAudioMixer = DefaultAudioMixer.Factory().create() as DefaultAudioMixer
+    private val delegate: DefaultAudioMixer =
+        DefaultAudioMixer.Factory().create() as DefaultAudioMixer
     private var sourceCount = 0
     private var isConfigured = false
-    
+
     // Track source volumes to ensure they stay applied
     private val sourceVolumes = mutableMapOf<Int, Float>()
 
@@ -72,7 +73,10 @@ private class VolumeControlAudioMixer(
         bufferSizeMs: Int,
         startTimeUs: Long
     ) {
-        Log.d(RENDER_TAG, "VolumeControlAudioMixer.configure: format=$outputAudioFormat, bufferSizeMs=$bufferSizeMs, startTimeUs=$startTimeUs")
+        Log.d(
+            RENDER_TAG,
+            "VolumeControlAudioMixer.configure: format=$outputAudioFormat, bufferSizeMs=$bufferSizeMs, startTimeUs=$startTimeUs"
+        )
         delegate.configure(outputAudioFormat, bufferSizeMs, startTimeUs)
         isConfigured = true
         sourceCount = 0
@@ -85,37 +89,41 @@ private class VolumeControlAudioMixer(
 
     override fun addSource(sourceFormat: AudioProcessor.AudioFormat, startTimeUs: Long): Int {
         val sourceId = delegate.addSource(sourceFormat, startTimeUs)
-        
+
         // Determine which volume to apply based on source order and whether video audio is present
         val volume: Float
         val sourceType: String
-        
+
         if (videoAudioPresent) {
-            // Both video and custom audio present (mixing mode)
-            // Source 0 = Video audio, Source 1+ = Custom audio
+            // Both video and audio tracks present (mixing mode)
+            // Source 0 = Video audio, Source 1..N = Audio tracks
             if (sourceCount == 0) {
-                volume = videoAudioVolume
+                volume = 1.0f  // Video audio at full volume (per-clip volume not available in mixer mode)
                 sourceType = "VIDEO AUDIO"
             } else {
-                volume = customAudioVolume
-                sourceType = "CUSTOM AUDIO"
+                val trackIndex = sourceCount - 1
+                volume = trackVolumes.getOrElse(trackIndex) { 1.0f }
+                sourceType = "AUDIO TRACK $trackIndex"
             }
         } else {
-            // Video audio was removed (replace mode) - only custom audio present
-            // All sources are custom audio
-            volume = customAudioVolume
-            sourceType = "CUSTOM AUDIO (replacing video audio)"
+            // Video audio was removed - only audio tracks present
+            val trackIndex = sourceCount
+            volume = trackVolumes.getOrElse(trackIndex) { 1.0f }
+            sourceType = "AUDIO TRACK $trackIndex (no video audio)"
         }
-        
-        Log.d(RENDER_TAG, "VolumeControlAudioMixer: Source $sourceId added ($sourceType), applying volume: $volume")
-        
+
+        Log.d(
+            RENDER_TAG,
+            "VolumeControlAudioMixer: Source $sourceId added ($sourceType), applying volume: $volume"
+        )
+
         // Store the volume we want for this source
         sourceVolumes[sourceId] = volume
-        
+
         // Apply volume to this source
         delegate.setSourceVolume(sourceId, volume)
         Log.d(RENDER_TAG, "VolumeControlAudioMixer: setSourceVolume($sourceId, $volume) called")
-        
+
         sourceCount++
         return sourceId
     }
@@ -128,11 +136,17 @@ private class VolumeControlAudioMixer(
         // This is called externally - log it and check if it differs from our intended volume
         val intendedVolume = sourceVolumes[sourceId]
         if (intendedVolume != null && intendedVolume != volume) {
-            Log.w(RENDER_TAG, "VolumeControlAudioMixer: External setSourceVolume($sourceId, $volume) differs from intended $intendedVolume - IGNORING external call!")
+            Log.w(
+                RENDER_TAG,
+                "VolumeControlAudioMixer: External setSourceVolume($sourceId, $volume) differs from intended $intendedVolume - IGNORING external call!"
+            )
             // Re-apply our intended volume
             delegate.setSourceVolume(sourceId, intendedVolume)
         } else {
-            Log.d(RENDER_TAG, "VolumeControlAudioMixer.setSourceVolume called externally: sourceId=$sourceId, volume=$volume")
+            Log.d(
+                RENDER_TAG,
+                "VolumeControlAudioMixer.setSourceVolume called externally: sourceId=$sourceId, volume=$volume"
+            )
             delegate.setSourceVolume(sourceId, volume)
         }
     }

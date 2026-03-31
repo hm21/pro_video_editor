@@ -49,40 +49,41 @@ class RenderVideo {
                         ))
                     return
                 }
-                
+
                 var transcodedFiles: [String] = []
                 var workingConfig = config
-                
+
                 // HEVC 10-bit HDR videos cause issues with AVFoundation's compositor
                 // They must be pre-transcoded to H.264 8-bit SDR for ANY effect processing
                 print("🔍 Checking for HEVC 10-bit videos that need transcoding...")
-                
+
                 // Pre-transcode HEVC 10-bit HDR videos to H.264 8-bit SDR
                 let inputPaths = config.videoClips.map { $0.inputPath }
                 let transcodeMap = await VideoTranscoder.transcodeClipsIfNeeded(inputPaths)
-                
+
                 // Track transcoded files for cleanup
                 transcodedFiles = transcodeMap.values.filter { $0.contains("transcoded_") }
-                
+
                 if !transcodedFiles.isEmpty {
                     print("✅ Pre-transcoded \(transcodedFiles.count) HEVC 10-bit videos to H.264")
-                    
+
                     // Update config with transcoded paths
                     let updatedClips = config.videoClips.map { clip -> VideoClip in
                         if let newPath = transcodeMap[clip.inputPath], newPath != clip.inputPath {
                             return VideoClip(
                                 inputPath: newPath,
                                 startUs: clip.startUs,
-                                endUs: clip.endUs
+                                endUs: clip.endUs,
+                                volume: clip.volume
                             )
                         }
                         return clip
                     }
-                    
+
                     // Create new config with updated clips
                     workingConfig = config.copyWith(videoClips: updatedClips)
                 }
-                
+
                 var outputURL: URL!
 
                 let finalize: () -> Void = {
@@ -105,11 +106,13 @@ class RenderVideo {
                         let url = URL(fileURLWithPath: outputPath)
                         let pathExtension = url.pathExtension.lowercased()
                         let requestedFormat = workingConfig.outputFormat.lowercased()
-                        
+
                         if pathExtension != requestedFormat {
-                            print("⚠️ WARNING: Output path extension '.\(pathExtension)' doesn't match requested format '.\(requestedFormat)'")
+                            print(
+                                "⚠️ WARNING: Output path extension '.\(pathExtension)' doesn't match requested format '.\(requestedFormat)'"
+                            )
                             print("⚠️ Correcting file extension to match format...")
-                            
+
                             // Replace extension with correct format
                             let pathWithoutExtension = url.deletingPathExtension()
                             outputURL = pathWithoutExtension.appendingPathExtension(requestedFormat)
@@ -126,9 +129,8 @@ class RenderVideo {
                     print("   📁 Output format: \(workingConfig.outputFormat)")
                     print("   📹 Output path: \(outputURL.path)")
                     print("   🔊 Enable Audio: \(workingConfig.enableAudio)")
-                    print("   🔊 Original audio volume: \(workingConfig.originalAudioVolume ?? 1.0)")
-                    print("   🔊 Custom audio path: \(workingConfig.customAudioPath ?? "none")")
-                    print("   🔊 Custom audio volume: \(workingConfig.customAudioVolume ?? 1.0)")
+                    print("   🎵 Audio tracks: \(workingConfig.audioTracks.count)")
+                    print("   🎨 Color filters: \(workingConfig.colorFilters.count)")
                     print("===========================")
                     print("")
 
@@ -136,23 +138,22 @@ class RenderVideo {
                     var effectsConfig = VideoCompositorConfig()
 
                     // Use composition helper to merge multiple video clips
-                    let (composition, videoComposition, renderSize, audioMix, sourceTrackID) =
+                    let (composition, videoCompData, renderSize, audioMix, sourceTrackID) =
                         try await applyComposition(
                             videoClips: workingConfig.videoClips,
                             videoEffects: effectsConfig,
                             enableAudio: workingConfig.enableAudio,
-                            customAudioPath: workingConfig.customAudioPath,
-                            customAudioStartTimeUs: workingConfig.customAudioStartTimeUs,
-                            originalAudioVolume: workingConfig.originalAudioVolume,
-                            customAudioVolume: workingConfig.customAudioVolume,
-                            loopCustomAudio: workingConfig.loopCustomAudio
+                            audioTracks: workingConfig.audioTracks
                         )
-                    
+                    var videoCompConfig = videoCompData
+
                     // Set source track ID for fallback on older iOS versions (e.g., iPhone 7)
                     effectsConfig.sourceTrackID = sourceTrackID
 
                     // Apply playback speed to the entire composition
-                    applyPlaybackSpeed(composition: composition, speed: workingConfig.playbackSpeed)
+                    videoCompConfig.instructions = applyPlaybackSpeed(
+                        composition: composition, instructions: videoCompConfig.instructions,
+                        speed: workingConfig.playbackSpeed)
 
                     // Get the first video track for orientation info
                     let firstClipURL = URL(fileURLWithPath: workingConfig.videoClips[0].inputPath)
@@ -182,19 +183,22 @@ class RenderVideo {
                     )
 
                     applyRotation(config: &effectsConfig, rotateTurns: workingConfig.rotateTurns)
-                    applyFlip(config: &effectsConfig, flipX: workingConfig.flipX, flipY: workingConfig.flipY)
-                    applyScale(config: &effectsConfig, scaleX: workingConfig.scaleX, scaleY: workingConfig.scaleY)
+                    applyFlip(
+                        config: &effectsConfig, flipX: workingConfig.flipX,
+                        flipY: workingConfig.flipY)
+                    applyScale(
+                        config: &effectsConfig, scaleX: workingConfig.scaleX,
+                        scaleY: workingConfig.scaleY)
                     applyColorMatrix(
-                        config: &effectsConfig, to: videoComposition,
-                        matrixList: workingConfig.colorMatrixList)
+                        config: &effectsConfig,
+                        filters: workingConfig.colorFilters)
                     applyBlur(config: &effectsConfig, sigma: workingConfig.blur)
                     applyImageLayer(
                         config: &effectsConfig,
-                        imageData: workingConfig.imageData,
                         imageLayers: workingConfig.imageLayers,
                         withCropping: workingConfig.imageBytesWithCropping)
 
-                    var finalRenderSize = videoComposition.renderSize
+                    var finalRenderSize = videoCompConfig.renderSize
 
                     // Only update renderSize if cropping was actually applied
                     if workingConfig.cropWidth != nil || workingConfig.cropHeight != nil {
@@ -226,14 +230,16 @@ class RenderVideo {
                         )
                     }
 
+                    // Build the final AVMutableVideoComposition
+                    let videoComposition = AVMutableVideoComposition()
+                    videoComposition.frameDuration = videoCompConfig.frameDuration
                     videoComposition.renderSize = finalRenderSize
-
-                    let compositorClass = makeVideoCompositorSubclass(with: effectsConfig)
-                    videoComposition.customVideoCompositorClass = compositorClass
+                    videoComposition.instructions = videoCompConfig.instructions
+                    videoComposition.customVideoCompositorClass = makeVideoCompositorSubclass(with: effectsConfig)
 
                     let preset = applyBitrate(requestedBitrate: workingConfig.bitrate)
 
-                    let export = try prepareExportSession(
+                    let export = try await prepareExportSession(
                         composition: composition,
                         videoComposition: videoComposition,
                         audioMix: audioMix,
@@ -321,42 +327,52 @@ class RenderVideo {
         startUs: Int64?,
         endUs: Int64?,
         shouldOptimizeForNetworkUse: Bool
-    ) throws -> AVAssetExportSession {
+    ) async throws -> AVAssetExportSession {
         guard let export = AVAssetExportSession(asset: composition, presetName: preset) else {
             throw NSError(
                 domain: "RenderVideo", code: 3,
                 userInfo: [NSLocalizedDescriptionKey: "Export session creation failed"])
         }
-        
+
         let fileType = mapFormatToMimeType(format: outputFormat)
         print("📹 Export session setup:")
         print("   - Requested format: \(outputFormat)")
         print("   - AVFileType: \(fileType.rawValue)")
         print("   - Output URL: \(outputURL.path)")
-        
+
         export.outputURL = outputURL
         export.outputFileType = fileType
         export.videoComposition = videoComposition
-        
+
         // Apply global trim (timeRange) if startUs or endUs is provided
         if startUs != nil || endUs != nil {
-            let compositionDuration = composition.duration
+            let compositionDuration: CMTime
+            if #available(iOS 16.0, *) {
+                compositionDuration = try await composition.load(.duration)
+            } else {
+                compositionDuration = composition.duration
+            }
             let startTime = startUs.map { CMTime(value: $0, timescale: 1_000_000) } ?? .zero
-            let endTime = endUs.map { CMTime(value: $0, timescale: 1_000_000) } ?? compositionDuration
+            let endTime =
+                endUs.map { CMTime(value: $0, timescale: 1_000_000) } ?? compositionDuration
             let duration = CMTimeSubtract(endTime, startTime)
-            
+
             // Ensure we don't exceed composition bounds
-            let clampedDuration = CMTimeMinimum(duration, CMTimeSubtract(compositionDuration, startTime))
-            
+            let clampedDuration = CMTimeMinimum(
+                duration, CMTimeSubtract(compositionDuration, startTime))
+
             if CMTimeGetSeconds(clampedDuration) > 0 {
                 export.timeRange = CMTimeRange(start: startTime, duration: clampedDuration)
-                print("   - TimeRange applied: \(String(format: "%.2f", CMTimeGetSeconds(startTime)))s - \(String(format: "%.2f", CMTimeGetSeconds(CMTimeAdd(startTime, clampedDuration))))s")
+                print(
+                    "   - TimeRange applied: \(String(format: "%.2f", CMTimeGetSeconds(startTime)))s - \(String(format: "%.2f", CMTimeGetSeconds(CMTimeAdd(startTime, clampedDuration))))s"
+                )
             }
         }
 
         // Check if composition has audio tracks
-        let hasAudioTracks = (composition as? AVMutableComposition)?.tracks(withMediaType: .audio).isEmpty == false
-        
+        let hasAudioTracks =
+            (composition as? AVMutableComposition)?.tracks(withMediaType: .audio).isEmpty == false
+
         // Apply audio mix if available
         if let audioMix = audioMix, hasAudioTracks {
             export.audioMix = audioMix
@@ -364,7 +380,7 @@ class RenderVideo {
         } else if !hasAudioTracks {
             print("ℹ️ No audio tracks in composition - exporting video only")
         }
-        
+
         // Apply fast start optimization (moves moov atom to beginning for streaming)
         export.shouldOptimizeForNetworkUse = shouldOptimizeForNetworkUse
         if shouldOptimizeForNetworkUse {

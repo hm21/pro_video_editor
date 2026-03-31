@@ -10,7 +10,7 @@ import 'package:pro_image_editor/pro_image_editor.dart';
 import 'package:pro_video_editor/core/platform/io/io_helper.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/features/editor/services/audio_helper_service.dart';
-import 'package:video_player/video_player.dart';
+import 'package:video_player/video_player.dart' hide VideoAudioTrack;
 
 import '/core/constants/example_audio_tracks_constant.dart';
 import '/core/constants/example_constants.dart';
@@ -319,12 +319,16 @@ class _VideoEditorBasicExamplePageState
 
     final exportModel = VideoRenderData(
       id: _taskId,
-      video: _video,
+      videoSegments: [VideoSegment(video: _video, volume: originalVolume)],
       outputFormat: _outputFormat,
       enableAudio: _proVideoController?.isAudioEnabled ?? true,
-      imageBytes: parameters.layers.isNotEmpty ? parameters.image : null,
+      imageLayers: parameters.layers.isNotEmpty
+          ? [ImageLayer(image: EditorLayerImage.memory(parameters.image))]
+          : null,
       blur: parameters.blur,
-      colorMatrixList: parameters.colorFilters,
+      colorFilters: parameters.colorFilters
+          .map((el) => ColorFilter(matrix: el))
+          .toList(),
       startTime: parameters.startTime,
       endTime: parameters.endTime,
       transform: parameters.isTransformed
@@ -338,12 +342,16 @@ class _VideoEditorBasicExamplePageState
               flipY: parameters.flipY,
             )
           : null,
-      customAudioPath: await _audioService.safeCustomAudioPath(
-        customAudioTrack,
-      ),
-      originalAudioVolume: originalVolume,
-      customAudioVolume: overlayVolume,
-      // bitrate: _videoMetadata.bitrate,
+      audioTracks: customAudioTrack != null
+          ? [
+              VideoAudioTrack(
+                path: (await _audioService.safeCustomAudioPath(
+                  customAudioTrack,
+                ))!,
+                volume: overlayVolume,
+              ),
+            ]
+          : [],
     );
 
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -470,8 +478,6 @@ class _VideoEditorBasicExamplePageState
           callbacksFunction: () =>
               editor.callbacks.videoEditorCallbacks ?? VideoEditorCallbacks(),
         );
-
-    /// FIXME: On android video metadata say it's 90deg rotated??
 
     /// Load the new video
     final controller = VideoPlayerController.file(io.File(updatedFile.path));

@@ -12,7 +12,7 @@ import UIKit
 class ThumbnailGenerator {
 
     // MARK: - Public Methods
-    
+
     /// Asynchronously generates thumbnails from a video file.
     ///
     /// This method determines the extraction mode based on the configuration:
@@ -55,7 +55,7 @@ class ThumbnailGenerator {
                 }
 
                 // MARK: - Frame Extraction
-                
+
                 let timeIndexMap: [Double: Int] = Dictionary(
                     uniqueKeysWithValues:
                         times.enumerated().map { (index, time) in
@@ -85,11 +85,15 @@ class ThumbnailGenerator {
                                 targetHeight: config.outputHeight,
                                 boxFit: config.boxFit
                             )
-                            let data = compressCGImage(resized, format: config.outputFormat, jpegQuality: config.jpegQuality)
+                            let data = compressCGImage(
+                                resized, format: config.outputFormat,
+                                jpegQuality: config.jpegQuality)
                             resultData[index] = data
 
                             let elapsed = Int((Date().timeIntervalSince1970 - start) * 1000)
-                            print("[\(index)] ✅ \(Int(key * 1000)) ms in \(elapsed) ms (\(data.count) bytes)")
+                            print(
+                                "[\(index)] ✅ \(Int(key * 1000)) ms in \(elapsed) ms (\(data.count) bytes)"
+                            )
                         } else {
                             let message = error?.localizedDescription ?? "Unknown error"
                             print("[\(index)] ❌ Failed at \(Int(key * 1000)) ms: \(message)")
@@ -113,7 +117,7 @@ class ThumbnailGenerator {
     }
 
     // MARK: - Image Processing
-    
+
     /// Resizes a CGImage while maintaining aspect ratio.
     ///
     /// This method supports two scaling modes:
@@ -174,7 +178,9 @@ class ThumbnailGenerator {
     ///   - format: Output format ("png", "jpeg", or "jpg")
     ///   - jpegQuality: JPEG compression quality (0-100). Only affects JPEG format.
     /// - Returns: Compressed image as Data
-    private static func compressCGImage(_ cgImage: CGImage, format: String, jpegQuality: Int) -> Data {
+    private static func compressCGImage(_ cgImage: CGImage, format: String, jpegQuality: Int)
+        -> Data
+    {
         let image = UIImage(cgImage: cgImage)
         let quality = CGFloat(jpegQuality) / 100.0
         switch format.lowercased() {
@@ -189,7 +195,7 @@ class ThumbnailGenerator {
     }
 
     // MARK: - Keyframe Extraction
-    
+
     /// Extracts evenly distributed timestamps for keyframe extraction.
     ///
     /// This method calculates timestamps evenly spaced across the video duration
@@ -199,7 +205,8 @@ class ThumbnailGenerator {
     ///   - asset: The video asset to extract timestamps from
     ///   - maxFrames: Maximum number of timestamps to generate
     /// - Returns: Array of NSValue-wrapped CMTime timestamps
-    private static func extractKeyframeTimestamps(asset: AVAsset, maxFrames: Int) async -> [NSValue] {
+    private static func extractKeyframeTimestamps(asset: AVAsset, maxFrames: Int) async -> [NSValue]
+    {
         let duration: CMTime
         if #available(iOS 15.0, *) {
             do {
