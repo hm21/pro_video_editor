@@ -1,3 +1,7 @@
+## 1.12.0
+- **FEAT**(android, iOS, macOS): Add layer animations with `LayerAnimation` on `ImageLayer`. Supports fade, slide, and scale animations with `animateIn`, `animateOut`, and `animateInOut` phases. Includes 13 easing curves: linear, easeIn, easeOut, easeInOut, easeInCubic, easeOutCubic, easeInOutCubic, bounceIn, bounceOut, bounceInOut, elasticIn, elasticOut, elasticInOut.
+- **FIX**(iOS, macOS): Replace deprecated `AVMutableVideoCompositionLayerInstruction` with `AVVideoCompositionLayerInstruction.Configuration` on macOS 26+ / iOS 26+, with backward-compatible fallback.
+
 ## 1.11.0
 - **FEAT**(android, iOS, macOS): Add timeline-based color filters via `ColorFilter` with optional `startTime`/`endTime` for applying different filters to specific time ranges.
 - **FEAT**(android, iOS, macOS): Add multi-track audio support via `VideoAudioTrack` with per-track volume, loop, and timeline placement (`startTime`, `endTime`, `audioStartTime`, `audioEndTime`).

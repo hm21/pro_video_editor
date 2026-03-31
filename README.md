@@ -120,6 +120,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 #### 🎨 **Visual Effects**
 - 🖼️ **Layers**: Overlay a image like a text or drawings on the video.
 - 🕐 **Timed Image Layers**: Position image overlays at specific coordinates with optional start/end times.
+- 🎬 **Layer Animations**: Animate image layers with fade, slide, and scale effects, configurable easing curves, and in/out/inOut phases.
 - 🧮 **Color Matrix**: Apply one or multiple 4x5 color matrices (e.g., for filters).
 - 💧 **Blur**: Add a blur effect to the video.
 - 📡 **Bitrate**: Set a custom video bitrate. If constant bitrate (CBR) isn't supported, it will gracefully fall back to the next available mode.
@@ -145,6 +146,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 | `Remove-Audio`             | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Overlay Layers`           | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Timed Image Layers`       | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
+| `Layer Animations`          | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Multiple ColorMatrix 4x5` | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Cancel export task`       | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Blur background`          | 🧪      | 🧪  | 🧪     | ❌      | ❌     | 🚫   |
