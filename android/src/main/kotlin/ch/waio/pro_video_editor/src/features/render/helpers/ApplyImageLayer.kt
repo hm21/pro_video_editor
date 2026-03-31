@@ -92,6 +92,8 @@ fun applyTimedImageLayers(
 
             val finalOverlay: Bitmap
             val overlaySettings: StaticOverlaySettings
+            var baseNormX = 0f
+            var baseNormY = 0f
 
             if (isStretched) {
                 // Stretch image to fill the entire video frame
@@ -130,11 +132,11 @@ fun applyTimedImageLayers(
                 // Input uses top-left origin, so y must be flipped.
                 val centerX = x.toFloat() + imageWidth / 2f
                 val centerY = y.toFloat() + imageHeight / 2f
-                val normX = (centerX / videoWidth) * 2f - 1f
-                val normY = 1f - (centerY / videoHeight) * 2f
+                baseNormX = (centerX / videoWidth) * 2f - 1f
+                baseNormY = 1f - (centerY / videoHeight) * 2f
 
                 overlaySettings = StaticOverlaySettings.Builder()
-                    .setBackgroundFrameAnchor(normX, normY)
+                    .setBackgroundFrameAnchor(baseNormX, baseNormY)
                     .setOverlayFrameAnchor(0f, 0f)
                     .build()
 
@@ -154,9 +156,30 @@ fun applyTimedImageLayers(
                         " ${if (endTimeUs == -1L) "until end" else "end=${endTimeUs}us"}"
             )
 
-            val bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(
-                finalOverlay, overlaySettings
-            )
+            val hasAnimations = layer.animations.isNotEmpty()
+            val bitmapOverlay: BitmapOverlay
+
+            if (hasAnimations) {
+                val imageWidth = finalOverlay.width
+                val imageHeight = finalOverlay.height
+                bitmapOverlay = AnimatedBitmapOverlay(
+                    bitmap = finalOverlay,
+                    baseNormX = baseNormX,
+                    baseNormY = baseNormY,
+                    imageWidth = imageWidth,
+                    imageHeight = imageHeight,
+                    videoWidth = videoWidth,
+                    videoHeight = videoHeight,
+                    layerStartUs = startTimeUs,
+                    layerEndUs = endTimeUs,
+                    animations = layer.animations
+                )
+                Log.d(RENDER_TAG, "Layer: using AnimatedBitmapOverlay with ${layer.animations.size} animation(s)")
+            } else {
+                bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(
+                    finalOverlay, overlaySettings
+                )
+            }
             val overlayEffect = OverlayEffect(listOf(bitmapOverlay))
 
             if (startTimeUs == -1L && endTimeUs == -1L) {

@@ -78,7 +78,8 @@ class CompositionBuilder(
                     startUs = imageLayer.startUs,
                     endUs = imageLayer.endUs,
                     x = imageLayer.x,
-                    y = imageLayer.y
+                    y = imageLayer.y,
+                    animations = imageLayer.animations
                 )
             })
             .setEnableAudio(config.enableAudio)

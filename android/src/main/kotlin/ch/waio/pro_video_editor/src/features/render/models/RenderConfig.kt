@@ -82,6 +82,38 @@ data class AudioTrackConfig(
 }
 
 /**
+ * Represents a single animation configuration for an image layer.
+ *
+ * @property type The kind of animation: "fade", "slide", or "scale"
+ * @property phase When the animation plays: "animateIn", "animateOut", or "animateInOut"
+ * @property durationUs Duration of the animation in microseconds
+ * @property curve Easing curve name (e.g. "linear", "easeIn", "bounceOut")
+ * @property slideDirection Slide direction: "left", "right", "top", or "bottom"
+ * @property scaleFrom Starting scale factor for scale animations
+ */
+data class LayerAnimationConfig(
+    val type: String,
+    val phase: String,
+    val durationUs: Long,
+    val curve: String = "linear",
+    val slideDirection: String? = null,
+    val scaleFrom: Double? = null
+) {
+    companion object {
+        fun fromMap(map: Map<String, Any?>): LayerAnimationConfig {
+            return LayerAnimationConfig(
+                type = map["type"] as String,
+                phase = map["phase"] as String,
+                durationUs = (map["durationUs"] as Number).toLong(),
+                curve = map["curve"] as? String ?: "linear",
+                slideDirection = map["slideDirection"] as? String,
+                scaleFrom = (map["scaleFrom"] as? Number)?.toDouble()
+            )
+        }
+    }
+}
+
+/**
  * Represents an image overlay layer with timing information.
  *
  * @property imageData The image data as a byte array
@@ -89,13 +121,15 @@ data class AudioTrackConfig(
  * @property endUs End time in microseconds when the layer should disappear (-1 = until end of video)
  * @property x Horizontal offset in pixels (null = stretch to fill)
  * @property y Vertical offset in pixels (null = stretch to fill)
+ * @property animations List of animations to apply to this layer
  */
 data class ImageLayer(
     val imageData: ByteArray,
     val startUs: Long,
     val endUs: Long,
     val x: Int? = null,
-    val y: Int? = null
+    val y: Int? = null,
+    val animations: List<LayerAnimationConfig> = emptyList()
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -105,7 +139,8 @@ data class ImageLayer(
                 startUs == other.startUs &&
                 endUs == other.endUs &&
                 x == other.x &&
-                y == other.y
+                y == other.y &&
+                animations == other.animations
     }
 
     override fun hashCode(): Int {
@@ -114,6 +149,7 @@ data class ImageLayer(
         result = 31 * result + endUs.hashCode()
         result = 31 * result + (x?.hashCode() ?: 0)
         result = 31 * result + (y?.hashCode() ?: 0)
+        result = 31 * result + animations.hashCode()
         return result
     }
 }
@@ -205,10 +241,15 @@ data class RenderConfig(
                 val x = (layerMap["x"] as? Number)?.toInt()
                 val y = (layerMap["y"] as? Number)?.toInt()
 
+                // Parse animations
+                @Suppress("UNCHECKED_CAST")
+                val animationsRaw = layerMap["animations"] as? List<Map<String, Any?>>
+                val animations = animationsRaw?.map { LayerAnimationConfig.fromMap(it) } ?: emptyList()
+
                 if (imageData == null || imageData.isEmpty()) {
                     null
                 } else {
-                    ImageLayer(imageData, startUs, endUs, x, y)
+                    ImageLayer(imageData, startUs, endUs, x, y, animations)
                 }
             } ?: emptyList()
 

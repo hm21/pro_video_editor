@@ -13,6 +13,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
+import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
 import java.io.File
@@ -56,7 +57,8 @@ class VideoSequenceBuilder(
         val startUs: Long = 0,
         val endUs: Long = -1,
         val x: Int? = null,
-        val y: Int? = null
+        val y: Int? = null,
+        val animations: List<LayerAnimationConfig> = emptyList()
     )
 
     /**
