@@ -60,7 +60,9 @@ void main() {
           reason: 'Audio file should exist at $outputPath',
         );
 
-        final header = file.openSync().readSync(defaultMagicNumbersMaxLength);
+        final raf = file.openSync();
+        final header = raf.readSync(defaultMagicNumbersMaxLength);
+        raf.closeSync();
         final mimeType = lookupMimeType(result, headerBytes: header);
         // Some formats may be detected under alternative MIME types depending
         // on the file extension used on the current platform:
