@@ -68,6 +68,7 @@ class CompositionBuilder(
             .setAudioEffects(audioEffects)
             .setRotation(rotationDegrees)
             .setFlip(config.flipX, config.flipY)
+            .setScale(config.scaleX, config.scaleY)
             .setCrop(config.cropWidth, config.cropHeight, config.cropX, config.cropY)
             .setTimedImageLayers(config.imageLayers.map { imageLayer ->
                 VideoSequenceBuilder.ImageLayerConfig(

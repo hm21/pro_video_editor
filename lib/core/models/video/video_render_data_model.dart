@@ -410,7 +410,6 @@ class VideoRenderData {
 
     // Handle quality config
     if (qualityConfig != null && scaleX == null && scaleY == null) {
-      // ignore: deprecated_member_use_from_same_package
       final targetVideo = video ??
           (videoSegments != null && videoSegments!.isNotEmpty
               ? videoSegments!.first.video
@@ -420,8 +419,11 @@ class VideoRenderData {
         final originalResolution = meta.resolution;
         final targetResolution =
             qualityConfig!.resolution ?? originalResolution;
-        scaleX = targetResolution.width / originalResolution.width;
-        scaleY = targetResolution.height / originalResolution.height;
+        final sx = targetResolution.width / originalResolution.width;
+        final sy = targetResolution.height / originalResolution.height;
+        final scale = sx < sy ? sx : sy;
+        scaleX = scale;
+        scaleY = scale;
       }
     }
 

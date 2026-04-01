@@ -3,6 +3,7 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 import RENDER_TAG
 import android.net.Uri
 import android.util.Log
+import applyScale
 import androidx.media3.common.C
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
@@ -41,6 +42,8 @@ class VideoSequenceBuilder(
     private var globalStartUs: Long? = null
     private var globalEndUs: Long? = null
     private var hasCustomAudio: Boolean = false
+    private var scaleX: Float? = null
+    private var scaleY: Float? = null
 
     data class CropConfig(
         val width: Int?,
@@ -68,6 +71,15 @@ class VideoSequenceBuilder(
      */
     fun setVideoEffects(effects: List<Effect>): VideoSequenceBuilder {
         this.videoEffects = effects
+        return this
+    }
+
+    /**
+     * Sets the scale factors to apply after overlay and crop.
+     */
+    fun setScale(scaleX: Float?, scaleY: Float?): VideoSequenceBuilder {
+        this.scaleX = scaleX
+        this.scaleY = scaleY
         return this
     }
 
@@ -467,6 +479,10 @@ class VideoSequenceBuilder(
         if (!hasWithCropping && timedImageLayers.isNotEmpty()) {
             applyTimedImageLayers(clipVideoEffects, timedImageLayers, videoWidth, videoHeight)
         }
+
+        // Apply scale AFTER overlay and crop to match the iOS/macOS pipeline.
+        // This prevents the overlay from being distorted by a pre-applied scale.
+        applyScale(clipVideoEffects, scaleX, scaleY)
 
         // Per-clip volume control:
         // - Without custom audio: VolumeAudioProcessor per clip works (single sequence)
