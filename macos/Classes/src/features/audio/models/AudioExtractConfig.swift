@@ -77,6 +77,7 @@ struct AudioExtractConfig {
         case "mp3": return "com.apple.m4a-audio"  // MP3 in M4A container
         case "aac": return "com.apple.m4a-audio"  // AAC in M4A container
         case "m4a": return "com.apple.m4a-audio"  // M4A container
+        case "wav": return "com.microsoft.waveform-audio" // WAV format
         default: return "com.apple.m4a-audio"
         }
     }
