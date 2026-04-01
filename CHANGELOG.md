@@ -1,5 +1,9 @@
+## 1.13.2
+- **FIX**(android): Fix image layer distortion when `imageBytesWithCropping` is enabled with a crop transform and qualityConfigs.
+
 ## 1.13.1
 - **FIX**: Fix `VideoQualityConfig` stretching video when target resolution has a different aspect ratio. Now uses uniform scaling (BoxFit.contain) to preserve the original aspect ratio.
+
 
 ## 1.13.0
 - **FEAT**(android, iOS, macOS): Add optional `size` field on `ImageLayer` to scale overlay images to specific dimensions before rendering.

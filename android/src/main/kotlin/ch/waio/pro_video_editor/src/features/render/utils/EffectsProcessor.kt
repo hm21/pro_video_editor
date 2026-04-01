@@ -7,7 +7,6 @@ import applyColorMatrix
 import applyFlip
 import applyPlaybackSpeed
 import applyRotation
-import applyScale
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 
 /**
@@ -51,7 +50,8 @@ class EffectsProcessor {
         // Apply effects in order
         applyRotation(videoEffects, rotationDegrees)
         applyFlip(videoEffects, config.flipX, config.flipY)
-        applyScale(videoEffects, config.scaleX, config.scaleY)
+        // Scale is NOT applied here — it is applied by VideoSequenceBuilder
+        // AFTER overlay and crop to match the iOS/macOS pipeline order.
         applyColorMatrix(videoEffects, config.colorFilters)
         applyBlur(videoEffects, config.blur)
         applyPlaybackSpeed(videoEffects, audioEffects, config.playbackSpeed)
