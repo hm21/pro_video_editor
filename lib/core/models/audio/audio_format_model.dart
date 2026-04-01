@@ -24,7 +24,7 @@ enum AudioFormat {
 
   /// WAV format - uncompressed audio, high quality, large file size.
   /// Supported on: Android, iOS, macOS
-  wav('audio/wav');
+  wav('audio/x-wav');
 
   const AudioFormat(this.mimeType);
 

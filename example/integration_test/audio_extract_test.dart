@@ -69,7 +69,7 @@ void main() {
         // The mime package maps .wav to 'audio/x-wav' rather than 'audio/wav'.
         final expectedMimeTypes = switch (format) {
           AudioFormat.aac => [format.mimeType, 'audio/mp4'],
-          AudioFormat.wav => [format.mimeType, 'audio/x-wav'],
+          AudioFormat.wav => [format.mimeType, 'audio/wav'],
           _ => [format.mimeType],
         };
         expect(expectedMimeTypes, contains(mimeType));
