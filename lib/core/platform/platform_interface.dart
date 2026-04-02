@@ -8,6 +8,7 @@ import '/core/models/audio/waveform_chunk_model.dart';
 import '/core/models/audio/waveform_configs_model.dart';
 import '/core/models/audio/waveform_data_model.dart';
 import '/core/models/thumbnail/key_frames_configs_model.dart';
+import '/core/models/thumbnail/single_thumbnail_configs_model.dart';
 import '/core/models/thumbnail/thumbnail_configs_model.dart';
 import '/core/models/video/editor_video_model.dart';
 import '/core/models/video/progress_model.dart';
@@ -188,6 +189,37 @@ abstract class ProVideoEditor extends PlatformInterface {
   /// from [KeyFramesConfigs.id].
   Future<List<Uint8List>> getKeyFrames(KeyFramesConfigs value) {
     throw UnimplementedError('getKeyFrames() has not been implemented.');
+  }
+
+  /// Extracts a single thumbnail from a video — either the first or last frame.
+  ///
+  /// This is a convenience method that avoids specifying exact timestamps.
+  /// For [ThumbnailPosition.first], a frame at timestamp 0 is extracted.
+  /// For [ThumbnailPosition.last], the video duration is resolved
+  /// automatically (or from [SingleThumbnailConfigs.videoDuration] if
+  /// provided) and a frame near the end is extracted.
+  ///
+  /// [value] Configuration containing:
+  /// - Video source ([EditorVideo])
+  /// - Desired thumbnail dimensions
+  /// - Image quality settings
+  /// - Position (first or last)
+  ///
+  /// Returns the thumbnail as a [Uint8List], or `null` if extraction fails.
+  ///
+  /// Example:
+  /// ```dart
+  /// final config = SingleThumbnailConfigs(
+  ///   video: EditorVideo.file('/path/to/video.mp4'),
+  ///   outputSize: Size(256, 256),
+  ///   position: ThumbnailPosition.first,
+  /// );
+  ///
+  /// final thumbnail =
+  ///     await ProVideoEditor.instance.getSingleThumbnail(config);
+  /// ```
+  Future<Uint8List?> getSingleThumbnail(SingleThumbnailConfigs value) {
+    throw UnimplementedError('getSingleThumbnail() has not been implemented.');
   }
 
   /// Extracts audio from a video file.

@@ -12,6 +12,7 @@ import 'package:pro_video_editor/core/models/video/progress_model.dart';
 import 'package:web/web.dart' as web;
 
 import '/core/models/thumbnail/key_frames_configs_model.dart';
+import '/core/models/thumbnail/single_thumbnail_configs_model.dart';
 import '/core/models/thumbnail/thumbnail_configs_model.dart';
 import '/core/models/video/editor_video_model.dart';
 import '/core/models/video/video_metadata_model.dart';
@@ -84,6 +85,34 @@ class ProVideoEditorWeb extends ProVideoEditor {
       value,
       onProgress: (progress) => _updateProgress(value.id, progress),
     );
+  }
+
+  @override
+  Future<Uint8List?> getSingleThumbnail(SingleThumbnailConfigs value) async {
+    Duration timestamp;
+    if (value.position == ThumbnailPosition.last) {
+      final duration = value.videoDuration ??
+          (await _manager.getMetadata(value.video)).duration;
+      timestamp = duration;
+    } else {
+      timestamp = Duration.zero;
+    }
+
+    final configs = ThumbnailConfigs(
+      video: value.video,
+      outputSize: value.outputSize,
+      outputFormat: value.outputFormat,
+      boxFit: value.boxFit,
+      id: value.id,
+      jpegQuality: value.jpegQuality,
+      timestamps: [timestamp],
+    );
+
+    final results = await _manager.getThumbnails(
+      configs,
+      onProgress: (progress) => _updateProgress(value.id, progress),
+    );
+    return results.isNotEmpty ? results.first : null;
   }
 
   @override

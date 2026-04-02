@@ -150,4 +150,125 @@ void main() {
   test('cancel throws when taskId is empty', () {
     expect(() => platform.cancel(''), throwsArgumentError);
   });
+
+  group('getSingleThumbnail', () {
+    test('first position returns thumbnail', () async {
+      final result = await platform.getSingleThumbnail(
+        SingleThumbnailConfigs(
+          video: mockVideo,
+          outputSize: const Size(100, 100),
+          position: ThumbnailPosition.first,
+        ),
+      );
+
+      expect(result, isA<Uint8List>());
+      expect(result, mockBytes);
+    });
+
+    test('last position with provided duration returns thumbnail', () async {
+      final result = await platform.getSingleThumbnail(
+        SingleThumbnailConfigs(
+          video: mockVideo,
+          outputSize: const Size(100, 100),
+          position: ThumbnailPosition.last,
+          videoDuration: const Duration(seconds: 10),
+        ),
+      );
+
+      expect(result, isA<Uint8List>());
+      expect(result, mockBytes);
+    });
+
+    test('last position without duration fetches metadata', () async {
+      final result = await platform.getSingleThumbnail(
+        SingleThumbnailConfigs(
+          video: mockVideo,
+          outputSize: const Size(100, 100),
+          position: ThumbnailPosition.last,
+        ),
+      );
+
+      expect(result, isA<Uint8List>());
+      expect(result, mockBytes);
+    });
+
+    test('returns null when native returns empty list', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+        switch (methodCall.method) {
+          case 'getThumbnails':
+            return <Uint8List>[];
+          case 'getMetadata':
+            return {
+              'duration': 1200,
+              'width': 1080,
+              'height': 1920,
+              'rotation': 0,
+              'extension': 'mp4',
+            };
+          default:
+            return null;
+        }
+      });
+
+      final result = await platform.getSingleThumbnail(
+        SingleThumbnailConfigs(
+          video: mockVideo,
+          outputSize: const Size(100, 100),
+          position: ThumbnailPosition.first,
+        ),
+      );
+
+      expect(result, isNull);
+    });
+
+    test('sends lastFrameTolerance true for last position', () async {
+      Map<dynamic, dynamic>? capturedArgs;
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+        if (methodCall.method == 'getThumbnails') {
+          capturedArgs = methodCall.arguments as Map<dynamic, dynamic>;
+          return [mockBytes];
+        }
+        return null;
+      });
+
+      await platform.getSingleThumbnail(
+        SingleThumbnailConfigs(
+          video: mockVideo,
+          outputSize: const Size(100, 100),
+          position: ThumbnailPosition.last,
+          videoDuration: const Duration(seconds: 5),
+        ),
+      );
+
+      expect(capturedArgs?['lastFrameTolerance'], isTrue);
+      expect(capturedArgs?['timestamps'], [5000000]);
+    });
+
+    test('sends lastFrameTolerance false for first position', () async {
+      Map<dynamic, dynamic>? capturedArgs;
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+        if (methodCall.method == 'getThumbnails') {
+          capturedArgs = methodCall.arguments as Map<dynamic, dynamic>;
+          return [mockBytes];
+        }
+        return null;
+      });
+
+      await platform.getSingleThumbnail(
+        SingleThumbnailConfigs(
+          video: mockVideo,
+          outputSize: const Size(100, 100),
+          position: ThumbnailPosition.first,
+        ),
+      );
+
+      expect(capturedArgs?['lastFrameTolerance'], isFalse);
+      expect(capturedArgs?['timestamps'], [0]);
+    });
+  });
 }

@@ -1,3 +1,6 @@
+## 1.14.0
+- **FEAT**(android, iOS, macOS, web): Add `getSingleThumbnail` method with `SingleThumbnailConfigs` to extract the first or last frame of a video via `ThumbnailPosition.first` / `ThumbnailPosition.last`.
+
 ## 1.13.2
 - **FIX**(android): Fix image layer distortion when `imageBytesWithCropping` is enabled with a crop transform and qualityConfigs.
 

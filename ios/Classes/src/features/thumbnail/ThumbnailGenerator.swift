@@ -39,8 +39,16 @@ class ThumbnailGenerator {
                 let asset = AVURLAsset(url: videoURL)
                 let generator = AVAssetImageGenerator(asset: asset)
                 generator.appliesPreferredTrackTransform = true
-                generator.requestedTimeToleranceBefore = .zero
-                generator.requestedTimeToleranceAfter = .zero
+                if config.lastFrameTolerance {
+                    // Use a small tolerance so AVFoundation decodes the
+                    // nearest frame instead of jumping to a distant keyframe.
+                    generator.requestedTimeToleranceBefore = CMTime(
+                        seconds: 0.1, preferredTimescale: 1_000_000)
+                    generator.requestedTimeToleranceAfter = .zero
+                } else {
+                    generator.requestedTimeToleranceBefore = .zero
+                    generator.requestedTimeToleranceAfter = .zero
+                }
 
                 let times: [NSValue]
                 if !config.timestampsUs.isEmpty {

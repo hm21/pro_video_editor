@@ -17,6 +17,8 @@ class ThumbnailExamplePage extends StatefulWidget {
 class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
   List<MemoryImage> _thumbnails = [];
   List<MemoryImage> _keyFrames = [];
+  MemoryImage? _firstThumbnail;
+  MemoryImage? _lastThumbnail;
 
   final int _exampleImageCount = 8;
   final double _imageSize = 50;
@@ -80,6 +82,48 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
     setState(() {});
   }
 
+  void _generateFirstThumbnail() async {
+    var outputSize = _imageSize * MediaQuery.devicePixelRatioOf(context);
+
+    var raw = await ProVideoEditor.instance.getSingleThumbnail(
+      SingleThumbnailConfigs(
+        video: EditorVideo.asset(kVideoEditorExampleH264Path),
+        outputFormat: _thumbnailFormat,
+        outputSize: Size(outputSize, outputSize),
+        boxFit: ThumbnailBoxFit.cover,
+        position: ThumbnailPosition.first,
+      ),
+    );
+
+    if (raw != null) {
+      _firstThumbnail = MemoryImage(raw);
+      setState(() {});
+    }
+  }
+
+  void _generateLastThumbnail() async {
+    var outputSize = _imageSize * MediaQuery.devicePixelRatioOf(context);
+
+    if (_informations == null) await _setMetadata();
+
+    var raw = await ProVideoEditor.instance.getSingleThumbnail(
+      SingleThumbnailConfigs(
+        video: EditorVideo.asset(kVideoEditorExampleH264Path),
+        outputFormat: _thumbnailFormat,
+        outputSize: Size(outputSize, outputSize),
+        boxFit: ThumbnailBoxFit.cover,
+        position: ThumbnailPosition.last,
+        // Provide duration to skip an extra metadata lookup
+        videoDuration: _informations!.duration,
+      ),
+    );
+
+    if (raw != null) {
+      _lastThumbnail = MemoryImage(raw);
+      setState(() {});
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -100,6 +144,18 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
             trailing: _buildProgress(_keyFramesTaskId),
           ),
           _buildThumbnails(_keyFrames),
+          ListTile(
+            onTap: _generateFirstThumbnail,
+            leading: const Icon(Icons.first_page_rounded),
+            title: const Text('First Frame'),
+          ),
+          if (_firstThumbnail != null) _buildSingleThumbnail(_firstThumbnail!),
+          ListTile(
+            onTap: _generateLastThumbnail,
+            leading: const Icon(Icons.last_page_rounded),
+            title: const Text('Last Frame'),
+          ),
+          if (_lastThumbnail != null) _buildSingleThumbnail(_lastThumbnail!),
         ],
       ),
     );
@@ -123,6 +179,20 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
             ),
           )
           .toList(),
+    );
+  }
+
+  Widget _buildSingleThumbnail(MemoryImage image) {
+    return Center(
+      child: Container(
+        width: _imageSize,
+        height: _imageSize,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: Image(image: image, fit: BoxFit.cover),
+      ),
     );
   }
 

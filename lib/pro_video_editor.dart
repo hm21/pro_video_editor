@@ -28,6 +28,7 @@ export 'shared/utils/converters.dart';
 
 /// Thumbnails
 export 'core/models/thumbnail/key_frames_configs_model.dart';
+export 'core/models/thumbnail/single_thumbnail_configs_model.dart';
 export 'core/models/thumbnail/thumbnail_box_fit_model.dart';
 export 'core/models/thumbnail/thumbnail_configs_model.dart';
 export 'core/models/thumbnail/thumbnail_format_model.dart';

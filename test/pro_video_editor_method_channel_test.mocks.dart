@@ -183,6 +183,15 @@ class MockEditorVideo extends _i1.Mock implements _i2.EditorVideo {
           ),
         ),
       ) as _i2.EditorVideo);
+
+  @override
+  Map<String, dynamic> toMap() => (super.noSuchMethod(
+        Invocation.method(
+          #toMap,
+          [],
+        ),
+        returnValue: <String, dynamic>{},
+      ) as Map<String, dynamic>);
 }
 
 /// A class which mocks [ThumbnailConfigs].
@@ -419,6 +428,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
   @override
   _i4.VideoRenderData copyWith({
     String? id,
+    _i4.VideoQualityConfig? qualityConfig,
     _i4.VideoOutputFormat? outputFormat,
     _i2.EditorVideo? video,
     List<_i4.VideoSegment>? videoSegments,
@@ -434,7 +444,6 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
     List<_i4.VideoAudioTrack>? audioTracks,
     double? blur,
     int? bitrate,
-    _i4.VideoQualityConfig? qualityConfig,
     String? customAudioPath,
     Duration? customAudioStartTime,
     double? originalAudioVolume,
@@ -449,6 +458,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
           [],
           {
             #id: id,
+            #qualityConfig: qualityConfig,
             #outputFormat: outputFormat,
             #video: video,
             #videoSegments: videoSegments,
@@ -464,7 +474,6 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
             #audioTracks: audioTracks,
             #blur: blur,
             #bitrate: bitrate,
-            #qualityConfig: qualityConfig,
             #customAudioPath: customAudioPath,
             #customAudioStartTime: customAudioStartTime,
             #originalAudioVolume: originalAudioVolume,
@@ -481,6 +490,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
             [],
             {
               #id: id,
+              #qualityConfig: qualityConfig,
               #outputFormat: outputFormat,
               #video: video,
               #videoSegments: videoSegments,
@@ -496,7 +506,6 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
               #audioTracks: audioTracks,
               #blur: blur,
               #bitrate: bitrate,
-              #qualityConfig: qualityConfig,
               #customAudioPath: customAudioPath,
               #customAudioStartTime: customAudioStartTime,
               #originalAudioVolume: originalAudioVolume,
@@ -508,4 +517,28 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
           ),
         ),
       ) as _i4.VideoRenderData);
+
+  @override
+  Map<String, dynamic> toMap() => (super.noSuchMethod(
+        Invocation.method(
+          #toMap,
+          [],
+        ),
+        returnValue: <String, dynamic>{},
+      ) as Map<String, dynamic>);
+
+  @override
+  String toJson() => (super.noSuchMethod(
+        Invocation.method(
+          #toJson,
+          [],
+        ),
+        returnValue: _i8.dummyValue<String>(
+          this,
+          Invocation.method(
+            #toJson,
+            [],
+          ),
+        ),
+      ) as String);
 }

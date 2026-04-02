@@ -37,6 +37,11 @@ struct ThumbnailConfig {
     /// Nil if using timestamp-based extraction
     let maxOutputFrames: Int?
 
+    /// When true, allows seeking backwards to find the nearest frame.
+    /// Used when extracting the last frame of a video to ensure
+    /// AVAssetImageGenerator finds a valid frame near the end.
+    let lastFrameTolerance: Bool
+
     /// Creates a ThumbnailConfig from Flutter method call arguments.
     ///
     /// - Parameter arguments: Dictionary containing the method call arguments
@@ -62,6 +67,7 @@ struct ThumbnailConfig {
         let rawTimestamps = args["timestamps"] as? [NSNumber] ?? []
         let timestampsUs = rawTimestamps.map { $0.int64Value }
         let maxOutputFrames = args["maxOutputFrames"] as? Int
+        let lastFrameTolerance = args["lastFrameTolerance"] as? Bool ?? false
 
         // At least one extraction mode must be specified
         guard !timestampsUs.isEmpty || maxOutputFrames != nil else {
@@ -78,7 +84,8 @@ struct ThumbnailConfig {
             outputWidth: outputWidth,
             outputHeight: outputHeight,
             timestampsUs: timestampsUs,
-            maxOutputFrames: maxOutputFrames
+            maxOutputFrames: maxOutputFrames,
+            lastFrameTolerance: lastFrameTolerance
         )
     }
 }

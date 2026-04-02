@@ -11,6 +11,7 @@ import '/core/models/audio/waveform_configs_model.dart';
 import '/core/models/audio/waveform_data_model.dart';
 import '/core/models/exceptions/render_exceptions.dart';
 import '/core/models/thumbnail/key_frames_configs_model.dart';
+import '/core/models/thumbnail/single_thumbnail_configs_model.dart';
 import '/core/models/thumbnail/thumbnail_base_abstract.dart';
 import '/core/models/thumbnail/thumbnail_configs_model.dart';
 import '/core/models/video/editor_video_model.dart';
@@ -134,6 +135,34 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   @override
   Future<List<Uint8List>> getKeyFrames(KeyFramesConfigs value) async {
     return await _extractThumbnails(value);
+  }
+
+  @override
+  Future<Uint8List?> getSingleThumbnail(SingleThumbnailConfigs value) async {
+    final bool isLastFrame = value.position == ThumbnailPosition.last;
+    Duration timestamp;
+    if (isLastFrame) {
+      final duration =
+          value.videoDuration ?? (await getMetadata(value.video)).duration;
+      timestamp = duration;
+    } else {
+      timestamp = Duration.zero;
+    }
+
+    var inputPath = await value.video.safeFilePath();
+
+    final response = await methodChannel.invokeMethod<List<dynamic>>(
+      'getThumbnails',
+      {
+        'inputPath': inputPath,
+        'extension': _getFileExtension(inputPath),
+        ...value.toMap(),
+        'timestamps': [timestamp.inMicroseconds],
+        'lastFrameTolerance': isLastFrame,
+      },
+    );
+    final List<Uint8List> result = response?.cast<Uint8List>() ?? [];
+    return result.isNotEmpty ? result.first : null;
   }
 
   @override
