@@ -1,3 +1,6 @@
+## 1.14.1
+- **FIX**(android): Fix compatibility with media3 1.10.0 by replacing removed `ChannelMixingMatrix.create` with `ChannelMixingMatrix.createForConstantGain`.
+
 ## 1.14.0
 - **FEAT**(android, iOS, macOS, web): Add `getSingleThumbnail` method with `SingleThumbnailConfigs` to extract the first or last frame of a video via `ThumbnailPosition.first` / `ThumbnailPosition.last`.
 

@@ -360,12 +360,12 @@ class VideoSequenceBuilder(
 
         // Stereo (2 channels) to Stereo (2 channels) - passthrough (no boost needed)
         channelMixer.putChannelMixingMatrix(
-            ChannelMixingMatrix.create(2, 2)
+            ChannelMixingMatrix.createForConstantGain(2, 2)
         )
 
         // Mono (1 channel) to Stereo (2 channels)
         channelMixer.putChannelMixingMatrix(
-            ChannelMixingMatrix.create(1, 2)
+            ChannelMixingMatrix.createForConstantGain(1, 2)
         )
 
         Log.d(
