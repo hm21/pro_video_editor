@@ -18,5 +18,5 @@ func applyBlur(
 
     if sigma == nil || sigma == 0 { return }
 
-    print("[\(Tags.render)] 🌫️ Applying Gaussian blur: sigma=\(String(format: "%.1f", sigma!))")
+    PluginLog.print("[\(Tags.render)] 🌫️ Applying Gaussian blur: sigma=\(String(format: "%.1f", sigma!))")
 }

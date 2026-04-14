@@ -33,7 +33,7 @@ internal class VideoTranscoder {
         let formatInfo = await MediaInfoExtractor.getVideoFormatInfo(videoPath)
         let needsTranscode = formatInfo.needsTranscodingForEffects()
 
-        print(
+        PluginLog.print(
             "🔍 Video transcoding check: path=\(videoPath), "
                 + "isHevc=\(formatInfo.isHevc), bitDepth=\(formatInfo.bitDepth), "
                 + "isHdr=\(formatInfo.isHdr), needsTranscoding=\(needsTranscode)")
@@ -51,11 +51,11 @@ internal class VideoTranscoder {
     static func transcodeToH264(_ videoPath: String) async -> TranscodeResult {
         // Check if transcoding is needed
         guard await needsTranscoding(videoPath) else {
-            print("✅ No transcoding needed for: \(videoPath)")
+            PluginLog.print("✅ No transcoding needed for: \(videoPath)")
             return .notNeeded(originalPath: videoPath)
         }
 
-        print("🎬 Starting HEVC 10-bit HDR → H.264 8-bit SDR transcoding for: \(videoPath)")
+        PluginLog.print("🎬 Starting HEVC 10-bit HDR → H.264 8-bit SDR transcoding for: \(videoPath)")
 
         let inputURL = URL(fileURLWithPath: videoPath)
         let outputURL = FileManager.default.temporaryDirectory
@@ -66,15 +66,15 @@ internal class VideoTranscoder {
 
             // Verify output
             let outputInfo = await MediaInfoExtractor.getVideoFormatInfo(outputURL.path)
-            print("✅ Transcoding completed: \(outputURL.path)")
-            print(
+            PluginLog.print("✅ Transcoding completed: \(outputURL.path)")
+            PluginLog.print(
                 "   Output: isHevc=\(outputInfo.isHevc), bitDepth=\(outputInfo.bitDepth), isHdr=\(outputInfo.isHdr)"
             )
 
             return .success(outputPath: outputURL.path)
 
         } catch {
-            print("❌ Transcoding failed: \(error.localizedDescription)")
+            PluginLog.print("❌ Transcoding failed: \(error.localizedDescription)")
             try? FileManager.default.removeItem(at: outputURL)
             return .error(error)
         }
@@ -94,7 +94,7 @@ internal class VideoTranscoder {
             case .notNeeded(let originalPath):
                 result[inputPath] = originalPath
             case .error:
-                print("⚠️ Transcoding failed for \(inputPath), using original")
+                PluginLog.print("⚠️ Transcoding failed for \(inputPath), using original")
                 result[inputPath] = inputPath
             }
         }
@@ -110,9 +110,9 @@ internal class VideoTranscoder {
             if path.contains("transcoded_") {
                 do {
                     try FileManager.default.removeItem(atPath: path)
-                    print("🗑️ Cleaned up transcoded file: \(path)")
+                    PluginLog.print("🗑️ Cleaned up transcoded file: \(path)")
                 } catch {
-                    print("⚠️ Failed to clean up \(path): \(error.localizedDescription)")
+                    PluginLog.print("⚠️ Failed to clean up \(path): \(error.localizedDescription)")
                 }
             }
         }
@@ -234,8 +234,8 @@ internal class VideoTranscoder {
             exportSession.videoComposition = videoComposition
         }
 
-        print("🎬 Transcoding with AVAssetExportSession...")
-        print("   Input size: \(naturalSize), Output size: \(renderSize)")
+        PluginLog.print("🎬 Transcoding with AVAssetExportSession...")
+        PluginLog.print("   Input size: \(naturalSize), Output size: \(renderSize)")
 
         // Export
         if #available(macOS 15.0, *) {
@@ -250,7 +250,7 @@ internal class VideoTranscoder {
             }
         }
 
-        print("✅ Transcoding completed successfully")
+        PluginLog.print("✅ Transcoding completed successfully")
     }
 
     /// Calculates output size accounting for rotation.

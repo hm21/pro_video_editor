@@ -3,8 +3,8 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 import RENDER_TAG
 import android.media.MediaExtractor
 import android.media.MediaFormat
-import android.util.Log
 import androidx.media3.common.util.UnstableApi
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 
 /**
  * Utility class for extracting media information from video and audio files.

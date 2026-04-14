@@ -25,6 +25,6 @@ func applyScale(
     if x != 1.0 || y != 1.0 {
         let percentX = Int(x * 100)
         let percentY = Int(y * 100)
-        print("[\(Tags.render)] 📏 Applying scale: X=\(percentX)%, Y=\(percentY)%")
+        PluginLog.print("[\(Tags.render)] 📏 Applying scale: X=\(percentX)%, Y=\(percentY)%")
     }
 }

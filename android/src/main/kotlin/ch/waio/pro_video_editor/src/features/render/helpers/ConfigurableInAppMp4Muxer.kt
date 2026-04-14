@@ -1,6 +1,5 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
-import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.Metadata
@@ -13,6 +12,7 @@ import androidx.media3.muxer.Muxer
 import androidx.media3.muxer.MuxerException
 import androidx.media3.muxer.MuxerUtil
 import androidx.media3.muxer.SeekableMuxerOutput
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import com.google.common.collect.ImmutableList
 import java.io.FileNotFoundException
 import java.io.FileOutputStream

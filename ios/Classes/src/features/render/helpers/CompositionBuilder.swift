@@ -56,8 +56,8 @@ internal class CompositionBuilder {
             )
         }
 
-        print("🎬 Creating composition with \(videoClips.count) video clips")
-        print("🔊 Audio enabled: \(enableAudio)")
+        PluginLog.print("🎬 Creating composition with \(videoClips.count) video clips")
+        PluginLog.print("🔊 Audio enabled: \(enableAudio)")
 
         let composition = AVMutableComposition()
 
@@ -70,7 +70,7 @@ internal class CompositionBuilder {
         // Add custom audio tracks
         var customAudioTracks: [(track: AVMutableCompositionTrack, config: AudioTrackConfig)] = []
         for trackConfig in audioTracks {
-            print("🎵 Adding audio track: \(trackConfig.path)")
+            PluginLog.print("🎵 Adding audio track: \(trackConfig.path)")
             let audioBuilder = AudioSequenceBuilder(
                 audioPath: trackConfig.path,
                 targetDuration: videoResult.totalDuration
@@ -111,18 +111,18 @@ internal class CompositionBuilder {
         // This fixes issues on older iOS versions (e.g., iPhone 7, iOS 15)
         var instructions: [AVVideoCompositionInstructionProtocol] = []
 
-        print("")
-        print("🎨 ===== CREATING VIDEO INSTRUCTIONS =====")
-        print("   Total clips to process: \(videoResult.clipInstructions.count)")
-        print(
+        PluginLog.print("")
+        PluginLog.print("🎨 ===== CREATING VIDEO INSTRUCTIONS =====")
+        PluginLog.print("   Total clips to process: \(videoResult.clipInstructions.count)")
+        PluginLog.print(
             "   Target render size: \(videoResult.renderSize.width) x \(videoResult.renderSize.height)"
         )
-        print("==========================================")
-        print("")
+        PluginLog.print("==========================================")
+        PluginLog.print("")
 
         for (index, clipInstruction) in videoResult.clipInstructions.enumerated() {
-            print("🎬 Processing instruction for clip \(index)")
-            print(
+            PluginLog.print("🎬 Processing instruction for clip \(index)")
+            PluginLog.print(
                 "   Time range: \(String(format: "%.2f", clipInstruction.timeRange.start.seconds))s - \(String(format: "%.2f", (clipInstruction.timeRange.start + clipInstruction.timeRange.duration).seconds))s"
             )
 
@@ -157,10 +157,10 @@ internal class CompositionBuilder {
                 backgroundColor: CGColor(red: 0, green: 0, blue: 0, alpha: 1)
             )
 
-            print(
+            PluginLog.print(
                 "   ⚙️ Layer instruction configured with transform (trackID: \(videoResult.videoTrack.trackID))"
             )
-            print("")
+            PluginLog.print("")
 
             instructions.append(instruction)
         }
@@ -171,7 +171,7 @@ internal class CompositionBuilder {
             renderSize: compositionRenderSize
         )
 
-        print("✅ Composition created successfully with \(videoClips.count) clips")
+        PluginLog.print("✅ Composition created successfully with \(videoClips.count) clips")
 
         // Return the track ID for fallback on older iOS versions
         let sourceTrackID = videoResult.videoTrack.trackID
@@ -204,7 +204,7 @@ internal class CompositionBuilder {
             }
 
             audioMixInputParameters.append(inputParameters)
-            print("🔊 Applied per-clip volume to original audio track")
+            PluginLog.print("🔊 Applied per-clip volume to original audio track")
         }
 
         // Apply volume to custom audio tracks
@@ -212,7 +212,7 @@ internal class CompositionBuilder {
             let inputParameters = AVMutableAudioMixInputParameters(track: track)
             inputParameters.setVolume(config.volume, at: .zero)
             audioMixInputParameters.append(inputParameters)
-            print("🔊 Applied volume \(config.volume) to custom audio track: \(config.path)")
+            PluginLog.print("🔊 Applied volume \(config.volume) to custom audio track: \(config.path)")
         }
 
         let audioMix = AVMutableAudioMix()
@@ -239,10 +239,10 @@ internal class CompositionBuilder {
         let videoWidth = abs(displaySize.width)
         let videoHeight = abs(displaySize.height)
 
-        print("   📐 Transform calculation:")
-        print("      Natural size: \(naturalSize.width) x \(naturalSize.height)")
-        print("      Display size (after rotation): \(videoWidth) x \(videoHeight)")
-        print("      Target render size: \(renderSize.width) x \(renderSize.height)")
+        PluginLog.print("   📐 Transform calculation:")
+        PluginLog.print("      Natural size: \(naturalSize.width) x \(naturalSize.height)")
+        PluginLog.print("      Display size (after rotation): \(videoWidth) x \(videoHeight)")
+        PluginLog.print("      Target render size: \(renderSize.width) x \(renderSize.height)")
 
         // Calculate scale to fill the render size (we want videos to be the same size)
         let scaleX = renderSize.width / videoWidth
@@ -253,21 +253,21 @@ internal class CompositionBuilder {
         let scalePercentage = scale * 100
 
         if willBeScaled {
-            print(
+            PluginLog.print(
                 "      🔍 SCALING: \(String(format: "%.1f%%", scalePercentage)) (factor: \(String(format: "%.3f", scale)))"
             )
-            print(
+            PluginLog.print(
                 "         Scale X: \(String(format: "%.3f", scaleX)) | Scale Y: \(String(format: "%.3f", scaleY))"
             )
         } else {
-            print("      ✓ No scaling needed (video already fits render size)")
+            PluginLog.print("      ✓ No scaling needed (video already fits render size)")
         }
 
         // Calculate the scaled video dimensions
         let scaledWidth = videoWidth * scale
         let scaledHeight = videoHeight * scale
 
-        print(
+        PluginLog.print(
             "      Final video size: \(String(format: "%.1f", scaledWidth)) x \(String(format: "%.1f", scaledHeight))"
         )
 
@@ -281,7 +281,7 @@ internal class CompositionBuilder {
 
         let angle = atan2(preferredTransform.b, preferredTransform.a)
         let degrees = angle * 180 / .pi
-        print("      Rotation: \(String(format: "%.1f", degrees))°")
+        PluginLog.print("      Rotation: \(String(format: "%.1f", degrees))°")
 
         // 2. Scale the video to fit the render size
         transform = transform.scaledBy(x: scale, y: scale)
@@ -298,20 +298,20 @@ internal class CompositionBuilder {
             finalTranslateX = translateY
             finalTranslateY = translateX
             transform = transform.translatedBy(x: finalTranslateX, y: finalTranslateY)
-            print(
+            PluginLog.print(
                 "      Translation (rotated coords): x=\(String(format: "%.1f", finalTranslateX)), y=\(String(format: "%.1f", finalTranslateY))"
             )
         } else {
             finalTranslateX = translateX
             finalTranslateY = translateY
             transform = transform.translatedBy(x: finalTranslateX, y: finalTranslateY)
-            print(
+            PluginLog.print(
                 "      Translation: x=\(String(format: "%.1f", finalTranslateX)), y=\(String(format: "%.1f", finalTranslateY))"
             )
         }
 
-        print("   ✅ Transform applied for clip \(clipIndex)")
-        print("")
+        PluginLog.print("   ✅ Transform applied for clip \(clipIndex)")
+        PluginLog.print("")
 
         return transform
     }

@@ -2,7 +2,6 @@ package ch.waio.pro_video_editor
 
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import ch.waio.pro_video_editor.src.features.audio.ExtractAudio
 import ch.waio.pro_video_editor.src.features.audio.NoAudioTrackException
 import ch.waio.pro_video_editor.src.features.audio.models.AudioExtractConfig
@@ -12,6 +11,7 @@ import ch.waio.pro_video_editor.src.features.metadata.models.MetadataConfig
 import ch.waio.pro_video_editor.src.features.render.RenderVideo
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderTask
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.features.thumbnail.ThumbnailGenerator
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailConfig
 import ch.waio.pro_video_editor.src.features.waveform.WaveformGenerator
@@ -134,6 +134,8 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
      * - cancelTask: Cancels active render or audio extraction task
      */
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        applyInlineNativeLogLevel(call)
+
         when (call.method) {
             "getPlatformVersion" -> handleGetPlatformVersion(result)
             "getMetadata" -> handleGetMetadata(call, result)
@@ -145,6 +147,25 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             "startWaveformStream" -> handleStartWaveformStream(call, result)
             "cancelTask" -> handleCancelTask(call, result)
             else -> result.notImplemented()
+        }
+    }
+
+    /**
+     * Applies an optional inline native log level from method call arguments.
+     */
+    private fun applyInlineNativeLogLevel(call: MethodCall) {
+        val level = call.argument<String>("nativeLogLevel")
+        if (level.isNullOrBlank()) {
+            return
+        }
+
+        try {
+            Log.setMinimumLevel(level)
+        } catch (e: IllegalArgumentException) {
+            Log.w(
+                "ProVideoEditorPlugin",
+                "Ignoring invalid nativeLogLevel '$level': ${e.message}"
+            )
         }
     }
 

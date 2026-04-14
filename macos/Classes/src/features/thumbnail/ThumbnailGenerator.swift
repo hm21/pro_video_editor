@@ -82,7 +82,7 @@ class ThumbnailGenerator {
 
                     let key = requestedTime.seconds
                     guard let index = timeIndexMap[key] else {
-                        print("⚠️ Unexpected time: \(Int(key * 1000)) ms")
+                        PluginLog.print("⚠️ Unexpected time: \(Int(key * 1000)) ms")
                         return
                     }
 
@@ -98,12 +98,12 @@ class ThumbnailGenerator {
                         resultData[index] = data
 
                         let elapsed = Int((Date().timeIntervalSince1970 - start) * 1000)
-                        print(
+                        PluginLog.print(
                             "[\(index)] ✅ \(Int(key * 1000)) ms in \(elapsed) ms (\(data.count) bytes)"
                         )
                     } else {
                         let message = error?.localizedDescription ?? "Unknown error"
-                        print("[\(index)] ❌ Failed at \(Int(key * 1000)) ms: \(message)")
+                        PluginLog.print("[\(index)] ❌ Failed at \(Int(key * 1000)) ms: \(message)")
                     }
 
                     completed += 1
@@ -192,7 +192,7 @@ class ThumbnailGenerator {
             case "jpeg", "jpg":
                 return .jpeg
             default:
-                print("⚠️ Format \(format) not supported, falling back to JPEG")
+                PluginLog.print("⚠️ Format \(format) not supported, falling back to JPEG")
                 return .jpeg
             }
         }()
@@ -219,7 +219,7 @@ class ThumbnailGenerator {
             do {
                 duration = try await asset.load(.duration)
             } catch {
-                print("❌ Failed to load duration: \(error.localizedDescription)")
+                PluginLog.print("❌ Failed to load duration: \(error.localizedDescription)")
                 return []
             }
         } else {

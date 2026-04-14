@@ -1,9 +1,9 @@
-import android.util.Log
 import androidx.media3.common.Effect
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.SpeedChangeEffect
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 
 /**
  * Applies playback speed modification to both video and audio.

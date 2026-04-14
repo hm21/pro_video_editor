@@ -3,7 +3,6 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 import RENDER_TAG
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.util.Log
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
@@ -14,6 +13,7 @@ import androidx.core.graphics.scale
 import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.TimestampWrapper
 import ch.waio.pro_video_editor.src.features.render.models.ImageLayer
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 
 /**
  * Applies static image overlay on video.

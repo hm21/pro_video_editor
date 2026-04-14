@@ -25,7 +25,7 @@ public func applyPlaybackSpeed(
     guard let speed = speed, speed > 0, speed != 1 else { return instructions }
 
     let speedType = speed < 1 ? "slow motion" : "fast forward"
-    print(
+    PluginLog.print(
         "[\(Tags.render)] ⚡ Applying playback speed: \(String(format: "%.2f", speed))x (\(speedType))"
     )
 

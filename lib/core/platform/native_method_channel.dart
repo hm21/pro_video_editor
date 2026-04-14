@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:mime/mime.dart';
 import 'package:pro_video_editor/core/models/exceptions/audio_exceptions.dart';
+import 'package:pro_video_editor/core/models/platform/native_log_level.dart';
 
 import '/core/models/audio/audio_extract_configs_model.dart';
 import '/core/models/audio/waveform_chunk_model.dart';
@@ -66,13 +67,15 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   ///
   /// Emits [WaveformChunk] events during streaming waveform generation,
   /// allowing progressive UI updates.
-  final _waveformStreamChannel =
-      const EventChannel('pro_video_editor_waveform_stream');
+  final _waveformStreamChannel = const EventChannel(
+    'pro_video_editor_waveform_stream',
+  );
 
   @override
   Future<String?> getPlatformVersion() async {
-    final version =
-        await methodChannel.invokeMethod<String>('getPlatformVersion');
+    final version = await methodChannel.invokeMethod<String>(
+      'getPlatformVersion',
+    );
     return version;
   }
 
@@ -80,6 +83,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   Future<VideoMetadata> getMetadata(
     EditorVideo value, {
     bool checkStreamingOptimization = false,
+    NativeLogLevel? nativeLogLevel,
   }) async {
     var inputPath = await value.safeFilePath();
 
@@ -90,6 +94,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
               'inputPath': inputPath,
               'extension': extension,
               'checkStreamingOptimization': checkStreamingOptimization,
+              'nativeLogLevel': nativeLogLevel?.methodValue,
             }) ??
             {};
 
@@ -97,53 +102,66 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   }
 
   @override
-  Future<bool> hasAudioTrack(EditorVideo value) async {
+  Future<bool> hasAudioTrack(
+    EditorVideo value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
     var inputPath = await value.safeFilePath();
 
-    final result = await methodChannel.invokeMethod<bool>(
-      'hasAudioTrack',
-      {
-        'inputPath': inputPath,
-        'extension': _getFileExtension(inputPath),
-      },
-    );
+    final result = await methodChannel.invokeMethod<bool>('hasAudioTrack', {
+      'inputPath': inputPath,
+      'extension': _getFileExtension(inputPath),
+      'nativeLogLevel': nativeLogLevel?.methodValue,
+    });
 
     return result ?? false;
   }
 
-  Future<List<Uint8List>> _extractThumbnails(ThumbnailBase value) async {
+  Future<List<Uint8List>> _extractThumbnails(
+    ThumbnailBase value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
     var inputPath = await value.video.safeFilePath();
 
-    final response = await methodChannel.invokeMethod<List<dynamic>>(
-      'getThumbnails',
-      {
-        'inputPath': inputPath,
-        'extension': _getFileExtension(inputPath),
-        ...value.toMap(),
-      },
-    );
+    final response =
+        await methodChannel.invokeMethod<List<dynamic>>('getThumbnails', {
+      'inputPath': inputPath,
+      'extension': _getFileExtension(inputPath),
+      'nativeLogLevel': nativeLogLevel?.methodValue,
+      ...value.toMap(),
+    });
     final List<Uint8List> result = response?.cast<Uint8List>() ?? [];
 
     return result;
   }
 
   @override
-  Future<List<Uint8List>> getThumbnails(ThumbnailConfigs value) async {
-    return await _extractThumbnails(value);
+  Future<List<Uint8List>> getThumbnails(
+    ThumbnailConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
+    return await _extractThumbnails(value, nativeLogLevel: nativeLogLevel);
   }
 
   @override
-  Future<List<Uint8List>> getKeyFrames(KeyFramesConfigs value) async {
-    return await _extractThumbnails(value);
+  Future<List<Uint8List>> getKeyFrames(
+    KeyFramesConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
+    return await _extractThumbnails(value, nativeLogLevel: nativeLogLevel);
   }
 
   @override
-  Future<Uint8List?> getSingleThumbnail(SingleThumbnailConfigs value) async {
+  Future<Uint8List?> getSingleThumbnail(
+    SingleThumbnailConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
     final bool isLastFrame = value.position == ThumbnailPosition.last;
     Duration timestamp;
     if (isLastFrame) {
-      final duration =
-          value.videoDuration ?? (await getMetadata(value.video)).duration;
+      final duration = value.videoDuration ??
+          (await getMetadata(value.video, nativeLogLevel: nativeLogLevel))
+              .duration;
       timestamp = duration;
     } else {
       timestamp = Duration.zero;
@@ -156,6 +174,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       {
         'inputPath': inputPath,
         'extension': _getFileExtension(inputPath),
+        'nativeLogLevel': nativeLogLevel?.methodValue,
         ...value.toMap(),
         'timestamps': [timestamp.inMicroseconds],
         'lastFrameTolerance': isLastFrame,
@@ -166,18 +185,20 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   }
 
   @override
-  Future<Uint8List> extractAudio(AudioExtractConfigs value) async {
+  Future<Uint8List> extractAudio(
+    AudioExtractConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
     try {
       var inputPath = await value.video.safeFilePath();
 
-      final Uint8List? result = await methodChannel.invokeMethod<Uint8List>(
-        'extractAudio',
-        {
-          'inputPath': inputPath,
-          'extension': _getFileExtension(inputPath),
-          ...value.toMap(),
-        },
-      );
+      final Uint8List? result =
+          await methodChannel.invokeMethod<Uint8List>('extractAudio', {
+        'inputPath': inputPath,
+        'extension': _getFileExtension(inputPath),
+        'nativeLogLevel': nativeLogLevel?.methodValue,
+        ...value.toMap(),
+      });
 
       if (result == null) {
         throw ArgumentError('Failed to extract audio from video');
@@ -197,20 +218,19 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   @override
   Future<String> extractAudioToFile(
     String filePath,
-    AudioExtractConfigs value,
-  ) async {
+    AudioExtractConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
     try {
       var inputPath = await value.video.safeFilePath();
 
-      await methodChannel.invokeMethod<String>(
-        'extractAudio',
-        {
-          'inputPath': inputPath,
-          'extension': _getFileExtension(inputPath),
-          'outputPath': filePath,
-          ...value.toMap(),
-        },
-      );
+      await methodChannel.invokeMethod<String>('extractAudio', {
+        'inputPath': inputPath,
+        'extension': _getFileExtension(inputPath),
+        'nativeLogLevel': nativeLogLevel?.methodValue,
+        'outputPath': filePath,
+        ...value.toMap(),
+      });
 
       return filePath;
     } on PlatformException catch (error) {
@@ -224,18 +244,20 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   }
 
   @override
-  Future<WaveformData> getWaveform(WaveformConfigs value) async {
+  Future<WaveformData> getWaveform(
+    WaveformConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
     try {
       var inputPath = await value.video.safeFilePath();
 
-      final response = await methodChannel.invokeMethod<Map<dynamic, dynamic>>(
-        'getWaveform',
-        {
-          'inputPath': inputPath,
-          'extension': _getFileExtension(inputPath),
-          ...value.toMap(),
-        },
-      );
+      final response = await methodChannel
+          .invokeMethod<Map<dynamic, dynamic>>('getWaveform', {
+        'inputPath': inputPath,
+        'extension': _getFileExtension(inputPath),
+        'nativeLogLevel': nativeLogLevel?.methodValue,
+        ...value.toMap(),
+      });
 
       if (response == null) {
         throw ArgumentError('Failed to generate waveform data');
@@ -253,21 +275,22 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   }
 
   @override
-  Stream<WaveformChunk> getWaveformStream(WaveformConfigs value) async* {
+  Stream<WaveformChunk> getWaveformStream(
+    WaveformConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async* {
     // Get the input path before starting the stream
     final inputPath = await value.video.safeFilePath();
     final extension = _getFileExtension(inputPath);
 
     // Start the streaming waveform generation on native side
     // The native side will start sending chunks via the event channel
-    await methodChannel.invokeMethod<void>(
-      'startWaveformStream',
-      {
-        'inputPath': inputPath,
-        'extension': extension,
-        ...value.toMap(),
-      },
-    );
+    await methodChannel.invokeMethod<void>('startWaveformStream', {
+      'inputPath': inputPath,
+      'extension': extension,
+      'nativeLogLevel': nativeLogLevel?.methodValue,
+      ...value.toMap(),
+    });
 
     // Listen to the waveform stream event channel
     final streamController = StreamController<WaveformChunk>();
@@ -290,10 +313,12 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
                 } else if (errorCode == renderCanceledErrorCode) {
                   streamController.addError(const RenderCanceledException());
                 } else {
-                  streamController.addError(PlatformException(
-                    code: errorCode ?? 'WAVEFORM_ERROR',
-                    message: error,
-                  ));
+                  streamController.addError(
+                    PlatformException(
+                      code: errorCode ?? 'WAVEFORM_ERROR',
+                      message: error,
+                    ),
+                  );
                 }
                 streamController.close();
                 subscription?.cancel();
@@ -339,13 +364,19 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   }
 
   @override
-  Future<Uint8List> renderVideo(VideoRenderData value) async {
+  Future<Uint8List> renderVideo(
+    VideoRenderData value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
     try {
       final renderData = await value.toAsyncMap();
 
       final Uint8List? result = await methodChannel.invokeMethod<Uint8List>(
         'renderVideo',
-        renderData,
+        {
+          ...renderData,
+          'nativeLogLevel': nativeLogLevel?.methodValue,
+        },
       );
 
       if (result == null) {
@@ -364,18 +395,17 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   @override
   Future<String> renderVideoToFile(
     String filePath,
-    VideoRenderData value,
-  ) async {
+    VideoRenderData value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
     try {
       final renderData = await value.toAsyncMap();
 
-      await methodChannel.invokeMethod<String>(
-        'renderVideo',
-        {
-          ...renderData,
-          'outputPath': filePath,
-        },
-      );
+      await methodChannel.invokeMethod<String>('renderVideo', {
+        ...renderData,
+        'outputPath': filePath,
+        'nativeLogLevel': nativeLogLevel?.methodValue,
+      });
 
       return filePath;
     } on PlatformException catch (error) {
@@ -392,12 +422,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       throw ArgumentError('taskId cannot be empty');
     }
 
-    await methodChannel.invokeMethod<void>(
-      'cancelTask',
-      {
-        'id': taskId,
-      },
-    );
+    await methodChannel.invokeMethod<void>('cancelTask', {'id': taskId});
   }
 
   @override

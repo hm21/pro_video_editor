@@ -25,10 +25,10 @@ import AVFoundation
 /// - <1 Mbps: Low quality
 public func applyBitrate(requestedBitrate: Int?, presetHint: String? = nil) -> String {
     if let bitrate = requestedBitrate {
-        print(
+        PluginLog.print(
             "[\(Tags.render)] 📊 Requested bitrate: \(bitrate) bps (\(String(format: "%.1f", Double(bitrate) / 1_000_000)) Mbps)"
         )
-        print(
+        PluginLog.print(
             "[\(Tags.render)] ⚠️ AVAssetExportSession does not support custom bitrate directly - using closest preset"
         )
 

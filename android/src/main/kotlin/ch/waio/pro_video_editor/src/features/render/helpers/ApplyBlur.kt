@@ -1,7 +1,7 @@
-import android.util.Log
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.GaussianBlur
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 
 /**
  * Applies Gaussian blur effect to video.

@@ -25,7 +25,7 @@ func applyColorMatrix(
 
     let globalCount = filters.filter { $0.startUs == -1 && $0.endUs == -1 }.count
     let timedCount = filters.count - globalCount
-    print(
+    PluginLog.print(
         "[\(Tags.render)] 🎨 Applying color grading: \(filters.count) filter(s) (\(globalCount) global, \(timedCount) timed)"
     )
 }
@@ -34,7 +34,7 @@ func applyColorMatrix(
 
 func multiplyColorMatrices(_ m1: [Double], _ m2: [Double]) -> [Double] {
     guard m1.count == 20, m2.count == 20 else {
-        print("Invalid matrix dimensions for multiplication")
+        PluginLog.print("Invalid matrix dimensions for multiplication")
         return m1
     }
 

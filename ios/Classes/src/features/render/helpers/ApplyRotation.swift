@@ -28,5 +28,5 @@ func applyRotation(
     config.rotateTurns = turns
 
     if turns == 0 { return }
-    print("[\(Tags.render)] 🔄 Applying rotation: \(degrees)° (\(turns) × 90°)")
+    PluginLog.print("[\(Tags.render)] 🔄 Applying rotation: \(degrees)° (\(turns) × 90°)")
 }

@@ -6,10 +6,10 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import ch.waio.pro_video_editor.src.features.audio.NoAudioTrackException
 import ch.waio.pro_video_editor.src.features.waveform.models.WaveformConfig
 import ch.waio.pro_video_editor.src.features.waveform.models.WaveformJobHandle
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean

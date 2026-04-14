@@ -1,11 +1,11 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
-import android.util.Log
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Crop
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import java.io.File
 
 /**

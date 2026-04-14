@@ -6,8 +6,8 @@ import android.graphics.Bitmap
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
-import android.util.Log
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailConfig
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

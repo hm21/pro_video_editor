@@ -37,7 +37,7 @@ func applyCrop(
     config.cropHeight = height
 
     if cropX != 0 || cropY != 0 || cropWidth != nil || cropHeight != nil {
-        print(
+        PluginLog.print(
             "[\(Tags.render)] ✂️ Applying crop: x=\(Int(x)), y=\(Int(y)), width=\(Int(width)), height=\(Int(height))"
         )
     }

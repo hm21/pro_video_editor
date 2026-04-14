@@ -56,7 +56,7 @@ class RenderVideo {
 
                 // HEVC 10-bit HDR videos cause issues with AVFoundation's compositor
                 // They must be pre-transcoded to H.264 8-bit SDR for ANY effect processing
-                print("🔍 Checking for HEVC 10-bit videos that need transcoding...")
+                PluginLog.print("🔍 Checking for HEVC 10-bit videos that need transcoding...")
 
                 // Pre-transcode HEVC 10-bit HDR videos to H.264 8-bit SDR
                 let inputPaths = config.videoClips.map { $0.inputPath }
@@ -66,7 +66,7 @@ class RenderVideo {
                 transcodedFiles = transcodeMap.values.filter { $0.contains("transcoded_") }
 
                 if !transcodedFiles.isEmpty {
-                    print("✅ Pre-transcoded \(transcodedFiles.count) HEVC 10-bit videos to H.264")
+                    PluginLog.print("✅ Pre-transcoded \(transcodedFiles.count) HEVC 10-bit videos to H.264")
 
                     // Update config with transcoded paths
                     let updatedClips = config.videoClips.map { clip -> VideoClip in
@@ -109,10 +109,10 @@ class RenderVideo {
                         let requestedFormat = workingConfig.outputFormat.lowercased()
 
                         if pathExtension != requestedFormat {
-                            print(
+                            PluginLog.print(
                                 "⚠️ WARNING: Output path extension '.\(pathExtension)' doesn't match requested format '.\(requestedFormat)'"
                             )
-                            print("⚠️ Correcting file extension to match format...")
+                            PluginLog.print("⚠️ Correcting file extension to match format...")
 
                             // Replace extension with correct format
                             let pathWithoutExtension = url.deletingPathExtension()
@@ -124,16 +124,16 @@ class RenderVideo {
                         outputURL = temporaryURL(for: workingConfig.outputFormat)
                     }
 
-                    print("")
-                    print("🎬 ===== RENDER CONFIG =====")
-                    print("   Video clips: \(workingConfig.videoClips.count)")
-                    print("   📁 Output format: \(workingConfig.outputFormat)")
-                    print("   📹 Output path: \(outputURL.path)")
-                    print("   🔊 Enable Audio: \(workingConfig.enableAudio)")
-                    print("   🎵 Audio tracks: \(workingConfig.audioTracks.count)")
-                    print("   🎨 Color filters: \(workingConfig.colorFilters.count)")
-                    print("===========================")
-                    print("")
+                    PluginLog.print("")
+                    PluginLog.print("🎬 ===== RENDER CONFIG =====")
+                    PluginLog.print("   Video clips: \(workingConfig.videoClips.count)")
+                    PluginLog.print("   📁 Output format: \(workingConfig.outputFormat)")
+                    PluginLog.print("   📹 Output path: \(outputURL.path)")
+                    PluginLog.print("   🔊 Enable Audio: \(workingConfig.enableAudio)")
+                    PluginLog.print("   🎵 Audio tracks: \(workingConfig.audioTracks.count)")
+                    PluginLog.print("   🎨 Color filters: \(workingConfig.colorFilters.count)")
+                    PluginLog.print("===========================")
+                    PluginLog.print("")
 
                     // Create configuration for video effects
                     var effectsConfig = VideoCompositorConfig()
@@ -345,10 +345,10 @@ class RenderVideo {
         }
 
         let fileType = mapFormatToMimeType(format: outputFormat)
-        print("📹 Export session setup:")
-        print("   - Requested format: \(outputFormat)")
-        print("   - AVFileType: \(fileType.rawValue)")
-        print("   - Output URL: \(outputURL.path)")
+        PluginLog.print("📹 Export session setup:")
+        PluginLog.print("   - Requested format: \(outputFormat)")
+        PluginLog.print("   - AVFileType: \(fileType.rawValue)")
+        PluginLog.print("   - Output URL: \(outputURL.path)")
 
         export.outputURL = outputURL
         export.outputFileType = fileType
@@ -373,7 +373,7 @@ class RenderVideo {
 
             if CMTimeGetSeconds(clampedDuration) > 0 {
                 export.timeRange = CMTimeRange(start: startTime, duration: clampedDuration)
-                print(
+                PluginLog.print(
                     "   - TimeRange applied: \(String(format: "%.2f", CMTimeGetSeconds(startTime)))s - \(String(format: "%.2f", CMTimeGetSeconds(CMTimeAdd(startTime, clampedDuration))))s"
                 )
             }
@@ -386,15 +386,15 @@ class RenderVideo {
         // Apply audio mix if available
         if let audioMix = audioMix, hasAudioTracks {
             export.audioMix = audioMix
-            print("🔊 Audio mix applied to export session")
+            PluginLog.print("🔊 Audio mix applied to export session")
         } else if !hasAudioTracks {
-            print("ℹ️ No audio tracks in composition - exporting video only")
+            PluginLog.print("ℹ️ No audio tracks in composition - exporting video only")
         }
 
         // Apply fast start optimization (moves moov atom to beginning for streaming)
         export.shouldOptimizeForNetworkUse = shouldOptimizeForNetworkUse
         if shouldOptimizeForNetworkUse {
-            print("🚀 Fast start enabled - optimizing for network streaming")
+            PluginLog.print("🚀 Fast start enabled - optimizing for network streaming")
         }
 
         return export

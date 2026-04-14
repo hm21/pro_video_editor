@@ -7,6 +7,7 @@ import '/core/models/audio/audio_extract_configs_model.dart';
 import '/core/models/audio/waveform_chunk_model.dart';
 import '/core/models/audio/waveform_configs_model.dart';
 import '/core/models/audio/waveform_data_model.dart';
+import '/core/models/platform/native_log_level.dart';
 import '/core/models/thumbnail/key_frames_configs_model.dart';
 import '/core/models/thumbnail/single_thumbnail_configs_model.dart';
 import '/core/models/thumbnail/thumbnail_configs_model.dart';
@@ -113,6 +114,7 @@ abstract class ProVideoEditor extends PlatformInterface {
   Future<VideoMetadata> getMetadata(
     EditorVideo value, {
     bool checkStreamingOptimization = false,
+    NativeLogLevel? nativeLogLevel,
   }) {
     throw UnimplementedError('getMetadata() has not been implemented.');
   }
@@ -147,7 +149,10 @@ abstract class ProVideoEditor extends PlatformInterface {
   ///   print('Video has no audio track');
   /// }
   /// ```
-  Future<bool> hasAudioTrack(EditorVideo value) {
+  Future<bool> hasAudioTrack(
+    EditorVideo value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
     throw UnimplementedError('hasAudioTrack() has not been implemented.');
   }
 
@@ -167,7 +172,10 @@ abstract class ProVideoEditor extends PlatformInterface {
   ///
   /// Progress updates are emitted via [progressStreamById] using the task ID
   /// from [ThumbnailConfigs.id].
-  Future<List<Uint8List>> getThumbnails(ThumbnailConfigs value) {
+  Future<List<Uint8List>> getThumbnails(
+    ThumbnailConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
     throw UnimplementedError('getThumbnails() has not been implemented.');
   }
 
@@ -187,7 +195,10 @@ abstract class ProVideoEditor extends PlatformInterface {
   ///
   /// Progress updates are emitted via [progressStreamById] using the task ID
   /// from [KeyFramesConfigs.id].
-  Future<List<Uint8List>> getKeyFrames(KeyFramesConfigs value) {
+  Future<List<Uint8List>> getKeyFrames(
+    KeyFramesConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
     throw UnimplementedError('getKeyFrames() has not been implemented.');
   }
 
@@ -218,7 +229,10 @@ abstract class ProVideoEditor extends PlatformInterface {
   /// final thumbnail =
   ///     await ProVideoEditor.instance.getSingleThumbnail(config);
   /// ```
-  Future<Uint8List?> getSingleThumbnail(SingleThumbnailConfigs value) {
+  Future<Uint8List?> getSingleThumbnail(
+    SingleThumbnailConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
     throw UnimplementedError('getSingleThumbnail() has not been implemented.');
   }
 
@@ -268,7 +282,10 @@ abstract class ProVideoEditor extends PlatformInterface {
   ///
   /// final audioData = await ProVideoEditor.instance.extractAudio(config);
   /// ```
-  Future<Uint8List> extractAudio(AudioExtractConfigs value) {
+  Future<Uint8List> extractAudio(
+    AudioExtractConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
     throw UnimplementedError('extractAudio() has not been implemented.');
   }
 
@@ -307,8 +324,9 @@ abstract class ProVideoEditor extends PlatformInterface {
   /// ```
   Future<String> extractAudioToFile(
     String filePath,
-    AudioExtractConfigs value,
-  ) {
+    AudioExtractConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
     throw UnimplementedError('extractAudioToFile() has not been implemented.');
   }
 
@@ -356,7 +374,10 @@ abstract class ProVideoEditor extends PlatformInterface {
   /// final waveform = await ProVideoEditor.instance.getWaveform(configs);
   /// print('Generated ${waveform.sampleCount} samples');
   /// ```
-  Future<WaveformData> getWaveform(WaveformConfigs value) {
+  Future<WaveformData> getWaveform(
+    WaveformConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
     throw UnimplementedError('getWaveform() has not been implemented.');
   }
 
@@ -406,7 +427,10 @@ abstract class ProVideoEditor extends PlatformInterface {
   ///   }
   /// }
   /// ```
-  Stream<WaveformChunk> getWaveformStream(WaveformConfigs value) {
+  Stream<WaveformChunk> getWaveformStream(
+    WaveformConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
     throw UnimplementedError('getWaveformStream() has not been implemented.');
   }
 
@@ -434,7 +458,10 @@ abstract class ProVideoEditor extends PlatformInterface {
   ///
   /// Progress updates are emitted via [progressStreamById] using
   /// [VideoRenderData.id].
-  Future<Uint8List> renderVideo(VideoRenderData value) {
+  Future<Uint8List> renderVideo(
+    VideoRenderData value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
     throw UnimplementedError('renderVideo() has not been implemented.');
   }
 
@@ -466,8 +493,9 @@ abstract class ProVideoEditor extends PlatformInterface {
   /// [VideoRenderData.id].
   Future<String> renderVideoToFile(
     String filePath,
-    VideoRenderData value,
-  ) {
+    VideoRenderData value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
     throw UnimplementedError('renderVideoToFile() has not been implemented.');
   }
 

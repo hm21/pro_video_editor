@@ -1,7 +1,7 @@
 package ch.waio.pro_video_editor.src.features.render.models
 
 import PACKAGE_TAG
-import android.util.Log
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import io.flutter.plugin.common.MethodCall
 
 /**

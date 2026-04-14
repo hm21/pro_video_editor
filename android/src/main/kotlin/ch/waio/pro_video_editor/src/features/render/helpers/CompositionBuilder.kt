@@ -2,7 +2,6 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
 import android.content.Context
-import android.util.Log
 import androidx.media3.common.Effect
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
@@ -10,6 +9,7 @@ import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItemSequence
 import ch.waio.pro_video_editor.src.features.render.models.AudioTrackConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 
 /**
  * Main builder class for creating Media3 Compositions from render configurations.

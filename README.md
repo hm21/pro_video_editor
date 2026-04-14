@@ -130,6 +130,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 #### 📱 **Runtime Features**
 - 📊 **Progress**: Track the progress of one or multiple running tasks.
 - 🧵 **Multi-Tasking**: Execute multiple video processing tasks concurrently.
+- 🔇 **Native Log Level**: Control native log verbosity per API call with `NativeLogLevel` (`none`, `error`, `warning`, `info`, `debug`, `verbose`).
 
 
 ### Platform Support
@@ -590,6 +591,30 @@ List<Uint8List> result = await ProVideoEditor.instance.getKeyFrames(
         boxFit: ThumbnailBoxFit.cover,
     ),
 );
+```
+
+#### Native Log Level Example
+
+Control native log verbosity per API call on Android, iOS, and macOS.
+
+```dart
+/// Silence all native logs for this call
+List<Uint8List> thumbnails = await ProVideoEditor.instance.getThumbnails(
+    ThumbnailConfigs(
+        video: EditorVideo.asset('assets/my-video.mp4'),
+        outputSize: const Size(200, 200),
+        timestamps: const [Duration(seconds: 5)],
+    ),
+    nativeLogLevel: NativeLogLevel.none,
+);
+
+/// Show only errors
+VideoMetadata metadata = await ProVideoEditor.instance.getMetadata(
+    video: EditorVideo.asset('assets/my-video.mp4'),
+    nativeLogLevel: NativeLogLevel.error,
+);
+
+/// Available levels: none, error, warning, info, debug, verbose
 ```
 
 

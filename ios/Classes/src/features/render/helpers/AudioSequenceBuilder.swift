@@ -101,7 +101,7 @@ internal class AudioSequenceBuilder {
     func build(in composition: AVMutableComposition) async throws -> AVMutableCompositionTrack? {
         let audioURL = URL(fileURLWithPath: audioPath)
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
-            print("⚠️ Custom audio file does not exist: \(audioPath)")
+            PluginLog.print("⚠️ Custom audio file does not exist: \(audioPath)")
             return nil
         }
 
@@ -113,7 +113,7 @@ internal class AudioSequenceBuilder {
                 preferredTrackID: kCMPersistentTrackID_Invalid
             )
         else {
-            print("⚠️ Failed to add custom audio track")
+            PluginLog.print("⚠️ Failed to add custom audio track")
             return nil
         }
 
@@ -129,7 +129,7 @@ internal class AudioSequenceBuilder {
         let effectiveAudioEnd = audioEndTime ?? audioDuration
         let effectiveAudioDuration = CMTimeSubtract(effectiveAudioEnd, audioStartTime)
         if CMTimeCompare(effectiveAudioDuration, .zero) <= 0 {
-            print(
+            PluginLog.print(
                 "⚠️ Audio start/end time range is invalid (start: \(audioStartTime.seconds)s, end: \(effectiveAudioEnd.seconds)s)"
             )
             return nil
@@ -141,18 +141,18 @@ internal class AudioSequenceBuilder {
         let effectivePlayDuration = CMTimeMinimum(playDuration, remainingCompositionTime)
 
         if CMTimeCompare(effectivePlayDuration, .zero) <= 0 {
-            print("⚠️ No time remaining in composition for audio track")
+            PluginLog.print("⚠️ No time remaining in composition for audio track")
             return nil
         }
 
         if CMTimeCompare(audioStartTime, .zero) > 0 {
-            print("🎵 Custom audio start offset: \(audioStartTime.seconds)s")
+            PluginLog.print("🎵 Custom audio start offset: \(audioStartTime.seconds)s")
         }
         if audioEndTime != nil {
-            print("🎵 Custom audio end offset: \(effectiveAudioEnd.seconds)s")
+            PluginLog.print("🎵 Custom audio end offset: \(effectiveAudioEnd.seconds)s")
         }
         if CMTimeCompare(compositionInsertTime, .zero) > 0 {
-            print(
+            PluginLog.print(
                 "🎵 Audio placed at composition time: \(compositionInsertTime.seconds)s"
             )
         }
@@ -163,7 +163,7 @@ internal class AudioSequenceBuilder {
             let timeRange = CMTimeRange(start: audioStartTime, duration: effectivePlayDuration)
             try compositionAudioTrack.insertTimeRange(
                 timeRange, of: audioTrack, at: compositionInsertTime)
-            print("✂️ Custom audio trimmed to \(effectivePlayDuration.seconds)s")
+            PluginLog.print("✂️ Custom audio trimmed to \(effectivePlayDuration.seconds)s")
         } else if loopAudio {
             // Loop audio to match play duration
             var currentTime = compositionInsertTime
@@ -188,7 +188,7 @@ internal class AudioSequenceBuilder {
                 isFirstLoop = false
             }
 
-            print(
+            PluginLog.print(
                 "🔄 Custom audio looped \(loopCount) times to match \(effectivePlayDuration.seconds)s duration"
             )
         } else {
@@ -197,14 +197,14 @@ internal class AudioSequenceBuilder {
             let timeRange = CMTimeRange(start: audioStartTime, duration: insertDuration)
             try compositionAudioTrack.insertTimeRange(
                 timeRange, of: audioTrack, at: compositionInsertTime)
-            print(
+            PluginLog.print(
                 "▶️ Custom audio plays once (\(insertDuration.seconds)s, no loop)"
                     + (CMTimeCompare(audioStartTime, .zero) > 0
                         ? " starting at \(audioStartTime.seconds)s" : ""))
         }
 
         if volume != 1.0 {
-            print("🔊 Custom audio volume: \(volume)")
+            PluginLog.print("🔊 Custom audio volume: \(volume)")
         }
 
         return compositionAudioTrack
@@ -218,7 +218,7 @@ internal class AudioSequenceBuilder {
         let customSampleRate = await MediaInfoExtractor.getAudioSampleRate(audioPath)
 
         guard customSampleRate > 0 else {
-            print("⚠️ Could not detect custom audio sample rate")
+            PluginLog.print("⚠️ Could not detect custom audio sample rate")
             return true  // Assume compatible if we can't detect
         }
 
@@ -226,14 +226,14 @@ internal class AudioSequenceBuilder {
             if let videoSampleRate = await getVideoAudioSampleRate(clip.inputPath),
                 videoSampleRate > 0 && videoSampleRate != customSampleRate
             {
-                print(
+                PluginLog.print(
                     "❌ Sample rate mismatch: custom audio (\(customSampleRate) Hz) vs video (\(videoSampleRate) Hz)"
                 )
                 return false
             }
         }
 
-        print("✅ Sample rates are compatible")
+        PluginLog.print("✅ Sample rates are compatible")
         return true
     }
 

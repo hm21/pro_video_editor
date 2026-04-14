@@ -1,9 +1,9 @@
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
-import android.util.Log
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.VideoEncoderSettings
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 
 /**
  * Configures video encoder bitrate settings.

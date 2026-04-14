@@ -16,7 +16,7 @@ internal class MediaInfoExtractor {
     static func getVideoDuration(_ videoPath: String) async -> Int64 {
         let url = URL(fileURLWithPath: videoPath)
         guard FileManager.default.fileExists(atPath: url.path) else {
-            print("❌ Video file does not exist: \(videoPath)")
+            PluginLog.print("❌ Video file does not exist: \(videoPath)")
             return 0
         }
 
@@ -36,7 +36,7 @@ internal class MediaInfoExtractor {
 
             return Int64(duration.seconds * 1_000_000)
         } catch {
-            print("❌ Failed to get video duration for \(videoPath): \(error.localizedDescription)")
+            PluginLog.print("❌ Failed to get video duration for \(videoPath): \(error.localizedDescription)")
             return 0
         }
     }
@@ -48,7 +48,7 @@ internal class MediaInfoExtractor {
     static func getAudioDuration(_ audioPath: String) async -> Int64 {
         let url = URL(fileURLWithPath: audioPath)
         guard FileManager.default.fileExists(atPath: url.path) else {
-            print("❌ Audio file does not exist: \(audioPath)")
+            PluginLog.print("❌ Audio file does not exist: \(audioPath)")
             return 0
         }
 
@@ -67,10 +67,10 @@ internal class MediaInfoExtractor {
             }
 
             let durationUs = Int64(duration.seconds * 1_000_000)
-            print("🔍 Audio duration: \(durationUs / 1000) ms")
+            PluginLog.print("🔍 Audio duration: \(durationUs / 1000) ms")
             return durationUs
         } catch {
-            print("❌ Failed to get audio duration: \(error.localizedDescription)")
+            PluginLog.print("❌ Failed to get audio duration: \(error.localizedDescription)")
             return 0
         }
     }
@@ -117,7 +117,7 @@ internal class MediaInfoExtractor {
 
             return nil
         } catch {
-            print("❌ Failed to get audio channel count: \(error.localizedDescription)")
+            PluginLog.print("❌ Failed to get audio channel count: \(error.localizedDescription)")
             return nil
         }
     }
@@ -159,14 +159,14 @@ internal class MediaInfoExtractor {
                 let formatDesc = description as! CMFormatDescription
                 if let basicDesc = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) {
                     let sampleRate = Int(basicDesc.pointee.mSampleRate)
-                    print("🔍 Audio sample rate: \(sampleRate) Hz")
+                    PluginLog.print("🔍 Audio sample rate: \(sampleRate) Hz")
                     return sampleRate
                 }
             }
 
             return 0
         } catch {
-            print("❌ Failed to get audio sample rate: \(error.localizedDescription)")
+            PluginLog.print("❌ Failed to get audio sample rate: \(error.localizedDescription)")
             return 0
         }
     }
@@ -248,7 +248,7 @@ internal class MediaInfoExtractor {
     static func getVideoFormatInfo(_ videoPath: String) async -> VideoFormatInfo {
         let url = URL(fileURLWithPath: videoPath)
         guard FileManager.default.fileExists(atPath: url.path) else {
-            print("❌ Video file does not exist: \(videoPath)")
+            PluginLog.print("❌ Video file does not exist: \(videoPath)")
             return VideoFormatInfo(isHevc: false, bitDepth: 8, isHdr: false, profile: nil)
         }
 
@@ -323,7 +323,7 @@ internal class MediaInfoExtractor {
                 }
             }
 
-            print(
+            PluginLog.print(
                 "🔍 Video format: path=\(videoPath), isHevc=\(isHevc), bitDepth=\(bitDepth), isHdr=\(isHdr), profile=\(profile ?? "unknown")"
             )
 
@@ -331,7 +331,7 @@ internal class MediaInfoExtractor {
                 isHevc: isHevc, bitDepth: bitDepth, isHdr: isHdr, profile: profile)
 
         } catch {
-            print(
+            PluginLog.print(
                 "❌ Failed to get video format info for \(videoPath): \(error.localizedDescription)")
             return VideoFormatInfo(isHevc: false, bitDepth: 8, isHdr: false, profile: nil)
         }

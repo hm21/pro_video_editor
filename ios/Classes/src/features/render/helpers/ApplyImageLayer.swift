@@ -25,6 +25,6 @@ func applyImageLayer(
     config.imageBytesWithCropping = withCropping
 
     if !imageLayers.isEmpty {
-        print("[\(Tags.render)] 🖼️ Applying \(imageLayers.count) image layer(s) with timing")
+        PluginLog.print("[\(Tags.render)] 🖼️ Applying \(imageLayers.count) image layer(s) with timing")
     }
 }

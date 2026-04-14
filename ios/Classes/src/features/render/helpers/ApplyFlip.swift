@@ -20,5 +20,5 @@ func applyFlip(
   if !flipX && !flipY { return }
 
   let flipType = flipX && flipY ? "both axes" : flipX ? "horizontal" : "vertical"
-  print("[\(Tags.render)] 🔄 Applying flip: \(flipType)")
+  PluginLog.print("[\(Tags.render)] 🔄 Applying flip: \(flipType)")
 }

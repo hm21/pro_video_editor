@@ -38,7 +38,7 @@ internal class VideoSequenceBuilder {
         }
 
         let durationMs = Int(totalDuration.seconds * 1000)
-        print("🔍 Total video duration: \(durationMs) ms")
+        PluginLog.print("🔍 Total video duration: \(durationMs) ms")
         return totalDuration
     }
 
@@ -77,8 +77,8 @@ internal class VideoSequenceBuilder {
             )
         }
 
-        print("🎬 Building video sequence with \(videoClips.count) clips")
-        print("🔊 Audio enabled: \(enableAudio)")
+        PluginLog.print("🎬 Building video sequence with \(videoClips.count) clips")
+        PluginLog.print("🔊 Audio enabled: \(enableAudio)")
 
         var totalDuration = CMTime.zero
         var maxRenderSize = CGSize.zero
@@ -108,17 +108,17 @@ internal class VideoSequenceBuilder {
                 preferredTrackID: kCMPersistentTrackID_Invalid
             )
             if sharedAudioTrack != nil {
-                print("🔊 Created SHARED audio track for all clips (will prevent empty segments)")
+                PluginLog.print("🔊 Created SHARED audio track for all clips (will prevent empty segments)")
             }
         }
 
         // Process each video clip
         for (index, clip) in videoClips.enumerated() {
-            print("📹 Processing clip \(index): \(clip.inputPath)")
+            PluginLog.print("📹 Processing clip \(index): \(clip.inputPath)")
 
             let url = URL(fileURLWithPath: clip.inputPath)
             guard FileManager.default.fileExists(atPath: url.path) else {
-                print("❌ ERROR: Video file does not exist: \(clip.inputPath)")
+                PluginLog.print("❌ ERROR: Video file does not exist: \(clip.inputPath)")
                 throw NSError(
                     domain: "VideoSequenceBuilder",
                     code: 3,
@@ -148,13 +148,13 @@ internal class VideoSequenceBuilder {
             // Log video properties
             let angle = atan2(preferredTransform.b, preferredTransform.a)
             let degrees = angle * 180 / .pi
-            print("📹 Clip \(index) properties:")
-            print("   - Natural size: \(naturalSize.width) x \(naturalSize.height)")
-            print(
+            PluginLog.print("📹 Clip \(index) properties:")
+            PluginLog.print("   - Natural size: \(naturalSize.width) x \(naturalSize.height)")
+            PluginLog.print(
                 "   - Rotation: \(degrees)° (transform: [\(preferredTransform.a), \(preferredTransform.b), \(preferredTransform.c), \(preferredTransform.d), \(preferredTransform.tx), \(preferredTransform.ty)])"
             )
-            print("   - Display size: \(correctedSize.width) x \(correctedSize.height)")
-            print("   - Frame rate: \(nominalFrameRate) fps")
+            PluginLog.print("   - Display size: \(correctedSize.width) x \(correctedSize.height)")
+            PluginLog.print("   - Frame rate: \(nominalFrameRate) fps")
 
             // Update max render size
             if correctedSize.width > maxRenderSize.width
@@ -162,7 +162,7 @@ internal class VideoSequenceBuilder {
             {
                 let oldSize = maxRenderSize
                 maxRenderSize = correctedSize
-                print(
+                PluginLog.print(
                     "   - ⬆️ Max render size updated: \(oldSize.width)x\(oldSize.height) → \(maxRenderSize.width)x\(maxRenderSize.height)"
                 )
             }
@@ -197,13 +197,13 @@ internal class VideoSequenceBuilder {
                 let audioTrack = try? await MediaInfoExtractor.loadAudioTrack(from: asset),
                 let sharedAudioTrack = sharedAudioTrack
             {
-                print("🔊 Processing audio for clip \(index)...")
-                print("   ✅ Audio track loaded from asset")
-                print("      Track ID: \(audioTrack.trackID)")
-                print(
+                PluginLog.print("🔊 Processing audio for clip \(index)...")
+                PluginLog.print("   ✅ Audio track loaded from asset")
+                PluginLog.print("      Track ID: \(audioTrack.trackID)")
+                PluginLog.print(
                     "      Duration: \(String(format: "%.2f", audioTrack.timeRange.duration.seconds))s"
                 )
-                print("      Format: \(audioTrack.mediaType)")
+                PluginLog.print("      Format: \(audioTrack.mediaType)")
 
                 do {
                     try sharedAudioTrack.insertTimeRange(
@@ -211,62 +211,62 @@ internal class VideoSequenceBuilder {
                         of: audioTrack,
                         at: totalDuration
                     )
-                    print("   ✅ Audio inserted into SHARED track!")
-                    print(
+                    PluginLog.print("   ✅ Audio inserted into SHARED track!")
+                    PluginLog.print(
                         "      Source time range: \(String(format: "%.2f", clipTimeRange.start.seconds))s - \(String(format: "%.2f", (clipTimeRange.start + clipTimeRange.duration).seconds))s"
                     )
-                    print(
+                    PluginLog.print(
                         "      Inserted at composition time: \(String(format: "%.2f", totalDuration.seconds))s"
                     )
-                    print(
+                    PluginLog.print(
                         "      Audio duration: \(String(format: "%.2f", clipTimeRange.duration.seconds))s"
                     )
                 } catch {
-                    print("   ❌ ERROR inserting audio: \(error.localizedDescription)")
-                    print("      Error details: \(error)")
+                    PluginLog.print("   ❌ ERROR inserting audio: \(error.localizedDescription)")
+                    PluginLog.print("      Error details: \(error)")
                 }
             }
 
             totalDuration = CMTimeAdd(totalDuration, clipDuration)
-            print("✅ Clip \(index) added successfully")
-            print("   - Duration: \(String(format: "%.2f", clipDuration.seconds))s")
-            print(
+            PluginLog.print("✅ Clip \(index) added successfully")
+            PluginLog.print("   - Duration: \(String(format: "%.2f", clipDuration.seconds))s")
+            PluginLog.print(
                 "   - Time range in composition: \(String(format: "%.2f", totalDuration.seconds - clipDuration.seconds))s - \(String(format: "%.2f", totalDuration.seconds))s"
             )
         }
 
-        print("")
-        print("📊 ===== VIDEO SEQUENCE SUMMARY =====")
-        print("   Total clips: \(videoClips.count)")
-        print("   Total duration: \(String(format: "%.2f", totalDuration.seconds))s")
-        print("   Max render size: \(maxRenderSize.width) x \(maxRenderSize.height)")
-        print("   Max frame rate: \(maxFrameRate) fps")
-        print("   Clip instructions: \(clipInstructions.count)")
+        PluginLog.print("")
+        PluginLog.print("📊 ===== VIDEO SEQUENCE SUMMARY =====")
+        PluginLog.print("   Total clips: \(videoClips.count)")
+        PluginLog.print("   Total duration: \(String(format: "%.2f", totalDuration.seconds))s")
+        PluginLog.print("   Max render size: \(maxRenderSize.width) x \(maxRenderSize.height)")
+        PluginLog.print("   Max frame rate: \(maxFrameRate) fps")
+        PluginLog.print("   Clip instructions: \(clipInstructions.count)")
 
         // Handle shared audio track - add to result if it has segments, otherwise remove from composition
         if let audioTrack = sharedAudioTrack {
             if !audioTrack.segments.isEmpty {
                 originalAudioTracks.append(audioTrack)
-                print(
+                PluginLog.print(
                     "   🔊 AUDIO TRACKS: 1 (shared track with \(audioTrack.segments.count) segment(s))"
                 )
                 for (segIdx, segment) in audioTrack.segments.enumerated() {
                     let timeMapping = segment as AVCompositionTrackSegment
-                    print(
+                    PluginLog.print(
                         "      Segment \(segIdx): \(String(format: "%.2f", timeMapping.timeMapping.target.start.seconds))s - \(String(format: "%.2f", (timeMapping.timeMapping.target.start + timeMapping.timeMapping.target.duration).seconds))s (duration: \(String(format: "%.2f", timeMapping.timeMapping.target.duration.seconds))s)"
                     )
                 }
             } else {
                 // Remove empty audio track from composition to prevent export errors
                 composition.removeTrack(audioTrack)
-                print("   🔊 AUDIO TRACKS: 0 (shared track was empty and removed from composition)")
+                PluginLog.print("   🔊 AUDIO TRACKS: 0 (shared track was empty and removed from composition)")
             }
         } else {
-            print("   🔊 AUDIO TRACKS: 0 (no audio track created)")
+            PluginLog.print("   🔊 AUDIO TRACKS: 0 (no audio track created)")
         }
 
-        print("=====================================")
-        print("")
+        PluginLog.print("=====================================")
+        PluginLog.print("")
 
         return VideoSequenceResult(
             videoTrack: compositionVideoTrack,

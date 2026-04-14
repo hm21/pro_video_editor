@@ -1,9 +1,9 @@
-import android.util.Log
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.SingleColorLut
 import androidx.media3.effect.TimestampWrapper
 import ch.waio.pro_video_editor.src.features.render.models.ColorFilterConfig
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 
 /**
  * Applies color matrix transformation using 3D LUT (Look-Up Table).

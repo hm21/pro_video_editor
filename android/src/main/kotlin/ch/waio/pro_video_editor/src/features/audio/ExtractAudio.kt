@@ -7,9 +7,9 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import ch.waio.pro_video_editor.src.features.audio.models.AudioExtractConfig
 import ch.waio.pro_video_editor.src.features.audio.models.AudioExtractJobHandle
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import java.io.File
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean

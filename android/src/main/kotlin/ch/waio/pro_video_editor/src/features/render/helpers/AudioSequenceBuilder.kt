@@ -2,7 +2,6 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
 import android.net.Uri
-import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.ChannelMixingAudioProcessor
@@ -11,6 +10,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import java.io.File
 
 /**

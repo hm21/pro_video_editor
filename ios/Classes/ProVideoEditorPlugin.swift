@@ -50,6 +50,8 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
   /// - extractAudio: Extracts audio from video
   /// - cancelTask: Cancels active render or audio extraction task
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    applyInlineNativeLogLevel(call: call)
+
     switch call.method {
     case "getPlatformVersion":
       handleGetPlatformVersion(result: result)
@@ -80,6 +82,21 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
 
     default:
       result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func applyInlineNativeLogLevel(call: FlutterMethodCall) {
+    guard let args = call.arguments as? [String: Any],
+      let level = args["nativeLogLevel"] as? String,
+      !level.isEmpty
+    else {
+      return
+    }
+
+    do {
+      try PluginLog.setMinimumLevel(level)
+    } catch {
+      PluginLog.print("⚠️ Ignoring invalid nativeLogLevel '\(level)': \(error.localizedDescription)")
     }
   }
 

@@ -2,7 +2,6 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
 import android.net.Uri
-import android.util.Log
 import applyScale
 import androidx.media3.common.C
 import androidx.media3.common.Effect
@@ -17,6 +16,7 @@ import androidx.media3.transformer.Effects
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import java.io.File
 
 /**
