@@ -20,24 +20,27 @@ import java.nio.ByteBuffer
  * to each audio source during the mixing process.
  *
  * @property trackVolumes Volume multipliers for each audio track sequence (0.0-1.0+)
- * @property videoAudioPresent Whether video audio is present (not removed due to volume=0)
+ * @property videoAudioSourceCount Number of video sequences that have active audio
+ * @property videoSequenceVolumes Volume multipliers for each video sequence
  */
 @UnstableApi
 class VolumeControlAudioMixerFactory(
     private val trackVolumes: List<Float>,
-    private val videoAudioPresent: Boolean
+    private val videoAudioSourceCount: Int,
+    private val videoSequenceVolumes: List<Float>
 ) : AudioMixer.Factory {
 
     init {
         Log.d(
             RENDER_TAG,
-            "VolumeControlAudioMixerFactory created: trackVolumes=$trackVolumes, videoAudioPresent=$videoAudioPresent"
+            "VolumeControlAudioMixerFactory created: trackVolumes=$trackVolumes, " +
+                    "videoAudioSourceCount=$videoAudioSourceCount, videoSequenceVolumes=$videoSequenceVolumes"
         )
     }
 
     override fun create(): AudioMixer {
         Log.d(RENDER_TAG, "Creating VolumeControlAudioMixer")
-        return VolumeControlAudioMixer(trackVolumes, videoAudioPresent)
+        return VolumeControlAudioMixer(trackVolumes, videoAudioSourceCount, videoSequenceVolumes)
     }
 }
 
@@ -47,17 +50,15 @@ class VolumeControlAudioMixerFactory(
  * When sources are added, it tracks their IDs and applies the appropriate volume
  * using DefaultAudioMixer.setSourceVolume() after each source is added.
  *
- * If videoAudioPresent is true (mixing video + audio tracks):
- *   Source 0 = Video audio (first sequence) - volume 1.0 (per-clip volume not available in mixer mode)
- *   Source 1..N = Audio tracks - applies trackVolumes[0], trackVolumes[1], etc.
- * 
- * If videoAudioPresent is false (no video audio):
- *   Source 0..N = Audio tracks - applies trackVolumes[0], trackVolumes[1], etc.
+ * Source order in Media3 Composition (Mixed):
+ *   Source 0..N-1 = Video audio (from each sequence that has an AUDIO track)
+ *   Source N..M = Audio tracks
  */
 @UnstableApi
 private class VolumeControlAudioMixer(
     private val trackVolumes: List<Float>,
-    private val videoAudioPresent: Boolean
+    private val videoAudioSourceCount: Int,
+    private val videoSequenceVolumes: List<Float>
 ) : AudioMixer {
 
     private val delegate: DefaultAudioMixer =
@@ -90,26 +91,19 @@ private class VolumeControlAudioMixer(
     override fun addSource(sourceFormat: AudioProcessor.AudioFormat, startTimeUs: Long): Int {
         val sourceId = delegate.addSource(sourceFormat, startTimeUs)
 
-        // Determine which volume to apply based on source order and whether video audio is present
+        // Determine which volume to apply based on source order
         val volume: Float
         val sourceType: String
 
-        if (videoAudioPresent) {
-            // Both video and audio tracks present (mixing mode)
-            // Source 0 = Video audio, Source 1..N = Audio tracks
-            if (sourceCount == 0) {
-                volume = 1.0f  // Video audio at full volume (per-clip volume not available in mixer mode)
-                sourceType = "VIDEO AUDIO"
-            } else {
-                val trackIndex = sourceCount - 1
-                volume = trackVolumes.getOrElse(trackIndex) { 1.0f }
-                sourceType = "AUDIO TRACK $trackIndex"
-            }
+        if (sourceCount < videoAudioSourceCount) {
+            // Source is a video audio track
+            volume = videoSequenceVolumes.getOrElse(sourceCount) { 1.0f }
+            sourceType = "VIDEO AUDIO (Sequence $sourceCount)"
         } else {
-            // Video audio was removed - only audio tracks present
-            val trackIndex = sourceCount
+            // Source is an audio track
+            val trackIndex = sourceCount - videoAudioSourceCount
             volume = trackVolumes.getOrElse(trackIndex) { 1.0f }
-            sourceType = "AUDIO TRACK $trackIndex (no video audio)"
+            sourceType = "AUDIO TRACK $trackIndex"
         }
 
         Log.d(

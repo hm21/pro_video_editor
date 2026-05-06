@@ -35,4 +35,12 @@ struct VideoCompositorConfig {
     /// Fallback source track ID for older iOS versions where sourceTrackIDs may be empty.
     /// This is used when the custom compositor doesn't receive track IDs properly.
     var sourceTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
+
+    /// Mapping of track ID to video clip configuration for multi-track compositing
+    var videoClipConfigs: [CMPersistentTrackID: VideoClip] = [:]
+
+    /// The intended render size of the composition (logical coordinate space).
+    /// This is used to calculate scale factors if the actual render context size
+    /// differs from the intended size (e.g. due to AVAssetExportSession presets).
+    var intendedRenderSize: CGSize = .zero
 }

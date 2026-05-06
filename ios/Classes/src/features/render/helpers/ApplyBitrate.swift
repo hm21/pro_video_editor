@@ -7,8 +7,9 @@ import AVFoundation
 /// resolution/quality presets.
 ///
 /// - Parameters:
-///   - requestedBitrate: Target bitrate in bits per second. If nil, returns preset hint or highest quality.
-///   - presetHint: Optional preset to use as fallback. If nil, defaults to highest quality.
+///   - requestedBitrate: Target bitrate in bits per second. If nil, returns highest quality.
+///   - renderWidth: Optional target render width to ensure preset supports the resolution.
+///   - renderHeight: Optional target render height to ensure preset supports the resolution.
 /// - Returns: AVAssetExportPreset string matching the requested quality level.
 ///
 /// Bitrate mapping:
@@ -23,7 +24,28 @@ import AVFoundation
 /// - ≥2 Mbps: 480p
 /// - ≥1 Mbps: Medium quality
 /// - <1 Mbps: Low quality
-public func applyBitrate(requestedBitrate: Int?, presetHint: String? = nil) -> String {
+public func applyBitrate(
+    requestedBitrate: Int?,
+    renderWidth: Double? = nil,
+    renderHeight: Double? = nil
+) -> String {
+    // If a custom resolution is provided, we should ideally use a "HighestQuality"
+    // preset to avoid resolution constraints from bitrate-based presets.
+    // However, if a bitrate is also specified, we'll try to pick the best matching one.
+    if let rw = renderWidth, let rh = renderHeight {
+        let maxDim = max(rw, rh)
+
+        if maxDim > 1920 {
+            if #available(iOS 11.0, *) {
+                return AVAssetExportPresetHEVC3840x2160
+            } else {
+                return AVAssetExportPreset3840x2160
+            }
+        } else if maxDim > 1280 {
+            return AVAssetExportPreset1920x1080
+        }
+    }
+
     if let bitrate = requestedBitrate {
         PluginLog.print(
             "[\(Tags.render)] 📊 Requested bitrate: \(bitrate) bps (\(String(format: "%.1f", Double(bitrate) / 1_000_000)) Mbps)"
@@ -73,5 +95,5 @@ public func applyBitrate(requestedBitrate: Int?, presetHint: String? = nil) -> S
         }
     }
 
-    return presetHint ?? AVAssetExportPresetHighestQuality
+    return AVAssetExportPresetHighestQuality
 }

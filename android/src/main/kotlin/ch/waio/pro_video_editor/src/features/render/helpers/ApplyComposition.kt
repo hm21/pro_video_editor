@@ -27,7 +27,7 @@ fun applyComposition(
     videoEffects: List<Effect>,
     audioEffects: List<AudioProcessor>
 ): Composition? {
-    return CompositionBuilder(context, config)
+    return CompositionBuilder(config, context)
         .setVideoEffects(videoEffects)
         .setAudioEffects(audioEffects)
         .build()

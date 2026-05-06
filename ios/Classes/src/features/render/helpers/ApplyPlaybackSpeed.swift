@@ -43,10 +43,10 @@ public func applyPlaybackSpeed(
         }
         let scaledStart = CMTimeMultiplyByFloat64(custom.timeRange.start, multiplier: multiplier)
         let scaledDuration = CMTimeMultiplyByFloat64(custom.timeRange.duration, multiplier: multiplier)
-        let trackID = (custom.requiredSourceTrackIDs?.first as? NSNumber)?.int32Value ?? kCMPersistentTrackID_Invalid
+        let trackIDs = custom.requiredSourceTrackIDs?.compactMap { ($0 as? NSNumber)?.int32Value } ?? []
         return CustomVideoCompositionInstruction(
             timeRange: CMTimeRange(start: scaledStart, duration: scaledDuration),
-            sourceTrackID: trackID,
+            sourceTrackIDs: trackIDs,
             layerInstructions: custom.layerInstructions,
             backgroundColor: custom.backgroundColor
         )

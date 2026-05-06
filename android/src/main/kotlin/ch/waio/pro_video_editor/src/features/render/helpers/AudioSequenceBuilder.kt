@@ -2,6 +2,7 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
 import android.net.Uri
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.ChannelMixingAudioProcessor
@@ -143,51 +144,45 @@ class AudioSequenceBuilder(
         val compEnd = compositionEndTimeUs ?: videoDurationUs
         val targetDurationUs = (compEnd - compStart).coerceAtLeast(0L)
 
-        // Build audio effects
-        val audioProcessors = buildAudioProcessors()
-        val audioEffects = Effects(audioProcessors, emptyList())
-
-        // Create audio content items with looping or single play
+        // Create audio content items with looping or single play.
+        // NOTE: AudioProcessor instances cannot be shared across multiple EditedMediaItems.
+        // We create fresh effects for each item inside the creation methods.
         val audioContentItems = if (loopAudio) {
             createLoopedAudioItems(
                 audioFile,
                 sourceEndUs,
                 effectiveAudioDurationUs,
-                targetDurationUs,
-                audioEffects
+                targetDurationUs
             )
         } else {
-            createSingleAudioItem(audioFile, sourceEndUs, effectiveAudioDurationUs, targetDurationUs, audioEffects)
+            createSingleAudioItem(audioFile, sourceEndUs, effectiveAudioDurationUs, targetDurationUs)
         }
 
-        val allItems = mutableListOf<EditedMediaItem>()
+        // Build audio sequence using addGap() for leading and trailing silence.
+        // This is more efficient than generating temporary silent WAV files
+        // and avoids potential NPEs with empty MediaItems.
+        val trackTypes = setOf(@C.TrackType C.TRACK_TYPE_AUDIO)
+        val sequenceBuilder = EditedMediaItemSequence.Builder(trackTypes)
 
         // Add leading silence if audio starts after composition time 0.
-        // Media3 parallel sequences always start at time 0, so we need
-        // silence padding to offset the audio to the correct position.
         if (compStart > 0) {
-            val silentItem = createSilentAudioItem(compStart, audioEffects)
-            if (silentItem != null) {
-                allItems.add(silentItem)
-                Log.d(RENDER_TAG, "Added ${compStart / 1000}ms leading silence for composition offset")
-            }
+            sequenceBuilder.addGap(compStart)
+            Log.d(RENDER_TAG, "Added ${compStart / 1000}ms leading gap for composition offset")
         }
 
-        allItems.addAll(audioContentItems)
+        for (item in audioContentItems) {
+            sequenceBuilder.addItem(item)
+        }
 
         // Add trailing silence so the sequence spans the full video duration.
-        // This ensures all parallel sequences have matching lengths.
         val totalContentDurationUs = compStart + targetDurationUs
         if (totalContentDurationUs < videoDurationUs) {
             val trailingDurationUs = videoDurationUs - totalContentDurationUs
-            val silentItem = createSilentAudioItem(trailingDurationUs, audioEffects)
-            if (silentItem != null) {
-                allItems.add(silentItem)
-                Log.d(RENDER_TAG, "Added ${trailingDurationUs / 1000}ms trailing silence")
-            }
+            sequenceBuilder.addGap(trailingDurationUs)
+            Log.d(RENDER_TAG, "Added ${trailingDurationUs / 1000}ms trailing gap")
         }
 
-        return EditedMediaItemSequence.Builder(allItems).build()
+        return sequenceBuilder.build()
     }
 
     /**
@@ -200,48 +195,7 @@ class AudioSequenceBuilder(
 
         // Add channel mixing if needed
         if (needsNormalization) {
-            val channelMixer = ChannelMixingAudioProcessor()
-
-            // 7.1 Surround (8 channels) to Stereo (2 channels)
-            // Channel order: FL, FR, FC, LFE, BL, BR, SL, SR
-            val eightToTwo = floatArrayOf(
-                1.0f, 0.0f, 0.707f, 0.0f, 0.707f, 0.0f, 0.707f, 0.0f,  // Left output
-                0.0f, 1.0f, 0.707f, 0.0f, 0.0f, 0.707f, 0.0f, 0.707f   // Right output
-            )
-            channelMixer.putChannelMixingMatrix(
-                ChannelMixingMatrix(8, 2, eightToTwo)
-            )
-
-            // 5.1 Surround (6 channels) to Stereo (2 channels)
-            // ITU-R BS.775 standard
-            val sixToTwo = floatArrayOf(
-                1.0f, 0.0f, 0.707f, 0.0f, 0.707f, 0.0f,  // Left output
-                0.0f, 1.0f, 0.707f, 0.0f, 0.0f, 0.707f   // Right output
-            )
-            channelMixer.putChannelMixingMatrix(
-                ChannelMixingMatrix(6, 2, sixToTwo)
-            )
-
-            // Quad (4 channels) to Stereo (2 channels)
-            val fourToTwo = floatArrayOf(
-                1.0f, 0.0f, 0.707f, 0.0f,  // Left output
-                0.0f, 1.0f, 0.0f, 0.707f   // Right output
-            )
-            channelMixer.putChannelMixingMatrix(
-                ChannelMixingMatrix(4, 2, fourToTwo)
-            )
-
-            // Stereo (2 channels) to Stereo (2 channels) - passthrough
-            channelMixer.putChannelMixingMatrix(
-                ChannelMixingMatrix.createForConstantGain(2, 2)
-            )
-
-            // Mono (1 channel) to Stereo (2 channels)
-            channelMixer.putChannelMixingMatrix(
-                ChannelMixingMatrix.createForConstantGain(1, 2)
-            )
-
-            processors.add(channelMixer)
+            processors.add(AudioMixingUtils.createStandardStereoMixer())
             Log.d(RENDER_TAG, "Added channel normalization for custom audio")
         }
 
@@ -268,14 +222,13 @@ class AudioSequenceBuilder(
         audioFile: File,
         sourceEndUs: Long,
         effectiveAudioDurationUs: Long,
-        targetDurationUs: Long,
-        effects: Effects
+        targetDurationUs: Long
     ): List<EditedMediaItem> {
         val audioItems = mutableListOf<EditedMediaItem>()
 
         if (effectiveAudioDurationUs <= 0 || targetDurationUs <= 0) {
             // Fallback: add audio once without duration constraints
-            val audioItem = createAudioItem(audioFile, startTimeUs, null, effects)
+            val audioItem = createAudioItem(audioFile, startTimeUs, null, Effects(buildAudioProcessors(), emptyList()))
             audioItems.add(audioItem)
             return audioItems
         }
@@ -308,7 +261,7 @@ class AudioSequenceBuilder(
                 if (audioEndTimeUs != null) loopEndUs else null
             }
 
-            val audioItem = createAudioItem(audioFile, loopStartUs, endPositionUs, effects)
+            val audioItem = createAudioItem(audioFile, loopStartUs, endPositionUs, Effects(buildAudioProcessors(), emptyList()))
             audioItems.add(audioItem)
             remainingDurationUs -= loopAudioDurationUs
             isFirstLoop = false
@@ -325,8 +278,7 @@ class AudioSequenceBuilder(
         audioFile: File,
         sourceEndUs: Long,
         effectiveAudioDurationUs: Long,
-        targetDurationUs: Long,
-        effects: Effects
+        targetDurationUs: Long
     ): List<EditedMediaItem> {
         val endPositionUs = if (effectiveAudioDurationUs > targetDurationUs && targetDurationUs > 0) {
             Log.d(RENDER_TAG, "Trimming audio to ${targetDurationUs / 1000} ms (no loop)")
@@ -344,7 +296,7 @@ class AudioSequenceBuilder(
             )
             null
         }
-        return listOf(createAudioItem(audioFile, startTimeUs, endPositionUs, effects))
+        return listOf(createAudioItem(audioFile, startTimeUs, endPositionUs, Effects(buildAudioProcessors(), emptyList())))
     }
 
     /**
@@ -376,86 +328,4 @@ class AudioSequenceBuilder(
             .build()
     }
 
-    /**
-     * Creates a silent audio EditedMediaItem of the specified duration.
-     *
-     * Media3 parallel sequences always start at time 0, so we use silence
-     * to offset audio to the correct composition position.
-     */
-    private fun createSilentAudioItem(durationUs: Long, effects: Effects): EditedMediaItem? {
-        if (durationUs <= 0) return null
-
-        val silentFile = generateSilentWavFile(durationUs)
-        if (silentFile == null) {
-            Log.e(RENDER_TAG, "Failed to create silent audio item")
-            return null
-        }
-
-        val mediaItem = MediaItem.Builder().setUri(Uri.fromFile(silentFile)).build()
-        return EditedMediaItem.Builder(mediaItem)
-            .setRemoveVideo(true)
-            .setEffects(effects)
-            .build()
-    }
-
-    /**
-     * Generates a temporary WAV file containing silence of the specified duration.
-     *
-     * Creates a valid PCM WAV file with stereo 44100Hz 16-bit silence.
-     */
-    private fun generateSilentWavFile(durationUs: Long): File? {
-        try {
-            val sampleRate = 44100
-            val channels = 2
-            val bitsPerSample = 16
-            val bytesPerSample = bitsPerSample / 8
-            val numSamples = (sampleRate * durationUs / 1_000_000.0).toInt()
-            val dataSize = numSamples * channels * bytesPerSample
-            val fileSize = 36 + dataSize
-
-            val file = File.createTempFile("silence_", ".wav")
-            file.deleteOnExit()
-
-            file.outputStream().use { out ->
-                // RIFF header
-                out.write("RIFF".toByteArray(Charsets.US_ASCII))
-                out.write(toLittleEndian(fileSize, 4))
-                out.write("WAVE".toByteArray(Charsets.US_ASCII))
-
-                // fmt subchunk
-                out.write("fmt ".toByteArray(Charsets.US_ASCII))
-                out.write(toLittleEndian(16, 4))  // Subchunk1Size (PCM)
-                out.write(toLittleEndian(1, 2))   // AudioFormat (PCM = 1)
-                out.write(toLittleEndian(channels, 2))
-                out.write(toLittleEndian(sampleRate, 4))
-                out.write(toLittleEndian(sampleRate * channels * bytesPerSample, 4))
-                out.write(toLittleEndian(channels * bytesPerSample, 2))
-                out.write(toLittleEndian(bitsPerSample, 2))
-
-                // data subchunk
-                out.write("data".toByteArray(Charsets.US_ASCII))
-                out.write(toLittleEndian(dataSize, 4))
-
-                // Write silence (all zeros)
-                val buffer = ByteArray(8192)
-                var remaining = dataSize
-                while (remaining > 0) {
-                    val toWrite = minOf(remaining, buffer.size)
-                    out.write(buffer, 0, toWrite)
-                    remaining -= toWrite
-                }
-            }
-
-            Log.d(RENDER_TAG, "Generated ${durationUs / 1000}ms silent WAV: ${file.absolutePath}")
-            return file
-        } catch (e: Exception) {
-            Log.e(RENDER_TAG, "Failed to generate silent WAV: ${e.message}")
-            return null
-        }
-    }
-
-    /** Converts an integer to little-endian byte array. */
-    private fun toLittleEndian(value: Int, numBytes: Int): ByteArray {
-        return ByteArray(numBytes) { i -> ((value shr (8 * i)) and 0xFF).toByte() }
-    }
 }

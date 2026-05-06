@@ -25,9 +25,7 @@ public func applyPlaybackSpeed(
     guard let speed = speed, speed > 0, speed != 1 else { return instructions }
 
     let speedType = speed < 1 ? "slow motion" : "fast forward"
-    PluginLog.print(
-        "[\(Tags.render)] ⚡ Applying playback speed: \(String(format: "%.2f", speed))x (\(speedType))"
-    )
+    PluginLog.print("[\(Tags.render)] ⚡ Applying playback speed: \(String(format: "%.2f", speed))x (\(speedType))")
 
     let multiplier = 1.0 / Double(speed)
 
@@ -44,14 +42,11 @@ public func applyPlaybackSpeed(
             return instruction
         }
         let scaledStart = CMTimeMultiplyByFloat64(custom.timeRange.start, multiplier: multiplier)
-        let scaledDuration = CMTimeMultiplyByFloat64(
-            custom.timeRange.duration, multiplier: multiplier)
-        let trackID =
-            (custom.requiredSourceTrackIDs?.first as? NSNumber)?.int32Value
-            ?? kCMPersistentTrackID_Invalid
+        let scaledDuration = CMTimeMultiplyByFloat64(custom.timeRange.duration, multiplier: multiplier)
+        let trackIDs = custom.requiredSourceTrackIDs?.compactMap { ($0 as? NSNumber)?.int32Value } ?? []
         return CustomVideoCompositionInstruction(
             timeRange: CMTimeRange(start: scaledStart, duration: scaledDuration),
-            sourceTrackID: trackID,
+            sourceTrackIDs: trackIDs,
             layerInstructions: custom.layerInstructions,
             backgroundColor: custom.backgroundColor
         )

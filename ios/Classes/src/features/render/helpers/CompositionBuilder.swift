@@ -12,6 +12,8 @@ internal class CompositionBuilder {
     private let videoEffects: VideoCompositorConfig
     private var enableAudio: Bool = true
     private var audioTracks: [AudioTrackConfig] = []
+    private var renderWidth: Double?
+    private var renderHeight: Double?
 
     /// Initializes builder with configuration.
     ///
@@ -21,6 +23,13 @@ internal class CompositionBuilder {
     init(videoClips: [VideoClip], videoEffects: VideoCompositorConfig) {
         self.videoClips = videoClips
         self.videoEffects = videoEffects
+    }
+
+    /// Sets the target render size.
+    func setRenderSize(width: Double?, height: Double?) -> CompositionBuilder {
+        self.renderWidth = width
+        self.renderHeight = height
+        return self
     }
 
     /// Enables or disables audio.
@@ -46,7 +55,7 @@ internal class CompositionBuilder {
     /// - Returns: Tuple containing composition, video composition, render size, audio mix, and source track ID
     /// - Throws: Error if composition creation fails
     func build() async throws -> (
-        AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID
+        AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID, VideoCompositorConfig
     ) {
         guard !videoClips.isEmpty else {
             throw NSError(
@@ -64,8 +73,13 @@ internal class CompositionBuilder {
         // Build video sequence
         let videoBuilder = VideoSequenceBuilder(videoClips: videoClips)
             .setEnableAudio(enableAudio)
+            .setRenderSize(width: renderWidth, height: renderHeight)
 
         let videoResult = try await videoBuilder.build(in: composition)
+
+        // Store track configs for compositor
+        var updatedVideoEffects = videoEffects
+        updatedVideoEffects.videoClipConfigs = videoResult.trackConfigs
 
         // Add custom audio tracks
         var customAudioTracks: [(track: AVMutableCompositionTrack, config: AudioTrackConfig)] = []
@@ -106,9 +120,7 @@ internal class CompositionBuilder {
         )
         let compositionRenderSize = videoResult.renderSize
 
-        // Create instructions for each clip segment
-        // Use custom instruction class to ensure requiredSourceTrackIDs is properly set
-        // This fixes issues on older iOS versions (e.g., iPhone 7, iOS 15)
+        // Create instructions for each non-overlapping time segment
         var instructions: [AVVideoCompositionInstructionProtocol] = []
 
         PluginLog.print("")
@@ -120,6 +132,8 @@ internal class CompositionBuilder {
         PluginLog.print("==========================================")
         PluginLog.print("")
 
+        // Calculate pre-determined transforms for all clips
+        var clipTransforms: [CGAffineTransform] = []
         for (index, clipInstruction) in videoResult.clipInstructions.enumerated() {
             PluginLog.print("🎬 Processing instruction for clip \(index)")
             PluginLog.print(
@@ -133,36 +147,55 @@ internal class CompositionBuilder {
                 with: clipInstruction.transform,
                 clipIndex: index
             )
+            clipTransforms.append(transform)
+        }
 
-            let layerInstruction: AVVideoCompositionLayerInstruction
-            if #available(iOS 26.0, *) {
-                var config = AVVideoCompositionLayerInstruction.Configuration(
-                    assetTrack: videoResult.videoTrack
-                )
-                config.setTransform(transform, at: .zero)
-                layerInstruction = AVVideoCompositionLayerInstruction(configuration: config)
-            } else {
-                let mutableInstruction = AVMutableVideoCompositionLayerInstruction(
-                    assetTrack: videoResult.videoTrack
-                )
-                mutableInstruction.setTransform(transform, at: .zero)
-                layerInstruction = mutableInstruction
+        // Calculate non-overlapping time segments
+        let segments = calculateSegments(
+            from: videoResult.clipInstructions,
+            totalDuration: videoResult.totalDuration
+        )
+
+        for (segIndex, segmentRange) in segments.enumerated() {
+            PluginLog.print("🎬 Processing segment \(segIndex)")
+            PluginLog.print(
+                "   Time range: \(String(format: "%.2f", segmentRange.start.seconds))s - \(String(format: "%.2f", (segmentRange.start + segmentRange.duration).seconds))s"
+            )
+
+            var activeTrackIDs: [CMPersistentTrackID] = []
+            var layerInstructions: [AVVideoCompositionLayerInstruction] = []
+
+            for (clipIndex, clipInstruction) in videoResult.clipInstructions.enumerated() {
+                // Check if this clip is active during this segment
+                let clipRange = clipInstruction.timeRange
+                let intersection = CMTimeRangeGetIntersection(segmentRange, otherRange: clipRange)
+
+                if CMTimeGetSeconds(intersection.duration) > 0 {
+                    activeTrackIDs.append(clipInstruction.trackID)
+
+                    let transform = clipTransforms[clipIndex]
+                    let mutableLayerInstruction = AVMutableVideoCompositionLayerInstruction(
+                        assetTrack: composition.track(withTrackID: clipInstruction.trackID)!
+                    )
+                    mutableLayerInstruction.setTransform(transform, at: .zero)
+                    layerInstructions.append(mutableLayerInstruction)
+
+                    PluginLog.print("   - Added trackID \(clipInstruction.trackID) (Clip \(clipIndex))")
+                }
             }
 
-            // Use custom instruction that explicitly provides requiredSourceTrackIDs
-            let instruction = CustomVideoCompositionInstruction(
-                timeRange: clipInstruction.timeRange,
-                sourceTrackID: videoResult.videoTrack.trackID,
-                layerInstructions: [layerInstruction],
-                backgroundColor: CGColor(red: 0, green: 0, blue: 0, alpha: 1)
-            )
-
-            PluginLog.print(
-                "   ⚙️ Layer instruction configured with transform (trackID: \(videoResult.videoTrack.trackID))"
-            )
+            if !layerInstructions.isEmpty {
+                // Use custom instruction that explicitly provides requiredSourceTrackIDs
+                let instruction = CustomVideoCompositionInstruction(
+                    timeRange: segmentRange,
+                    sourceTrackIDs: activeTrackIDs,
+                    layerInstructions: layerInstructions,
+                    backgroundColor: CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+                )
+                instructions.append(instruction)
+                PluginLog.print("   ✅ Segment instruction created with \(layerInstructions.count) layers")
+            }
             PluginLog.print("")
-
-            instructions.append(instruction)
         }
 
         let videoCompositionData = VideoCompositionData(
@@ -173,10 +206,10 @@ internal class CompositionBuilder {
 
         PluginLog.print("✅ Composition created successfully with \(videoClips.count) clips")
 
-        // Return the track ID for fallback on older iOS versions
-        let sourceTrackID = videoResult.videoTrack.trackID
+        // Return the first track ID for fallback on older iOS versions
+        let sourceTrackID = videoResult.clipInstructions.first?.trackID ?? kCMPersistentTrackID_Invalid
 
-        return (composition, videoCompositionData, videoResult.renderSize, audioMix, sourceTrackID)
+        return (composition, videoCompositionData, videoResult.renderSize, audioMix, sourceTrackID, updatedVideoEffects)
     }
 
     /// Creates audio mix with per-clip and per-track volume parameters.
@@ -191,11 +224,17 @@ internal class CompositionBuilder {
         for track in originalTracks {
             let inputParameters = AVMutableAudioMixInputParameters(track: track)
 
-            // Use setVolumeRamp for each clip's time range to ensure
-            // volume changes are applied precisely per segment
-            for (index, clipInstruction) in clipInstructions.enumerated() {
+            // Find all instructions that apply to this specific audio track
+            let relevantInstructions = clipInstructions.enumerated().filter { _, instruction in
+                instruction.audioTrackID == track.trackID
+            }
+
+            for (index, clipInstruction) in relevantInstructions {
                 let clipVolume = index < videoClips.count
                     ? (videoClips[index].volume ?? 1.0) : 1.0
+
+                PluginLog.print("🔊 Setting volume ramp for track \(track.trackID): volume=\(clipVolume) at \(String(format: "%.2f", clipInstruction.timeRange.start.seconds))s")
+
                 inputParameters.setVolumeRamp(
                     fromStartVolume: clipVolume,
                     toEndVolume: clipVolume,
@@ -204,7 +243,7 @@ internal class CompositionBuilder {
             }
 
             audioMixInputParameters.append(inputParameters)
-            PluginLog.print("🔊 Applied per-clip volume to original audio track")
+            PluginLog.print("🔊 Applied per-clip volume to original audio track (ID: \(track.trackID))")
         }
 
         // Apply volume to custom audio tracks
@@ -234,6 +273,16 @@ internal class CompositionBuilder {
         with preferredTransform: CGAffineTransform,
         clipIndex: Int
     ) -> CGAffineTransform {
+        // If manual positioning is requested, use the preferred transform as-is.
+        // The compositor will handle custom scaling and positioning based on VideoClip config.
+        if clipIndex < videoClips.count {
+            let clip = videoClips[clipIndex]
+            if clip.x != nil || clip.y != nil || clip.width != nil || clip.height != nil {
+                PluginLog.print("   🎯 Manual positioning detected for clip \(clipIndex), skipping fit and center transform")
+                return preferredTransform
+            }
+        }
+
         // Get the display size after applying the original transform (handles rotation)
         let displaySize = naturalSize.applying(preferredTransform)
         let videoWidth = abs(displaySize.width)
@@ -314,5 +363,40 @@ internal class CompositionBuilder {
         PluginLog.print("")
 
         return transform
+    }
+
+    /// Calculates non-overlapping time segments from clip instructions.
+    private func calculateSegments(from instructions: [ClipInstruction], totalDuration: CMTime) -> [CMTimeRange] {
+        var points: [CMTime] = [.zero, totalDuration]
+        for instruction in instructions {
+            points.append(instruction.timeRange.start)
+            points.append(CMTimeAdd(instruction.timeRange.start, instruction.timeRange.duration))
+        }
+
+        let sortedPoints = points
+            .filter { CMTimeCompare($0, totalDuration) <= 0 }
+            .sorted { CMTimeCompare($0, $1) < 0 }
+
+        var uniquePoints: [CMTime] = []
+        for point in sortedPoints {
+            if let last = uniquePoints.last {
+                if CMTimeCompare(last, point) != 0 {
+                    uniquePoints.append(point)
+                }
+            } else {
+                uniquePoints.append(point)
+            }
+        }
+
+        var segments: [CMTimeRange] = []
+        for i in 0..<uniquePoints.count - 1 {
+            let start = uniquePoints[i]
+            let end = uniquePoints[i+1]
+            let duration = CMTimeSubtract(end, start)
+            if CMTimeGetSeconds(duration) > 0 {
+                segments.append(CMTimeRange(start: start, duration: duration))
+            }
+        }
+        return segments
     }
 }

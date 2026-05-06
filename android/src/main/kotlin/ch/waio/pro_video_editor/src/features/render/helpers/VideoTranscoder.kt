@@ -15,6 +15,7 @@ import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import androidx.media3.transformer.Effects
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference
@@ -44,19 +45,21 @@ object VideoTranscoder {
     }
 
     /**
-     * Checks if a video needs transcoding for effect compatibility.
+     * Checks if a video needs transcoding for compatibility.
      * 
      * @param videoPath Path to the video file
      * @return True if transcoding is needed
      */
     fun needsTranscoding(videoPath: String): Boolean {
         val formatInfo = MediaInfoExtractor.getVideoFormatInfo(videoPath)
-        val needsTranscode = formatInfo.needsTranscodingForEffects()
+        val audioChannels = MediaInfoExtractor.getAudioChannelCount(videoPath) ?: 2
+        
+        val needsTranscode = formatInfo.needsTranscodingForEffects() || audioChannels > 2
 
         Log.d(
             RENDER_TAG, "Video transcoding check: path=$videoPath, " +
                     "isHevc=${formatInfo.isHevc}, bitDepth=${formatInfo.bitDepth}, " +
-                    "isHdr=${formatInfo.isHdr}, needsTranscoding=$needsTranscode"
+                    "isHdr=${formatInfo.isHdr}, channels=$audioChannels, needsTranscoding=$needsTranscode"
         )
 
         return needsTranscode
@@ -82,7 +85,7 @@ object VideoTranscoder {
             return TranscodeResult.NotNeeded(inputPath)
         }
 
-        Log.i(RENDER_TAG, "Starting HEVC 10-bit HDR -> H.264 8-bit SDR transcoding for: $inputPath")
+        Log.i(RENDER_TAG, "Starting HEVC 10-bit HDR or Multi-channel -> H.264 8-bit Stereo transcoding for: $inputPath")
 
         val outputFile = File(
             context.cacheDir,
@@ -138,10 +141,12 @@ object VideoTranscoder {
                     .build()
 
                 // Use HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL to convert HDR to SDR
-                // This forces 8-bit output which then allows H.264 encoding
+                // This forces 8-bit output which then allows H.264 encoding.
+                // Also add standard audio normalization to ensure stereo output.
                 val editedMediaItem = EditedMediaItem.Builder(mediaItem)
                     .setRemoveAudio(false)
                     .setRemoveVideo(false)
+                    .setEffects(Effects(listOf(AudioMixingUtils.createStandardStereoMixer()), emptyList()))
                     .build()
 
                 // Build composition with HDR tonemapping enabled

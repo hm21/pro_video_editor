@@ -67,7 +67,7 @@ fun applyImageLayer(
 @UnstableApi
 fun applyTimedImageLayers(
     videoEffects: MutableList<Effect>,
-    imageLayers: List<VideoSequenceBuilder.ImageLayerConfig>,
+    imageLayers: List<ImageLayer>,
     videoWidth: Int,
     videoHeight: Int
 ) {
@@ -79,7 +79,7 @@ fun applyTimedImageLayers(
     )
     for (layer in imageLayers) {
         try {
-            val imageBytes = layer.imageBytes ?: continue
+            val imageBytes = layer.imageData
             val options = BitmapFactory.Options().apply {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }

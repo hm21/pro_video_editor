@@ -75,7 +75,14 @@ class RenderVideo {
                                 inputPath: newPath,
                                 startUs: clip.startUs,
                                 endUs: clip.endUs,
-                                volume: clip.volume
+                                volume: clip.volume,
+                                opacity: clip.opacity,
+                                x: clip.x,
+                                y: clip.y,
+                                width: clip.width,
+                                height: clip.height,
+                                segmentTimeUs: clip.segmentTimeUs,
+                                zIndex: clip.zIndex
                             )
                         }
                         return clip
@@ -139,13 +146,16 @@ class RenderVideo {
                     var effectsConfig = VideoCompositorConfig()
 
                     // Use composition helper to merge multiple video clips
-                    let (composition, videoCompData, renderSize, audioMix, sourceTrackID) =
+                    let (composition, videoCompData, renderSize, audioMix, sourceTrackID, updatedEffectsConfig) =
                         try await applyComposition(
                             videoClips: workingConfig.videoClips,
                             videoEffects: effectsConfig,
                             enableAudio: workingConfig.enableAudio,
-                            audioTracks: workingConfig.audioTracks
+                            audioTracks: workingConfig.audioTracks,
+                            renderWidth: workingConfig.renderWidth,
+                            renderHeight: workingConfig.renderHeight
                         )
+                    effectsConfig = updatedEffectsConfig
                     var videoCompConfig = videoCompData
 
                     // Set source track ID for fallback on older macOS versions
@@ -236,10 +246,18 @@ class RenderVideo {
                     videoComposition.frameDuration = videoCompConfig.frameDuration
                     videoComposition.renderSize = finalRenderSize
                     videoComposition.instructions = videoCompConfig.instructions
+
+                    // Ensure compositor knows the intended logical size for coordinate mapping
+                    effectsConfig.intendedRenderSize = finalRenderSize
+
                     videoComposition.customVideoCompositorClass = makeVideoCompositorSubclass(
                         with: effectsConfig)
 
-                    let preset = applyBitrate(requestedBitrate: workingConfig.bitrate)
+                    let preset = applyBitrate(
+                        requestedBitrate: workingConfig.bitrate,
+                        renderWidth: workingConfig.renderWidth,
+                        renderHeight: workingConfig.renderHeight
+                    )
 
                     let export = try await prepareExportSession(
                         composition: composition,

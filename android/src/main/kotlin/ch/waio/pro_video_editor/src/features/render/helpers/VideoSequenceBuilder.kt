@@ -3,6 +3,7 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 import RENDER_TAG
 import android.net.Uri
 import applyScale
+import applyRotation
 import androidx.media3.common.C
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
@@ -35,7 +36,6 @@ class VideoSequenceBuilder(
     private var flipX: Boolean = false
     private var flipY: Boolean = false
     private var cropConfig: CropConfig? = null
-    private var timedImageLayers: List<ImageLayerConfig> = emptyList()
     private var enableAudio: Boolean = true
     private var needsAudioNormalization: Boolean = false
     private var forceRemoveAudio: Boolean = false
@@ -44,6 +44,8 @@ class VideoSequenceBuilder(
     private var hasCustomAudio: Boolean = false
     private var scaleX: Float? = null
     private var scaleY: Float? = null
+    private var renderWidth: Int? = null
+    private var renderHeight: Int? = null
 
     data class CropConfig(
         val width: Int?,
@@ -52,19 +54,14 @@ class VideoSequenceBuilder(
         val y: Int?
     )
 
-    data class ImageLayerConfig(
-        val imageBytes: ByteArray?,
-        val scaleX: Float?,
-        val scaleY: Float?,
-        val withCropping: Boolean = false,
-        val startUs: Long = 0,
-        val endUs: Long = -1,
-        val x: Int? = null,
-        val y: Int? = null,
-        val width: Double? = null,
-        val height: Double? = null,
-        val animations: List<LayerAnimationConfig> = emptyList()
-    )
+    /**
+     * Sets target render dimensions for composition-based positioning.
+     */
+    fun setRenderDimensions(width: Int?, height: Int?): VideoSequenceBuilder {
+        this.renderWidth = width
+        this.renderHeight = height
+        return this
+    }
 
     /**
      * Sets the video effects to apply to all clips.
@@ -113,14 +110,6 @@ class VideoSequenceBuilder(
      */
     fun setCrop(width: Int?, height: Int?, x: Int?, y: Int?): VideoSequenceBuilder {
         this.cropConfig = CropConfig(width, height, x, y)
-        return this
-    }
-
-    /**
-     * Sets time-based image layer overlays configuration.
-     */
-    fun setTimedImageLayers(layers: List<ImageLayerConfig>): VideoSequenceBuilder {
-        this.timedImageLayers = layers
         return this
     }
 
@@ -179,10 +168,17 @@ class VideoSequenceBuilder(
     /**
      * Detects if audio normalization is needed across video clips.
      *
-     * @return true if clips have different audio channel counts
+     * Only considers clips that have audio enabled (not muted).
+     *
+     * @return true if any active clip has > 2 channels (needs downmixing)
+     */
+    /**
+     * Detects if audio normalization is needed across video clips.
+     *
+     * @return true if any clip has non-stereo audio (needs downmixing)
      */
     fun detectAudioNormalizationNeeded(): Boolean {
-        if (!enableAudio || videoClips.size <= 1) {
+        if (!enableAudio) {
             return false
         }
 
@@ -190,18 +186,15 @@ class VideoSequenceBuilder(
             MediaInfoExtractor.getAudioChannelCount(clip.inputPath)
         }
 
-        val needsNormalization = audioChannelCounts.isNotEmpty() &&
-                audioChannelCounts.toSet().size > 1
+        // Normalize if any clip is NOT Stereo (2 channels).
+        // This includes Mono (1 channel) and Multi-channel (5.1/7.1).
+        // Forcing Stereo consistency prevents reconfiguration errors in Media3 AudioGraph.
+        val needsNormalization = audioChannelCounts.any { it != 2 }
 
         if (needsNormalization) {
             Log.d(
                 RENDER_TAG,
-                "Audio normalization needed - detected different channel counts: $audioChannelCounts"
-            )
-        } else if (audioChannelCounts.isNotEmpty()) {
-            Log.d(
-                RENDER_TAG,
-                "Audio normalization NOT needed - all videos have same channel count: ${audioChannelCounts.firstOrNull()}"
+                "Audio normalization needed - non-stereo audio detected: $audioChannelCounts"
             )
         }
 
@@ -225,9 +218,8 @@ class VideoSequenceBuilder(
         var totalDurationUs = 0L
         trimmedClips.forEach { clip ->
             val clipDurationUs = when {
-                clip.endUs != null && clip.startUs != null -> clip.endUs - clip.startUs
-                clip.endUs != null -> clip.endUs
-                else -> MediaInfoExtractor.getVideoDuration(clip.inputPath)
+                clip.startUs != null -> MediaInfoExtractor.getVideoDuration(clip.inputPath) - clip.startUs
+                else -> MediaInfoExtractor.getVideoDuration(clip.inputPath) - (clip.startUs ?: 0L)
             }
             totalDurationUs += clipDurationUs
         }
@@ -248,17 +240,17 @@ class VideoSequenceBuilder(
         val trimmedClips = applyGlobalTrim(videoClips)
         Log.d(RENDER_TAG, "After global trim: ${trimmedClips.size} clips (was ${videoClips.size})")
 
-        // Prepare normalized audio effects with channel mixing if needed
-        val normalizedAudioEffects = if (needsAudioNormalization) {
-            Log.d(RENDER_TAG, "Adding ChannelMixingAudioProcessor to normalize audio to stereo")
-            buildChannelNormalizationEffects()
-        } else {
-            audioEffects.toList()
-        }
-
         // Build EditedMediaItems for each clip
         val editedMediaItems = trimmedClips.mapIndexed { index, clip ->
-            buildEditedMediaItem(index, clip, normalizedAudioEffects)
+            // Audio normalization is now handled primarily via pre-transcoding.
+            // We keep the processor for edge cases where pre-transcoding was skipped.
+            val itemAudioProcessors = mutableListOf<AudioProcessor>()
+            if (needsAudioNormalization) {
+                itemAudioProcessors.add(AudioMixingUtils.createStandardStereoMixer())
+            }
+            itemAudioProcessors.addAll(audioEffects)
+
+            buildEditedMediaItem(index, clip, itemAudioProcessors)
         }
 
         Log.d(RENDER_TAG, "Total EditedMediaItems created: ${editedMediaItems.size}")
@@ -281,8 +273,13 @@ class VideoSequenceBuilder(
 
         // Determine track types for the sequence
         val trackTypes = mutableSetOf<@C.TrackType Int>(C.TRACK_TYPE_VIDEO)
-        if (enableAudio) {
+        
+        // ONLY add audio track type if at least one item provides audio
+        if (enableAudio && finalVideoItems.any { !it.removeAudio }) {
             trackTypes.add(C.TRACK_TYPE_AUDIO)
+            Log.d(RENDER_TAG, "Sequence will include AUDIO track")
+        } else {
+            Log.d(RENDER_TAG, "Sequence will NOT include AUDIO track (muted or disabled)")
         }
 
         return EditedMediaItemSequence.Builder(trackTypes)
@@ -292,93 +289,13 @@ class VideoSequenceBuilder(
     }
 
     /**
-     * Builds channel normalization effects (channel mixer + audio processors).
-     *
-     * Uses boosted ITU-R BS.775 coefficients for multi-channel downmixing.
-     * 
-     * The standard ITU-R BS.775 coefficients (1.0, 0.707, 0.707) cause volume loss
-     * because the energy distributed across multiple channels doesn't fully translate
-     * to stereo. We apply a boost factor of ~1.4 (sqrt(2)) to compensate.
-     * 
-     * This ensures that surround content maintains similar perceived loudness
-     * when mixed with stereo custom audio tracks.
-     */
-    private fun buildChannelNormalizationEffects(): List<AudioProcessor> {
-        val channelMixer = ChannelMixingAudioProcessor()
-
-        // Boost factor to compensate for energy loss during downmixing
-        // sqrt(2) ≈ 1.414 compensates for the typical ~70% volume loss
-        val boost = 1.4f
-
-        // 7.1 Surround (8 channels) to Stereo (2 channels)
-        // Channel order: FL, FR, FC, LFE, BL, BR, SL, SR
-        // Boosted coefficients to maintain loudness
-        val eightToTwo = floatArrayOf(
-            1.0f * boost,
-            0.0f,
-            0.707f * boost,
-            0.0f,
-            0.707f * boost,
-            0.0f,
-            0.707f * boost,
-            0.0f,  // Left output
-            0.0f,
-            1.0f * boost,
-            0.707f * boost,
-            0.0f,
-            0.0f,
-            0.707f * boost,
-            0.0f,
-            0.707f * boost   // Right output
-        )
-        channelMixer.putChannelMixingMatrix(
-            ChannelMixingMatrix(8, 2, eightToTwo)
-        )
-
-        // 5.1 Surround (6 channels) to Stereo (2 channels)
-        // Channel order: FL, FR, FC, LFE, BL, BR
-        // Boosted ITU-R BS.775: L' = (L + 0.707*C + 0.707*Ls) * boost
-        val sixToTwo = floatArrayOf(
-            1.0f * boost, 0.0f, 0.707f * boost, 0.0f, 0.707f * boost, 0.0f,  // Left output
-            0.0f, 1.0f * boost, 0.707f * boost, 0.0f, 0.0f, 0.707f * boost   // Right output
-        )
-        channelMixer.putChannelMixingMatrix(
-            ChannelMixingMatrix(6, 2, sixToTwo)
-        )
-
-        // Quad (4 channels) to Stereo (2 channels)
-        // Channel order: FL, FR, BL, BR
-        // Slightly lower boost for quad (less energy distributed)
-        val boostQuad = 1.2f
-        val fourToTwo = floatArrayOf(
-            1.0f * boostQuad, 0.0f, 0.707f * boostQuad, 0.0f,  // Left output
-            0.0f, 1.0f * boostQuad, 0.0f, 0.707f * boostQuad   // Right output
-        )
-        channelMixer.putChannelMixingMatrix(
-            ChannelMixingMatrix(4, 2, fourToTwo)
-        )
-
-        // Stereo (2 channels) to Stereo (2 channels) - passthrough (no boost needed)
-        channelMixer.putChannelMixingMatrix(
-            ChannelMixingMatrix.createForConstantGain(2, 2)
-        )
-
-        // Mono (1 channel) to Stereo (2 channels)
-        channelMixer.putChannelMixingMatrix(
-            ChannelMixingMatrix.createForConstantGain(1, 2)
-        )
-
-        Log.d(
-            RENDER_TAG,
-            "Channel normalization configured with boosted coefficients for loudness preservation"
-        )
-
-        return mutableListOf<AudioProcessor>(channelMixer).apply { addAll(audioEffects) }
-    }
-
-    /**
      * Builds an EditedMediaItem for a single video clip with all effects.
      */
+    private fun isImageFile(path: String): Boolean {
+        val extension = path.substringAfterLast('.', "").lowercase()
+        return extension in listOf("jpg", "jpeg", "png", "webp", "heic", "heif")
+    }
+
     private fun buildEditedMediaItem(
         index: Int,
         clip: VideoClip,
@@ -389,27 +306,44 @@ class VideoSequenceBuilder(
 
         if (!inputFile.exists()) {
             Log.e(RENDER_TAG, "ERROR: Video file does not exist: ${clip.inputPath}")
-        } else {
-            Log.d(RENDER_TAG, "Video file exists, size: ${inputFile.length()} bytes")
         }
 
         // Build MediaItem with optional trimming
         val mediaItemBuilder = MediaItem.Builder().setUri(Uri.fromFile(inputFile))
 
+        val isImage = isImageFile(clip.inputPath)
+        if (isImage) {
+            val durationUs = when {
+                clip.endUs != null -> clip.endUs - (clip.startUs ?: 0L)
+                else -> MediaInfoExtractor.getVideoDuration(clip.inputPath) - (clip.startUs ?: 0L)
+            }
+            mediaItemBuilder.setImageDurationMs(maxOf(1, durationUs / 1000))
+
+            // Map common extensions to MIME types for Transformer
+            val extension = clip.inputPath.substringAfterLast('.', "").lowercase()
+            val mimeType = when (extension) {
+                "png" -> "image/png"
+                "webp" -> "image/webp"
+                "heic", "heif" -> "image/heif"
+                else -> "image/jpeg"
+            }
+            mediaItemBuilder.setMimeType(mimeType)
+        }
+
         if (clip.startUs != null || clip.endUs != null) {
             val startMs = (clip.startUs ?: 0L) / 1000
-            val endMs = clip.endUs?.div(1000) ?: C.TIME_END_OF_SOURCE
-            val expectedDurationMs = if (clip.endUs != null && clip.startUs != null) {
-                (clip.endUs - clip.startUs) / 1000
-            } else if (clip.endUs != null) {
+            
+            // Explicitly use C.TIME_END_OF_SOURCE only if endUs is null.
+            // If it's provided, ensure it's not accidentally set to Long.MIN_VALUE via overflow/underflow.
+            val endMs = if (clip.endUs != null) {
                 clip.endUs / 1000
             } else {
-                -1L
+                C.TIME_END_OF_SOURCE
             }
 
             Log.d(
                 RENDER_TAG,
-                "Applying trim to clip ${clip.inputPath}: start=$startMs ms, end=$endMs ms, expectedDuration=$expectedDurationMs ms"
+                "Applying trim to clip ${clip.inputPath}: start=$startMs ms, end=$endMs ms"
             )
 
             val clippingConfig = MediaItem.ClippingConfiguration.Builder()
@@ -433,30 +367,16 @@ class VideoSequenceBuilder(
             rotationDegrees
         )
 
+        // Apply rotation early so subsequent effects (Crop, Composition) see correctly oriented frames
+        applyRotation(clipVideoEffects, videoRotation.toFloat())
+
         // Adjust dimensions based on rotation
         val isRotated90Deg = videoRotation == 90 || videoRotation == 270
 
         // If crop is applied, update dimensions for AFTER crop scenario
-        val croppedWidth: Int?
-        val croppedHeight: Int?
         val crop = cropConfig
         if (crop != null) {
-            croppedWidth = if (isRotated90Deg) crop.height else crop.width
-            croppedHeight = if (isRotated90Deg) crop.width else crop.height
-        } else {
-            croppedWidth = null
-            croppedHeight = null
-        }
-
-        // Apply timed image layers BEFORE crop if withCropping is enabled
-        // This makes the images get cropped together with the video
-        val hasWithCropping = timedImageLayers.any { it.withCropping }
-        if (hasWithCropping && timedImageLayers.isNotEmpty()) {
-            applyTimedImageLayers(clipVideoEffects, timedImageLayers, videoWidth, videoHeight)
-        }
-
-        // Apply crop if configured
-        cropConfig?.let { crop ->
+            // Apply crop if configured
             applyCrop(
                 clipVideoEffects,
                 inputFile,
@@ -470,19 +390,33 @@ class VideoSequenceBuilder(
             )
 
             // Update dimensions after crop for image layers applied AFTER crop
+            val croppedWidth: Int? = if (isRotated90Deg) crop.height else crop.width
+            val croppedHeight: Int? = if (isRotated90Deg) crop.width else crop.height
             if (croppedWidth != null) videoWidth = croppedWidth
             if (croppedHeight != null) videoHeight = croppedHeight
         }
 
-        // Apply timed image layers AFTER crop if withCropping is disabled (default)
-        // This makes the images stretch to the final cropped size
-        if (!hasWithCropping && timedImageLayers.isNotEmpty()) {
-            applyTimedImageLayers(clipVideoEffects, timedImageLayers, videoWidth, videoHeight)
+        // Apply composition transformation if render dimensions are set.
+        // This ensures consistent canvas sizing.
+        if (renderWidth != null && renderHeight != null) {
+            clipVideoEffects += VideoCompositionTransformation(
+                x = clip.x,
+                y = clip.y,
+                width = clip.width,
+                height = clip.height,
+                videoWidth = videoWidth,
+                videoHeight = videoHeight,
+                renderWidth = renderWidth!!,
+                renderHeight = renderHeight!!
+            )
         }
 
         // Apply scale AFTER overlay and crop to match the iOS/macOS pipeline.
         // This prevents the overlay from being distorted by a pre-applied scale.
         applyScale(clipVideoEffects, scaleX, scaleY)
+
+        // Apply opacity
+        applyOpacity(clipVideoEffects, clip.opacity)
 
         // Per-clip volume control:
         // - Without custom audio: VolumeAudioProcessor per clip works (single sequence)
@@ -521,6 +455,11 @@ class VideoSequenceBuilder(
         return EditedMediaItem.Builder(mediaItem)
             .setEffects(effects)
             .setRemoveAudio(shouldRemoveAudio)
+            .apply {
+                if (isImage) {
+                    setFrameRate(30)
+                }
+            }
             .build()
     }
 
@@ -599,7 +538,14 @@ class VideoSequenceBuilder(
                             inputPath = clip.inputPath,
                             startUs = newStartInSource,
                             endUs = newEndInSource,
-                            volume = clip.volume
+                            volume = clip.volume,
+                            x = clip.x,
+                            y = clip.y,
+                            width = clip.width,
+                            height = clip.height,
+                            zIndex = clip.zIndex,
+                            opacity = clip.opacity,
+                            segmentTimeUs = clip.segmentTimeUs
                         )
                     )
                     val trimmedDuration = newEndInSource - newStartInSource

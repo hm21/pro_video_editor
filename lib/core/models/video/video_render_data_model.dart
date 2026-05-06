@@ -408,25 +408,6 @@ class VideoRenderData {
     double? scaleX = transform.scaleX;
     double? scaleY = transform.scaleY;
 
-    // Handle quality config
-    if (qualityConfig != null && scaleX == null && scaleY == null) {
-      final targetVideo = video ??
-          (videoSegments != null && videoSegments!.isNotEmpty
-              ? videoSegments!.first.video
-              : null);
-      if (targetVideo != null) {
-        final meta = await ProVideoEditor.instance.getMetadata(targetVideo);
-        final originalResolution = meta.resolution;
-        final targetResolution =
-            qualityConfig!.resolution ?? originalResolution;
-        final sx = targetResolution.width / originalResolution.width;
-        final sy = targetResolution.height / originalResolution.height;
-        final scale = sx < sy ? sx : sy;
-        scaleX = scale;
-        scaleY = scale;
-      }
-    }
-
     // Convert video clips to map format
     // ignore: deprecated_member_use_from_same_package
     final fallbackVolume = originalAudioVolume;
@@ -536,6 +517,8 @@ class VideoRenderData {
       'bitrate': bitrate,
       'scaleX': scaleX,
       'scaleY': scaleY,
+      'renderWidth': qualityConfig?.resolution?.width,
+      'renderHeight': qualityConfig?.resolution?.height,
       // Global trim for entire composition (only for videoSegments,
       // not single video). For single video, startTime/endTime are already
       // applied to the clip itself

@@ -212,6 +212,12 @@ struct RenderConfig {
     /// Global end time in microseconds for trimming the final composition
     let endUs: Int64?
 
+    /// Target render width
+    let renderWidth: Double?
+
+    /// Target render height
+    let renderHeight: Double?
+
     /// Whether to optimize the video for network streaming (fast start).
     /// When true, moves the moov atom to the beginning of the file.
     let shouldOptimizeForNetworkUse: Bool
@@ -248,6 +254,8 @@ struct RenderConfig {
             blur: self.blur,
             startUs: self.startUs,
             endUs: self.endUs,
+            renderWidth: self.renderWidth,
+            renderHeight: self.renderHeight,
             shouldOptimizeForNetworkUse: self.shouldOptimizeForNetworkUse,
             imageBytesWithCropping: self.imageBytesWithCropping
         )
@@ -269,7 +277,14 @@ struct RenderConfig {
                     inputPath: inputPath,
                     startUs: (clipMap["startUs"] as? NSNumber)?.int64Value,
                     endUs: (clipMap["endUs"] as? NSNumber)?.int64Value,
-                    volume: (clipMap["volume"] as? NSNumber)?.floatValue
+                    volume: (clipMap["volume"] as? NSNumber)?.floatValue,
+                    opacity: (clipMap["opacity"] as? NSNumber)?.doubleValue,
+                    x: (clipMap["x"] as? NSNumber)?.doubleValue,
+                    y: (clipMap["y"] as? NSNumber)?.doubleValue,
+                    width: (clipMap["width"] as? NSNumber)?.doubleValue,
+                    height: (clipMap["height"] as? NSNumber)?.doubleValue,
+                    segmentTimeUs: (clipMap["segmentTimeUs"] as? NSNumber)?.int64Value,
+                    zIndex: clipMap["zIndex"] as? Int
                 )
             }
         }
@@ -320,6 +335,8 @@ struct RenderConfig {
             blur: (args["blur"] as? NSNumber)?.doubleValue,
             startUs: (args["startUs"] as? NSNumber)?.int64Value,
             endUs: (args["endUs"] as? NSNumber)?.int64Value,
+            renderWidth: (args["renderWidth"] as? NSNumber)?.doubleValue,
+            renderHeight: (args["renderHeight"] as? NSNumber)?.doubleValue,
             shouldOptimizeForNetworkUse: args["shouldOptimizeForNetworkUse"] as? Bool ?? true,
             imageBytesWithCropping: args["imageBytesWithCropping"] as? Bool ?? false
         )

@@ -19,18 +19,22 @@ import Foundation
 ///   - CGSize: Final render size (max dimensions from all clips)
 ///   - AVAudioMix?: Audio mix with volume controls (nil if no audio mixing needed)
 ///   - CMPersistentTrackID: The track ID of the video composition track (for fallback on older macOS)
+///   - VideoCompositorConfig: Updated compositor configuration with track info
 ///
 /// - Throws: NSError if video clips are empty, files don't exist, or tracks can't be loaded.
 func applyComposition(
     videoClips: [VideoClip],
     videoEffects: VideoCompositorConfig,
     enableAudio: Bool,
-    audioTracks: [AudioTrackConfig]
+    audioTracks: [AudioTrackConfig],
+    renderWidth: Double? = nil,
+    renderHeight: Double? = nil
 ) async throws -> (
-    AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID
+    AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID, VideoCompositorConfig
 ) {
     return try await CompositionBuilder(videoClips: videoClips, videoEffects: videoEffects)
         .setEnableAudio(enableAudio)
         .setAudioTracks(audioTracks)
+        .setRenderSize(width: renderWidth, height: renderHeight)
         .build()
 }

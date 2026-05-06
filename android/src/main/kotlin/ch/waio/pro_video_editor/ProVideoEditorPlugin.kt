@@ -303,7 +303,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                     }
                 },
                 onError = { error ->
-                    Log.e("RenderVideo", "Error rendering video: ${error.message}")
+                    Log.e("RenderVideo", "Error rendering video: ${error.message}", error)
                     mainHandler.post {
                         val removedTask = activeRenderTasks.remove(id)
                         val code = if (removedTask?.canceled?.get() == true) {
@@ -321,9 +321,11 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                 jobHandle.cancel()
             }
         } catch (e: IllegalArgumentException) {
+            Log.e("RenderVideo", "Error rendering video: ${e.message}", e)
             activeRenderTasks.remove(id)
             result.error("INVALID_ARGUMENTS", e.message, null)
         } catch (e: Exception) {
+            Log.e("RenderVideo", "Error rendering video: ${e.message}", e)
             activeRenderTasks.remove(id)
             result.error("RENDER_ERROR", "Failed to start render: ${e.message}", null)
         }

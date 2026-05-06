@@ -47,11 +47,10 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   final double _blurFactor = 0;
   final List<List<double>> _colorFilters = [];
 
-  // kBasicFilterMatrix   kComplexFilterMatrix
-
   VideoMetadata? _outputMetadata;
 
   String _taskId = DateTime.now().microsecondsSinceEpoch.toString();
+  String? _error;
 
   late final EditorVideo _video;
 
@@ -373,7 +372,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       videoSegments: [
         VideoSegment(
           video: _video,
-          startTime: const Duration(seconds: 0),
+          startTime: Duration.zero,
           endTime: const Duration(seconds: 7),
           volume: 1.0,
         ),
@@ -636,6 +635,215 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Picture in picture example. Combined video segments.
+  ///
+  /// This example demonstrates how to render composite video from multiple
+  /// overlapping video segments
+  Future<void> _combinedPip() async {
+    VideoMetadata meta = await _pve.getMetadata(_video);
+    var Size(width: width, height: height) = meta.resolution;
+
+    var data = VideoRenderData(
+      videoSegments: [
+        // the first segment is used to drive the video resolution
+        VideoSegment(
+          video: _video,
+          segmentTime: Duration.zero,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 10),
+          offset: const Offset(100, 0),
+          // size: Size(width, height),
+          zIndex: 0,
+          volume: 1.0,
+        ),
+        VideoSegment(
+          video: _video,
+          segmentTime: const Duration(seconds: 5),
+          startTime: const Duration(seconds: 5),
+          endTime: const Duration(seconds: 15),
+          offset: const Offset(20, 20),
+          size: Size(width / 2, height / 2),
+          zIndex: 10,
+          volume: 0,
+        ),
+      ],
+
+      // imageLayers: [
+      //   // Stretched overlay for entire video
+      //   ImageLayer(image: EditorLayerImage.memory(imageBytes)),
+      //   // Sticker visible only from 3s–8s
+      //   ImageLayer(
+      //     image: stickerImage,
+      //     offset: const Offset(500, 150),
+      //     startTime: const Duration(seconds: 3),
+      //     endTime: const Duration(seconds: 8),
+      //   ),
+      // ],
+      // audioTracks: [
+      //   // Background music in second half at low volume
+      //   VideoAudioTrack(
+      //     path: audioFile.path,
+      //     volume: 0.4,
+      //     startTime: const Duration(seconds: 10),
+      //   ),
+      // ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Video grid example. Combined video segments.
+  ///
+  /// This example demonstrates how to render composite video with multiple
+  /// stacked video segments
+  Future<void> _combinedStack() async {
+    VideoMetadata meta1 = await _pve.getMetadata(_video);
+    var Size(width: width1, height: height1) = meta1.resolution;
+
+    EditorVideo video2 = EditorVideo.asset(kVideoEditorExampleAssetWorldPath);
+    VideoMetadata meta2 = await _pve.getMetadata(video2);
+    var Size(width: width2, height: height2) = meta2.resolution;
+
+    double width = max(width1, width2);
+    double scale1 = width / width1;
+    double scale2 = width / width2;
+
+    // resize one of the videos to match the other video width
+    // stack them vertically video1 on top of video2
+    double height = height1 * scale1 + height2 * scale2;
+
+    // int duration = min(meta1.duration.inSeconds, meta2.duration.inSeconds);
+    debugPrint('target resolution: $width x $height');
+
+    var data = VideoRenderData(
+      qualityConfig: VideoQualityConfig.custom(
+        bitrate: meta1.bitrate,
+        resolution: Size(width, height),
+      ),
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          segmentTime: Duration.zero,
+          startTime: Duration.zero,
+          // endTime: Duration(seconds: duration),
+          endTime: const Duration(seconds: 5),
+          offset: const Offset(0, 0),
+          size: Size(width1 * scale1, height1 * scale1),
+          zIndex: 10,
+          volume: 1.0,
+        ),
+
+        VideoSegment(
+          video: video2,
+          segmentTime: Duration.zero,
+          startTime: Duration.zero,
+          // endTime: Duration(seconds: duration),
+          endTime: const Duration(seconds: 5),
+          offset: Offset(0, height1 * scale1),
+          size: Size(width2 * scale2, height2 * scale2),
+          volume: 0,
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Video grid example. Combined video segments.
+  ///
+  /// This example demonstrates how to render composite video from multiple
+  /// overlapping video segments
+  Future<void> _combinedGrid() async {
+    VideoMetadata metadata = await _pve.getMetadata(_video);
+
+    Size resolution = metadata.resolution;
+    double width = resolution.width;
+    double height = resolution.height;
+
+    // red image with opacity bytes for interleaving test
+    final redRecorder = ui.PictureRecorder();
+    ui.Canvas(redRecorder).drawRect(
+      const ui.Rect.fromLTWH(0, 0, 500, 500),
+      ui.Paint()..color = Colors.red.withValues(alpha: 0.5),
+    );
+    ui.Picture redPicture = redRecorder.endRecording();
+    ui.Image redImg = await redPicture.toImage(500, 500);
+    ByteData? bytes = await redImg.toByteData(format: ui.ImageByteFormat.png);
+    Uint8List redImageBytes = bytes!.buffer.asUint8List();
+    redPicture.dispose();
+
+    var data = VideoRenderData(
+      qualityConfig: VideoQualityConfig.custom(
+        bitrate: metadata.bitrate,
+        resolution: Size(width * 2, height * 2),
+      ),
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          segmentTime: Duration.zero,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 10),
+          offset: const Offset(0, 0),
+          size: Size(width, height),
+          zIndex: 10,
+          volume: 1.0,
+        ),
+        VideoSegment(
+          video: _video,
+          segmentTime: const Duration(seconds: 3),
+          startTime: const Duration(seconds: 3),
+          endTime: const Duration(seconds: 13),
+          offset: Offset(width - 50, 50),
+          size: Size(width, height),
+          zIndex: 20,
+          volume: 1.0,
+        ),
+        VideoSegment(
+          video: _video,
+          segmentTime: const Duration(seconds: 6),
+          startTime: const Duration(seconds: 6),
+          endTime: const Duration(seconds: 16),
+          offset: Offset(width, height),
+          size: Size(width, height),
+          zIndex: 30,
+          volume: 1.0,
+        ),
+        VideoSegment(
+          video: _video,
+          segmentTime: const Duration(seconds: 9),
+          startTime: const Duration(seconds: 9),
+          endTime: const Duration(seconds: 20),
+          offset: Offset(50, height - 50),
+          size: Size(width, height),
+          zIndex: 40,
+          volume: 1.0,
+        ),
+
+        // 480 × 270
+        VideoSegment(
+          video: EditorVideo.asset(kVideoEditorExampleAssetWorldPath),
+          segmentTime: Duration.zero,
+          zIndex: 50,
+          opacity: 0.5,
+          offset: Offset(width - 600, height - 200),
+          size: const Size(480 * 2, 270 * 2),
+          volume: 0,
+        ),
+      ],
+
+      imageLayers: [
+        // Transparent red square at the top
+        ImageLayer(
+          image: EditorLayerImage.memory(redImageBytes),
+          offset: Offset(width - 250, height - 300),
+          size: const Size(500, 500),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   /// Fade animation on image layer.
   ///
   /// This example demonstrates a simple fade-in and fade-out animation
@@ -805,7 +1013,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       videoSegments: [
         VideoSegment(
           video: _video,
-          startTime: const Duration(seconds: 0),
+          startTime: Duration.zero,
           endTime: const Duration(seconds: 5),
         ),
         VideoSegment(
@@ -831,7 +1039,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       videoSegments: [
         VideoSegment(
           video: _video,
-          startTime: const Duration(seconds: 0),
+          startTime: Duration.zero,
           endTime: const Duration(seconds: 5),
         ),
         VideoSegment(
@@ -934,6 +1142,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   Future<void> _renderVideo(VideoRenderData value) async {
     _taskId = DateTime.now().microsecondsSinceEpoch.toString();
+    _error = null;
     setState(() => _isExporting = true);
 
     final directory = await getTemporaryDirectory();
@@ -949,8 +1158,15 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     } on RenderCanceledException {
       setState(() => _isExporting = false);
       return;
+    } catch (ex) {
+      setState(() {
+        _error = 'Failed to render video: $ex';
+        _isExporting = false;
+      });
+      return;
     }
 
+    debugPrint('output $outputPath');
     final result = File(outputPath).readAsBytesSync();
 
     _generationTime = sp.elapsed;
@@ -1112,10 +1328,13 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
               ),
               Text(
                 'Result: ${formatBytes(_videoBytes!.lengthInBytes)} '
-                'bytes in ${_generationTime.inMilliseconds}ms',
+                'bytes in ${_generationTime.inMilliseconds}ms, '
+                '${_outputMetadata?.resolution.width ?? 0}'
+                ' x ${_outputMetadata?.resolution.height ?? 0}',
               ),
               if (_outputMetadata?.isOptimizedForStreaming != null)
                 Row(
+                  spacing: 6,
                   children: [
                     Icon(
                       _outputMetadata!.isOptimizedForStreaming!
@@ -1126,12 +1345,24 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
                           : Colors.red,
                       size: 18,
                     ),
-                    const SizedBox(width: 6),
                     Text(
                       _outputMetadata!.isOptimizedForStreaming!
                           ? 'Optimized for streaming (moov before mdat)'
                           : 'Not optimized (mdat before moov)',
                     ),
+                  ],
+                ),
+              if (_error != null)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  spacing: 6,
+                  children: [
+                    const Icon(
+                      Icons.warning_rounded,
+                      color: Colors.red,
+                      size: 20,
+                    ),
+                    Expanded(child: Text('$_error')),
                   ],
                 ),
             ],
@@ -1183,11 +1414,13 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           onTap: _layers,
           leading: const Icon(Icons.layers_outlined),
           title: const Text('Parse with layers'),
+          subtitle: const Text('Layer for the whole video duration'),
         ),
         ListTile(
           onTap: _layersTimed,
           leading: const Icon(Icons.av_timer_outlined),
           title: const Text('Parse with timed layers'),
+          subtitle: const Text('Layers at 0, 5, 7 + random one every second'),
         ),
         ListTile(
           onTap: _layersWithSize,
@@ -1215,12 +1448,31 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           onTap: _multipleChanges,
           leading: const Icon(Icons.web_stories_outlined),
           title: const Text('Multiple changes'),
+          subtitle: const Text('FlipX, image, color filter, crop'),
         ),
         ListTile(
           onTap: _combinedTimeBased,
           leading: const Icon(Icons.timeline_outlined),
           title: const Text('Combined Time-Based'),
           subtitle: const Text('Clips + filters + layers + audio, all timed'),
+        ),
+        ListTile(
+          onTap: _combinedPip,
+          leading: const Icon(Icons.picture_in_picture_alt),
+          title: const Text('Picture in picture'),
+          subtitle: const Text('Pip starts at 5, main ends at 10'),
+        ),
+        ListTile(
+          onTap: _combinedStack,
+          leading: const Icon(Icons.stacked_line_chart),
+          title: const Text('Video stack'),
+          subtitle: const Text('Two videos stacked together'),
+        ),
+        ListTile(
+          onTap: _combinedGrid,
+          leading: const Icon(Icons.dashboard_outlined),
+          title: const Text('Video grid'),
+          subtitle: const Text('Grid of videos, with overlays and opacity'),
         ),
         ListTile(
           onTap: _bitrate,

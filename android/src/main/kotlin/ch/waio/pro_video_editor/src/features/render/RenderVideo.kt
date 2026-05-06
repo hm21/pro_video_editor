@@ -18,8 +18,10 @@ import java.util.concurrent.atomic.AtomicReference
 import applyBitrate
 import mapFormatToMimeType
 import ch.waio.pro_video_editor.src.features.render.helpers.applyComposition
+import ch.waio.pro_video_editor.src.features.render.helpers.CompositionBuilder
 import ch.waio.pro_video_editor.src.features.render.helpers.VolumeControlAudioMixerFactory
 import ch.waio.pro_video_editor.src.features.render.helpers.ConfigurableInAppMp4Muxer
+import ch.waio.pro_video_editor.src.features.render.helpers.MediaInfoExtractor
 import ch.waio.pro_video_editor.src.features.render.helpers.VideoTranscoder
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderJobHandle
@@ -57,27 +59,59 @@ class RenderVideo(private val context: Context) {
      * Checks if transcoding is needed for video compatibility.
      * 
      * Transcoding is needed when:
-     * 1. GPU effects are used with HEVC 10-bit HDR videos
+     * 1. GPU effects are used with HEVC 10-bit HDR videos.
      * 2. Multiple videos are being merged and at least one is HEVC 10-bit
-     *    (mixing different codecs in a composition can cause frame processing errors)
+     *    (mixing different codecs in a composition can cause frame processing errors).
+     * 3. Multi-channel audio (5.1/7.1) is detected AND more than one unmuted audio source
+     *    is present (mixing multi-channel with stereo or silence causes mixer reconfiguration errors).
      */
     private fun needsPreTranscoding(config: RenderConfig): Boolean {
-        // Check for GPU effects
+        // 1. Check for HEVC 10-bit / HDR compatibility with GPU effects
         if (hasGpuEffects(config)) {
-            return true
-        }
-
-        // When multiple clips are being merged, check if any need transcoding
-        // Mixing different codecs (HEVC + H.264) can cause frame processing errors
-        if (config.videoClips.size > 1) {
             val hasAnyHevc10bit = config.videoClips.any { clip ->
-                VideoTranscoder.needsTranscoding(clip.inputPath)
+                val info = MediaInfoExtractor.getVideoFormatInfo(clip.inputPath)
+                info.isHevc && info.bitDepth == 10
             }
             if (hasAnyHevc10bit) {
-                Log.d(
-                    RENDER_TAG, "Multiple video clips with HEVC 10-bit detected, " +
-                            "pre-transcoding to ensure codec compatibility"
-                )
+                Log.d(RENDER_TAG, "HEVC 10-bit detected with GPU effects, pre-transcoding needed")
+                return true
+            }
+        }
+
+        // 2. Check for multi-channel audio mixing complexity
+        val unmutedVideoClips = config.videoClips.filter { (it.volume ?: 1.0f) > 0.0f }
+        val audibleCustomTracks = config.audioTracks.filter { it.volume > 0.0f }
+        val totalAudibleSources = unmutedVideoClips.size + audibleCustomTracks.size
+
+        val hasMultiChannel = config.videoClips.any { clip ->
+            (MediaInfoExtractor.getAudioChannelCount(clip.inputPath) ?: 2) > 2
+        }
+
+        if (hasMultiChannel) {
+            // We only MUST transcode multi-channel audio if it needs to be mixed with something else.
+            // If it's the only source, Media3 can handle downmixing via AudioProcessors during render.
+            if (totalAudibleSources > 1) {
+                Log.d(RENDER_TAG, "Multi-channel audio detected with multiple sources, pre-transcoding for mixing safety")
+                return true
+            }
+            
+            // TODO having multiple video clips (even if muted), mixing/overlapping transitions
+            //      can trigger audio reconfiguration errors if formats don't match perfectly
+            if (config.videoClips.size > 1) {
+                Log.d(RENDER_TAG, "Multi-channel audio detected in multi-clip merge, pre-transcoding for transition stability")
+                return true
+            }
+        }
+
+        // 3. Codec mixing check (H.264 + HEVC)
+        // Mixing different codecs (HEVC + H.264) in a single sequence can cause frame processing errors
+        if (config.videoClips.size > 1) {
+            val hasAnyHevc10bit = config.videoClips.any { clip ->
+                val info = MediaInfoExtractor.getVideoFormatInfo(clip.inputPath)
+                info.isHevc && info.bitDepth == 10
+            }
+            if (hasAnyHevc10bit) {
+                Log.d(RENDER_TAG, "HEVC 10-bit detected in merge, pre-transcoding to ensure consistency")
                 return true
             }
         }
@@ -138,8 +172,8 @@ class RenderVideo(private val context: Context) {
                     val updatedClips = config.videoClips.map { clip ->
                         val newPath = transcodeMap[clip.inputPath] ?: clip.inputPath
                         if (newPath != clip.inputPath) {
-                            // If transcoded, use the new path but keep trim times and volume
-                            VideoClip(newPath, clip.startUs, clip.endUs, clip.volume)
+                            // If transcoded, use the new path but preserve all other parameters
+                            clip.copy(inputPath = newPath)
                         } else {
                             clip
                         }
@@ -241,10 +275,39 @@ class RenderVideo(private val context: Context) {
         // Check if we need custom audio mixing with volume control
         val hasCustomAudio = config.audioTracks.isNotEmpty()
 
-        // Determine if video audio will be present in the mix
-        // Video audio is removed when audio is disabled or all clips have volume 0
-        val videoAudioPresent = config.enableAudio &&
-                config.videoClips.any { (it.volume ?: 1.0f) > 0.0f }
+        // Determine how many video sequences will contribute to the audio mix
+        // A video sequence has audio if audio is enabled AND at least one clip has volume > 0
+        val videoAudioSourceCount: Int
+        val videoSequenceVolumes: List<Float>
+        
+        if (config.enableAudio) {
+            val needsMultipleSequences = config.videoClips.any {
+                it.x != null || it.y != null || it.width != null || it.height != null || 
+                it.segmentTimeUs != null || it.opacity != null || (it.zIndex ?: 0) != 0
+            }
+            if (needsMultipleSequences) {
+                // In Pip mode, each clip is a separate sequence. 
+                // IMPORTANT: Match the exact layering logic from CompositionBuilder.
+                // 1. Higher zIndex on top.
+                // 2. Default zIndex is 0.
+                // 3. If zIndex is same, latter segment in input list is on top.
+                //
+                // In Media3, the first sequence in the list is the bottom-most layer.
+                // By using a stable ascending sort, we satisfy the rules.
+                val sortedClips = config.videoClips.sortedByDescending { it.zIndex ?: 0 }
+                val activeClips = sortedClips.filter { (it.volume ?: 1.0f) > 0.0f }
+                videoAudioSourceCount = activeClips.size
+                videoSequenceVolumes = activeClips.map { it.volume ?: 1.0f }
+            } else {
+                // Single sequence. Has audio if any clip is unmuted.
+                val isUnmuted = config.videoClips.any { (it.volume ?: 1.0f) > 0.0f }
+                videoAudioSourceCount = if (isUnmuted) 1 else 0
+                videoSequenceVolumes = if (isUnmuted) listOf(1.0f) else emptyList()
+            }
+        } else {
+            videoAudioSourceCount = 0
+            videoSequenceVolumes = emptyList()
+        }
 
         // Build transformer with callbacks
         val transformerBuilder = Transformer.Builder(context)
@@ -266,7 +329,8 @@ class RenderVideo(private val context: Context) {
             transformerBuilder.setAudioMixerFactory(
                 VolumeControlAudioMixerFactory(
                     trackVolumes = trackVolumes,
-                    videoAudioPresent = videoAudioPresent
+                    videoAudioSourceCount = videoAudioSourceCount,
+                    videoSequenceVolumes = videoSequenceVolumes
                 )
             )
         }
@@ -310,16 +374,25 @@ class RenderVideo(private val context: Context) {
         // Create composition (now fast - no manual audio mixing needed, Media3 handles it natively)
         Thread {
             try {
-                val composition = applyComposition(
-                    context = context,
-                    config = config,
-                    videoEffects = videoEffects,
-                    audioEffects = audioEffects
-                )
+                val compositionBuilder = CompositionBuilder(config, context)
+                val composition = compositionBuilder
+                    .setVideoEffects(videoEffects)
+                    .setAudioEffects(audioEffects)
+                    .build()
 
                 mainHandler.post {
                     if (composition != null) {
                         transformer.start(composition, outputFile.absolutePath)
+                        
+                        // Register release on transformer end
+                        transformer.addListener(object : Transformer.Listener {
+                            override fun onCompleted(c: Composition, r: ExportResult) {
+                                compositionBuilder.release()
+                            }
+                            override fun onError(c: Composition, r: ExportResult, e: ExportException) {
+                                compositionBuilder.release()
+                            }
+                        })
 
                         // Start progress tracking loop
                         val progressHolder = ProgressHolder()
@@ -339,6 +412,7 @@ class RenderVideo(private val context: Context) {
                             }
                         })
                     } else {
+                        compositionBuilder.release()
                         onError(IllegalStateException("Failed to create composition"))
                     }
                 }

@@ -5,18 +5,32 @@ import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import io.flutter.plugin.common.MethodCall
 
 /**
- * Represents a video clip segment with optional trimming.
+ * Represents a video clip segment with optional trimming and composition parameters.
  * 
  * @property inputPath Absolute path to video file
  * @property startUs Start time in microseconds (null = from beginning)
  * @property endUs End time in microseconds (null = until end)
  * @property volume Volume multiplier for this clip (null = unchanged, 0.0=mute, 1.0=original)
+ * @property x Horizontal offset in pixels from the left edge
+ * @property y Vertical offset in pixels from the top edge
+ * @property width Target width of the segment in pixels (null = original)
+ * @property height Target height of the segment in pixels (null = original)
+ * @property zIndex Layer order (higher values on top)
+ * @property opacity Transparency (0.0=invisible, 1.0=opaque)
+ * @property segmentTimeUs Absolute start time in the composition (null = sequential)
  */
 data class VideoClip(
     val inputPath: String,
     val startUs: Long?,
     val endUs: Long?,
-    val volume: Float? = null
+    val volume: Float? = null,
+    val x: Double? = null,
+    val y: Double? = null,
+    val width: Double? = null,
+    val height: Double? = null,
+    val zIndex: Int? = null,
+    val opacity: Float? = null,
+    val segmentTimeUs: Long? = null
 )
 
 /**
@@ -176,6 +190,8 @@ data class RenderConfig(
     val cropY: Int? = null,
     val scaleX: Float? = null,
     val scaleY: Float? = null,
+    val renderWidth: Int? = null,
+    val renderHeight: Int? = null,
     val bitrate: Int? = null,
     val enableAudio: Boolean = true,
     val playbackSpeed: Float? = null,
@@ -231,11 +247,20 @@ data class RenderConfig(
                     inputPath = clipMap["inputPath"] as String,
                     startUs = (clipMap["startUs"] as? Number)?.toLong(),
                     endUs = (clipMap["endUs"] as? Number)?.toLong(),
-                    volume = (clipMap["volume"] as? Number)?.toFloat()
+                    volume = (clipMap["volume"] as? Number)?.toFloat(),
+                    x = (clipMap["x"] as? Number)?.toDouble(),
+                    y = (clipMap["y"] as? Number)?.toDouble(),
+                    width = (clipMap["width"] as? Number)?.toDouble(),
+                    height = (clipMap["height"] as? Number)?.toDouble(),
+                    zIndex = (clipMap["zIndex"] as? Number)?.toInt(),
+                    opacity = (clipMap["opacity"] as? Number)?.toFloat(),
+                    segmentTimeUs = (clipMap["segmentTimeUs"] as? Number)?.toLong()
                 )
                 Log.d(
                     PACKAGE_TAG,
-                    "Clip $index: path=${clip.inputPath}, start=${clip.startUs}, end=${clip.endUs}, volume=${clip.volume}"
+                    "Clip $index: path=${clip.inputPath}, start=${clip.startUs}, end=${clip.endUs}, " +
+                            "volume=${clip.volume}, pos=(${clip.x}, ${clip.y}), size=${clip.width}x${clip.height}, " +
+                            "zIndex=${clip.zIndex}, opacity=${clip.opacity}, time=${clip.segmentTimeUs}"
                 )
                 clip
             }
@@ -292,6 +317,8 @@ data class RenderConfig(
                 cropY = call.argument<Number>("cropY")?.toInt(),
                 scaleX = call.argument<Number>("scaleX")?.toFloat(),
                 scaleY = call.argument<Number>("scaleY")?.toFloat(),
+                renderWidth = call.argument<Number>("renderWidth")?.toInt(),
+                renderHeight = call.argument<Number>("renderHeight")?.toInt(),
                 bitrate = call.argument<Number>("bitrate")?.toInt(),
                 enableAudio = call.argument<Boolean>("enableAudio") ?: true,
                 playbackSpeed = call.argument<Number>("playbackSpeed")?.toFloat(),
