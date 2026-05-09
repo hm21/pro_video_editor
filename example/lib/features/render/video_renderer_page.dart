@@ -127,7 +127,35 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   Future<void> _changeSpeed() async {
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video)],
+      // ignore: deprecated_member_use
       playbackSpeed: .5,
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Different playback speeds per video segment.
+  ///
+  /// This example demonstrates per-clip speed control when concatenating
+  /// multiple video clips:
+  /// - Clip 1: 2× speed (fast-forward)
+  /// - Clip 2: 0.5× speed (slow-motion)
+  Future<void> _perClipSpeed() async {
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 0),
+          endTime: const Duration(seconds: 5),
+          playbackSpeed: 2.0, // Fast-forward
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 5),
+          endTime: const Duration(seconds: 10),
+          playbackSpeed: 0.5, // Slow-motion
+        ),
+      ],
     );
 
     await _renderVideo(data);
@@ -1178,6 +1206,14 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           onTap: _changeSpeed,
           leading: const Icon(Icons.speed_outlined),
           title: const Text('Change playback speed'),
+        ),
+        ListTile(
+          onTap: _perClipSpeed,
+          leading: const Icon(Icons.speed_rounded),
+          title: const Text('Per-clip playback speed'),
+          subtitle: const Text(
+            'Clip 1: 2× fast-forward · Clip 2: 0.5× slow-motion',
+          ),
         ),
         ListTile(
           onTap: _layers,

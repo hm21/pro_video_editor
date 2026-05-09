@@ -9,7 +9,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.common.audio.ChannelMixingMatrix
+import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.SpeedChangeEffect
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
@@ -489,18 +491,30 @@ class VideoSequenceBuilder(
         // - With custom audio: AudioProcessors don't work with parallel sequences,
         //   so per-clip volume is best-effort (applied via VolumeControlAudioMixer globally)
         val clipVolume = clip.volume
-        val finalAudioEffects = if (!hasCustomAudio && clipVolume != null && clipVolume != 1.0f) {
-            Log.d(
-                RENDER_TAG,
-                "Clip $index volume: ${clipVolume}x (applied via VolumeAudioProcessor)"
-            )
-            val volumeProcessor = VolumeAudioProcessor(clipVolume)
-            mutableListOf<AudioProcessor>().apply {
-                addAll(normalizedAudioEffects)
-                add(volumeProcessor)
+        val perClipAudioProcessors = mutableListOf<AudioProcessor>().apply {
+            addAll(normalizedAudioEffects)
+            if (!hasCustomAudio && clipVolume != null && clipVolume != 1.0f) {
+                Log.d(
+                    RENDER_TAG,
+                    "Clip $index volume: ${clipVolume}x (applied via VolumeAudioProcessor)"
+                )
+                add(VolumeAudioProcessor(clipVolume))
+            }
+        }
+
+        // Per-clip playback speed:
+        // - Video: SpeedChangeEffect on the EditedMediaItem
+        // - Audio: SonicAudioProcessor (only effective without custom audio /
+        //   parallel sequences; otherwise best-effort)
+        val clipSpeed = clip.playbackSpeed
+        val finalAudioEffects: List<AudioProcessor> = if (clipSpeed != null && clipSpeed > 0f && clipSpeed != 1.0f) {
+            Log.d(RENDER_TAG, "Clip $index playback speed: ${clipSpeed}x")
+            clipVideoEffects += SpeedChangeEffect(clipSpeed)
+            perClipAudioProcessors.apply {
+                add(SonicAudioProcessor().apply { setSpeed(clipSpeed) })
             }
         } else {
-            normalizedAudioEffects
+            perClipAudioProcessors
         }
 
         val effects = Effects(finalAudioEffects, clipVideoEffects)
@@ -599,7 +613,8 @@ class VideoSequenceBuilder(
                             inputPath = clip.inputPath,
                             startUs = newStartInSource,
                             endUs = newEndInSource,
-                            volume = clip.volume
+                            volume = clip.volume,
+                            playbackSpeed = clip.playbackSpeed
                         )
                     )
                     val trimmedDuration = newEndInSource - newStartInSource

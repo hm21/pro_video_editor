@@ -16,6 +16,7 @@ class VideoSegment {
     this.startTime,
     this.endTime,
     this.volume,
+    this.playbackSpeed,
   })  : assert(
           startTime == null || endTime == null || startTime < endTime,
           'startTime must be before endTime',
@@ -23,6 +24,10 @@ class VideoSegment {
         assert(
           volume == null || volume >= 0,
           '[volume] must be greater than or equal to 0',
+        ),
+        assert(
+          playbackSpeed == null || playbackSpeed > 0,
+          '[playbackSpeed] must be greater than 0',
         );
 
   /// The video source for this clip.
@@ -50,6 +55,13 @@ class VideoSegment {
   /// If null, the original volume is used.
   final double? volume;
 
+  /// Playback speed of this segment.
+  ///
+  /// For example, `0.5` for half speed, `2.0` for double speed.
+  ///
+  /// If null, the original speed is used.
+  final double? playbackSpeed;
+
   /// Converts this clip to a map for platform channel communication.
   Future<Map<String, dynamic>> toAsyncMap() async {
     final inputPath = await video.safeFilePath();
@@ -59,6 +71,7 @@ class VideoSegment {
       'startUs': startTime?.inMicroseconds,
       'endUs': endTime?.inMicroseconds,
       'volume': volume,
+      'playbackSpeed': playbackSpeed,
     };
   }
 
@@ -68,12 +81,14 @@ class VideoSegment {
     Duration? startTime,
     Duration? endTime,
     double? volume,
+    double? playbackSpeed,
   }) {
     return VideoSegment(
       video: video ?? this.video,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       volume: volume ?? this.volume,
+      playbackSpeed: playbackSpeed ?? this.playbackSpeed,
     );
   }
 
@@ -84,7 +99,8 @@ class VideoSegment {
     return other.video == video &&
         other.startTime == startTime &&
         other.endTime == endTime &&
-        other.volume == volume;
+        other.volume == volume &&
+        other.playbackSpeed == playbackSpeed;
   }
 
   @override
@@ -92,7 +108,8 @@ class VideoSegment {
     return video.hashCode ^
         startTime.hashCode ^
         endTime.hashCode ^
-        volume.hashCode;
+        volume.hashCode ^
+        playbackSpeed.hashCode;
   }
 
   @override
@@ -100,7 +117,8 @@ class VideoSegment {
     return 'VideoSegment(video: $video, '
         'startTime: $startTime, '
         'endTime: $endTime, '
-        'volume: $volume)';
+        'volume: $volume, '
+        'playbackSpeed: $playbackSpeed)';
   }
 
   Map<String, dynamic> toMap() {
@@ -109,6 +127,7 @@ class VideoSegment {
       'startTime': startTime?.inMicroseconds,
       'endTime': endTime?.inMicroseconds,
       'volume': volume,
+      'playbackSpeed': playbackSpeed,
     };
   }
 
@@ -122,6 +141,7 @@ class VideoSegment {
           ? Duration(microseconds: safeParseInt(map['endTime']))
           : null,
       volume: tryParseDouble(map['volume']),
+      playbackSpeed: tryParseDouble(map['playbackSpeed']),
     );
   }
 

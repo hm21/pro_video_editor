@@ -230,6 +230,59 @@ void main() {
     await testSpeed(0.8); // Slow down
   });
 
+  testWidgets('per-clip speed: 2x on single segment', (tester) async {
+    final originalMeta = await ProVideoEditor.instance.getMetadata(inputVideo);
+    const speedFactor = 2.0;
+
+    final meta = await testRender(
+      description: 'Per-clip speed x$speedFactor',
+      renderModel: VideoRenderData(
+        outputFormat: VideoOutputFormat.mp4,
+        videoSegments: [
+          VideoSegment(video: inputVideo, playbackSpeed: speedFactor),
+        ],
+      ),
+    );
+
+    expect(
+      meta.duration.inSeconds,
+      closeTo(originalMeta.duration.inSeconds / speedFactor, 1),
+      reason: 'Duration should be halved with per-clip speed x$speedFactor',
+    );
+  });
+
+  testWidgets('per-clip speed: different speeds per segment', (tester) async {
+    // Use two non-overlapping trim windows so we can predict output duration.
+    // segment A: 3 s at 2× → contributes ~1.5 s
+    // segment B: 3 s at 0.5× → contributes ~6 s  → total ~7.5 s
+    final meta = await testRender(
+      description: 'Per-clip mixed speeds (2× + 0.5×)',
+      renderModel: VideoRenderData(
+        outputFormat: VideoOutputFormat.mp4,
+        videoSegments: [
+          VideoSegment(
+            video: inputVideo,
+            startTime: const Duration(seconds: 0),
+            endTime: const Duration(seconds: 3),
+            playbackSpeed: 2.0,
+          ),
+          VideoSegment(
+            video: inputVideo,
+            startTime: const Duration(seconds: 3),
+            endTime: const Duration(seconds: 6),
+            playbackSpeed: 0.5,
+          ),
+        ],
+      ),
+    );
+
+    expect(
+      meta.duration.inSeconds,
+      closeTo(7, 2),
+      reason: 'Total duration should be ~7.5 s (1.5 s + 6 s)',
+    );
+  });
+
   testWidgets('remove audio', (tester) async {
     await testRender(
       description: 'Audio removed',
@@ -698,6 +751,60 @@ void main() {
       expect(result.lengthInBytes, greaterThan(50000));
     });
 
+    testWidgets('per-clip speed 2x', (_) async {
+      final result = await ProVideoEditor.instance.renderVideo(
+        VideoRenderData(
+          outputFormat: VideoOutputFormat.mp4,
+          videoSegments: [
+            VideoSegment(
+              video: hevcVideo,
+              startTime: Duration.zero,
+              endTime: const Duration(seconds: 2),
+              playbackSpeed: 2.0,
+            ),
+          ],
+        ),
+      );
+      expect(result, isNotNull, reason: 'HEVC per-clip speed 2x failed');
+      expect(result.lengthInBytes, greaterThan(10000));
+
+      final meta = await ProVideoEditor.instance.getMetadata(
+        EditorVideo.memory(result),
+      );
+      expect(
+        meta.duration.inSeconds,
+        closeTo(1, 1),
+        reason: 'HEVC per-clip speed 2x: 2s input → ~1s output',
+      );
+    });
+
+    testWidgets('per-clip speed 0.5x', (_) async {
+      final result = await ProVideoEditor.instance.renderVideo(
+        VideoRenderData(
+          outputFormat: VideoOutputFormat.mp4,
+          videoSegments: [
+            VideoSegment(
+              video: hevcVideo,
+              startTime: Duration.zero,
+              endTime: const Duration(seconds: 1),
+              playbackSpeed: 0.5,
+            ),
+          ],
+        ),
+      );
+      expect(result, isNotNull, reason: 'HEVC per-clip speed 0.5x failed');
+      expect(result.lengthInBytes, greaterThan(10000));
+
+      final meta = await ProVideoEditor.instance.getMetadata(
+        EditorVideo.memory(result),
+      );
+      expect(
+        meta.duration.inSeconds,
+        closeTo(2, 1),
+        reason: 'HEVC per-clip speed 0.5x: 1s input → ~2s output',
+      );
+    });
+
     // Note: hevc.mp4 is only ~2.5s, so use 0-1s and 1-2s segments
     testWidgets('merge two HEVC videos', (_) async {
       final result = await ProVideoEditor.instance.renderVideo(
@@ -953,6 +1060,60 @@ void main() {
       );
       expect(result, isNotNull, reason: 'H.264 with combined effects failed');
       expect(result.lengthInBytes, greaterThan(50000));
+    });
+
+    testWidgets('per-clip speed 2x', (_) async {
+      final result = await ProVideoEditor.instance.renderVideo(
+        VideoRenderData(
+          outputFormat: VideoOutputFormat.mp4,
+          videoSegments: [
+            VideoSegment(
+              video: h264Video,
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 5),
+              playbackSpeed: 2.0,
+            ),
+          ],
+        ),
+      );
+      expect(result, isNotNull, reason: 'H.264 per-clip speed 2x failed');
+      expect(result.lengthInBytes, greaterThan(50000));
+
+      final meta = await ProVideoEditor.instance.getMetadata(
+        EditorVideo.memory(result),
+      );
+      expect(
+        meta.duration.inSeconds,
+        closeTo(2, 1),
+        reason: 'H.264 per-clip speed 2x: 4s input → ~2s output',
+      );
+    });
+
+    testWidgets('per-clip speed 0.5x', (_) async {
+      final result = await ProVideoEditor.instance.renderVideo(
+        VideoRenderData(
+          outputFormat: VideoOutputFormat.mp4,
+          videoSegments: [
+            VideoSegment(
+              video: h264Video,
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 3),
+              playbackSpeed: 0.5,
+            ),
+          ],
+        ),
+      );
+      expect(result, isNotNull, reason: 'H.264 per-clip speed 0.5x failed');
+      expect(result.lengthInBytes, greaterThan(50000));
+
+      final meta = await ProVideoEditor.instance.getMetadata(
+        EditorVideo.memory(result),
+      );
+      expect(
+        meta.duration.inSeconds,
+        closeTo(4, 1),
+        reason: 'H.264 per-clip speed 0.5x: 2s input → ~4s output',
+      );
     });
 
     testWidgets('merge two H.264 videos', (_) async {

@@ -175,18 +175,35 @@ internal class VideoSequenceBuilder {
             // Calculate time range for this clip
             let clipTimeRange = await calculateTimeRange(for: clip, from: asset)
             let clipDuration = clipTimeRange.duration
+            let insertStart = totalDuration
 
             // Insert video clip into the composition track
             try compositionVideoTrack.insertTimeRange(
                 clipTimeRange,
                 of: videoTrack,
-                at: totalDuration
+                at: insertStart
             )
+
+            // Apply per-clip playback speed by scaling the inserted segment.
+            // The global config.playbackSpeed is still applied via
+            // composition instructions in `applyPlaybackSpeed` and is multiplicative.
+            let effectiveDuration: CMTime
+            if let speed = clip.playbackSpeed, speed > 0, speed != 1.0 {
+                let scaled = CMTimeMultiplyByFloat64(clipDuration, multiplier: 1.0 / Float64(speed))
+                let insertedRange = CMTimeRange(start: insertStart, duration: clipDuration)
+                compositionVideoTrack.scaleTimeRange(insertedRange, toDuration: scaled)
+                effectiveDuration = scaled
+                PluginLog.print(
+                    "⏩ Clip \(index) playback speed: \(speed)× (duration \(String(format: "%.2f", clipDuration.seconds))s → \(String(format: "%.2f", scaled.seconds))s)"
+                )
+            } else {
+                effectiveDuration = clipDuration
+            }
 
             // Store instruction for this clip segment
             clipInstructions.append(
                 ClipInstruction(
-                    timeRange: CMTimeRange(start: totalDuration, duration: clipDuration),
+                    timeRange: CMTimeRange(start: insertStart, duration: effectiveDuration),
                     transform: preferredTransform,
                     naturalSize: naturalSize,
                     renderSize: correctedSize
@@ -209,8 +226,13 @@ internal class VideoSequenceBuilder {
                     try sharedAudioTrack.insertTimeRange(
                         clipTimeRange,
                         of: audioTrack,
-                        at: totalDuration
+                        at: insertStart
                     )
+                    // Apply per-clip playback speed to audio segment to keep A/V in sync.
+                    if let speed = clip.playbackSpeed, speed > 0, speed != 1.0 {
+                        let insertedAudioRange = CMTimeRange(start: insertStart, duration: clipDuration)
+                        sharedAudioTrack.scaleTimeRange(insertedAudioRange, toDuration: effectiveDuration)
+                    }
                     PluginLog.print("   ✅ Audio inserted into SHARED track!")
                     PluginLog.print(
                         "      Source time range: \(String(format: "%.2f", clipTimeRange.start.seconds))s - \(String(format: "%.2f", (clipTimeRange.start + clipTimeRange.duration).seconds))s"
@@ -227,9 +249,9 @@ internal class VideoSequenceBuilder {
                 }
             }
 
-            totalDuration = CMTimeAdd(totalDuration, clipDuration)
+            totalDuration = CMTimeAdd(totalDuration, effectiveDuration)
             PluginLog.print("✅ Clip \(index) added successfully")
-            PluginLog.print("   - Duration: \(String(format: "%.2f", clipDuration.seconds))s")
+            PluginLog.print("   - Duration: \(String(format: "%.2f", effectiveDuration.seconds))s")
             PluginLog.print(
                 "   - Time range in composition: \(String(format: "%.2f", totalDuration.seconds - clipDuration.seconds))s - \(String(format: "%.2f", totalDuration.seconds))s"
             )

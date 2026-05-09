@@ -269,7 +269,8 @@ struct RenderConfig {
                     inputPath: inputPath,
                     startUs: (clipMap["startUs"] as? NSNumber)?.int64Value,
                     endUs: (clipMap["endUs"] as? NSNumber)?.int64Value,
-                    volume: (clipMap["volume"] as? NSNumber)?.floatValue
+                    volume: (clipMap["volume"] as? NSNumber)?.floatValue,
+                    playbackSpeed: (clipMap["playbackSpeed"] as? NSNumber)?.floatValue
                 )
             }
         }

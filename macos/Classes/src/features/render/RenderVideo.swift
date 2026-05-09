@@ -75,7 +75,8 @@ class RenderVideo {
                                 inputPath: newPath,
                                 startUs: clip.startUs,
                                 endUs: clip.endUs,
-                                volume: clip.volume
+                                volume: clip.volume,
+                                playbackSpeed: clip.playbackSpeed
                             )
                         }
                         return clip

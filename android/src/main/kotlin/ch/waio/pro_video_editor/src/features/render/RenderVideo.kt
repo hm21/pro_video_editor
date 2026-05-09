@@ -138,8 +138,8 @@ class RenderVideo(private val context: Context) {
                     val updatedClips = config.videoClips.map { clip ->
                         val newPath = transcodeMap[clip.inputPath] ?: clip.inputPath
                         if (newPath != clip.inputPath) {
-                            // If transcoded, use the new path but keep trim times and volume
-                            VideoClip(newPath, clip.startUs, clip.endUs, clip.volume)
+                            // If transcoded, use the new path but keep trim times, volume and speed
+                            VideoClip(newPath, clip.startUs, clip.endUs, clip.volume, clip.playbackSpeed)
                         } else {
                             clip
                         }

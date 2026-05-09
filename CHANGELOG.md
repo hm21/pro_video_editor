@@ -1,3 +1,7 @@
+## 1.16.0
+- **FEAT**(android, iOS, macOS): Add per-clip `playbackSpeed` to `VideoSegment`, allowing each segment in a multi-clip composition to have its own playback speed (e.g. `2.0` for fast-forward, `0.5` for slow-motion).
+- **DEPRECATED**: `VideoRenderData.playbackSpeed` is deprecated. Use `VideoSegment.playbackSpeed` instead.
+
 ## 1.15.2
 - **FIX**(example): Replace deprecated `CompleteParameters.customAudioTrack` usage with `CompleteParameters.audioTracks` in the basic video editor example.
 

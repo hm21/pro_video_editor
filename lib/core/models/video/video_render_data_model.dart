@@ -30,7 +30,7 @@ class VideoRenderData {
     this.imageLayers,
     this.transform,
     this.enableAudio = true,
-    this.playbackSpeed,
+    @Deprecated('Use VideoSegment.playbackSpeed instead.') this.playbackSpeed,
     this.startTime,
     this.endTime,
     @Deprecated('Use colorFilters instead.') this.colorMatrixList = const [],
@@ -124,6 +124,7 @@ class VideoRenderData {
     List<ImageLayer> imageLayers = const [],
     ExportTransform? transform,
     bool enableAudio = true,
+    @Deprecated('Use VideoSegment.playbackSpeed instead.')
     double? playbackSpeed,
     Duration? startTime,
     Duration? endTime,
@@ -153,6 +154,7 @@ class VideoRenderData {
       imageLayers: imageLayers,
       transform: transform,
       enableAudio: enableAudio,
+      // ignore: deprecated_member_use_from_same_package
       playbackSpeed: playbackSpeed,
       startTime: startTime,
       endTime: endTime,
@@ -248,6 +250,7 @@ class VideoRenderData {
   /// Playback speed of the exported video.
   ///
   /// For example, `0.5` for half speed, `2.0` for double speed.
+  @Deprecated('Use VideoSegment.playbackSpeed instead.')
   final double? playbackSpeed;
 
   /// Optional start time for trimming the entire composition across all
