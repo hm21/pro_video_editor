@@ -1,3 +1,6 @@
+## 1.16.1
+- **FIX**(iOS, macOS): Fix crash `No source tracks available for compositing` when rendering H.264 MP4 files whose container duration slightly exceeds the video track's actual frame duration. The compositor time range is now clamped to the video track's real `timeRange` before inserting into the composition, preventing AVFoundation from requesting frames that have no pixel buffer. A black-frame fallback was also added as a safety net.
+
 ## 1.16.0
 - **FEAT**(android, iOS, macOS): Add per-clip `playbackSpeed` to `VideoSegment`, allowing each segment in a multi-clip composition to have its own playback speed (e.g. `2.0` for fast-forward, `0.5` for slow-motion).
 - **DEPRECATED**: `VideoRenderData.playbackSpeed` is deprecated. Use `VideoSegment.playbackSpeed` instead.

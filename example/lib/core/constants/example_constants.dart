@@ -10,6 +10,12 @@ const String kVideoEditorExampleH264Path = 'assets/demo.mp4';
 /// examples.
 const String kVideoEditorExampleAssetWorldPath = 'assets/demo_world.mp4';
 
+/// A local path to a H.264 MP4 where the container duration slightly exceeds
+/// the video track's actual frame duration. Used to reproduce issue #131
+/// (compositor crash: "No source tracks available") reported by @rabble.
+const String kVideoEditorExampleDivinePath =
+    'assets/tests/divine_transcribed.mp4';
+
 /// A local path to the first example audio track used in video editor demos.
 const String kVideoEditorExampleAudio1Path = 'assets/audio1.mp3';
 

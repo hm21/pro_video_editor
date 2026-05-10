@@ -1800,4 +1800,82 @@ void main() {
       );
     }, skip: true);
   });
+
+  // ===========================================================================
+  // Regression Tests
+  // ===========================================================================
+  group('Regression tests', () {
+    // Issue #131 – reported by @rabble
+    // Certain H.264 MP4 files have a container duration that is slightly longer
+    // than the video track's actual decoded frames. This caused AVFoundation to
+    // call the custom compositor for a time slot where no pixel buffer was
+    // available (sourceTrackIDs empty), resulting in the crash:
+    //   PlatformException(RENDER_ERROR,
+    //     No source tracks available for compositing
+    // (sourceTrackIDs: 0, configTrackID: 1))
+    // Fix: clamp ClipInstruction.timeRange to the video track's actual
+    // timeRange in VideoSequenceBuilder before inserting into the composition.
+    group('#131 – H.264 MP4 with container duration > track duration', () {
+      final divineVideo = EditorVideo.asset(kVideoEditorExampleDivinePath);
+
+      testWidgets('plain export succeeds (no effects)', (_) async {
+        final result = await ProVideoEditor.instance.renderVideo(
+          VideoRenderData(
+            videoSegments: [VideoSegment(video: divineVideo)],
+            outputFormat: VideoOutputFormat.mp4,
+            shouldOptimizeForNetworkUse: true,
+          ),
+        );
+        expect(result.lengthInBytes, greaterThan(10000));
+      }, skip: !isIOS && !isMacOS);
+
+      testWidgets(
+        'export with image layer (original crash scenario)',
+        (_) async {
+          final watermark = await createTestOverlayImage(
+            width: 200,
+            height: 100,
+          );
+          final result = await ProVideoEditor.instance.renderVideo(
+            VideoRenderData(
+              videoSegments: [VideoSegment(video: divineVideo)],
+              outputFormat: VideoOutputFormat.mp4,
+              shouldOptimizeForNetworkUse: true,
+              imageLayers: [
+                ImageLayer(image: EditorLayerImage.memory(watermark)),
+              ],
+            ),
+          );
+          expect(result.lengthInBytes, greaterThan(10000));
+        },
+        skip: !isIOS && !isMacOS,
+      );
+
+      testWidgets('export with color filter + image layer', (_) async {
+        final watermark = await createTestOverlayImage(width: 200, height: 100);
+        final result = await ProVideoEditor.instance.renderVideo(
+          VideoRenderData(
+            videoSegments: [VideoSegment(video: divineVideo)],
+            outputFormat: VideoOutputFormat.mp4,
+            colorFilters: kBasicFilterMatrix,
+            imageLayers: [
+              ImageLayer(image: EditorLayerImage.memory(watermark)),
+            ],
+          ),
+        );
+        expect(result.lengthInBytes, greaterThan(10000));
+      }, skip: !isIOS && !isMacOS);
+
+      testWidgets('export with blur', (_) async {
+        final result = await ProVideoEditor.instance.renderVideo(
+          VideoRenderData(
+            videoSegments: [VideoSegment(video: divineVideo)],
+            outputFormat: VideoOutputFormat.mp4,
+            blur: 3,
+          ),
+        );
+        expect(result.lengthInBytes, greaterThan(10000));
+      }, skip: !isIOS && !isMacOS);
+    });
+  });
 }

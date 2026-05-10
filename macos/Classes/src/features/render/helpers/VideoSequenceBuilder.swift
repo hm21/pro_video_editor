@@ -173,7 +173,17 @@ internal class VideoSequenceBuilder {
             }
 
             // Calculate time range for this clip
-            let clipTimeRange = await calculateTimeRange(for: clip, from: asset)
+            let rawClipTimeRange = await calculateTimeRange(for: clip, from: asset)
+
+            // Clamp clip range to the video track's actual available range.
+            // Some MP4 files have a container duration slightly longer than the video
+            // track's decoded frames. Without clamping, insertTimeRange silently truncates
+            // the insert but the ClipInstruction keeps the longer duration, creating a gap
+            // where AVFoundation calls the compositor with no source frame available
+            // (sourceTrackIDs empty), causing a RENDER_ERROR crash.
+            let videoTrackTimeRange = videoTrack.timeRange
+            let clampedRange = CMTimeRangeGetIntersection(rawClipTimeRange, otherRange: videoTrackTimeRange)
+            let clipTimeRange = clampedRange.duration > .zero ? clampedRange : rawClipTimeRange
             let clipDuration = clipTimeRange.duration
             let insertStart = totalDuration
 

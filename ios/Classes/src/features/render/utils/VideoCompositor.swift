@@ -175,7 +175,11 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
     ]
 
-    func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {}
+    private var renderContext: AVVideoCompositionRenderContext?
+
+    func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {
+        renderContext = newRenderContext
+    }
 
     func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
         // Try to get source buffer from the first available track
@@ -205,13 +209,26 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         }
 
         guard let sourceBuffer = sourceBuffer else {
-            request.finish(
-                with: NSError(
-                    domain: "VideoCompositor", code: 0,
-                    userInfo: [
-                        NSLocalizedDescriptionKey:
-                            "No source tracks available for compositing (sourceTrackIDs: \(request.sourceTrackIDs.count), configTrackID: \(sourceTrackID))"
-                    ]))
+            // Last-resort fallback: output a black frame rather than aborting the entire render.
+            // This can happen for certain MP4 files where the container duration slightly exceeds
+            // the video track's actual decoded frames, causing AVFoundation to call the compositor
+            // for a time slot where no pixel buffer is available.
+            if let ctx = renderContext, let blackBuffer = ctx.newPixelBuffer() {
+                CVPixelBufferLockBaseAddress(blackBuffer, [])
+                if let addr = CVPixelBufferGetBaseAddress(blackBuffer) {
+                    memset(addr, 0, CVPixelBufferGetDataSize(blackBuffer))
+                }
+                CVPixelBufferUnlockBaseAddress(blackBuffer, [])
+                request.finish(withComposedVideoFrame: blackBuffer)
+            } else {
+                request.finish(
+                    with: NSError(
+                        domain: "VideoCompositor", code: 0,
+                        userInfo: [
+                            NSLocalizedDescriptionKey:
+                                "No source tracks available for compositing (sourceTrackIDs: \(request.sourceTrackIDs.count), configTrackID: \(sourceTrackID))"
+                        ]))
+            }
             return
         }
         var outputImage = CIImage(cvPixelBuffer: sourceBuffer)
