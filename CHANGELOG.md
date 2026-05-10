@@ -1,3 +1,6 @@
+## 1.16.2
+- **FIX**(android, iOS, macOS): Eliminate audible clicks/gaps at custom audio loop boundaries and clip transitions. Each custom audio track is now pre-rendered to a single gap-less PCM WAV file before being inserted into the composition, avoiding AAC encoder frame realignment (Android Media3) and codec priming/padding artifacts (AVFoundation `insertTimeRange` per loop iteration on iOS/macOS). Volume control remains in the mixer layer for post-hoc adjustments without re-decoding.
+
 ## 1.16.1
 - **FIX**(iOS, macOS): Fix crash `No source tracks available for compositing` when rendering H.264 MP4 files whose container duration slightly exceeds the video track's actual frame duration. The compositor time range is now clamped to the video track's real `timeRange` before inserting into the composition, preventing AVFoundation from requesting frames that have no pixel buffer. A black-frame fallback was also added as a safety net.
 
