@@ -310,7 +310,7 @@ class RenderVideo(private val context: Context) {
         // Create composition (now fast - no manual audio mixing needed, Media3 handles it natively)
         Thread {
             try {
-                val composition = applyComposition(
+                val compositionResult = applyComposition(
                     context = context,
                     config = config,
                     videoEffects = videoEffects,
@@ -318,7 +318,27 @@ class RenderVideo(private val context: Context) {
                 )
 
                 mainHandler.post {
-                    if (composition != null) {
+                    if (compositionResult != null) {
+                        val composition = compositionResult.composition
+                        val audioTempFiles = compositionResult.temporaryFiles
+
+                        transformer.addListener(object : Transformer.Listener {
+                            override fun onCompleted(
+                                composition: Composition,
+                                result: ExportResult
+                            ) {
+                                cleanupAudioTempFiles(audioTempFiles)
+                            }
+
+                            override fun onError(
+                                composition: Composition,
+                                result: ExportResult,
+                                exception: ExportException
+                            ) {
+                                cleanupAudioTempFiles(audioTempFiles)
+                            }
+                        })
+
                         transformer.start(composition, outputFile.absolutePath)
 
                         // Start progress tracking loop
@@ -348,5 +368,28 @@ class RenderVideo(private val context: Context) {
                 }
             }
         }.start()
+    }
+
+    /**
+     * Deletes pre-rendered audio temp files (typically WAVs from
+     * AudioPreRenderer) created while building the composition.
+     */
+    private fun cleanupAudioTempFiles(files: List<File>) {
+        for (file in files) {
+            try {
+                if (file.exists()) {
+                    val deleted = file.delete()
+                    Log.d(
+                        RENDER_TAG,
+                        "Cleanup pre-rendered audio file: ${file.name}, deleted=$deleted"
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(
+                    RENDER_TAG,
+                    "Failed to delete pre-rendered audio file ${file.name}: ${e.message}"
+                )
+            }
+        }
     }
 }

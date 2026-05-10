@@ -10,6 +10,7 @@ import androidx.media3.transformer.EditedMediaItemSequence
 import ch.waio.pro_video_editor.src.features.render.models.AudioTrackConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import java.io.File
 
 /**
  * Main builder class for creating Media3 Compositions from render configurations.
@@ -27,6 +28,13 @@ class CompositionBuilder(
 
     private var videoEffects: List<Effect> = emptyList()
     private var audioEffects: List<AudioProcessor> = emptyList()
+
+    /**
+     * Temporary files (e.g. pre-rendered audio WAVs) created while building
+     * the composition. The caller MUST delete these files after the
+     * Transformer export finishes (success or failure).
+     */
+    val temporaryFiles: MutableList<File> = mutableListOf()
 
     /**
      * Sets the video effects to apply from EffectsProcessor.
@@ -107,19 +115,20 @@ class CompositionBuilder(
             "Created video EditedMediaItemSequence with ${config.videoClips.size} items"
         )
 
-        // Add audio tracks as separate sequences - Media3 will mix all tracks natively
+        // Add audio tracks as separate sequences - Media3 will mix all tracks natively.
+        // Each audio track is pre-rendered to a single gap-less PCM WAV file via
+        // AudioPreRenderer to avoid encoder frame realignment artifacts (clicks/gaps)
+        // at loop and silence boundaries.
         if (hasCustomAudio) {
             val totalVideoDuration = videoBuilder.calculateTotalDuration()
 
             for ((index, track) in config.audioTracks.withIndex()) {
                 Log.d(
                     RENDER_TAG,
-                    "🎵 Adding audio track $index: path=${track.path}, volume=${track.volume}, loop=${track.loop}"
+                    "🎵 Pre-rendering audio track $index: path=${track.path}, volume=${track.volume}, loop=${track.loop}"
                 )
 
-                val audioSequence = AudioSequenceBuilder(track.path, totalVideoDuration)
-                    .setVolume(track.volume)
-                    .setNormalization(needsNormalization)
+                val result = AudioSequenceBuilder(context, track.path, totalVideoDuration)
                     .setLoop(track.loop)
                     .setStartTime(track.audioStartUs)
                     .setAudioEndTime(track.audioEndUs)
@@ -127,9 +136,14 @@ class CompositionBuilder(
                     .setCompositionEndTime(track.endUs)
                     .build()
 
-                if (audioSequence != null) {
-                    sequences.add(audioSequence)
-                    Log.d(RENDER_TAG, "Audio track $index added (will be mixed natively by Media3)")
+                if (result != null) {
+                    sequences.add(result.sequence)
+                    temporaryFiles.add(result.temporaryFile)
+                    Log.d(
+                        RENDER_TAG,
+                        "Audio track $index pre-rendered to ${result.temporaryFile.name} " +
+                                "(${result.temporaryFile.length()} bytes)"
+                    )
                 }
             }
         }

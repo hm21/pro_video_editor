@@ -86,11 +86,17 @@ class RenderVideo {
                 }
 
                 var outputURL: URL!
+                var temporaryAudioURLs: [URL] = []
 
                 let finalize: () -> Void = {
                     try? cleanup(config.outputPath == nil ? [outputURL] : [])
                     // Clean up transcoded files
                     VideoTranscoder.cleanupTranscodedFiles(transcodedFiles)
+                    // Clean up pre-rendered audio temp files
+                    for url in temporaryAudioURLs {
+                        try? FileManager.default.removeItem(at: url)
+                        PluginLog.print("🧹 Removed pre-rendered audio: \(url.lastPathComponent)")
+                    }
                 }
 
                 let handleCompletion: (Result<Data?, Error>) -> Void = { result in
@@ -139,13 +145,14 @@ class RenderVideo {
                     var effectsConfig = VideoCompositorConfig()
 
                     // Use composition helper to merge multiple video clips
-                    let (composition, videoCompData, renderSize, audioMix, sourceTrackID) =
+                    let (composition, videoCompData, renderSize, audioMix, sourceTrackID, audioTempURLs) =
                         try await applyComposition(
                             videoClips: workingConfig.videoClips,
                             videoEffects: effectsConfig,
                             enableAudio: workingConfig.enableAudio,
                             audioTracks: workingConfig.audioTracks
                         )
+                    temporaryAudioURLs = audioTempURLs
                     var videoCompConfig = videoCompData
 
                     // Set source track ID for fallback on older iOS versions (e.g., iPhone 7)

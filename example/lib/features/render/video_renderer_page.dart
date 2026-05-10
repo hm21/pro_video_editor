@@ -389,6 +389,71 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// **Loop seam stress test** — short clipped audio looped many times.
+  ///
+  /// Extracts only a ~1 second window from the source audio file and lets it
+  /// loop continuously across the full video duration. With a typical 21s
+  /// demo video this produces ~20 loop boundaries — the most aggressive
+  /// scenario to expose audible clicks/gaps at each loop restart.
+  ///
+  /// Use this to A/B compare the audio quality at every seam before and
+  /// after the seamless audio pre-render implementation.
+  Future<void> _loopSeamStressShort() async {
+    final customAudioFile = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio1Path,
+    );
+
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video, volume: 0)],
+      audioTracks: [
+        VideoAudioTrack(
+          path: customAudioFile.path,
+          volume: 1.0,
+          loop: true,
+          audioStartTime: const Duration(seconds: 2),
+          audioEndTime: const Duration(milliseconds: 3000),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// **Loop seam stress test** — looped audio across multiple video clips.
+  ///
+  /// Concatenates the same video three times (~63s total) and lets a
+  /// short 2-second audio window loop continuously across the entire
+  /// timeline. This stresses both:
+  /// - Loop boundaries inside the audio track
+  /// - Audio continuity across video clip transitions
+  ///
+  /// Use this to A/B compare seamless audio behaviour before and after
+  /// the pre-render implementation.
+  Future<void> _loopSeamStressMultiClip() async {
+    final customAudioFile = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio1Path,
+    );
+
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(video: _video, volume: 0),
+        VideoSegment(video: _video, volume: 0),
+        VideoSegment(video: _video, volume: 0),
+      ],
+      audioTracks: [
+        VideoAudioTrack(
+          path: customAudioFile.path,
+          volume: 1.0,
+          loop: true,
+          audioStartTime: const Duration(seconds: 1),
+          audioEndTime: const Duration(seconds: 3),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   /// Different volume levels per video segment.
   ///
   /// This example demonstrates per-clip volume control when concatenating
@@ -994,6 +1059,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
     await _playerPreview.open(Media(outputPath));
     await _playerPreview.play();
+    await _playerPreview.setPlaylistMode(.loop);
   }
 
   Future<void> _cancelRender() async {
@@ -1348,6 +1414,22 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           leading: const Icon(Icons.content_cut_outlined),
           title: const Text('Audio Clip Range'),
           subtitle: const Text('Extract 3s–8s from audio file'),
+        ),
+        ListTile(
+          onTap: _loopSeamStressShort,
+          leading: const Icon(Icons.repeat_outlined),
+          title: const Text('Loop Seam Stress (short)'),
+          subtitle: const Text(
+            '1s audio window looped across full video — exposes loop clicks',
+          ),
+        ),
+        ListTile(
+          onTap: _loopSeamStressMultiClip,
+          leading: const Icon(Icons.repeat_on_outlined),
+          title: const Text('Loop Seam Stress (multi-clip)'),
+          subtitle: const Text(
+            '2s audio window looped across 3 concatenated clips',
+          ),
         ),
         ListTile(
           onTap: _perClipVolume,

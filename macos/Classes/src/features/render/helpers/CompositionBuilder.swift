@@ -43,10 +43,10 @@ internal class CompositionBuilder {
 
     /// Builds the complete composition.
     ///
-    /// - Returns: Tuple containing composition, video composition, render size, audio mix, and source track ID
+    /// - Returns: Tuple containing composition, video composition, render size, audio mix, source track ID, and temporary file URLs to clean up after export
     /// - Throws: Error if composition creation fails
     func build() async throws -> (
-        AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID
+        AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID, [URL]
     ) {
         guard !videoClips.isEmpty else {
             throw NSError(
@@ -67,22 +67,23 @@ internal class CompositionBuilder {
 
         let videoResult = try await videoBuilder.build(in: composition)
 
-        // Add custom audio tracks
+        // Add custom audio tracks (each pre-rendered to a single PCM WAV).
         var customAudioTracks: [(track: AVMutableCompositionTrack, config: AudioTrackConfig)] = []
+        var temporaryAudioURLs: [URL] = []
         for trackConfig in audioTracks {
             PluginLog.print("🎵 Adding audio track: \(trackConfig.path)")
             let audioBuilder = AudioSequenceBuilder(
                 audioPath: trackConfig.path,
                 targetDuration: videoResult.totalDuration
-            ).setVolume(trackConfig.volume)
-                .setLoop(trackConfig.loop)
+            ).setLoop(trackConfig.loop)
                 .setAudioStartTime(trackConfig.audioStartUs)
                 .setAudioEndTime(trackConfig.audioEndUs)
                 .setCompositionStartTime(trackConfig.startUs == -1 ? nil : trackConfig.startUs)
                 .setCompositionEndTime(trackConfig.endUs == -1 ? nil : trackConfig.endUs)
 
-            if let track = try await audioBuilder.build(in: composition) {
-                customAudioTracks.append((track: track, config: trackConfig))
+            if let result = try await audioBuilder.build(in: composition) {
+                customAudioTracks.append((track: result.track, config: trackConfig))
+                temporaryAudioURLs.append(result.temporaryURL)
             }
         }
 
@@ -176,7 +177,7 @@ internal class CompositionBuilder {
         // Return the track ID for fallback on older macOS versions
         let sourceTrackID = videoResult.videoTrack.trackID
 
-        return (composition, videoCompositionData, videoResult.renderSize, audioMix, sourceTrackID)
+        return (composition, videoCompositionData, videoResult.renderSize, audioMix, sourceTrackID, temporaryAudioURLs)
     }
 
     /// Creates audio mix with per-clip and per-track volume parameters.
