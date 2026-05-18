@@ -1,13 +1,10 @@
 // src/video_metadata.h
 #pragma once
 
-#include <flutter/standard_method_codec.h>
-#include <flutter/method_result_functions.h>
+#include <flutter_linux/flutter_linux.h>
 
 namespace pro_video_editor {
 
-	void HandleGetMetadata(
-		const flutter::EncodableMap& args,
-		std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+	FlMethodResponse* HandleGetMetadata(FlValue* args);
 
 }  // namespace pro_video_editor

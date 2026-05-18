@@ -5,8 +5,6 @@
 #include <sys/utsname.h>
 
 #include <cstring>
-#include <memory>
-#include <iostream>
 
 #include "pro_video_editor_plugin_private.h"
 #include "src/video_metadata.h"
@@ -51,86 +49,19 @@ FlMethodResponse* get_platform_version() {
   return FL_METHOD_RESPONSE(fl_method_success_response_new(result));
 }
 
-// Utility to convert FlValue* to EncodableValue
-flutter::EncodableValue ConvertFlValueToEncodable(FlValue* value);
-
-// Utility to convert EncodableValue to FlValue*
-FlValue* ConvertEncodableToFlValue(const flutter::EncodableValue& value);
-
 static void pro_video_editor_plugin_handle_method_call(
     ProVideoEditorPlugin* self,
     FlMethodCall* method_call) {
   g_autoptr(FlMethodResponse) response = nullptr;
   const gchar* method = fl_method_call_get_name(method_call);
-
   FlValue* args = fl_method_call_get_args(method_call);
-  flutter::EncodableValue encodable_args = ConvertFlValueToEncodable(args);
-
-  if (!std::holds_alternative<flutter::EncodableMap>(encodable_args)) {
-    response = FL_METHOD_RESPONSE(fl_method_error_response_new(
-        "InvalidArgument", "Expected a map", nullptr));
-    fl_method_call_respond(method_call, response, nullptr);
-    return;
-  }
-
-  auto args_map = std::get<flutter::EncodableMap>(encodable_args);
 
   if (strcmp(method, "getPlatformVersion") == 0) {
     response = get_platform_version();
-
   } else if (strcmp(method, "getMetadata") == 0) {
-    pro_video_editor::HandleGetMetadata(
-        args_map,
-        std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
-            // onSuccess
-            [method_call](const flutter::EncodableValue* result) {
-              FlValue* fl_result = ConvertEncodableToFlValue(*result);
-              g_autoptr(FlMethodResponse) response =
-                  FL_METHOD_RESPONSE(fl_method_success_response_new(fl_result));
-              fl_method_call_respond(method_call, response, nullptr);
-            },
-            // onError
-            [method_call](const std::string& code,
-                          const std::string& message,
-                          const flutter::EncodableValue* details) {
-              g_autoptr(FlMethodResponse) response =
-                  FL_METHOD_RESPONSE(fl_method_error_response_new(code.c_str(), message.c_str(), nullptr));
-              fl_method_call_respond(method_call, response, nullptr);
-            },
-            // onNotImplemented
-            [method_call]() {
-              g_autoptr(FlMethodResponse) response =
-                  FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
-              fl_method_call_respond(method_call, response, nullptr);
-            }));
-
-    return;  // Don't respond here — async will handle it
-
+    response = pro_video_editor::HandleGetMetadata(args);
   } else if (strcmp(method, "createVideoThumbnails") == 0) {
-    pro_video_editor::HandleGenerateThumbnails(
-        args_map,
-        std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
-            [method_call](const flutter::EncodableValue* result) {
-              FlValue* fl_result = ConvertEncodableToFlValue(*result);
-              g_autoptr(FlMethodResponse) response =
-                  FL_METHOD_RESPONSE(fl_method_success_response_new(fl_result));
-              fl_method_call_respond(method_call, response, nullptr);
-            },
-            [method_call](const std::string& code,
-                          const std::string& message,
-                          const flutter::EncodableValue* details) {
-              g_autoptr(FlMethodResponse) response =
-                  FL_METHOD_RESPONSE(fl_method_error_response_new(code.c_str(), message.c_str(), nullptr));
-              fl_method_call_respond(method_call, response, nullptr);
-            },
-            [method_call]() {
-              g_autoptr(FlMethodResponse) response =
-                  FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
-              fl_method_call_respond(method_call, response, nullptr);
-            }));
-
-    return;
-
+    response = pro_video_editor::HandleGenerateThumbnails(args);
   } else {
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
   }
