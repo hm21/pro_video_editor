@@ -1,3 +1,6 @@
+## 1.16.3
+- **FIX**(linux): Fix Linux build by replacing the unavailable C++ Flutter embedder API (`flutter::EncodableValue`) with the GLib-based `FlValue` API. Update CMakeLists to use GStreamer (`gstreamer-1.0`, `gstreamer-pbutils-1.0`) instead of the unused libavformat/libavcodec/libavutil pkg-config targets. Fix source file extensions (`.cc` instead of `.cpp`).
+
 ## 1.16.2
 - **FIX**(android, iOS, macOS): Eliminate audible clicks/gaps at custom audio loop boundaries and clip transitions. Each custom audio track is now pre-rendered to a single gap-less PCM WAV file before being inserted into the composition, avoiding AAC encoder frame realignment (Android Media3) and codec priming/padding artifacts (AVFoundation `insertTimeRange` per loop iteration on iOS/macOS). Volume control remains in the mixer layer for post-hoc adjustments without re-decoding.
 

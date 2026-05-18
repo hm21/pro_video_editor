@@ -1,57 +1,44 @@
 #include "video_metadata.h"
 
-#include <flutter/standard_method_codec.h>
+#include <flutter_linux/flutter_linux.h>
 #include <gst/gst.h>
 #include <gst/pbutils/pbutils.h>
-#include <fstream>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <fcntl.h>
 #include <string>
-#include <vector>
-#include <map>
 #include <ctime>
 
 namespace pro_video_editor {
 
-void HandleGetMetadata(
-    const flutter::EncodableMap& args,
-    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
-
-    auto itPath = args.find(flutter::EncodableValue("inputPath"));
-    if (itPath == args.end()) {
-        result->Error("InvalidArgument", "Missing inputPath");
-        return;
-    }
-    const auto* pathStr = std::get_if<std::string>(&itPath->second);
-    if (!pathStr) {
-        result->Error("InvalidArgument", "Invalid inputPath format");
-        return;
+FlMethodResponse* HandleGetMetadata(FlValue* args) {
+    FlValue* inputPathValue = fl_value_lookup_string(args, "inputPath");
+    if (!inputPathValue || fl_value_get_type(inputPathValue) != FL_VALUE_TYPE_STRING) {
+        return FL_METHOD_RESPONSE(fl_method_error_response_new(
+            "InvalidArgument", "Missing or invalid inputPath", nullptr));
     }
 
-    std::string inputPath = *pathStr;
+    std::string inputPath = fl_value_get_string(inputPathValue);
 
     struct stat file_stat;
     int64_t fileSize = 0;
     std::string dateStr;
     if (stat(inputPath.c_str(), &file_stat) == 0) {
         fileSize = file_stat.st_size;
-
         char buffer[64];
         std::tm* tm = std::localtime(&file_stat.st_ctime);
         std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", tm);
         dateStr = buffer;
     } else {
-        result->Error("FileError", "Failed to stat file");
-        return;
+        return FL_METHOD_RESPONSE(fl_method_error_response_new(
+            "FileError", "Failed to stat file", nullptr));
     }
 
     gst_init(nullptr, nullptr);
 
     GstDiscoverer* discoverer = gst_discoverer_new(5 * GST_SECOND, nullptr);
     if (!discoverer) {
-        result->Error("GStreamerError", "Failed to create discoverer");
-        return;
+        return FL_METHOD_RESPONSE(fl_method_error_response_new(
+            "GStreamerError", "Failed to create discoverer", nullptr));
     }
 
     std::string uri = "file://" + inputPath;
@@ -59,12 +46,12 @@ void HandleGetMetadata(
 
     if (!info) {
         g_object_unref(discoverer);
-        result->Error("GStreamerError", "Failed to get metadata");
-        return;
+        return FL_METHOD_RESPONSE(fl_method_error_response_new(
+            "GStreamerError", "Failed to get metadata", nullptr));
     }
 
-    const GstDiscovererStreamInfo* streamInfo = gst_discoverer_info_get_stream_info(info);
-    const GstCaps* caps = gst_discoverer_stream_info_get_caps(streamInfo);
+    GstDiscovererStreamInfo* streamInfo = gst_discoverer_info_get_stream_info(info);
+    GstCaps* caps = gst_discoverer_stream_info_get_caps(streamInfo);
 
     int width = 0, height = 0, rotation = 0;
     double duration_ms = 0.0;
@@ -89,25 +76,25 @@ void HandleGetMetadata(
         gst_tag_list_get_string(tags, GST_TAG_TITLE, &title);
     }
 
-    flutter::EncodableMap result_map;
-    result_map[flutter::EncodableValue("fileSize")] = flutter::EncodableValue(static_cast<int64_t>(fileSize));
-    result_map[flutter::EncodableValue("duration")] = flutter::EncodableValue(duration_ms);
-    result_map[flutter::EncodableValue("width")] = flutter::EncodableValue(width);
-    result_map[flutter::EncodableValue("height")] = flutter::EncodableValue(height);
-    result_map[flutter::EncodableValue("rotation")] = flutter::EncodableValue(rotation);  // Rotation not available via GStreamer tags directly
-    result_map[flutter::EncodableValue("bitrate")] = flutter::EncodableValue(bitrate);
-    result_map[flutter::EncodableValue("title")] = flutter::EncodableValue(title ? title : "");
-    result_map[flutter::EncodableValue("artist")] = flutter::EncodableValue("");
-    result_map[flutter::EncodableValue("author")] = flutter::EncodableValue("");
-    result_map[flutter::EncodableValue("album")] = flutter::EncodableValue("");
-    result_map[flutter::EncodableValue("albumArtist")] = flutter::EncodableValue("");
-    result_map[flutter::EncodableValue("date")] = flutter::EncodableValue(dateStr);
+    g_autoptr(FlValue) result_map = fl_value_new_map();
+    fl_value_set_string_take(result_map, "fileSize", fl_value_new_int(fileSize));
+    fl_value_set_string_take(result_map, "duration", fl_value_new_float(duration_ms));
+    fl_value_set_string_take(result_map, "width", fl_value_new_int(width));
+    fl_value_set_string_take(result_map, "height", fl_value_new_int(height));
+    fl_value_set_string_take(result_map, "rotation", fl_value_new_int(rotation));
+    fl_value_set_string_take(result_map, "bitrate", fl_value_new_int(bitrate));
+    fl_value_set_string_take(result_map, "title", fl_value_new_string(title ? title : ""));
+    fl_value_set_string_take(result_map, "artist", fl_value_new_string(""));
+    fl_value_set_string_take(result_map, "author", fl_value_new_string(""));
+    fl_value_set_string_take(result_map, "album", fl_value_new_string(""));
+    fl_value_set_string_take(result_map, "albumArtist", fl_value_new_string(""));
+    fl_value_set_string_take(result_map, "date", fl_value_new_string(dateStr.c_str()));
 
     if (title) g_free(title);
     gst_discoverer_info_unref(info);
     g_object_unref(discoverer);
 
-    result->Success(flutter::EncodableValue(result_map));
+    return FL_METHOD_RESPONSE(fl_method_success_response_new(result_map));
 }
 
 }  // namespace pro_video_editor
