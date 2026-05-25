@@ -69,7 +69,7 @@ internal class CompositionBuilder {
 
         // Add custom audio tracks (each pre-rendered to a single PCM WAV).
         var customAudioTracks: [(track: AVMutableCompositionTrack, config: AudioTrackConfig)] = []
-        var temporaryAudioURLs: [URL] = []
+        var temporaryAudioURLs: [URL] = videoResult.reversedAudioTempURLs
         for trackConfig in audioTracks {
             PluginLog.print("🎵 Adding audio track: \(trackConfig.path)")
             let audioBuilder = AudioSequenceBuilder(

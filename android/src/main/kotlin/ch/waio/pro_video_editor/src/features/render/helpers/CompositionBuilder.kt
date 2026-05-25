@@ -71,7 +71,7 @@ class CompositionBuilder(
         val hasCustomAudio = config.audioTracks.isNotEmpty()
 
         // Build video sequence
-        val videoBuilder = VideoSequenceBuilder(config.videoClips)
+        val videoBuilder = VideoSequenceBuilder(config.videoClips, context)
             .setVideoEffects(videoEffects)
             .setAudioEffects(audioEffects)
             .setRotation(rotationDegrees)
@@ -106,6 +106,10 @@ class CompositionBuilder(
 
         // Build video sequence (with audio intact)
         val videoSequence = videoBuilder.build()
+
+        // Forward any temp files produced by VideoSequenceBuilder (reversed-segment
+        // MP4s) so the render pipeline deletes them after export.
+        temporaryFiles.addAll(videoBuilder.temporaryFiles)
 
         // Prepare sequences list
         val sequences = mutableListOf<EditedMediaItemSequence>()

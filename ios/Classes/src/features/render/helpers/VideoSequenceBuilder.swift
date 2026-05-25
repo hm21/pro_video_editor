@@ -85,6 +85,7 @@ internal class VideoSequenceBuilder {
         var maxFrameRate: Float = 30.0
         var originalAudioTracks: [AVMutableCompositionTrack] = []
         var clipInstructions: [ClipInstruction] = []
+        var reversedAudioTempURLs: [URL] = []
 
         // Create single video track for all clips
         guard
@@ -254,29 +255,59 @@ internal class VideoSequenceBuilder {
                 PluginLog.print("      Format: \(audioTrack.mediaType)")
 
                 do {
-                    var audioInsertTime = insertStart
-                    for sourceRange in sourceRanges {
-                        try sharedAudioTrack.insertTimeRange(
-                            sourceRange,
-                            of: audioTrack,
-                            at: audioInsertTime
-                        )
-                        audioInsertTime = CMTimeAdd(audioInsertTime, sourceRange.duration)
+                    if clip.reverseVideo {
+                        // True PCM-level reversal: decode → reverse samples → WAV.
+                        // This avoids the ~30 audible artefacts/second that the
+                        // frame-slice approach produces.
+                        if let reversed = await AudioReverser.reverse(
+                            inputPath: clip.inputPath,
+                            startTime: clipTimeRange.start,
+                            endTime: CMTimeRangeGetEnd(clipTimeRange)
+                        ) {
+                            reversedAudioTempURLs.append(reversed.outputURL)
+                            let wavAsset = AVURLAsset(url: reversed.outputURL)
+                            let wavTracks: [AVAssetTrack]
+                            if #available(iOS 15.0, *) {
+                                wavTracks = (try? await wavAsset.loadTracks(withMediaType: .audio)) ?? []
+                            } else {
+                                wavTracks = wavAsset.tracks(withMediaType: .audio)
+                            }
+                            if let wavTrack = wavTracks.first {
+                                // Clamp WAV duration to clipDuration to prevent audio
+                                // overhang that would cause AVErrorInvalidVideoComposition.
+                                let clampedDuration = CMTimeMinimum(reversed.duration, clipDuration)
+                                let wavRange = CMTimeRange(start: .zero, duration: clampedDuration)
+                                try sharedAudioTrack.insertTimeRange(wavRange, of: wavTrack, at: insertStart)
+                                if let speed = clip.playbackSpeed, speed > 0, speed != 1.0 {
+                                    let insertedRange = CMTimeRange(start: insertStart, duration: clipDuration)
+                                    sharedAudioTrack.scaleTimeRange(insertedRange, toDuration: effectiveDuration)
+                                }
+                                PluginLog.print("   ✅ Reversed audio inserted (PCM-level, \(reversed.duration.seconds)s)")
+                            }
+                        } else {
+                            PluginLog.print("   ⚠️ AudioReverser returned nil, skipping audio for reversed clip")
+                        }
+                    } else {
+                        var audioInsertTime = insertStart
+                        for sourceRange in sourceRanges {
+                            try sharedAudioTrack.insertTimeRange(
+                                sourceRange,
+                                of: audioTrack,
+                                at: audioInsertTime
+                            )
+                            audioInsertTime = CMTimeAdd(audioInsertTime, sourceRange.duration)
+                        }
+                        if let speed = clip.playbackSpeed, speed > 0, speed != 1.0 {
+                            let insertedAudioRange = CMTimeRange(start: insertStart, duration: clipDuration)
+                            sharedAudioTrack.scaleTimeRange(insertedAudioRange, toDuration: effectiveDuration)
+                        }
+                        PluginLog.print("   ✅ Audio inserted into SHARED track!")
                     }
-                    // Apply per-clip playback speed to audio segment to keep A/V in sync.
-                    if let speed = clip.playbackSpeed, speed > 0, speed != 1.0 {
-                        let insertedAudioRange = CMTimeRange(start: insertStart, duration: clipDuration)
-                        sharedAudioTrack.scaleTimeRange(insertedAudioRange, toDuration: effectiveDuration)
-                    }
-                    PluginLog.print("   ✅ Audio inserted into SHARED track!")
                     PluginLog.print(
                         "      Source time range: \(String(format: "%.2f", clipTimeRange.start.seconds))s - \(String(format: "%.2f", (clipTimeRange.start + clipTimeRange.duration).seconds))s"
                     )
                     PluginLog.print(
                         "      Inserted at composition time: \(String(format: "%.2f", totalDuration.seconds))s"
-                    )
-                    PluginLog.print(
-                        "      Audio duration: \(String(format: "%.2f", clipTimeRange.duration.seconds))s"
                     )
                 } catch {
                     PluginLog.print("   ❌ ERROR inserting audio: \(error.localizedDescription)")
@@ -321,7 +352,8 @@ internal class VideoSequenceBuilder {
             totalDuration: totalDuration,
             renderSize: maxRenderSize,
             frameRate: maxFrameRate,
-            clipInstructions: clipInstructions
+            clipInstructions: clipInstructions,
+            reversedAudioTempURLs: reversedAudioTempURLs
         )
     }
 
@@ -398,6 +430,9 @@ internal struct VideoSequenceResult {
     let renderSize: CGSize
     let frameRate: Float
     let clipInstructions: [ClipInstruction]
+    /// Temporary WAV files created by AudioReverser for reversed clips.
+    /// Must be deleted after the export session finishes.
+    let reversedAudioTempURLs: [URL]
 }
 
 /// Holds the data needed to construct an AVMutableVideoComposition without

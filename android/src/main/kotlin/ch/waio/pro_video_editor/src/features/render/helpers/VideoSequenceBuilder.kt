@@ -1,6 +1,7 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
+import android.content.Context
 import android.net.Uri
 import applyScale
 import androidx.media3.common.C
@@ -29,8 +30,16 @@ import java.io.File
  */
 @UnstableApi
 class VideoSequenceBuilder(
-    private val videoClips: List<VideoClip>
+    private val videoClips: List<VideoClip>,
+    private val context: Context? = null,
 ) {
+    /**
+     * Paths to temp files produced while building the sequence (currently:
+     * reversed-segment MP4s pre-rendered by [VideoReverser]). The caller MUST
+     * delete these after the Transformer export finishes.
+     */
+    val temporaryFiles: MutableList<java.io.File> = mutableListOf()
+
     private var videoEffects: List<Effect> = emptyList()
     private var audioEffects: List<AudioProcessor> = emptyList()
     private var rotationDegrees: Float = 0f
@@ -683,56 +692,69 @@ class VideoSequenceBuilder(
     }
 
     /**
-     * Expands reversed clips into frame-sized forward slices ordered from end to start.
-     *
-     * Media3 Transformer does not provide a native negative-speed effect. Small slices
-     * preserve the existing effect pipeline while producing backwards visual playback.
+     * Materializes any clip still flagged as reversed. In normal operation
+     * [RenderVideo] pre-renders reversed clips BEFORE the sequence is built
+     * (so it can report progress on the slow MediaCodec pre-render). This
+     * fallback only triggers if a reversed clip somehow reaches the builder
+     * directly (e.g. tests bypassing [RenderVideo]).
      */
     private fun expandReversedClips(clips: List<VideoClip>): List<VideoClip> {
-        val result = mutableListOf<VideoClip>()
+        if (clips.none { it.reverseVideo }) return clips
+        val ctx = context
+        if (ctx == null) {
+            Log.w(
+                RENDER_TAG,
+                "Reverse requested but no Context provided to VideoSequenceBuilder; " +
+                        "leaving clips unchanged."
+            )
+            return clips
+        }
+        Log.w(
+            RENDER_TAG,
+            "Reversed clip reached VideoSequenceBuilder — pre-render fallback engaged " +
+                    "(progress will NOT be reported for this stage)."
+        )
 
+        val result = mutableListOf<VideoClip>()
         for (clip in clips) {
             if (!clip.reverseVideo) {
                 result.add(clip)
                 continue
             }
-
             val sourceStartUs = clip.startUs ?: 0L
             val sourceEndUs = clip.endUs ?: MediaInfoExtractor.getVideoDuration(clip.inputPath)
             if (sourceEndUs <= sourceStartUs) {
                 Log.w(RENDER_TAG, "Skipping reversed clip with invalid range: ${clip.inputPath}")
                 continue
             }
-
-            val frameRate = MediaInfoExtractor.getVideoFrameRate(clip.inputPath)
-                ?.takeIf { it > 0f }
-                ?: 30f
-            val frameDurationUs = (1_000_000f / frameRate).toLong().coerceAtLeast(1L)
-            var cursorEndUs = sourceEndUs
-            var sliceCount = 0
-
-            while (cursorEndUs > sourceStartUs) {
-                val sliceStartUs = maxOf(sourceStartUs, cursorEndUs - frameDurationUs)
+            try {
+                val reversed = VideoReverser.reverseSync(
+                    context = ctx,
+                    inputPath = clip.inputPath,
+                    segmentStartUs = sourceStartUs,
+                    segmentEndUs = sourceEndUs,
+                    includeAudio = enableAudio && (clip.volume ?: 1.0f) > 0f,
+                )
+                temporaryFiles.add(java.io.File(reversed.outputPath))
                 result.add(
                     VideoClip(
-                        inputPath = clip.inputPath,
-                        startUs = sliceStartUs,
-                        endUs = cursorEndUs,
+                        inputPath = reversed.outputPath,
+                        startUs = 0L,
+                        endUs = reversed.durationUs.takeIf { it > 0 },
                         volume = clip.volume,
                         playbackSpeed = clip.playbackSpeed,
                         reverseVideo = false
                     )
                 )
-                cursorEndUs = sliceStartUs
-                sliceCount++
+            } catch (e: Exception) {
+                Log.e(
+                    RENDER_TAG,
+                    "Reverse pre-render failed for ${clip.inputPath}: ${e.message}. " +
+                            "Falling back to forward playback."
+                )
+                result.add(clip.copy(reverseVideo = false))
             }
-
-            Log.d(
-                RENDER_TAG,
-                "Expanded reversed clip into $sliceCount slices at ${frameRate}fps: ${clip.inputPath}"
-            )
         }
-
         return result
     }
 }

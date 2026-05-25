@@ -21,6 +21,7 @@ import ch.waio.pro_video_editor.src.features.render.helpers.applyComposition
 import ch.waio.pro_video_editor.src.features.render.helpers.VolumeControlAudioMixerFactory
 import ch.waio.pro_video_editor.src.features.render.helpers.ConfigurableInAppMp4Muxer
 import ch.waio.pro_video_editor.src.features.render.helpers.VideoTranscoder
+import ch.waio.pro_video_editor.src.features.render.helpers.VideoReverser
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderJobHandle
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
@@ -107,84 +108,31 @@ class RenderVideo(private val context: Context) {
         val shouldStopPolling = AtomicBoolean(false)
         val mainHandler = Handler(Looper.getMainLooper())
         var transcodedFiles: List<String> = emptyList()
+        var reversedFiles: List<String> = emptyList()
         val transformerRef = AtomicReference<Transformer?>(null)
         val outputFileRef = AtomicReference<File?>(null)
 
-        // Check if we need to pre-transcode HEVC 10-bit videos
         val needsPreTranscode = needsPreTranscoding(config)
+        val needsPreReverse = config.videoClips.any { it.reverseVideo }
 
-        if (needsPreTranscode) {
-            Log.d(RENDER_TAG, "Pre-transcoding needed, checking for HEVC 10-bit videos...")
+        // Progress split: reverse pre-render is the slowest stage, so it gets the
+        // largest share. Without reverse, the transformer owns the full bar.
+        val reverseShare = if (needsPreReverse) 0.6 else 0.0
+        val transformShare = 1.0 - reverseShare
+        val reverseProgress: (Double) -> Unit = { p ->
+            onProgress((p * reverseShare).coerceIn(0.0, 1.0))
+        }
+        val transformProgress: (Double) -> Unit = { p ->
+            onProgress((reverseShare + p * transformShare).coerceIn(0.0, 1.0))
+        }
 
-            // Pre-transcode in background thread
-            Thread {
-                try {
-                    val inputPaths = config.videoClips.map { it.inputPath }
-                    val transcodeMap = VideoTranscoder.transcodeClipsIfNeeded(context, inputPaths)
+        val cleanupAllPreFiles: () -> Unit = {
+            VideoTranscoder.cleanupTranscodedFiles(transcodedFiles)
+            VideoReverser.cleanupReversedFiles(reversedFiles)
+        }
 
-                    // Track transcoded files for cleanup
-                    transcodedFiles = transcodeMap.values.filter {
-                        it.contains("transcoded_")
-                    }
-
-                    if (transcodedFiles.isNotEmpty()) {
-                        Log.i(
-                            RENDER_TAG,
-                            "Pre-transcoded ${transcodedFiles.size} HEVC 10-bit videos to H.264"
-                        )
-                    }
-
-                    // Create new config with transcoded paths
-                    val updatedClips = config.videoClips.map { clip ->
-                        val newPath = transcodeMap[clip.inputPath] ?: clip.inputPath
-                        if (newPath != clip.inputPath) {
-                            // If transcoded, use the new path but keep trim times, volume and speed
-                            VideoClip(
-                                newPath,
-                                clip.startUs,
-                                clip.endUs,
-                                clip.volume,
-                                clip.playbackSpeed,
-                                clip.reverseVideo
-                            )
-                        } else {
-                            clip
-                        }
-                    }
-
-                    val updatedConfig = config.copy(videoClips = updatedClips)
-
-                    mainHandler.post {
-                        if (!shouldStopPolling.get()) {
-                            renderInternal(
-                                config = updatedConfig,
-                                onProgress = onProgress,
-                                onComplete = { result ->
-                                    // Cleanup transcoded files after render
-                                    VideoTranscoder.cleanupTranscodedFiles(transcodedFiles)
-                                    onComplete(result)
-                                },
-                                onError = { error ->
-                                    // Cleanup transcoded files on error too
-                                    VideoTranscoder.cleanupTranscodedFiles(transcodedFiles)
-                                    onError(error)
-                                },
-                                shouldStopPolling = shouldStopPolling,
-                                mainHandler = mainHandler,
-                                transformerRef = transformerRef,
-                                outputFileRef = outputFileRef
-                            )
-                        }
-                    }
-                } catch (e: Exception) {
-                    mainHandler.post {
-                        VideoTranscoder.cleanupTranscodedFiles(transcodedFiles)
-                        onError(e)
-                    }
-                }
-            }.start()
-        } else {
-            // No GPU effects, render directly
+        if (!needsPreTranscode && !needsPreReverse) {
+            // Fast path: nothing to pre-process.
             renderInternal(
                 config = config,
                 onProgress = onProgress,
@@ -195,6 +143,94 @@ class RenderVideo(private val context: Context) {
                 transformerRef = transformerRef,
                 outputFileRef = outputFileRef
             )
+        } else {
+            Thread {
+                try {
+                    var workingConfig = config
+
+                    // 1) Pre-transcode HEVC 10-bit clips (if needed).
+                    if (needsPreTranscode) {
+                        Log.d(RENDER_TAG, "Pre-transcoding HEVC 10-bit videos...")
+                        val inputPaths = workingConfig.videoClips.map { it.inputPath }
+                        val transcodeMap = VideoTranscoder.transcodeClipsIfNeeded(
+                            context, inputPaths
+                        )
+                        transcodedFiles = transcodeMap.values
+                            .filter { it.contains("transcoded_") }
+                        if (transcodedFiles.isNotEmpty()) {
+                            Log.i(
+                                RENDER_TAG,
+                                "Pre-transcoded ${transcodedFiles.size} HEVC 10-bit videos to H.264"
+                            )
+                        }
+                        val updatedClips = workingConfig.videoClips.map { clip ->
+                            val newPath = transcodeMap[clip.inputPath] ?: clip.inputPath
+                            if (newPath != clip.inputPath) {
+                                VideoClip(
+                                    newPath,
+                                    clip.startUs,
+                                    clip.endUs,
+                                    clip.volume,
+                                    clip.playbackSpeed,
+                                    clip.reverseVideo
+                                )
+                            } else clip
+                        }
+                        workingConfig = workingConfig.copy(videoClips = updatedClips)
+                    }
+
+                    // 2) Pre-render reversed clips into single forward MP4 temp files.
+                    if (needsPreReverse && !shouldStopPolling.get()) {
+                        Log.d(
+                            RENDER_TAG,
+                            "Pre-rendering reversed segments (" +
+                                    "${workingConfig.videoClips.count { it.reverseVideo }} clip(s))"
+                        )
+                        val reversedPaths = mutableListOf<String>()
+                        val reversedClips = preReverseClips(
+                            workingConfig.videoClips,
+                            enableAudio = workingConfig.enableAudio,
+                            shouldStop = shouldStopPolling,
+                            collectPath = { reversedPaths.add(it) },
+                            onProgress = { f -> reverseProgress(f.toDouble()) },
+                        )
+                        reversedFiles = reversedPaths
+                        workingConfig = workingConfig.copy(videoClips = reversedClips)
+                        // Make sure the bar fully fills the reverse share before
+                        // the transformer phase starts.
+                        reverseProgress(1.0)
+                    }
+
+                    val finalConfig = workingConfig
+                    mainHandler.post {
+                        if (shouldStopPolling.get()) {
+                            cleanupAllPreFiles()
+                            return@post
+                        }
+                        renderInternal(
+                            config = finalConfig,
+                            onProgress = transformProgress,
+                            onComplete = { result ->
+                                cleanupAllPreFiles()
+                                onComplete(result)
+                            },
+                            onError = { error ->
+                                cleanupAllPreFiles()
+                                onError(error)
+                            },
+                            shouldStopPolling = shouldStopPolling,
+                            mainHandler = mainHandler,
+                            transformerRef = transformerRef,
+                            outputFileRef = outputFileRef
+                        )
+                    }
+                } catch (e: Exception) {
+                    mainHandler.post {
+                        cleanupAllPreFiles()
+                        onError(e)
+                    }
+                }
+            }.start()
         }
 
         // Return cancellation handle
@@ -203,10 +239,70 @@ class RenderVideo(private val context: Context) {
             mainHandler.removeCallbacksAndMessages(null)
             transformerRef.get()?.cancel()
             VideoTranscoder.cleanupTranscodedFiles(transcodedFiles)
+            VideoReverser.cleanupReversedFiles(reversedFiles)
             if (config.outputPath == null) {
                 outputFileRef.get()?.delete()
             }
         }
+    }
+
+    /**
+     * Pre-renders all clips with `reverseVideo == true` into single forward
+     * MP4 temp files using [VideoReverser], and returns the rewritten clip
+     * list. Forward clips pass through unchanged.
+     */
+    private fun preReverseClips(
+        clips: List<VideoClip>,
+        enableAudio: Boolean,
+        shouldStop: AtomicBoolean,
+        collectPath: (String) -> Unit,
+        onProgress: (Float) -> Unit,
+    ): List<VideoClip> {
+        val reversedClipIndices = clips.withIndex()
+            .filter { it.value.reverseVideo }
+            .map { it.index }
+        if (reversedClipIndices.isEmpty()) return clips
+        val totalReversed = reversedClipIndices.size
+        val result = clips.toMutableList()
+        reversedClipIndices.forEachIndexed { progressIdx, clipIdx ->
+            if (shouldStop.get()) return result
+            val clip = clips[clipIdx]
+            val startUs = clip.startUs ?: 0L
+            val endUs = clip.endUs
+                ?: ch.waio.pro_video_editor.src.features.render.helpers
+                    .MediaInfoExtractor.getVideoDuration(clip.inputPath)
+            try {
+                val reversed = VideoReverser.reverseSync(
+                    context = context,
+                    inputPath = clip.inputPath,
+                    segmentStartUs = startUs,
+                    segmentEndUs = endUs,
+                    includeAudio = enableAudio && (clip.volume ?: 1.0f) > 0f,
+                    onProgress = { clipFraction ->
+                        // Map per-clip progress into the overall reverse phase.
+                        val overall = (progressIdx + clipFraction) / totalReversed
+                        onProgress(overall.coerceIn(0f, 1f))
+                    },
+                )
+                collectPath(reversed.outputPath)
+                result[clipIdx] = VideoClip(
+                    inputPath = reversed.outputPath,
+                    startUs = 0L,
+                    endUs = reversed.durationUs.takeIf { it > 0 },
+                    volume = clip.volume,
+                    playbackSpeed = clip.playbackSpeed,
+                    reverseVideo = false,
+                )
+            } catch (e: Exception) {
+                Log.e(
+                    RENDER_TAG,
+                    "Reverse pre-render failed for ${clip.inputPath}: ${e.message}. " +
+                            "Falling back to forward playback."
+                )
+                result[clipIdx] = clip.copy(reverseVideo = false)
+            }
+        }
+        return result
     }
 
     /**
