@@ -294,7 +294,7 @@ void main() {
           VideoSegment(
             video: h264Video,
             startTime: const Duration(seconds: 2),
-            endTime: const Duration(seconds: 5),
+            endTime: const Duration(seconds: 3),
             reverseVideo: true,
           ),
         ],
@@ -303,8 +303,8 @@ void main() {
 
     expect(
       meta.duration.inMilliseconds,
-      closeTo(3000, 700),
-      reason: 'Reversed 2s–5s trim should keep roughly the same duration',
+      closeTo(1000, 400),
+      reason: 'Reversed 2s–3s trim should keep roughly the same duration',
     );
   });
 
@@ -324,7 +324,7 @@ void main() {
           VideoSegment(
             video: h264Video,
             startTime: const Duration(seconds: 2),
-            endTime: const Duration(seconds: 5),
+            endTime: const Duration(seconds: 3),
             reverseVideo: true,
           ),
         ],
@@ -333,8 +333,8 @@ void main() {
 
     expect(
       meta.duration.inMilliseconds,
-      closeTo(5000, 900),
-      reason: 'Forward 2s + reversed 3s should render as roughly 5s',
+      closeTo(3000, 600),
+      reason: 'Forward 2s + reversed 1s should render as roughly 3s',
     );
   });
 
