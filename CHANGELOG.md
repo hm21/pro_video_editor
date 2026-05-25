@@ -1,3 +1,7 @@
+## 1.17.1
+- **FIX**(android): Fix reversed HEVC videos ignoring the rotation metadata tag, causing sideways/upside-down output.
+- **FIX**(iOS, macOS): Fix `AVErrorInvalidVideoComposition` (Code -11841) during reverse playback. `AudioReverser` produces PCM frames at 44 100 Hz, so the reversed WAV duration (`PCMFrameCount / 44100`) is a few microseconds longer than the video clip duration. This extended `composition.duration` beyond the `AVVideoComposition` instruction coverage. Fixed by clamping the inserted WAV range to `clipDuration` via `CMTimeMinimum`.
+
 ## 1.17.0
 - **FEAT**(android, iOS, macOS): Add `reverseVideo` flag to `VideoSegment` to play a clip backwards. When `true`, the segment renders from its trimmed end back to its trimmed start while other segments keep their own direction.
 
