@@ -15,7 +15,7 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 
-/** My tien
+/** 
  * Pre-renders reversed video segments into a single MP4 temp file so that the
  * main render pipeline can consume them as a normal forward clip.
  *
