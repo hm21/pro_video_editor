@@ -19,6 +19,14 @@ void main() {
         expect(map['startTime'], 2000000);
         expect(map['endTime'], 10000000);
         expect(map['volume'], 0.8);
+        expect(map['reverseVideo'], isFalse);
+      });
+
+      test('serializes reverseVideo correctly', () {
+        final reversed = VideoSegment(video: video, reverseVideo: true);
+        final map = reversed.toMap();
+
+        expect(map['reverseVideo'], isTrue);
       });
 
       test('serializes null fields as null', () {
@@ -28,6 +36,7 @@ void main() {
         expect(map['startTime'], isNull);
         expect(map['endTime'], isNull);
         expect(map['volume'], isNull);
+        expect(map['reverseVideo'], isFalse);
       });
     });
 
@@ -40,6 +49,7 @@ void main() {
         expect(restored.startTime, segment.startTime);
         expect(restored.endTime, segment.endTime);
         expect(restored.volume, segment.volume);
+        expect(restored.reverseVideo, segment.reverseVideo);
       });
 
       test('handles null optional fields', () {
@@ -50,6 +60,16 @@ void main() {
         expect(restored.startTime, isNull);
         expect(restored.endTime, isNull);
         expect(restored.volume, isNull);
+        expect(restored.reverseVideo, isFalse);
+      });
+
+      test('deserializes reverseVideo correctly', () {
+        final restored = VideoSegment.fromMap({
+          'video': {'assetPath': 'assets/test.mp4'},
+          'reverseVideo': true,
+        });
+
+        expect(restored.reverseVideo, isTrue);
       });
 
       test('parses numeric strings safely', () {
@@ -76,9 +96,10 @@ void main() {
 
     group('copyWith', () {
       test('creates copy with updated fields', () {
-        final copy = segment.copyWith(volume: 1.5);
+        final copy = segment.copyWith(volume: 1.5, reverseVideo: true);
 
         expect(copy.volume, 1.5);
+        expect(copy.reverseVideo, isTrue);
         expect(copy.video, segment.video);
         expect(copy.startTime, segment.startTime);
       });

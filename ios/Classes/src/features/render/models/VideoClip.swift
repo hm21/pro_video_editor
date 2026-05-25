@@ -7,18 +7,21 @@ internal struct VideoClip {
     let endUs: Int64?
     let volume: Float?
     let playbackSpeed: Float?
+    let reverseVideo: Bool
 
     init(
         inputPath: String,
         startUs: Int64? = nil,
         endUs: Int64? = nil,
         volume: Float? = nil,
-        playbackSpeed: Float? = nil
+        playbackSpeed: Float? = nil,
+        reverseVideo: Bool = false
     ) {
         self.inputPath = inputPath
         self.startUs = startUs
         self.endUs = endUs
         self.volume = volume
         self.playbackSpeed = playbackSpeed
+        self.reverseVideo = reverseVideo
     }
 }

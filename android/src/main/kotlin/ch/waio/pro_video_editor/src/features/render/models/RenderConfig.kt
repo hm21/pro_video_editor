@@ -12,13 +12,15 @@ import io.flutter.plugin.common.MethodCall
  * @property endUs End time in microseconds (null = until end)
  * @property volume Volume multiplier for this clip (null = unchanged, 0.0=mute, 1.0=original)
  * @property playbackSpeed Speed multiplier for this clip (null = unchanged, 0.5=half, 2.0=double)
+ * @property reverseVideo Whether to render this clip backwards
  */
 data class VideoClip(
     val inputPath: String,
     val startUs: Long?,
     val endUs: Long?,
     val volume: Float? = null,
-    val playbackSpeed: Float? = null
+    val playbackSpeed: Float? = null,
+    val reverseVideo: Boolean = false
 )
 
 /**
@@ -234,11 +236,12 @@ data class RenderConfig(
                     startUs = (clipMap["startUs"] as? Number)?.toLong(),
                     endUs = (clipMap["endUs"] as? Number)?.toLong(),
                     volume = (clipMap["volume"] as? Number)?.toFloat(),
-                    playbackSpeed = (clipMap["playbackSpeed"] as? Number)?.toFloat()
+                    playbackSpeed = (clipMap["playbackSpeed"] as? Number)?.toFloat(),
+                    reverseVideo = clipMap["reverseVideo"] as? Boolean ?: false
                 )
                 Log.d(
                     PACKAGE_TAG,
-                    "Clip $index: path=${clip.inputPath}, start=${clip.startUs}, end=${clip.endUs}, volume=${clip.volume}, speed=${clip.playbackSpeed}"
+                    "Clip $index: path=${clip.inputPath}, start=${clip.startUs}, end=${clip.endUs}, volume=${clip.volume}, speed=${clip.playbackSpeed}, reverse=${clip.reverseVideo}"
                 )
                 clip
             }

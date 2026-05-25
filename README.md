@@ -108,6 +108,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - ✂️ **Trim**: Cut the video to a specified start and end time.
 - 🔗 **Merge Videos**: Concatenate multiple video clips into a single output.
 - ⏩ **Playback Speed**: Adjust the playback speed of the video.
+- ⏪ **Reverse Video**: Play a video segment backwards.
 - 🔇 **Mute Audio**: Remove or mute the audio track from the video.
 - 📊 **Waveform**: Generate audio waveform data for visualization, with support for streaming mode.
 
@@ -267,6 +268,23 @@ Uint8List result = await ProVideoEditor.instance.renderVideo(data);
 
 /// Note: You must use either 'video' (single video) OR 'videoSegments' (multiple videos),
 /// but not both. The clips will be joined in the order they appear in the list.
+```
+
+#### Reverse Video Example
+```dart
+/// Render a segment backwards by setting reverseVideo to true.
+/// Other segments keep their original direction.
+var data = VideoRenderData(
+    videoSegments: [
+        VideoSegment(
+            video: EditorVideo.file(File('/path/to/clip.mp4')),
+            reverseVideo: true,
+        ),
+    ],
+    outputFormat: VideoOutputFormat.mp4,
+);
+
+Uint8List result = await ProVideoEditor.instance.renderVideo(data);
 ```
 
 #### Extract Audio Example

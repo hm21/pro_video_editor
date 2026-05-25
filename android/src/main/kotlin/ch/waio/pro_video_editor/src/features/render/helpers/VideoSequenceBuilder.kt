@@ -46,6 +46,7 @@ class VideoSequenceBuilder(
     private var hasCustomAudio: Boolean = false
     private var scaleX: Float? = null
     private var scaleY: Float? = null
+    private val rotatedDimensionsCache = mutableMapOf<String, Triple<Int, Int, Int>>()
 
     data class CropConfig(
         val width: Int?,
@@ -249,6 +250,8 @@ class VideoSequenceBuilder(
         // Apply global trim to clips if set
         val trimmedClips = applyGlobalTrim(videoClips)
         Log.d(RENDER_TAG, "After global trim: ${trimmedClips.size} clips (was ${videoClips.size})")
+        val timelineClips = expandReversedClips(trimmedClips)
+        Log.d(RENDER_TAG, "After reverse expansion: ${timelineClips.size} timeline clips")
 
         // Prepare normalized audio effects with channel mixing if needed
         val normalizedAudioEffects = if (needsAudioNormalization) {
@@ -259,7 +262,7 @@ class VideoSequenceBuilder(
         }
 
         // Build EditedMediaItems for each clip
-        val editedMediaItems = trimmedClips.mapIndexed { index, clip ->
+        val editedMediaItems = timelineClips.mapIndexed { index, clip ->
             buildEditedMediaItem(index, clip, normalizedAudioEffects)
         }
 
@@ -399,8 +402,8 @@ class VideoSequenceBuilder(
         val mediaItemBuilder = MediaItem.Builder().setUri(Uri.fromFile(inputFile))
 
         if (clip.startUs != null || clip.endUs != null) {
-            val startMs = (clip.startUs ?: 0L) / 1000
-            val endMs = clip.endUs?.div(1000) ?: C.TIME_END_OF_SOURCE
+            val startUs = clip.startUs ?: 0L
+            val endUs = clip.endUs ?: C.TIME_END_OF_SOURCE
             val expectedDurationMs = if (clip.endUs != null && clip.startUs != null) {
                 (clip.endUs - clip.startUs) / 1000
             } else if (clip.endUs != null) {
@@ -411,13 +414,17 @@ class VideoSequenceBuilder(
 
             Log.d(
                 RENDER_TAG,
-                "Applying trim to clip ${clip.inputPath}: start=$startMs ms, end=$endMs ms, expectedDuration=$expectedDurationMs ms"
+                "Applying trim to clip ${clip.inputPath}: start=${startUs / 1000} ms, end=${if (endUs == C.TIME_END_OF_SOURCE) "source end" else "${endUs / 1000} ms"}, expectedDuration=$expectedDurationMs ms"
             )
 
-            val clippingConfig = MediaItem.ClippingConfiguration.Builder()
-                .setStartPositionMs(startMs)
-                .setEndPositionMs(endMs)
-                .build()
+            val clippingConfigBuilder = MediaItem.ClippingConfiguration.Builder()
+                .setStartPositionUs(startUs)
+            if (clip.endUs != null) {
+                clippingConfigBuilder.setEndPositionUs(clip.endUs)
+            } else {
+                clippingConfigBuilder.setEndPositionMs(C.TIME_END_OF_SOURCE)
+            }
+            val clippingConfig = clippingConfigBuilder.build()
 
             mediaItemBuilder.setClippingConfiguration(clippingConfig)
         }
@@ -430,10 +437,13 @@ class VideoSequenceBuilder(
 
         // Calculate video dimensions for image layer positioning
         // This must be done before applying any effects
-        var (videoWidth, videoHeight, videoRotation) = getRotatedVideoDimensions(
-            inputFile,
-            rotationDegrees
-        )
+        val dimensionsKey = "${inputFile.absolutePath}|$rotationDegrees"
+        val dimensions = rotatedDimensionsCache.getOrPut(dimensionsKey) {
+            getRotatedVideoDimensions(inputFile, rotationDegrees)
+        }
+        var videoWidth = dimensions.first
+        var videoHeight = dimensions.second
+        val videoRotation = dimensions.third
 
         // Adjust dimensions based on rotation
         val isRotated90Deg = videoRotation == 90 || videoRotation == 270
@@ -582,28 +592,55 @@ class VideoSequenceBuilder(
                 // Clip overlaps with global trim range - adjust boundaries
                 var newStartInSource = clipStartInSource
                 var newEndInSource = clipEndInSource
+                val startTrimOffsetUs = if (clipStartInComposition < globalStart) {
+                    globalStart - clipStartInComposition
+                } else {
+                    0L
+                }
+                val endTrimOffsetUs = if (clipEndInComposition > globalEnd) {
+                    clipEndInComposition - globalEnd
+                } else {
+                    0L
+                }
+                val frameCompensationUs = 33333L // ~33ms = 1 frame at 30fps
 
                 // Adjust start if global start cuts into this clip
-                if (clipStartInComposition < globalStart) {
-                    val offsetUs = globalStart - clipStartInComposition
-                    newStartInSource = clipStartInSource + offsetUs
-                    Log.d(RENDER_TAG, "Adjusting clip start by ${offsetUs / 1000}ms")
+                if (startTrimOffsetUs > 0L) {
+                    if (clip.reverseVideo) {
+                        newEndInSource = clipEndInSource - startTrimOffsetUs
+                        Log.d(
+                            RENDER_TAG,
+                            "Adjusting reversed clip source end by ${startTrimOffsetUs / 1000}ms"
+                        )
+                    } else {
+                        newStartInSource = clipStartInSource + startTrimOffsetUs
+                        Log.d(RENDER_TAG, "Adjusting clip start by ${startTrimOffsetUs / 1000}ms")
+                    }
                 }
 
                 // Adjust end if global end cuts into this clip
-                if (clipEndInComposition > globalEnd) {
-                    val offsetUs = clipEndInComposition - globalEnd
-                    newEndInSource = clipEndInSource - offsetUs
-
-                    // Subtract ~1 frame (33ms for 30fps) to ensure encoder doesn't overshoot
-                    // This compensates for encoder rounding to next frame/audio sample boundary
-                    val frameCompensationUs = 33333L // ~33ms = 1 frame at 30fps
-                    newEndInSource = maxOf(newStartInSource, newEndInSource - frameCompensationUs)
-
-                    Log.d(
-                        RENDER_TAG,
-                        "Adjusting clip end by ${offsetUs / 1000}ms (with frame compensation)"
-                    )
+                if (endTrimOffsetUs > 0L) {
+                    // Subtract ~1 frame to ensure encoder doesn't overshoot. This compensates
+                    // for encoder rounding to next frame/audio sample boundary.
+                    if (clip.reverseVideo) {
+                        newStartInSource = minOf(
+                            newEndInSource,
+                            newStartInSource + endTrimOffsetUs + frameCompensationUs
+                        )
+                        Log.d(
+                            RENDER_TAG,
+                            "Adjusting reversed clip source start by ${endTrimOffsetUs / 1000}ms (with frame compensation)"
+                        )
+                    } else {
+                        newEndInSource = maxOf(
+                            newStartInSource,
+                            newEndInSource - endTrimOffsetUs - frameCompensationUs
+                        )
+                        Log.d(
+                            RENDER_TAG,
+                            "Adjusting clip end by ${endTrimOffsetUs / 1000}ms (with frame compensation)"
+                        )
+                    }
                 }
 
                 // Only add if there's still content left
@@ -614,7 +651,8 @@ class VideoSequenceBuilder(
                             startUs = newStartInSource,
                             endUs = newEndInSource,
                             volume = clip.volume,
-                            playbackSpeed = clip.playbackSpeed
+                            playbackSpeed = clip.playbackSpeed,
+                            reverseVideo = clip.reverseVideo
                         )
                     )
                     val trimmedDuration = newEndInSource - newStartInSource
@@ -640,6 +678,60 @@ class VideoSequenceBuilder(
                 globalEndUs?.minus(globalStartUs ?: 0L)?.div(1000)
             }ms)"
         )
+
+        return result
+    }
+
+    /**
+     * Expands reversed clips into frame-sized forward slices ordered from end to start.
+     *
+     * Media3 Transformer does not provide a native negative-speed effect. Small slices
+     * preserve the existing effect pipeline while producing backwards visual playback.
+     */
+    private fun expandReversedClips(clips: List<VideoClip>): List<VideoClip> {
+        val result = mutableListOf<VideoClip>()
+
+        for (clip in clips) {
+            if (!clip.reverseVideo) {
+                result.add(clip)
+                continue
+            }
+
+            val sourceStartUs = clip.startUs ?: 0L
+            val sourceEndUs = clip.endUs ?: MediaInfoExtractor.getVideoDuration(clip.inputPath)
+            if (sourceEndUs <= sourceStartUs) {
+                Log.w(RENDER_TAG, "Skipping reversed clip with invalid range: ${clip.inputPath}")
+                continue
+            }
+
+            val frameRate = MediaInfoExtractor.getVideoFrameRate(clip.inputPath)
+                ?.takeIf { it > 0f }
+                ?: 30f
+            val frameDurationUs = (1_000_000f / frameRate).toLong().coerceAtLeast(1L)
+            var cursorEndUs = sourceEndUs
+            var sliceCount = 0
+
+            while (cursorEndUs > sourceStartUs) {
+                val sliceStartUs = maxOf(sourceStartUs, cursorEndUs - frameDurationUs)
+                result.add(
+                    VideoClip(
+                        inputPath = clip.inputPath,
+                        startUs = sliceStartUs,
+                        endUs = cursorEndUs,
+                        volume = clip.volume,
+                        playbackSpeed = clip.playbackSpeed,
+                        reverseVideo = false
+                    )
+                )
+                cursorEndUs = sliceStartUs
+                sliceCount++
+            }
+
+            Log.d(
+                RENDER_TAG,
+                "Expanded reversed clip into $sliceCount slices at ${frameRate}fps: ${clip.inputPath}"
+            )
+        }
 
         return result
     }

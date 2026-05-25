@@ -45,6 +45,37 @@ object MediaInfoExtractor {
     }
 
     /**
+     * Retrieves video frame rate from file.
+     *
+     * @param videoPath Absolute path to video file
+     * @return Frame rate, or null if unavailable
+     */
+    fun getVideoFrameRate(videoPath: String): Float? {
+        return try {
+            val extractor = MediaExtractor()
+            extractor.setDataSource(videoPath)
+            var frameRate: Float? = null
+
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("video/")) {
+                    if (format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
+                        frameRate = format.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat()
+                    }
+                    break
+                }
+            }
+
+            extractor.release()
+            frameRate
+        } catch (e: Exception) {
+            Log.e(RENDER_TAG, "Failed to get video frame rate for $videoPath: ${e.message}")
+            null
+        }
+    }
+
+    /**
      * Retrieves audio duration from file.
      *
      * @param audioPath Absolute path to audio file
