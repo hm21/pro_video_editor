@@ -166,14 +166,14 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     var data = VideoRenderData(
       videoSegments: [
         VideoSegment(
-          video: _video,
+          video: EditorVideo.asset(kVideoEditorExampleH264Path),
           startTime: const Duration(seconds: 0),
-          endTime: const Duration(seconds: 4),
+          endTime: const Duration(seconds: 20),
         ),
         VideoSegment(
-          video: _video,
+          video: EditorVideo.asset(kVideoEditorExampleH264Path),
           startTime: const Duration(seconds: 0),
-          endTime: const Duration(seconds: 4),
+          endTime: const Duration(seconds: 20),
           reverseVideo: true,
         ),
       ],
