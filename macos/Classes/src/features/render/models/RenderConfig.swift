@@ -270,7 +270,8 @@ struct RenderConfig {
                     startUs: (clipMap["startUs"] as? NSNumber)?.int64Value,
                     endUs: (clipMap["endUs"] as? NSNumber)?.int64Value,
                     volume: (clipMap["volume"] as? NSNumber)?.floatValue,
-                    playbackSpeed: (clipMap["playbackSpeed"] as? NSNumber)?.floatValue
+                    playbackSpeed: (clipMap["playbackSpeed"] as? NSNumber)?.floatValue,
+                    reverseVideo: clipMap["reverseVideo"] as? Bool ?? false
                 )
             }
         }

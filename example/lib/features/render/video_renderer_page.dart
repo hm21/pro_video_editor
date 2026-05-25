@@ -161,6 +161,27 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Reverse playback per video segment.
+  Future<void> _perClipReverse() async {
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 0),
+          endTime: const Duration(seconds: 4),
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 0),
+          endTime: const Duration(seconds: 4),
+          reverseVideo: true,
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   Future<void> _removeAudio() async {
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video)],
@@ -1280,6 +1301,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           subtitle: const Text(
             'Clip 1: 2× fast-forward · Clip 2: 0.5× slow-motion',
           ),
+        ),
+        ListTile(
+          onTap: _perClipReverse,
+          leading: const Icon(Icons.replay_outlined),
+          title: const Text('Per-clip reverse playback'),
+          subtitle: const Text('Clip 1 forward · Clip 2 backwards'),
         ),
         ListTile(
           onTap: _layers,

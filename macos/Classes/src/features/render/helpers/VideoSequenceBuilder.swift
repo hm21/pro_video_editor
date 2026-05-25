@@ -186,13 +186,29 @@ internal class VideoSequenceBuilder {
             let clipTimeRange = clampedRange.duration > .zero ? clampedRange : rawClipTimeRange
             let clipDuration = clipTimeRange.duration
             let insertStart = totalDuration
+            let sourceRanges: [CMTimeRange]
+            if clip.reverseVideo {
+                sourceRanges = reverseTimeRanges(
+                    for: clipTimeRange,
+                    frameDuration: frameDuration(for: nominalFrameRate)
+                )
+            } else {
+                sourceRanges = [clipTimeRange]
+            }
 
-            // Insert video clip into the composition track
-            try compositionVideoTrack.insertTimeRange(
-                clipTimeRange,
-                of: videoTrack,
-                at: insertStart
-            )
+            // Insert video clip into the composition track.
+            var segmentInsertTime = insertStart
+            for sourceRange in sourceRanges {
+                try compositionVideoTrack.insertTimeRange(
+                    sourceRange,
+                    of: videoTrack,
+                    at: segmentInsertTime
+                )
+                segmentInsertTime = CMTimeAdd(segmentInsertTime, sourceRange.duration)
+            }
+            if clip.reverseVideo {
+                PluginLog.print("⏪ Clip \(index) reversed with \(sourceRanges.count) frame slice(s)")
+            }
 
             // Apply per-clip playback speed by scaling the inserted segment.
             // The global config.playbackSpeed is still applied via
@@ -233,11 +249,15 @@ internal class VideoSequenceBuilder {
                 PluginLog.print("      Format: \(audioTrack.mediaType)")
 
                 do {
-                    try sharedAudioTrack.insertTimeRange(
-                        clipTimeRange,
-                        of: audioTrack,
-                        at: insertStart
-                    )
+                    var audioInsertTime = insertStart
+                    for sourceRange in sourceRanges {
+                        try sharedAudioTrack.insertTimeRange(
+                            sourceRange,
+                            of: audioTrack,
+                            at: audioInsertTime
+                        )
+                        audioInsertTime = CMTimeAdd(audioInsertTime, sourceRange.duration)
+                    }
                     // Apply per-clip playback speed to audio segment to keep A/V in sync.
                     if let speed = clip.playbackSpeed, speed > 0, speed != 1.0 {
                         let insertedAudioRange = CMTimeRange(start: insertStart, duration: clipDuration)
@@ -263,7 +283,7 @@ internal class VideoSequenceBuilder {
             PluginLog.print("✅ Clip \(index) added successfully")
             PluginLog.print("   - Duration: \(String(format: "%.2f", effectiveDuration.seconds))s")
             PluginLog.print(
-                "   - Time range in composition: \(String(format: "%.2f", totalDuration.seconds - clipDuration.seconds))s - \(String(format: "%.2f", totalDuration.seconds))s"
+                "   - Time range in composition: \(String(format: "%.2f", insertStart.seconds))s - \(String(format: "%.2f", totalDuration.seconds))s"
             )
         }
 
@@ -335,6 +355,35 @@ internal class VideoSequenceBuilder {
 
         let duration = CMTimeSubtract(endTime, startTime)
         return CMTimeRange(start: startTime, duration: duration)
+    }
+
+    /// Returns a frame-sized duration used for reverse rendering slices.
+    private func frameDuration(for nominalFrameRate: Float) -> CMTime {
+        let fps = nominalFrameRate > 0 ? nominalFrameRate : 30.0
+        let timescale = max(1, Int32(fps.rounded()))
+        return CMTime(value: 1, timescale: timescale)
+    }
+
+    /// Builds forward-playable source slices ordered from the end of the range to the start.
+    private func reverseTimeRanges(for timeRange: CMTimeRange, frameDuration: CMTime) -> [CMTimeRange] {
+        var ranges: [CMTimeRange] = []
+        var cursorEnd = CMTimeRangeGetEnd(timeRange)
+        var remainingDuration = timeRange.duration
+
+        while CMTimeCompare(remainingDuration, CMTime.zero) > 0 {
+            let sliceDuration: CMTime
+            if CMTimeCompare(remainingDuration, frameDuration) < 0 {
+                sliceDuration = remainingDuration
+            } else {
+                sliceDuration = frameDuration
+            }
+            let sliceStart = CMTimeSubtract(cursorEnd, sliceDuration)
+            ranges.append(CMTimeRange(start: sliceStart, duration: sliceDuration))
+            cursorEnd = sliceStart
+            remainingDuration = CMTimeSubtract(remainingDuration, sliceDuration)
+        }
+
+        return ranges
     }
 }
 

@@ -1,3 +1,6 @@
+## 1.17.0
+- **FEAT**(android, iOS, macOS): Add `reverseVideo` flag to `VideoSegment` to play a clip backwards. When `true`, the segment renders from its trimmed end back to its trimmed start while other segments keep their own direction.
+
 ## 1.16.3
 - **FIX**(linux): Fix Linux build by replacing the unavailable C++ Flutter embedder API (`flutter::EncodableValue`) with the GLib-based `FlValue` API. Update CMakeLists to use GStreamer (`gstreamer-1.0`, `gstreamer-pbutils-1.0`) instead of the unused libavformat/libavcodec/libavutil pkg-config targets. Fix source file extensions (`.cc` instead of `.cpp`).
 

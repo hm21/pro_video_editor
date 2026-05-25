@@ -75,7 +75,8 @@ class RenderVideo {
                                 startUs: clip.startUs,
                                 endUs: clip.endUs,
                                 volume: clip.volume,
-                                playbackSpeed: clip.playbackSpeed
+                                playbackSpeed: clip.playbackSpeed,
+                                reverseVideo: clip.reverseVideo
                             )
                         }
                         return clip

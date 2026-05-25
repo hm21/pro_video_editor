@@ -17,6 +17,7 @@ class VideoSegment {
     this.endTime,
     this.volume,
     this.playbackSpeed,
+    this.reverseVideo = false,
   })  : assert(
           startTime == null || endTime == null || startTime < endTime,
           'startTime must be before endTime',
@@ -62,6 +63,14 @@ class VideoSegment {
   /// If null, the original speed is used.
   final double? playbackSpeed;
 
+  /// Whether to render this segment backwards.
+  ///
+  /// When `true`, this segment plays from its trimmed end back to its trimmed
+  /// start. Other segments keep their own order and direction.
+  ///
+  /// **Default**: `false`
+  final bool reverseVideo;
+
   /// Converts this clip to a map for platform channel communication.
   Future<Map<String, dynamic>> toAsyncMap() async {
     final inputPath = await video.safeFilePath();
@@ -72,6 +81,7 @@ class VideoSegment {
       'endUs': endTime?.inMicroseconds,
       'volume': volume,
       'playbackSpeed': playbackSpeed,
+      'reverseVideo': reverseVideo,
     };
   }
 
@@ -82,6 +92,7 @@ class VideoSegment {
     Duration? endTime,
     double? volume,
     double? playbackSpeed,
+    bool? reverseVideo,
   }) {
     return VideoSegment(
       video: video ?? this.video,
@@ -89,6 +100,7 @@ class VideoSegment {
       endTime: endTime ?? this.endTime,
       volume: volume ?? this.volume,
       playbackSpeed: playbackSpeed ?? this.playbackSpeed,
+      reverseVideo: reverseVideo ?? this.reverseVideo,
     );
   }
 
@@ -100,7 +112,8 @@ class VideoSegment {
         other.startTime == startTime &&
         other.endTime == endTime &&
         other.volume == volume &&
-        other.playbackSpeed == playbackSpeed;
+        other.playbackSpeed == playbackSpeed &&
+        other.reverseVideo == reverseVideo;
   }
 
   @override
@@ -109,7 +122,8 @@ class VideoSegment {
         startTime.hashCode ^
         endTime.hashCode ^
         volume.hashCode ^
-        playbackSpeed.hashCode;
+        playbackSpeed.hashCode ^
+        reverseVideo.hashCode;
   }
 
   @override
@@ -118,7 +132,8 @@ class VideoSegment {
         'startTime: $startTime, '
         'endTime: $endTime, '
         'volume: $volume, '
-        'playbackSpeed: $playbackSpeed)';
+        'playbackSpeed: $playbackSpeed, '
+        'reverseVideo: $reverseVideo)';
   }
 
   Map<String, dynamic> toMap() {
@@ -128,6 +143,7 @@ class VideoSegment {
       'endTime': endTime?.inMicroseconds,
       'volume': volume,
       'playbackSpeed': playbackSpeed,
+      'reverseVideo': reverseVideo,
     };
   }
 
@@ -142,6 +158,7 @@ class VideoSegment {
           : null,
       volume: tryParseDouble(map['volume']),
       playbackSpeed: tryParseDouble(map['playbackSpeed']),
+      reverseVideo: map['reverseVideo'] as bool? ?? false,
     );
   }
 
