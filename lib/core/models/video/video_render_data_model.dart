@@ -43,6 +43,7 @@ class VideoRenderData {
     @Deprecated('Use VideoSegment.volume instead.') this.originalAudioVolume,
     @Deprecated('Use audioTracks instead.') this.customAudioVolume,
     this.shouldOptimizeForNetworkUse = false,
+    this.disableBFrames = false,
     this.imageBytesWithCropping = false,
     @Deprecated('Use audioTracks instead.') this.loopCustomAudio = true,
   })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
@@ -139,6 +140,7 @@ class VideoRenderData {
     @Deprecated('Use VideoSegment.volume instead.') double? originalAudioVolume,
     @Deprecated('Use audioTracks instead.') double? customAudioVolume,
     bool shouldOptimizeForNetworkUse = false,
+    bool disableBFrames = false,
     bool imageBytesWithCropping = false,
     @Deprecated('Use audioTracks instead.') bool loopCustomAudio = true,
     String? id,
@@ -174,6 +176,7 @@ class VideoRenderData {
       // ignore: deprecated_member_use_from_same_package
       customAudioVolume: customAudioVolume,
       shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
+      disableBFrames: disableBFrames,
       imageBytesWithCropping: imageBytesWithCropping,
       // ignore: deprecated_member_use_from_same_package
       loopCustomAudio: loopCustomAudio,
@@ -363,6 +366,33 @@ class VideoRenderData {
   /// more critical than streaming capability.
   final bool shouldOptimizeForNetworkUse;
 
+  /// Whether to encode the output video without H.264 B-frames.
+  ///
+  /// When `true`, the renderer runs an additional re-encoding pass after the
+  /// main export that strips B-frames and produces a stream where every
+  /// packet's presentation order equals its decode order
+  /// (`AVVideoAllowFrameReorderingKey: false`).
+  ///
+  /// **Why this exists:** `AVAssetExportSession` (used internally on
+  /// iOS/macOS) always encodes with B-frames. When the resulting file is
+  /// fed into an `AVPlayerLooper` (or any `AVQueuePlayer`-based seamless
+  /// loop), the preroll of the duplicate player item can land at a
+  /// non-zero `currentTime`, causing the loop to restart at a random
+  /// offset instead of `0`. B-frame-free streams have a stable decoder
+  /// cursor and loop deterministically.
+  ///
+  /// **Cost:** Adds ~10–20 % render time and slightly increases file size
+  /// (typically +5–15 %) because B-frame compression is sacrificed.
+  ///
+  /// **Default**: `false`
+  ///
+  /// **Recommended:** Set `true` only when the output is intended for
+  /// seamless looping in `AVPlayerLooper`/`AVQueuePlayer` pipelines.
+  /// Currently only honored on iOS and macOS — the Android renderer
+  /// already produces B-frame-free output via MediaCodec defaults and
+  /// ignores this flag.
+  final bool disableBFrames;
+
   /// Whether to apply cropping to the image overlay along with the video.
   ///
   /// When `false` (default), the [imageBytes] amd [imageLayers] overlays
@@ -545,6 +575,7 @@ class VideoRenderData {
       'startUs': videoSegments != null ? startTime?.inMicroseconds : null,
       'endUs': videoSegments != null ? endTime?.inMicroseconds : null,
       'shouldOptimizeForNetworkUse': shouldOptimizeForNetworkUse,
+      'disableBFrames': disableBFrames,
       'imageBytesWithCropping': imageBytesWithCropping,
     };
   }
@@ -573,6 +604,7 @@ class VideoRenderData {
     double? originalAudioVolume,
     double? customAudioVolume,
     bool? shouldOptimizeForNetworkUse,
+    bool? disableBFrames,
     bool? imageBytesWithCropping,
     bool? loopCustomAudio,
   }) {
@@ -600,6 +632,7 @@ class VideoRenderData {
       customAudioVolume: customAudioVolume ?? this.customAudioVolume,
       shouldOptimizeForNetworkUse:
           shouldOptimizeForNetworkUse ?? this.shouldOptimizeForNetworkUse,
+      disableBFrames: disableBFrames ?? this.disableBFrames,
       imageBytesWithCropping:
           imageBytesWithCropping ?? this.imageBytesWithCropping,
       loopCustomAudio: loopCustomAudio ?? this.loopCustomAudio,
@@ -630,6 +663,7 @@ class VideoRenderData {
       'originalAudioVolume': originalAudioVolume,
       'customAudioVolume': customAudioVolume,
       'shouldOptimizeForNetworkUse': shouldOptimizeForNetworkUse,
+      'disableBFrames': disableBFrames,
       'imageBytesWithCropping': imageBytesWithCropping,
       'loopCustomAudio': loopCustomAudio,
     };
@@ -701,6 +735,7 @@ class VideoRenderData {
       originalAudioVolume: tryParseDouble(map['originalAudioVolume']),
       customAudioVolume: tryParseDouble(map['customAudioVolume']),
       shouldOptimizeForNetworkUse: map['shouldOptimizeForNetworkUse'] as bool,
+      disableBFrames: map['disableBFrames'] as bool? ?? false,
       imageBytesWithCropping: map['imageBytesWithCropping'] as bool,
       loopCustomAudio: map['loopCustomAudio'] as bool,
     );

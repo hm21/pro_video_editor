@@ -216,6 +216,16 @@ struct RenderConfig {
     /// When true, moves the moov atom to the beginning of the file.
     let shouldOptimizeForNetworkUse: Bool
 
+    /// Whether to strip H.264 B-frames from the final output via an extra
+    /// re-encoding pass after the main export.
+    ///
+    /// `AVAssetExportSession` always emits B-frames. When the resulting
+    /// file is consumed by `AVPlayerLooper`, the preroll of the duplicate
+    /// player item can land at a random `currentTime`, causing the loop
+    /// to restart at a non-zero offset. Disabling B-frames makes the
+    /// decoder cursor deterministic and fixes the issue.
+    let disableBFrames: Bool
+
     /// Whether to apply cropping to the image overlay along with the video.
     /// When true, the image overlay is cropped together with the video.
     /// When false (default), the overlay is scaled to the final cropped size.
@@ -249,6 +259,7 @@ struct RenderConfig {
             startUs: self.startUs,
             endUs: self.endUs,
             shouldOptimizeForNetworkUse: self.shouldOptimizeForNetworkUse,
+            disableBFrames: self.disableBFrames,
             imageBytesWithCropping: self.imageBytesWithCropping
         )
     }
@@ -323,6 +334,7 @@ struct RenderConfig {
             startUs: (args["startUs"] as? NSNumber)?.int64Value,
             endUs: (args["endUs"] as? NSNumber)?.int64Value,
             shouldOptimizeForNetworkUse: args["shouldOptimizeForNetworkUse"] as? Bool ?? true,
+            disableBFrames: args["disableBFrames"] as? Bool ?? false,
             imageBytesWithCropping: args["imageBytesWithCropping"] as? Bool ?? false
         )
     }

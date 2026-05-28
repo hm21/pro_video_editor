@@ -266,6 +266,13 @@ class RenderVideo {
 
                     try await monitorExportProgress(export, onProgress: onProgress)
 
+                    if workingConfig.disableBFrames {
+                        try await BFrameStripper.strip(
+                            at: outputURL,
+                            shouldOptimizeForNetworkUse: workingConfig.shouldOptimizeForNetworkUse
+                        )
+                    }
+
                     if workingConfig.outputPath != nil {
                         handleCompletion(.success(nil))
                     } else {

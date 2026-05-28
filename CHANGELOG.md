@@ -1,3 +1,6 @@
+## 1.17.2
+- **FEAT**(iOS, macOS): Add `VideoRenderData.disableBFrames` flag. When enabled, the renderer runs an additional re-encoding pass after the main export that strips H.264 B-frames (`AVVideoAllowFrameReorderingKey: false`). This fixes random restart positions when the exported file is consumed by `AVPlayerLooper`/`AVQueuePlayer`: because `AVAssetExportSession` always emits B-frames, the preroll of the duplicate player item could land at a non-zero `currentTime`, causing the loop to visually restart at a random offset. Disabling B-frames produces a deterministic decoder cursor at the cost of ~10–20 % render time and slightly larger files. Disabled by default; Android already produces B-frame-free output via MediaCodec defaults and ignores the flag.
+
 ## 1.17.1
 - **FIX**(android): Fix reversed HEVC videos ignoring the rotation metadata tag, causing sideways/upside-down output.
 - **FIX**(iOS, macOS): Fix `AVErrorInvalidVideoComposition` (Code -11841) during reverse playback. `AudioReverser` produces PCM frames at 44 100 Hz, so the reversed WAV duration (`PCMFrameCount / 44100`) is a few microseconds longer than the video clip duration. This extended `composition.duration` beyond the `AVVideoComposition` instruction coverage. Fixed by clamping the inserted WAV range to `clipDuration` via `CMTimeMinimum`.
