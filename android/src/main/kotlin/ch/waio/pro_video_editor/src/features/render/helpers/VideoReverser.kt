@@ -4,6 +4,7 @@ import RENDER_TAG
 import android.content.Context
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
@@ -277,21 +278,15 @@ object VideoReverser {
 
         // Encoder: H.264, all-intra (KEY_I_FRAME_INTERVAL = 0).
         val outMime = "video/avc"
-        val encoderFormat = MediaFormat.createVideoFormat(outMime, width, height).apply {
-            setInteger(
-                MediaFormat.KEY_COLOR_FORMAT,
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
-            )
-            val bitRate = if (inputFormat.containsKey(MediaFormat.KEY_BIT_RATE))
-                inputFormat.getInteger(MediaFormat.KEY_BIT_RATE)
-            else width * height * 4
-            setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
-            setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 0) // ← every frame is a keyframe
-        }
-        val encoder = MediaCodec.createEncoderByType(outMime)
-        encoder.configure(encoderFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        encoder.start()
+        val rawBitRate = if (inputFormat.containsKey(MediaFormat.KEY_BIT_RATE))
+            inputFormat.getInteger(MediaFormat.KEY_BIT_RATE)
+        else width * height * 4
+        // Configure the encoder with a bitrate clamped into the codec's
+        // supported range and progressively fall back to lower bitrates if the
+        // hardware encoder rejects the configuration. Without this, a source
+        // bitrate that is invalid for AVC (e.g. taken from an HEVC source)
+        // would throw a MediaCodec.CodecException and crash the reverse thread.
+        val encoder = createAllIntraEncoder(outMime, width, height, frameRate, rawBitRate)
 
         // Decoder: flexible YUV so getOutputImage() works on all devices.
         val decoderFormat = extractor.getTrackFormat(videoTrackIndex).also {
@@ -469,6 +464,82 @@ object VideoReverser {
     }
 
     /**
+     * Returns the bitrate range supported by the system AVC encoder, or `null`
+     * if it cannot be determined.
+     */
+    private fun avcBitrateRange(): android.util.Range<Int>? = try {
+        MediaCodecList(MediaCodecList.REGULAR_CODECS)
+            .codecInfos
+            .firstOrNull { info ->
+                info.isEncoder && info.supportedTypes.any { it.equals("video/avc", true) }
+            }
+            ?.getCapabilitiesForType("video/avc")
+            ?.videoCapabilities
+            ?.bitrateRange
+    } catch (e: Exception) {
+        Log.w(RENDER_TAG, "Could not query AVC bitrate range: ${e.message}")
+        null
+    }
+
+    /**
+     * Creates and starts an all-intra (KEY_I_FRAME_INTERVAL = 0) H.264 encoder.
+     *
+     * The requested bitrate is clamped into the codec's supported range and, if
+     * the encoder still rejects the configuration, progressively lower bitrates
+     * are tried. This prevents a [MediaCodec.CodecException] (e.g. from an
+     * out-of-range source bitrate) from crashing the reverse pipeline.
+     */
+    private fun createAllIntraEncoder(
+        mime: String,
+        width: Int,
+        height: Int,
+        frameRate: Int,
+        preferredBitrate: Int,
+    ): MediaCodec {
+        val range = avcBitrateRange()
+        val candidates = listOf(
+            preferredBitrate,
+            (width * height * 4),
+            (width * height * 2),
+        )
+            .map { bitrate ->
+                if (range != null) bitrate.coerceIn(range.lower, range.upper) else bitrate
+            }
+            .filter { it > 0 }
+            .distinct()
+
+        var lastError: Exception? = null
+        for (bitrate in candidates) {
+            val format = MediaFormat.createVideoFormat(mime, width, height).apply {
+                setInteger(
+                    MediaFormat.KEY_COLOR_FORMAT,
+                    MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
+                )
+                setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
+                setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 0) // every frame is a keyframe
+            }
+            val encoder = MediaCodec.createEncoderByType(mime)
+            try {
+                encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                encoder.start()
+                Log.d(RENDER_TAG, "All-intra encoder configured at ${bitrate / 1000} kbps")
+                return encoder
+            } catch (e: Exception) {
+                Log.w(
+                    RENDER_TAG,
+                    "All-intra encoder rejected ${bitrate / 1000} kbps: ${e.message}"
+                )
+                try { encoder.release() } catch (_: Exception) {}
+                lastError = e
+            }
+        }
+        throw IllegalStateException(
+            "Failed to configure all-intra AVC encoder for ${width}x$height", lastError
+        )
+    }
+
+    /**
      * Reads all compressed video samples from [allIntraFile] (an all-intra
      * MP4) into memory, reverses them by PTS, then writes to [muxer] with
      * monotonically-increasing timestamps. No codec is involved.
@@ -482,6 +553,27 @@ object VideoReverser {
         onProgress: (Float) -> Unit,
     ): Long {
         data class Sample(val ptsUs: Long, val data: ByteArray)
+
+        // Guard against OutOfMemoryError: this remux loads every compressed
+        // I-frame of the (all-intra, therefore large) temp file into RAM at
+        // once. Refuse segments that would not safely fit into the available
+        // heap so the caller can fall back to forward playback instead of the
+        // process being killed.
+        val fileSize = allIntraFile.length()
+        if (fileSize > 0) {
+            val runtime = Runtime.getRuntime()
+            val availableHeap = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
+            // Require a 2x margin for per-sample object overhead and transient
+            // buffers (ByteBuffer wrappers, sort scratch space, etc.).
+            val required = fileSize * 2
+            if (required > availableHeap) {
+                throw IllegalStateException(
+                    "Reversed segment too large to process in memory: " +
+                            "${fileSize / (1024 * 1024)} MB needs ~${required / (1024 * 1024)} MB, " +
+                            "only ${availableHeap / (1024 * 1024)} MB heap available"
+                )
+            }
+        }
 
         val extractor = MediaExtractor().apply { setDataSource(allIntraFile.absolutePath) }
         val trackIdx = findTrack(extractor, "video/")

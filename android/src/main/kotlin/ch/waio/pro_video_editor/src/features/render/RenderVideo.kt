@@ -335,6 +335,11 @@ class RenderVideo(private val context: Context) {
 
         val outputMimeType = mapFormatToMimeType(config.outputFormat)
         val encoderFactoryBuilder = DefaultEncoderFactory.Builder(context)
+            // Allow Media3 to fall back to supported encoder settings when the
+            // hardware encoder rejects the requested configuration (e.g. an
+            // unsupported bitrate/profile/level combination on Qualcomm encoders)
+            // instead of failing the whole render with a codec exception.
+            .setEnableFallback(true)
 
         applyBitrate(encoderFactoryBuilder, outputMimeType, config.bitrate)
 
