@@ -321,13 +321,13 @@ class VideoMetadata {
         if checkStreamingOptimization {
             #if os(iOS)
                 if #available(iOS 13.4, *) {
-                    if let isOptimized = checkStreamingOptimization(url: tempFileURL) {
+                    if let isOptimized = Self.checkStreamingOptimization(url: tempFileURL) {
                         metadataDict["isOptimizedForStreaming"] = isOptimized
                     }
                 }
             #elseif os(macOS)
                 if #available(macOS 10.15.4, *) {
-                    if let isOptimized = checkStreamingOptimization(url: tempFileURL) {
+                    if let isOptimized = Self.checkStreamingOptimization(url: tempFileURL) {
                         metadataDict["isOptimizedForStreaming"] = isOptimized
                     }
                 }
@@ -413,6 +413,7 @@ class VideoMetadata {
 
     // MARK: - Streaming Optimization Check
 
+    @available(iOS 13.4, macOS 10.15.4, *)
     private static func checkStreamingOptimization(url: URL) -> Bool? {
         let ext = url.pathExtension.lowercased()
         guard ["mp4", "mov", "m4v", "m4a"].contains(ext) else { return nil }

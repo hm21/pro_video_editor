@@ -46,3 +46,6 @@ flutter:
   assets:
     - assets/
     - assets/tests/
+
+  config:
+    enable-swift-package-manager: false

@@ -14,7 +14,7 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(name: "FlutterFramework", path: "../FlutterFramework")
+        .package(path: "../FlutterFramework")
     ],
     targets: [
         .target(
@@ -22,7 +22,7 @@ let package = Package(
             dependencies: [
                 .product(name: "FlutterFramework", package: "FlutterFramework")
             ],
-            path: "Sources/pro_video_editor",
+            path: ".",
             resources: [],
             linkerSettings: [
                 .linkedFramework("Flutter", .when(platforms: [.iOS])),
