@@ -8,236 +8,456 @@ class VideoMetadata {
         ext: String,
         checkStreamingOptimization: Bool = false
     ) async throws -> [String: Any] {
+        let tempFileURL = URL(fileURLWithPath: inputPath)
+        let asset = AVURLAsset(url: tempFileURL)
 
-        let fileURL = URL(fileURLWithPath: inputPath)
-        let asset = AVURLAsset(url: fileURL)
+        // MARK: - File Properties
 
-        var metadataDict: [String: Any] = [:]
-
-        // --- File Properties ---
-        let fileAttributes = try? FileManager.default.attributesOfItem(atPath: inputPath)
-        if let fileSize = fileAttributes?[.size] as? Int64 {
-            metadataDict["fileSize"] = fileSize
-        }
-        if let creationDate = fileAttributes?[.creationDate] as? Date {
-            metadataDict["creationDate"] = Int64(creationDate.timeIntervalSince1970 * 1000)
+        let fileSize: Int64
+        do {
+            let attr = try FileManager.default.attributesOfItem(atPath: tempFileURL.path)
+            fileSize = attr[.size] as? Int64 ?? 0
+        } catch {
+            return ["error": "Failed to get file size: \(error.localizedDescription)"]
         }
 
-        // --- Core Video Properties (iOS 15+ or fallback) ---
+        // MARK: - Duration Extraction
+
+        let duration: CMTime
         if #available(iOS 15.0, macOS 12.0, *) {
-            await loadModernMetadata(asset: asset, into: &metadataDict)
+            duration = try await asset.load(.duration)
         } else {
-            loadLegacyMetadata(asset: asset, into: &metadataDict)
+            duration = asset.duration
         }
+        let durationMs = CMTimeGetSeconds(duration) * 1000.0
 
-        // --- Metadata & Tags ---
+        // MARK: - Audio Track Duration
+
+        var audioDurationMs: Double? = nil
         if #available(iOS 15.0, macOS 12.0, *) {
-            await loadModernCommonMetadata(asset: asset, into: &metadataDict)
+            let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+            if let audioTrack = audioTracks.first {
+                let audioTimeRange = try await audioTrack.load(.timeRange)
+                audioDurationMs = CMTimeGetSeconds(audioTimeRange.duration) * 1000.0
+            }
         } else {
-            loadLegacyCommonMetadata(asset: asset, into: &metadataDict)
+            if let audioTrack = asset.tracks(withMediaType: .audio).first {
+                audioDurationMs = CMTimeGetSeconds(audioTrack.timeRange.duration) * 1000.0
+            }
         }
 
-        // --- Streaming Optimization ---
+        // MARK: - Video Track Properties
+
+        var numericMetadata: [String: Int] = [
+            "width": 0,
+            "height": 0,
+            "rotation": 0,
+            "bitrate": 0,
+        ]
+        var frameRate: Double? = nil
+
+        if durationMs > 0 {
+            let fileSizeBits = fileSize * 8
+            numericMetadata["bitrate"] = Int(Double(fileSizeBits) * 1000 / durationMs)
+        }
+
+        if #available(iOS 15.0, macOS 12.0, *) {
+            let videoTracks = try await asset.loadTracks(withMediaType: .video)
+            if let track = videoTracks.first {
+                let size = try await track.load(.naturalSize)
+                let transform = try await track.load(.preferredTransform)
+                let transformedSize = size.applying(transform)
+                numericMetadata["width"] = Int(abs(transformedSize.width))
+                numericMetadata["height"] = Int(abs(transformedSize.height))
+                let angle = atan2(transform.b, transform.a)
+                numericMetadata["rotation"] = (Int(round(angle * 180 / .pi)) + 360) % 360
+                let nominalFrameRate = try await track.load(.nominalFrameRate)
+                if nominalFrameRate > 0 { frameRate = Double(nominalFrameRate) }
+            }
+        } else {
+            if let track = asset.tracks(withMediaType: .video).first {
+                let size = track.naturalSize.applying(track.preferredTransform)
+                numericMetadata["width"] = Int(abs(size.width))
+                numericMetadata["height"] = Int(abs(size.height))
+                let angle = atan2(track.preferredTransform.b, track.preferredTransform.a)
+                numericMetadata["rotation"] = (Int(round(angle * 180 / .pi)) + 360) % 360
+                if track.nominalFrameRate > 0 { frameRate = Double(track.nominalFrameRate) }
+            }
+        }
+
+        // MARK: - Descriptive Metadata
+
+        let textMetadataKeys = [
+            "title": "title",
+            "artist": "artist",
+            "author": "author",
+            "album": "albumName",
+            "albumArtist": "albumArtist",
+        ]
+        var textMetadata: [String: String] = [:]
+        var latitude: Double? = nil
+        var longitude: Double? = nil
+        var cameraMake: String = ""
+        var cameraModel: String = ""
+
+        if #available(iOS 15.0, macOS 12.0, *) {
+            let metadataItems = try await asset.load(.commonMetadata)
+            for (resultKey, metadataKey) in textMetadataKeys {
+                textMetadata[resultKey] = try await loadMetadataString(
+                    from: metadataItems, key: metadataKey)
+            }
+
+            if let locationItem = metadataItems.first(where: {
+                $0.commonKey?.rawValue == "location"
+            }) {
+                if let locationString = try? await locationItem.load(.stringValue) {
+                    let coords = parseLocationString(locationString)
+                    latitude = coords.latitude
+                    longitude = coords.longitude
+                }
+            }
+
+            let allMetadata = try await asset.load(.metadata)
+            for item in allMetadata {
+                if let key = item.key as? String {
+                    let keyLower = key.lowercased()
+                    if key == "com.apple.quicktime.make" {
+                        cameraMake = try await item.load(.stringValue) ?? ""
+                    } else if key == "com.apple.quicktime.model" {
+                        cameraModel = try await item.load(.stringValue) ?? ""
+                    } else if latitude == nil
+                        && (key == "com.apple.quicktime.location.ISO6709"
+                            || keyLower.contains("location") || keyLower.contains("gps")
+                            || key.contains("©xyz"))
+                    {
+                        if let locationString = try? await item.load(.stringValue) {
+                            let coords = parseLocationString(locationString)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                        if latitude == nil, let locationData = try? await item.load(.dataValue) {
+                            let coords = parseLocationData(locationData)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                    }
+                }
+                if latitude == nil, let identifier = item.identifier {
+                    let idRaw = identifier.rawValue.lowercased()
+                    if identifier == .quickTimeMetadataLocationISO6709
+                        || identifier == .identifier3GPUserDataLocation
+                        || idRaw.contains("location") || idRaw.contains("gps")
+                        || idRaw.contains("%a9xyz") || idRaw.contains("©xyz")
+                    {
+                        if let locationString = try? await item.load(.stringValue) {
+                            let coords = parseLocationString(locationString)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                        if latitude == nil, let locationData = try? await item.load(.dataValue) {
+                            let coords = parseLocationData(locationData)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                    }
+                    if cameraModel.isEmpty && idRaw.contains("auth") {
+                        if let model = try? await item.load(.stringValue) { cameraModel = model }
+                    }
+                }
+            }
+
+            if latitude == nil {
+                let qtMetadata = AVMetadataItem.metadataItems(
+                    from: allMetadata, filteredByIdentifier: .quickTimeMetadataLocationISO6709)
+                if let locationItem = qtMetadata.first,
+                    let locationString = try? await locationItem.load(.stringValue)
+                {
+                    let coords = parseLocationString(locationString)
+                    latitude = coords.latitude
+                    longitude = coords.longitude
+                }
+            }
+            if latitude == nil {
+                let threeGPMetadata = AVMetadataItem.metadataItems(
+                    from: allMetadata, filteredByIdentifier: .identifier3GPUserDataLocation)
+                if let locationItem = threeGPMetadata.first,
+                    let locationString = try? await locationItem.load(.stringValue)
+                {
+                    let coords = parseLocationString(locationString)
+                    latitude = coords.latitude
+                    longitude = coords.longitude
+                }
+            }
+        } else {
+            let metadataItems = asset.commonMetadata
+            for (resultKey, metadataKey) in textMetadataKeys {
+                textMetadata[resultKey] =
+                    metadataItems.first(where: { $0.commonKey?.rawValue == metadataKey })?
+                    .stringValue ?? ""
+            }
+            if let locationItem = metadataItems.first(where: {
+                $0.commonKey?.rawValue == "location"
+            }),
+                let locationString = locationItem.stringValue
+            {
+                let coords = parseLocationString(locationString)
+                latitude = coords.latitude
+                longitude = coords.longitude
+            }
+            let allMetadata = asset.metadata
+            for item in allMetadata {
+                if let key = item.key as? String {
+                    let keyLower = key.lowercased()
+                    if key == "com.apple.quicktime.make" {
+                        cameraMake = item.stringValue ?? ""
+                    } else if key == "com.apple.quicktime.model" {
+                        cameraModel = item.stringValue ?? ""
+                    } else if latitude == nil
+                        && (key == "com.apple.quicktime.location.ISO6709"
+                            || keyLower.contains("location") || keyLower.contains("gps")
+                            || key.contains("©xyz"))
+                    {
+                        if let locationString = item.stringValue {
+                            let coords = parseLocationString(locationString)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                        if latitude == nil, let locationData = item.dataValue {
+                            let coords = parseLocationData(locationData)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                    }
+                }
+                if latitude == nil, let identifier = item.identifier {
+                    let idRaw = identifier.rawValue.lowercased()
+                    if identifier == .quickTimeMetadataLocationISO6709
+                        || identifier == .identifier3GPUserDataLocation
+                        || idRaw.contains("location") || idRaw.contains("gps")
+                        || idRaw.contains("%a9xyz") || idRaw.contains("©xyz")
+                    {
+                        if let locationString = item.stringValue {
+                            let coords = parseLocationString(locationString)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                        if latitude == nil, let locationData = item.dataValue {
+                            let coords = parseLocationData(locationData)
+                            latitude = coords.latitude
+                            longitude = coords.longitude
+                        }
+                    }
+                    if cameraModel.isEmpty && idRaw.contains("auth") {
+                        if let model = item.stringValue { cameraModel = model }
+                    }
+                }
+            }
+            if latitude == nil {
+                let qtMetadata = AVMetadataItem.metadataItems(
+                    from: allMetadata, filteredByIdentifier: .quickTimeMetadataLocationISO6709)
+                if let locationItem = qtMetadata.first,
+                    let locationString = locationItem.stringValue
+                {
+                    let coords = parseLocationString(locationString)
+                    latitude = coords.latitude
+                    longitude = coords.longitude
+                }
+            }
+            if latitude == nil {
+                let threeGPMetadata = AVMetadataItem.metadataItems(
+                    from: allMetadata, filteredByIdentifier: .identifier3GPUserDataLocation)
+                if let locationItem = threeGPMetadata.first,
+                    let locationString = locationItem.stringValue
+                {
+                    let coords = parseLocationString(locationString)
+                    latitude = coords.latitude
+                    longitude = coords.longitude
+                }
+            }
+        }
+
+        // MARK: - Creation Date
+
+        var dateStr = ""
+        if #available(iOS 15.0, macOS 12.0, *) {
+            if let creationItem = try await asset.load(.creationDate),
+                let creationDate = try? await creationItem.load(.dateValue)
+            {
+                dateStr = ISO8601DateFormatter().string(from: creationDate)
+            }
+        }
+        if dateStr.isEmpty {
+            if let attr = try? FileManager.default.attributesOfItem(atPath: tempFileURL.path),
+                let fileCreationDate = attr[.creationDate] as? Date
+            {
+                dateStr = ISO8601DateFormatter().string(from: fileCreationDate)
+            }
+        }
+
+        // MARK: - Return Metadata Dictionary
+
+        var metadataDict: [String: Any] = [
+            "fileSize": fileSize,
+            "duration": durationMs,
+            "width": numericMetadata["width"] ?? 0,
+            "height": numericMetadata["height"] ?? 0,
+            "rotation": numericMetadata["rotation"] ?? 0,
+            "bitrate": numericMetadata["bitrate"] ?? 0,
+            "title": textMetadata["title"] ?? "",
+            "artist": textMetadata["artist"] ?? "",
+            "author": textMetadata["author"] ?? "",
+            "album": textMetadata["album"] ?? "",
+            "albumArtist": textMetadata["albumArtist"] ?? "",
+            "date": dateStr,
+            "cameraMake": cameraMake,
+            "cameraModel": cameraModel,
+        ]
+
+        if let audioDuration = audioDurationMs { metadataDict["audioDuration"] = audioDuration }
+        if let lat = latitude { metadataDict["latitude"] = lat }
+        if let lon = longitude { metadataDict["longitude"] = lon }
+        if let fps = frameRate { metadataDict["frameRate"] = fps }
+
         if checkStreamingOptimization {
-            metadataDict["isOptimizedForStreaming"] = checkMoovBeforeMdat(at: inputPath)
-        } else {
-            metadataDict["isOptimizedForStreaming"] = false
+            #if os(iOS)
+                if #available(iOS 13.4, *) {
+                    if let isOptimized = checkStreamingOptimization(url: tempFileURL) {
+                        metadataDict["isOptimizedForStreaming"] = isOptimized
+                    }
+                }
+            #elseif os(macOS)
+                if #available(macOS 10.15.4, *) {
+                    if let isOptimized = checkStreamingOptimization(url: tempFileURL) {
+                        metadataDict["isOptimizedForStreaming"] = isOptimized
+                    }
+                }
+            #endif
         }
 
         return metadataDict
     }
 
-    // MARK: - Modern iOS 15+ Path
-
-    @available(iOS 15.0, macOS 12.0, *)
-    private static func loadModernMetadata(asset: AVURLAsset, into dict: inout [String: Any]) async
-    {
-        do {
-            let keys = ["tracks", "duration", "commonMetadata"]
-            try await asset.loadValues(forKeys: keys)
-
-            let duration = try await asset.load(.duration)
-            let durationSeconds = CMTimeGetSeconds(duration)
-            dict["durationMs"] = Int64(durationSeconds * 1000)
-
-            let tracks = try await asset.load(.tracks)
-            let videoTracks = tracks.filter { $0.mediaType == .video }
-
-            if let videoTrack = videoTracks.first {
-                let naturalSize = try await videoTrack.load(.naturalSize)
-                let preferredTransform = try await videoTrack.load(.preferredTransform)
-                let rotation = determineRotation(from: preferredTransform)
-                dict["rotation"] = rotation
-
-                if rotation == 90 || rotation == 270 {
-                    dict["width"] = Int(naturalSize.height)
-                    dict["height"] = Int(naturalSize.width)
-                } else {
-                    dict["width"] = Int(naturalSize.width)
-                    dict["height"] = Int(naturalSize.height)
-                }
-
-                let frameRate = try await videoTrack.load(.nominalFrameRate)
-                dict["frameRate"] = Double(frameRate)
-
-                let estimatedBitRate = try await videoTrack.load(.estimatedDataRate)
-                dict["bitrate"] = Int(estimatedBitRate)
-            }
-        } catch {
-            // Fall back silently or log
-        }
-    }
-
-    @available(iOS 15.0, macOS 12.0, *)
-    private static func loadModernCommonMetadata(asset: AVURLAsset, into dict: inout [String: Any])
-        async
-    {
-        do {
-            let commonMetadata = try await asset.load(.commonMetadata)
-            for item in commonMetadata {
-                guard let key = item.commonKey?.rawValue else { continue }
-                if let value = try? await item.load(.value) as? String {
-                    switch key {
-                    case AVMetadataKey.commonKeyTitle.rawValue: dict["title"] = value
-                    case AVMetadataKey.commonKeyArtist.rawValue: dict["artist"] = value
-                    case AVMetadataKey.commonKeyAlbumName.rawValue: dict["album"] = value
-                    case AVMetadataKey.commonKeyAuthor.rawValue: dict["author"] = value
-                    case AVMetadataKey.commonKeyDescription.rawValue: dict["description"] = value
-                    default: break
-                    }
-                }
-            }
-        } catch {}
-    }
-
-    // MARK: - Legacy Path (iOS < 15)
-
-    private static func loadLegacyMetadata(asset: AVURLAsset, into dict: inout [String: Any]) {
-        let durationSeconds = CMTimeGetSeconds(asset.duration)
-        dict["durationMs"] = Int64(durationSeconds * 1000)
-
-        let videoTracks = asset.tracks(withMediaType: .video)
-        if let videoTrack = videoTracks.first {
-            let naturalSize = videoTrack.naturalSize
-            let preferredTransform = videoTrack.preferredTransform
-            let rotation = determineRotation(from: preferredTransform)
-            dict["rotation"] = rotation
-
-            if rotation == 90 || rotation == 270 {
-                dict["width"] = Int(naturalSize.height)
-                dict["height"] = Int(naturalSize.width)
-            } else {
-                dict["width"] = Int(naturalSize.width)
-                dict["height"] = Int(naturalSize.height)
-            }
-
-            dict["frameRate"] = Double(videoTrack.nominalFrameRate)
-            dict["bitrate"] = Int(videoTrack.estimatedDataRate)
-        }
-    }
-
-    private static func loadLegacyCommonMetadata(asset: AVURLAsset, into dict: inout [String: Any])
-    {
-        for item in asset.commonMetadata {
-            guard let key = item.commonKey?.rawValue else { continue }
-            if let value = item.value as? String {
-                switch key {
-                case AVMetadataKey.commonKeyTitle.rawValue: dict["title"] = value
-                case AVMetadataKey.commonKeyArtist.rawValue: dict["artist"] = value
-                case AVMetadataKey.commonKeyAlbumName.rawValue: dict["album"] = value
-                case AVMetadataKey.commonKeyAuthor.rawValue: dict["author"] = value
-                case AVMetadataKey.commonKeyDescription.rawValue: dict["description"] = value
-                default: break
-                }
-            }
-        }
-    }
-
-    // MARK: - Shared Helpers
-
-    private static func determineRotation(from transform: CGAffineTransform) -> Int {
-        if transform.a == 0 && transform.b == 1.0 && transform.c == -1.0 && transform.d == 0 {
-            return 90
-        }
-        if transform.a == 0 && transform.b == -1.0 && transform.c == 1.0 && transform.d == 0 {
-            return 270
-        }
-        if transform.a == -1.0 && transform.b == 0 && transform.c == 0 && transform.d == -1.0 {
-            return 180
-        }
-        return 0
-    }
-
-    private static func checkMoovBeforeMdat(at path: String) -> Bool {
-        // Fixed version with older API compatibility
-        guard let fileHandle = FileHandle(forReadingAtPath: path) else { return false }
-        defer { try? fileHandle.close() }
-
-        var position: UInt64 = 0
-        var moovPosition: UInt64? = nil
-        var mdatPosition: UInt64? = nil
-
-        let fileSize =
-            (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? UInt64) ?? 0
-
-        while position < fileSize {
-            guard position + 8 <= fileSize else { break }
-
-            do {
-                try fileHandle.seek(toOffset: position)
-            } catch { break }
-
-            guard let headerData = try? fileHandle.readData(ofLength: 8), headerData.count == 8
-            else {
-                break
-            }
-
-            let sizeBytes = headerData.subdata(in: 0..<4)
-            let atomSize = sizeBytes.withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
-
-            let typeBytes = headerData.subdata(in: 4..<8)
-            guard let atomType = String(data: typeBytes, encoding: .ascii) else { break }
-
-            if atomType == "moov" {
-                moovPosition = position
-                if mdatPosition != nil { return false }
-            } else if atomType == "mdat" {
-                mdatPosition = position
-                if moovPosition != nil { return true }
-            }
-
-            if moovPosition != nil && mdatPosition != nil { break }
-
-            var actualSize: UInt64 = UInt64(atomSize)
-            if atomSize == 1 {
-                guard position + 16 <= fileSize else { break }
-                guard let extData = try? fileHandle.readData(ofLength: 8), extData.count == 8 else {
-                    break
-                }
-                let bytes = extData.withUnsafeBytes { $0.load(as: UInt64.self).bigEndian }
-                actualSize = bytes
-            } else if atomSize == 0 {
-                break
-            }
-
-            position += actualSize
-        }
-
-        if let moov = moovPosition, let mdat = mdatPosition {
-            return moov < mdat
-        }
-        return moovPosition != nil
-    }
+    // MARK: - Audio Track Check
 
     static func checkAudioTrack(inputPath: String) async throws -> Bool {
-        let fileURL = URL(fileURLWithPath: inputPath)
-        let asset = AVURLAsset(url: fileURL)
-
+        let tempFileURL = URL(fileURLWithPath: inputPath)
+        let asset = AVURLAsset(url: tempFileURL)
         if #available(iOS 15.0, macOS 12.0, *) {
-            let tracks = try await asset.load(.tracks)
-            return !tracks.filter({ $0.mediaType == .audio }).isEmpty
+            let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+            return !audioTracks.isEmpty
         } else {
             return !asset.tracks(withMediaType: .audio).isEmpty
         }
+    }
+
+    // MARK: - Helper Methods
+
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func loadMetadataString(from metadata: [AVMetadataItem], key: String)
+        async throws -> String
+    {
+        if let item = metadata.first(where: { $0.commonKey?.rawValue == key }) {
+            return try await item.load(.stringValue) ?? ""
+        }
+        return ""
+    }
+
+    private static func parseLocationString(_ locationString: String) -> (
+        latitude: Double?, longitude: Double?
+    ) {
+        let cleaned = locationString.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        var latitude: Double? = nil
+        var longitude: Double? = nil
+        var signPositions: [Int] = []
+        for (index, char) in cleaned.enumerated() {
+            if char == "+" || char == "-" { signPositions.append(index) }
+        }
+        if signPositions.count >= 2 {
+            let latStartIndex = cleaned.index(cleaned.startIndex, offsetBy: signPositions[0])
+            let lonStartIndex = cleaned.index(cleaned.startIndex, offsetBy: signPositions[1])
+            latitude = Double(String(cleaned[latStartIndex..<lonStartIndex]))
+            longitude = Double(String(cleaned[lonStartIndex...]))
+        }
+        return (latitude, longitude)
+    }
+
+    private static func parseLocationData(_ data: Data) -> (latitude: Double?, longitude: Double?) {
+        if let locationString = String(data: data, encoding: .utf8) {
+            let coords = parseLocationString(locationString)
+            if coords.latitude != nil { return coords }
+        }
+        if let locationString = String(data: data, encoding: .utf16) {
+            let coords = parseLocationString(locationString)
+            if coords.latitude != nil { return coords }
+        }
+        if data.count >= 8 {
+            let latBytes = data.subdata(in: 0..<4)
+            let lonBytes = data.subdata(in: 4..<8)
+            let lat = latBytes.withUnsafeBytes { $0.load(as: Float32.self) }
+            let lon = lonBytes.withUnsafeBytes { $0.load(as: Float32.self) }
+            if lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 {
+                return (Double(lat), Double(lon))
+            }
+            let latBE = Float32(
+                bitPattern: UInt32(bigEndian: latBytes.withUnsafeBytes { $0.load(as: UInt32.self) })
+            )
+            let lonBE = Float32(
+                bitPattern: UInt32(bigEndian: lonBytes.withUnsafeBytes { $0.load(as: UInt32.self) })
+            )
+            if latBE >= -90 && latBE <= 90 && lonBE >= -180 && lonBE <= 180 {
+                return (Double(latBE), Double(lonBE))
+            }
+        }
+        return (nil, nil)
+    }
+
+    // MARK: - Streaming Optimization Check
+
+    private static func checkStreamingOptimization(url: URL) -> Bool? {
+        let ext = url.pathExtension.lowercased()
+        guard ["mp4", "mov", "m4v", "m4a"].contains(ext) else { return nil }
+        guard let fileHandle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? fileHandle.close() }
+
+        var moovPosition: UInt64? = nil
+        var mdatPosition: UInt64? = nil
+        var position: UInt64 = 0
+
+        while true {
+            guard let headerData = try? fileHandle.read(upToCount: 8), headerData.count == 8 else {
+                break
+            }
+            let atomSize =
+                UInt64(headerData[0]) << 24 | UInt64(headerData[1]) << 16
+                | UInt64(headerData[2]) << 8 | UInt64(headerData[3])
+            let atomType = String(data: headerData[4..<8], encoding: .ascii) ?? ""
+
+            switch atomType {
+            case "moov": moovPosition = position
+            case "mdat": mdatPosition = position
+            default: break
+            }
+
+            if let moov = moovPosition, let mdat = mdatPosition { return moov < mdat }
+
+            var actualSize: UInt64
+            if atomSize == 1 {
+                guard let extData = try? fileHandle.read(upToCount: 8), extData.count == 8 else {
+                    break
+                }
+                actualSize = (0..<8).reduce(0) { $0 | UInt64(extData[$1]) << (56 - $1 * 8) }
+            } else if atomSize == 0 {
+                break
+            } else {
+                actualSize = atomSize
+            }
+
+            position += actualSize
+            do { try fileHandle.seek(toOffset: position) } catch { break }
+        }
+
+        if moovPosition != nil && mdatPosition == nil { return true }
+        if moovPosition == nil && mdatPosition != nil { return false }
+        return nil
     }
 }

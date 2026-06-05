@@ -1,10 +1,10 @@
 import Foundation
 
 #if os(iOS)
-import Flutter
-import UIKit
+  import Flutter
+  import UIKit
 #elseif os(macOS)
-import FlutterMacOS
+  import FlutterMacOS
 #endif
 
 /// ProVideoEditorPlugin - Main Flutter plugin for advanced video editing capabilities.
@@ -34,9 +34,9 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     #if os(iOS)
-    let messenger = registrar.messenger()
+      let messenger = registrar.messenger()
     #elseif os(macOS)
-    let messenger = registrar.messenger
+      let messenger = registrar.messenger
     #endif
 
     let methodChannel = FlutterMethodChannel(
@@ -117,9 +117,9 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
   /// Returns the iOS platform version string.
   private func handleGetPlatformVersion(result: FlutterResult) {
     #if os(iOS)
-    result("iOS " + UIDevice.current.systemVersion)
+      result("iOS " + UIDevice.current.systemVersion)
     #elseif os(macOS)
-    result("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
+      result("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
     #endif
   }
 

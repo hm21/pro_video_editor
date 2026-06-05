@@ -43,8 +43,10 @@ class ThumbnailGenerator {
             do {
                 let videoURL = URL(fileURLWithPath: config.inputPath)
                 let asset = AVURLAsset(url: videoURL)
+
                 let generator = AVAssetImageGenerator(asset: asset)
                 generator.appliesPreferredTrackTransform = true
+
                 if config.lastFrameTolerance {
                     // Use a small tolerance so AVFoundation decodes the
                     // nearest frame instead of jumping to a distant keyframe.
@@ -68,29 +70,17 @@ class ThumbnailGenerator {
                     return
                 }
 
-                // MARK: - Frame Extraction
-
-                let timeIndexMap: [Double: Int] = Dictionary(
-                    uniqueKeysWithValues:
-                        times.enumerated().map { (index, time) in
-                            (time.timeValue.seconds, index)
-                        }
-                )
-
                 let results = await withCheckedContinuation { continuation in
                     var resultData = [Data?](repeating: nil, count: times.count)
+
+                    let totalCount = times.count
                     var completed = 0
                     let start = Date().timeIntervalSince1970
-                    let totalCount = times.count
 
                     generator.generateCGImagesAsynchronously(forTimes: times) {
                         requestedTime, cgImage, actualTime, result, error in
 
-                        let key = requestedTime.seconds
-                        guard let index = timeIndexMap[key] else {
-                            PluginLog.print("⚠️ Unexpected time: \(Int(key * 1000)) ms")
-                            return
-                        }
+                        let index = completed
 
                         if let cgImage = cgImage {
                             let resized = resizeCGImageKeepingAspect(
@@ -99,22 +89,27 @@ class ThumbnailGenerator {
                                 targetHeight: config.outputHeight,
                                 boxFit: config.boxFit
                             )
+
                             let data = compressCGImage(
-                                resized, format: config.outputFormat,
-                                jpegQuality: config.jpegQuality)
+                                resized,
+                                format: config.outputFormat,
+                                jpegQuality: config.jpegQuality
+                            )
+
                             resultData[index] = data
 
                             let elapsed = Int((Date().timeIntervalSince1970 - start) * 1000)
+
                             PluginLog.print(
-                                "[\(index)] ✅ \(Int(key * 1000)) ms in \(elapsed) ms (\(data.count) bytes)"
+                                "[\(index)] ✅ frame in \(elapsed) ms (\(data.count) bytes)"
                             )
                         } else {
                             let message = error?.localizedDescription ?? "Unknown error"
-                            PluginLog.print(
-                                "[\(index)] ❌ Failed at \(Int(key * 1000)) ms: \(message)")
+                            PluginLog.print("[\(index)] ❌ frame failed: \(message)")
                         }
 
                         completed += 1
+
                         onProgress(Double(completed) / Double(totalCount))
 
                         if completed == totalCount {
@@ -123,23 +118,59 @@ class ThumbnailGenerator {
                     }
                 }
 
-                let filteredResults = results.filter { !$0.isEmpty }
-                onComplete(filteredResults)
+                onComplete(results)
+
             } catch {
                 onError(error)
             }
         }
     }
 
-    // MARK: - Image Processing
+    // MARK: - Keyframe timestamps
 
-    /// Resizes a CGImage while maintaining aspect ratio.
+    private static func extractKeyframeTimestamps(
+        asset: AVAsset,
+        maxFrames: Int
+    ) async -> [NSValue] {
+
+        let duration: CMTime
+
+        if #available(iOS 15.0, macOS 13.0, *) {
+            do {
+                duration = try await asset.load(.duration)
+            } catch {
+                PluginLog.print("❌ Failed to load duration: \(error)")
+                return []
+            }
+        } else {
+            duration = asset.duration
+        }
+
+        guard duration.seconds.isFinite, duration.seconds > 0 else {
+            return []
+        }
+
+        let safeFrames = max(1, maxFrames)
+        let step = duration.seconds / Double(safeFrames)
+
+        return (0..<safeFrames).map { i in
+            let time = CMTime(
+                seconds: Double(i) * step,
+                preferredTimescale: 1_000_000
+            )
+            return NSValue(time: time)
+        }
+    }
+
+    // MARK: - Image processing
+
     private static func resizeCGImageKeepingAspect(
         cgImage: CGImage,
         targetWidth: Int,
         targetHeight: Int,
         boxFit: String
     ) -> CGImage {
+
         let originalWidth = CGFloat(cgImage.width)
         let originalHeight = CGFloat(cgImage.height)
 
@@ -153,8 +184,8 @@ class ThumbnailGenerator {
             }
         }()
 
-        let newWidth = Int(originalWidth * scale)
-        let newHeight = Int(originalHeight * scale)
+        let newWidth = max(1, Int(originalWidth * scale))
+        let newHeight = max(1, Int(originalHeight * scale))
 
         let context = CGContext(
             data: nil,
@@ -168,65 +199,43 @@ class ThumbnailGenerator {
 
         context.interpolationQuality = .high
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: newWidth, height: newHeight))
+
         return context.makeImage()!
     }
 
-    /// Compresses a CGImage to a Data object in the specified format across iOS and macOS platforms.
-    private static func compressCGImage(_ cgImage: CGImage, format: String, jpegQuality: Int)
-        -> Data
-    {
+    // MARK: - Compression
+
+    private static func compressCGImage(
+        _ cgImage: CGImage,
+        format: String,
+        jpegQuality: Int
+    ) -> Data {
+
         let quality = CGFloat(jpegQuality) / 100.0
         let isPng = format.lowercased() == "png"
 
         #if canImport(UIKit)
             let image = UIImage(cgImage: cgImage)
+
             if isPng {
                 return image.pngData() ?? Data()
             } else {
-                if format.lowercased() != "jpeg" && format.lowercased() != "jpg" {
-                    PluginLog.print("⚠️ Format \(format) not supported, falling back to JPEG")
-                }
                 return image.jpegData(compressionQuality: quality) ?? Data()
             }
+
         #elseif canImport(AppKit)
             let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
+
             if isPng {
                 return bitmapRep.representation(using: .png, properties: [:]) ?? Data()
             } else {
-                if format.lowercased() != "jpeg" && format.lowercased() != "jpg" {
-                    PluginLog.print("⚠️ Format \(format) not supported, falling back to JPEG")
-                }
                 return bitmapRep.representation(
-                    using: .jpeg, properties: [.compressionFactor: quality]) ?? Data()
+                    using: .jpeg,
+                    properties: [.compressionFactor: quality]
+                ) ?? Data()
             }
         #else
             return Data()
         #endif
-    }
-
-    // MARK: - Keyframe Extraction
-
-    /// Extracts evenly distributed timestamps for keyframe extraction.
-    private static func extractKeyframeTimestamps(asset: AVAsset, maxFrames: Int) async -> [NSValue]
-    {
-        let duration: CMTime
-        if #available(iOS 15.0, macOS 13.0, *) {
-            do {
-                duration = try await asset.load(.duration)
-            } catch {
-                PluginLog.print("❌ Failed to load duration: \(error.localizedDescription)")
-                return []
-            }
-        } else {
-            duration = asset.duration
-        }
-
-        guard duration.seconds.isFinite && duration.seconds > 0 else { return [] }
-
-        let step = duration.seconds / Double(maxFrames)
-        return (0..<maxFrames).map {
-            let time = CMTime(seconds: Double($0) * step, preferredTimescale: 1_000_000)
-            return NSValue(time: time)
-        }
     }
 }
