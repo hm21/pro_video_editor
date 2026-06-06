@@ -33,6 +33,16 @@ class NoAudioTrackException: NSError, @unchecked Sendable {
 class ExtractAudio {
 
   /// Extracts audio from a video file asynchronously.
+  ///
+  /// This method uses AVAssetExportSession for fast Passthrough export,
+  /// or AVAssetReader + FileHandle for WAV transcoding.
+  ///
+  /// - Parameters:
+  ///   - config: Complete extraction configuration
+  ///   - onProgress: Callback invoked with progress updates (0.0 to 1.0)
+  ///   - onComplete: Callback invoked on success with output bytes (nil if saved to file)
+  ///   - onError: Callback invoked if extraction fails
+  /// - Returns: Cancellation handle that can be used to stop the extraction
   static func extract(
     config: AudioExtractConfig,
     onProgress: @escaping (Double) -> Void,
@@ -79,6 +89,7 @@ class ExtractAudio {
         let sourceURL = URL(fileURLWithPath: config.inputPath)
         let asset = AVURLAsset(url: sourceURL)
 
+        /// https://developer.apple.com/documentation/dispatch/dispatchsemaphore
         let semaphore = DispatchSemaphore(value: 0)
         var loadError: Error?
 
@@ -287,7 +298,6 @@ class ExtractAudio {
 
         var duration = CMTime.zero
 
-        // FIXED COMPILER ERROR: Safely use modern async loading context or fallback blocks
         if #available(macOS 12.0, iOS 15.0, *) {
           (_, duration) = try await asset.load(.tracks, .duration)
         } else {

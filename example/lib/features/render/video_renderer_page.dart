@@ -1251,9 +1251,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
                 filters: _colorFilters,
                 child: isContentInitialized == true
                     ? Chewie(controller: _chewieControllerContent!)
-                    : const Center(
-                        child: CircularProgressIndicator(color: Colors.green),
-                      ),
+                    : const Center(child: CircularProgressIndicator()),
               ),
               IgnorePointer(
                 child: ClipRect(

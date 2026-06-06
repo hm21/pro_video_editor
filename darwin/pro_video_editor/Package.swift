@@ -23,7 +23,10 @@ let package = Package(
         .product(name: "FlutterFramework", package: "FlutterFramework")
       ],
       path: ".",
-      resources: [],
+      resources: [
+        // Uncomment if needed
+        // .copy("Resources/PrivacyInfo.xcprivacy")
+      ],
       linkerSettings: [
         .linkedFramework("Flutter", .when(platforms: [.iOS])),
         .linkedFramework("FlutterMacOS", .when(platforms: [.macOS])),

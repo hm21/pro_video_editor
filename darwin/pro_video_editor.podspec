@@ -30,6 +30,7 @@ A Flutter plugin which adds support for video editing.
     'DEFINES_MODULE' => 'YES' 
   }
 
-  # s.ios.resource_bundles = {'pro_video_editor_ios_privacy' => ['pro_video_editor/Sources/Resources/PrivacyInfo.xcprivacy']}
-  # s.osx.resource_bundles = {'pro_video_editor_osx_privacy' => ['pro_video_editor/Sources/Resources/PrivacyInfo.xcprivacy']}
+  # Uncomment if needed
+  # s.ios.resource_bundles = {'pro_video_editor_ios_privacy' => ['pro_video_editor/Resources/PrivacyInfo.xcprivacy']}
+  # s.osx.resource_bundles = {'pro_video_editor_osx_privacy' => ['pro_video_editor/Resources/PrivacyInfo.xcprivacy']}
 end
