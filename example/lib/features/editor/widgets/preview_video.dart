@@ -1,12 +1,13 @@
+import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
+import 'package:video_player/video_player.dart';
 
 import '/features/editor/widgets/pixel_transparent_painter.dart';
 
@@ -36,8 +37,9 @@ class _PreviewVideoState extends State<PreviewVideo> {
 
   late Future<VideoMetadata> _videoMetadata;
   late final int _generationTime = widget.generationTime.inMilliseconds;
-  final _player = Player();
-  late final _controller = VideoController(_player);
+
+  late VideoPlayerController _controller;
+  ChewieController? _chewieController;
 
   final _numberFormatter = NumberFormat();
 
@@ -53,13 +55,34 @@ class _PreviewVideoState extends State<PreviewVideo> {
 
   @override
   void dispose() {
-    _player.dispose();
+    _controller.dispose();
+    _chewieController?.dispose();
     super.dispose();
   }
 
   void _initializePlayer() async {
-    var media = Media('file://${widget.filePath}');
-    await _player.open(media, play: false);
+    _controller = VideoPlayerController.file(File(widget.filePath));
+
+    await _controller.initialize();
+
+    setState(() {});
+
+    _chewieController = ChewieController(
+      videoPlayerController: _controller,
+      autoPlay: true,
+      customControls: const MaterialControls(),
+
+      materialProgressColors: ChewieProgressColors(
+        playedColor: const Color(0xFFFF0000),
+        handleColor: const Color(0xFFFF0000),
+        bufferedColor: Colors.white.withValues(alpha: 0.3),
+        backgroundColor: Colors.white.withValues(alpha: 0.2),
+      ),
+
+      placeholder: Container(color: Colors.black),
+      autoInitialize: true,
+      showControlsOnInitialize: false,
+    );
   }
 
   String formatBytes(int bytes, [int decimals = 2]) {
@@ -127,10 +150,12 @@ class _PreviewVideoState extends State<PreviewVideo> {
             aspectRatio: aspectRatio,
             child: Hero(
               tag: const ProImageEditorConfigs().heroTag,
-              child: Video(
-                key: const ValueKey('Preview-Video-Player'),
-                controller: _controller,
-              ),
+              child: _chewieController != null
+                  ? Chewie(
+                      key: const ValueKey('Preview-Video-Player'),
+                      controller: _chewieController!,
+                    )
+                  : const Center(child: CircularProgressIndicator()),
             ),
           ),
         );
