@@ -52,19 +52,11 @@ internal class VideoSequenceBuilder {
     let asset = AVURLAsset(url: url)
     let assetDuration: CMTime
 
-    #if os(iOS)
-      if #available(iOS 15.0, *) {
-        assetDuration = (try? await asset.load(.duration)) ?? .zero
-      } else {
-        assetDuration = asset.duration
-      }
-    #elseif os(macOS)
-      if #available(macOS 13.0, *) {
-        assetDuration = (try? await asset.load(.duration)) ?? .zero
-      } else {
-        assetDuration = asset.duration
-      }
-    #endif
+    if #available(iOS 15.0, macOS 13.0, *) {
+      assetDuration = (try? await asset.load(.duration)) ?? .zero
+    } else {
+      assetDuration = asset.duration
+    }
 
     let startTime = clip.startUs.map { CMTime(value: $0, timescale: 1_000_000) } ?? .zero
     let endTime = clip.endUs.map { CMTime(value: $0, timescale: 1_000_000) } ?? assetDuration

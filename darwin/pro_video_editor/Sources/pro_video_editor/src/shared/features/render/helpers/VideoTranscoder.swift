@@ -156,68 +156,39 @@ internal class VideoTranscoder {
     // Create video composition for HDR → SDR conversion
     let videoTrack: AVAssetTrack
 
-    #if os(macOS)
-      if #available(macOS 13.0, *) {
-        let videoTracks = try await asset.loadTracks(withMediaType: .video)
-        guard let vTrack = videoTracks.first else {
-          throw NSError(
-            domain: "VideoTranscoder", code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "No video track found"])
-        }
-        videoTrack = vTrack
-      } else {
-        guard let vTrack = asset.tracks(withMediaType: .video).first else {
-          throw NSError(
-            domain: "VideoTranscoder", code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "No video track found"])
-        }
-        videoTrack = vTrack
+    if #available(iOS 15.0, macOS 13.0, *) {
+      let videoTracks = try await asset.loadTracks(withMediaType: .video)
+      guard let vTrack = videoTracks.first else {
+        throw NSError(
+          domain: "VideoTranscoder", code: 2,
+          userInfo: [NSLocalizedDescriptionKey: "No video track found"]
+        )
       }
-    #elseif os(iOS)
-      if #available(iOS 15.0, *) {
-        let videoTracks = try await asset.loadTracks(withMediaType: .video)
-        guard let vTrack = videoTracks.first else {
-          throw NSError(
-            domain: "VideoTranscoder", code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "No video track found"])
-        }
-        videoTrack = vTrack
-      } else {
-        guard let vTrack = asset.tracks(withMediaType: .video).first else {
-          throw NSError(
-            domain: "VideoTranscoder", code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "No video track found"])
-        }
-        videoTrack = vTrack
+      videoTrack = vTrack
+    } else {
+      guard let vTrack = asset.tracks(withMediaType: .video).first else {
+        throw NSError(
+          domain: "VideoTranscoder", code: 2,
+          userInfo: [NSLocalizedDescriptionKey: "No video track found"]
+        )
       }
-    #endif
+      videoTrack = vTrack
+    }
 
     // Get video properties
     let naturalSize: CGSize
     let preferredTransform: CGAffineTransform
     let nominalFrameRate: Float
 
-    #if os(macOS)
-      if #available(macOS 13.0, *) {
-        naturalSize = try await videoTrack.load(.naturalSize)
-        preferredTransform = try await videoTrack.load(.preferredTransform)
-        nominalFrameRate = try await videoTrack.load(.nominalFrameRate)
-      } else {
-        naturalSize = videoTrack.naturalSize
-        preferredTransform = videoTrack.preferredTransform
-        nominalFrameRate = videoTrack.nominalFrameRate
-      }
-    #elseif os(iOS)
-      if #available(iOS 15.0, *) {
-        naturalSize = try await videoTrack.load(.naturalSize)
-        preferredTransform = try await videoTrack.load(.preferredTransform)
-        nominalFrameRate = try await videoTrack.load(.nominalFrameRate)
-      } else {
-        naturalSize = videoTrack.naturalSize
-        preferredTransform = videoTrack.preferredTransform
-        nominalFrameRate = videoTrack.nominalFrameRate
-      }
-    #endif
+    if #available(iOS 15.0, macOS 13.0, *) {
+      naturalSize = try await videoTrack.load(.naturalSize)
+      preferredTransform = try await videoTrack.load(.preferredTransform)
+      nominalFrameRate = try await videoTrack.load(.nominalFrameRate)
+    } else {
+      naturalSize = videoTrack.naturalSize
+      preferredTransform = videoTrack.preferredTransform
+      nominalFrameRate = videoTrack.nominalFrameRate
+    }
 
     // Calculate render size accounting for rotation
     let renderSize = calculateOutputSize(

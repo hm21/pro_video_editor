@@ -25,19 +25,11 @@ internal class MediaInfoExtractor {
 
     do {
       let duration: CMTime
-      #if os(macOS)
-        if #available(macOS 13.0, *) {
-          duration = try await asset.load(.duration)
-        } else {
-          duration = asset.duration
-        }
-      #elseif os(iOS)
-        if #available(iOS 15.0, *) {
-          duration = try await asset.load(.duration)
-        } else {
-          duration = asset.duration
-        }
-      #endif
+      if #available(iOS 15.0, macOS 13.0, *) {
+        duration = try await asset.load(.duration)
+      } else {
+        duration = asset.duration
+      }
 
       guard duration.seconds.isFinite else {
         return 0
@@ -66,19 +58,11 @@ internal class MediaInfoExtractor {
 
     do {
       let duration: CMTime
-      #if os(macOS)
-        if #available(macOS 13.0, *) {
-          duration = try await asset.load(.duration)
-        } else {
-          duration = asset.duration
-        }
-      #elseif os(iOS)
-        if #available(iOS 15.0, *) {
-          duration = try await asset.load(.duration)
-        } else {
-          duration = asset.duration
-        }
-      #endif
+      if #available(iOS 15.0, macOS 13.0, *) {
+        duration = try await asset.load(.duration)
+      } else {
+        duration = asset.duration
+      }
 
       guard duration.seconds.isFinite else {
         return 0
@@ -109,38 +93,22 @@ internal class MediaInfoExtractor {
 
     do {
       let tracks: [AVAssetTrack]
-      #if os(macOS)
-        if #available(macOS 13.0, *) {
-          tracks = try await asset.loadTracks(withMediaType: .audio)
-        } else {
-          tracks = asset.tracks(withMediaType: .audio)
-        }
-      #elseif os(iOS)
-        if #available(iOS 15.0, *) {
-          tracks = try await asset.loadTracks(withMediaType: .audio)
-        } else {
-          tracks = asset.tracks(withMediaType: .audio)
-        }
-      #endif
+      if #available(iOS 15.0, macOS 13.0, *) {
+        tracks = try await asset.loadTracks(withMediaType: .audio)
+      } else {
+        tracks = asset.tracks(withMediaType: .audio)
+      }
 
       guard let audioTrack = tracks.first else {
         return nil
       }
 
       let formatDescriptions: [Any]
-      #if os(macOS)
-        if #available(macOS 13.0, *) {
-          formatDescriptions = try await audioTrack.load(.formatDescriptions)
-        } else {
-          formatDescriptions = audioTrack.formatDescriptions
-        }
-      #elseif os(iOS)
-        if #available(iOS 15.0, *) {
-          formatDescriptions = try await audioTrack.load(.formatDescriptions)
-        } else {
-          formatDescriptions = audioTrack.formatDescriptions
-        }
-      #endif
+      if #available(iOS 15.0, macOS 13.0, *) {
+        formatDescriptions = try await audioTrack.load(.formatDescriptions)
+      } else {
+        formatDescriptions = audioTrack.formatDescriptions
+      }
 
       for description in formatDescriptions {
         let formatDesc = description as! CMFormatDescription
@@ -173,38 +141,22 @@ internal class MediaInfoExtractor {
 
     do {
       let tracks: [AVAssetTrack]
-      #if os(macOS)
-        if #available(macOS 13.0, *) {
-          tracks = try await asset.loadTracks(withMediaType: .audio)
-        } else {
-          tracks = asset.tracks(withMediaType: .audio)
-        }
-      #elseif os(iOS)
-        if #available(iOS 15.0, *) {
-          tracks = try await asset.loadTracks(withMediaType: .audio)
-        } else {
-          tracks = asset.tracks(withMediaType: .audio)
-        }
-      #endif
+      if #available(iOS 15.0, macOS 13.0, *) {
+        tracks = try await asset.loadTracks(withMediaType: .audio)
+      } else {
+        tracks = asset.tracks(withMediaType: .audio)
+      }
 
       guard let audioTrack = tracks.first else {
         return 0
       }
 
       let formatDescriptions: [Any]
-      #if os(macOS)
-        if #available(macOS 13.0, *) {
-          formatDescriptions = try await audioTrack.load(.formatDescriptions)
-        } else {
-          formatDescriptions = audioTrack.formatDescriptions
-        }
-      #elseif os(iOS)
-        if #available(iOS 15.0, *) {
-          formatDescriptions = try await audioTrack.load(.formatDescriptions)
-        } else {
-          formatDescriptions = audioTrack.formatDescriptions
-        }
-      #endif
+      if #available(iOS 15.0, macOS 13.0, *) {
+        formatDescriptions = try await audioTrack.load(.formatDescriptions)
+      } else {
+        formatDescriptions = audioTrack.formatDescriptions
+      }
 
       for description in formatDescriptions {
         let formatDesc = description as! CMFormatDescription
@@ -227,19 +179,11 @@ internal class MediaInfoExtractor {
   /// Loads video track from asset.
   static func loadVideoTrack(from asset: AVAsset) async throws -> AVAssetTrack {
     let tracks: [AVAssetTrack]
-    #if os(macOS)
-      if #available(macOS 13.0, *) {
-        tracks = try await asset.loadTracks(withMediaType: .video)
-      } else {
-        tracks = asset.tracks(withMediaType: .video)
-      }
-    #elseif os(iOS)
-      if #available(iOS 15.0, *) {
-        tracks = try await asset.loadTracks(withMediaType: .video)
-      } else {
-        tracks = asset.tracks(withMediaType: .video)
-      }
-    #endif
+    if #available(iOS 15.0, macOS 13.0, *) {
+      tracks = try await asset.loadTracks(withMediaType: .video)
+    } else {
+      tracks = asset.tracks(withMediaType: .video)
+    }
 
     guard let track = tracks.first else {
       throw NSError(
@@ -253,21 +197,12 @@ internal class MediaInfoExtractor {
 
   /// Loads audio track from asset.
   static func loadAudioTrack(from asset: AVAsset) async throws -> AVAssetTrack? {
-    #if os(macOS)
-      if #available(macOS 13.0, *) {
-        let tracks = try await asset.loadTracks(withMediaType: .audio)
-        return tracks.first
-      } else {
-        return asset.tracks(withMediaType: .audio).first
-      }
-    #elseif os(iOS)
-      if #available(iOS 15.0, *) {
-        let tracks = try await asset.loadTracks(withMediaType: .audio)
-        return tracks.first
-      } else {
-        return asset.tracks(withMediaType: .audio).first
-      }
-    #endif
+    if #available(iOS 15.0, macOS 13.0, *) {
+      let tracks = try await asset.loadTracks(withMediaType: .audio)
+      return tracks.first
+    } else {
+      return asset.tracks(withMediaType: .audio).first
+    }
   }
 
   // MARK: - Video Format Detection
@@ -322,19 +257,11 @@ internal class MediaInfoExtractor {
 
       // Get format descriptions
       let formatDescriptions: [Any]
-      #if os(macOS)
-        if #available(macOS 13.0, *) {
-          formatDescriptions = try await videoTrack.load(.formatDescriptions)
-        } else {
-          formatDescriptions = videoTrack.formatDescriptions
-        }
-      #elseif os(iOS)
-        if #available(iOS 15.0, *) {
-          formatDescriptions = try await videoTrack.load(.formatDescriptions)
-        } else {
-          formatDescriptions = videoTrack.formatDescriptions
-        }
-      #endif
+      if #available(iOS 15.0, macOS 13.0, *) {
+        formatDescriptions = try await videoTrack.load(.formatDescriptions)
+      } else {
+        formatDescriptions = videoTrack.formatDescriptions
+      }
 
       for description in formatDescriptions {
         let formatDesc = description as! CMFormatDescription

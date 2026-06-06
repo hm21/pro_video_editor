@@ -45,19 +45,11 @@ internal enum AudioReverser {
 
     // Resolve actual asset duration for the "until end" case.
     let assetDuration: CMTime
-    #if os(macOS)
-      if #available(macOS 13.0, *) {
-        assetDuration = (try? await asset.load(.duration)) ?? .zero
-      } else {
-        assetDuration = asset.duration
-      }
-    #elseif os(iOS)
-      if #available(iOS 15.0, *) {
-        assetDuration = (try? await asset.load(.duration)) ?? .zero
-      } else {
-        assetDuration = asset.duration
-      }
-    #endif
+    if #available(iOS 15.0, macOS 13.0, *) {
+      assetDuration = (try? await asset.load(.duration)) ?? .zero
+    } else {
+      assetDuration = asset.duration
+    }
 
     let effectiveStart = CMTimeMaximum(startTime, .zero)
     let effectiveEnd = CMTimeMinimum(endTime, assetDuration)
@@ -71,19 +63,11 @@ internal enum AudioReverser {
     // Load audio track.
     let audioTracks: [AVAssetTrack]
     do {
-      #if os(macOS)
-        if #available(macOS 13.0, *) {
-          audioTracks = try await asset.loadTracks(withMediaType: .audio)
-        } else {
-          audioTracks = asset.tracks(withMediaType: .audio)
-        }
-      #elseif os(iOS)
-        if #available(iOS 15.0, *) {
-          audioTracks = try await asset.loadTracks(withMediaType: .audio)
-        } else {
-          audioTracks = asset.tracks(withMediaType: .audio)
-        }
-      #endif
+      if #available(iOS 15.0, macOS 13.0, *) {
+        audioTracks = try await asset.loadTracks(withMediaType: .audio)
+      } else {
+        audioTracks = asset.tracks(withMediaType: .audio)
+      }
     } catch {
       PluginLog.print("⚠️ AudioReverser: failed to load tracks: \(error)")
       return nil

@@ -139,35 +139,19 @@ internal class CompositionBuilder {
 
       let layerInstruction: AVVideoCompositionLayerInstruction
 
-      #if os(macOS)
-        if #available(macOS 26.0, *) {
-          var config = AVVideoCompositionLayerInstruction.Configuration(
-            assetTrack: videoResult.videoTrack
-          )
-          config.setTransform(transform, at: .zero)
-          layerInstruction = AVVideoCompositionLayerInstruction(configuration: config)
-        } else {
-          let mutableInstruction = AVMutableVideoCompositionLayerInstruction(
-            assetTrack: videoResult.videoTrack
-          )
-          mutableInstruction.setTransform(transform, at: .zero)
-          layerInstruction = mutableInstruction
-        }
-      #elseif os(iOS)
-        if #available(iOS 26.0, *) {
-          var config = AVVideoCompositionLayerInstruction.Configuration(
-            assetTrack: videoResult.videoTrack
-          )
-          config.setTransform(transform, at: .zero)
-          layerInstruction = AVVideoCompositionLayerInstruction(configuration: config)
-        } else {
-          let mutableInstruction = AVMutableVideoCompositionLayerInstruction(
-            assetTrack: videoResult.videoTrack
-          )
-          mutableInstruction.setTransform(transform, at: .zero)
-          layerInstruction = mutableInstruction
-        }
-      #endif
+      if #available(iOS 26.0, macOS 26.0, *) {
+        var config = AVVideoCompositionLayerInstruction.Configuration(
+          assetTrack: videoResult.videoTrack
+        )
+        config.setTransform(transform, at: .zero)
+        layerInstruction = AVVideoCompositionLayerInstruction(configuration: config)
+      } else {
+        let mutableInstruction = AVMutableVideoCompositionLayerInstruction(
+          assetTrack: videoResult.videoTrack
+        )
+        mutableInstruction.setTransform(transform, at: .zero)
+        layerInstruction = mutableInstruction
+      }
 
       // Use custom instruction that explicitly provides requiredSourceTrackIDs
       let instruction = CustomVideoCompositionInstruction(

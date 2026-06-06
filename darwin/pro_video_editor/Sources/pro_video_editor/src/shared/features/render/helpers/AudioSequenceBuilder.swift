@@ -106,19 +106,11 @@ internal class AudioSequenceBuilder {
     let prerenderAsset = AVURLAsset(url: prerender.outputURL)
     var prerenderTracks: [AVAssetTrack] = []
 
-    #if os(macOS)
-      if #available(macOS 13.0, *) {
-        prerenderTracks = (try? await prerenderAsset.loadTracks(withMediaType: .audio)) ?? []
-      } else {
-        prerenderTracks = prerenderAsset.tracks(withMediaType: .audio)
-      }
-    #elseif os(iOS)
-      if #available(iOS 15.0, *) {
-        prerenderTracks = (try? await prerenderAsset.loadTracks(withMediaType: .audio)) ?? []
-      } else {
-        prerenderTracks = prerenderAsset.tracks(withMediaType: .audio)
-      }
-    #endif
+    if #available(iOS 15.0, macOS 13.0, *) {
+      prerenderTracks = (try? await prerenderAsset.loadTracks(withMediaType: .audio)) ?? []
+    } else {
+      prerenderTracks = prerenderAsset.tracks(withMediaType: .audio)
+    }
 
     guard let sourceTrack = prerenderTracks.first else {
       PluginLog.print("⚠️ Pre-rendered audio has no audio track")
