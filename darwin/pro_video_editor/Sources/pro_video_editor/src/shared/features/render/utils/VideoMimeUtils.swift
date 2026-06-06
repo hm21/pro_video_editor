@@ -13,12 +13,12 @@ import AVFoundation
 /// - "mov": QuickTime movie container (.mov)
 /// - Default: Falls back to MP4 for unknown formats
 func mapFormatToMimeType(format: String) -> AVFileType {
-    switch format {
-    case "mp4":
-        return .mp4
-    case "mov":
-        return .mov
-    default:
-        return .mp4
-    }
+  switch format {
+  case "mp4":
+    return .mp4
+  case "mov":
+    return .mov
+  default:
+    return .mp4
+  }
 }

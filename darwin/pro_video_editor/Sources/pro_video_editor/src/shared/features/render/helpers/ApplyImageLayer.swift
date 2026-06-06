@@ -18,15 +18,15 @@ import Foundation
 /// - Note: The image is positioned and scaled by the video compositor according
 ///         to its own logic (typically centered or full-frame).
 public func applyImageLayer(
-    config: inout VideoCompositorConfig,
-    imageLayers: [ImageLayerConfig],
-    withCropping: Bool = false
+  config: inout VideoCompositorConfig,
+  imageLayers: [ImageLayerConfig],
+  withCropping: Bool = false
 ) {
-    config.imageLayerConfigs = imageLayers
-    config.imageBytesWithCropping = withCropping
+  config.imageLayerConfigs = imageLayers
+  config.imageBytesWithCropping = withCropping
 
-    if !imageLayers.isEmpty {
-        PluginLog.print(
-            "[\(Tags.render)] 🖼️ Applying \(imageLayers.count) image layer(s) with timing")
-    }
+  if !imageLayers.isEmpty {
+    PluginLog.print(
+      "[\(Tags.render)] 🖼️ Applying \(imageLayers.count) image layer(s) with timing")
+  }
 }

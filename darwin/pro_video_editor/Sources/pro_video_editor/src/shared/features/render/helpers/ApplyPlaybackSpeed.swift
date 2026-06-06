@@ -18,37 +18,40 @@ import AVFoundation
 /// - Returns: The rescaled instructions (unchanged if speed is nil or 1.0).
 /// - Note: Speed must be positive. Values ≤0 or exactly 1.0 are ignored.
 public func applyPlaybackSpeed(
-    composition: AVMutableComposition,
-    instructions: [AVVideoCompositionInstructionProtocol],
-    speed: Float?
+  composition: AVMutableComposition,
+  instructions: [AVVideoCompositionInstructionProtocol],
+  speed: Float?
 ) -> [AVVideoCompositionInstructionProtocol] {
-    guard let speed = speed, speed > 0, speed != 1 else { return instructions }
+  guard let speed = speed, speed > 0, speed != 1 else { return instructions }
 
-    let speedType = speed < 1 ? "slow motion" : "fast forward"
-    PluginLog.print("[\(Tags.render)] ⚡ Applying playback speed: \(String(format: "%.2f", speed))x (\(speedType))")
+  let speedType = speed < 1 ? "slow motion" : "fast forward"
+  PluginLog.print(
+    "[\(Tags.render)] ⚡ Applying playback speed: \(String(format: "%.2f", speed))x (\(speedType))")
 
-    let multiplier = 1.0 / Double(speed)
+  let multiplier = 1.0 / Double(speed)
 
-    let tracks = composition.tracks
-    for track in tracks {
-        let range = CMTimeRange(start: .zero, duration: track.timeRange.duration)
-        let scaledDuration = CMTimeMultiplyByFloat64(range.duration, multiplier: multiplier)
-        track.scaleTimeRange(range, toDuration: scaledDuration)
+  let tracks = composition.tracks
+  for track in tracks {
+    let range = CMTimeRange(start: .zero, duration: track.timeRange.duration)
+    let scaledDuration = CMTimeMultiplyByFloat64(range.duration, multiplier: multiplier)
+    track.scaleTimeRange(range, toDuration: scaledDuration)
+  }
+
+  // Scale video composition instructions to match the new track durations
+  return instructions.map { instruction in
+    guard let custom = instruction as? CustomVideoCompositionInstruction else {
+      return instruction
     }
-
-    // Scale video composition instructions to match the new track durations
-    return instructions.map { instruction in
-        guard let custom = instruction as? CustomVideoCompositionInstruction else {
-            return instruction
-        }
-        let scaledStart = CMTimeMultiplyByFloat64(custom.timeRange.start, multiplier: multiplier)
-        let scaledDuration = CMTimeMultiplyByFloat64(custom.timeRange.duration, multiplier: multiplier)
-        let trackID = (custom.requiredSourceTrackIDs?.first as? NSNumber)?.int32Value ?? kCMPersistentTrackID_Invalid
-        return CustomVideoCompositionInstruction(
-            timeRange: CMTimeRange(start: scaledStart, duration: scaledDuration),
-            sourceTrackID: trackID,
-            layerInstructions: custom.layerInstructions,
-            backgroundColor: custom.backgroundColor
-        )
-    }
+    let scaledStart = CMTimeMultiplyByFloat64(custom.timeRange.start, multiplier: multiplier)
+    let scaledDuration = CMTimeMultiplyByFloat64(custom.timeRange.duration, multiplier: multiplier)
+    let trackID =
+      (custom.requiredSourceTrackIDs?.first as? NSNumber)?.int32Value
+      ?? kCMPersistentTrackID_Invalid
+    return CustomVideoCompositionInstruction(
+      timeRange: CMTimeRange(start: scaledStart, duration: scaledDuration),
+      sourceTrackID: trackID,
+      layerInstructions: custom.layerInstructions,
+      backgroundColor: custom.backgroundColor
+    )
+  }
 }

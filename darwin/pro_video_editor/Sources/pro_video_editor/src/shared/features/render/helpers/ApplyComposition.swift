@@ -23,15 +23,15 @@ import Foundation
 ///
 /// - Throws: NSError if video clips are empty, files don't exist, or tracks can't be loaded.
 func applyComposition(
-    videoClips: [VideoClip],
-    videoEffects: VideoCompositorConfig,
-    enableAudio: Bool,
-    audioTracks: [AudioTrackConfig]
+  videoClips: [VideoClip],
+  videoEffects: VideoCompositorConfig,
+  enableAudio: Bool,
+  audioTracks: [AudioTrackConfig]
 ) async throws -> (
-    AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID, [URL]
+  AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID, [URL]
 ) {
-    return try await CompositionBuilder(videoClips: videoClips, videoEffects: videoEffects)
-        .setEnableAudio(enableAudio)
-        .setAudioTracks(audioTracks)
-        .build()
+  return try await CompositionBuilder(videoClips: videoClips, videoEffects: videoEffects)
+    .setEnableAudio(enableAudio)
+    .setAudioTracks(audioTracks)
+    .build()
 }

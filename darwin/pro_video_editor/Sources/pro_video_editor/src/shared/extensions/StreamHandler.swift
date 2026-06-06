@@ -1,7 +1,7 @@
 #if os(iOS)
-import Flutter
+  import Flutter
 #elseif os(macOS)
-import FlutterMacOS
+  import FlutterMacOS
 #endif
 
 /// FlutterStreamHandler conformance for ProVideoEditorPlugin.
@@ -10,29 +10,29 @@ import FlutterMacOS
 /// Progress events are streamed to Flutter with task ID and progress value (0.0 to 1.0).
 extension ProVideoEditorPlugin: FlutterStreamHandler {
   #if os(iOS)
-  @objc public func onListen(
-    withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink
-  ) -> FlutterError? {
-    self.eventSink = events
-    return nil
-  }
+    @objc public func onListen(
+      withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink
+    ) -> FlutterError? {
+      self.eventSink = events
+      return nil
+    }
 
-  @objc public func onCancel(withArguments arguments: Any?) -> FlutterError? {
-    self.eventSink = nil
-    return nil
-  }
+    @objc public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+      self.eventSink = nil
+      return nil
+    }
   #elseif os(macOS)
-  public func onListen(
-    withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink
-  ) -> FlutterError? {
-    self.eventSink = events
-    return nil
-  }
+    public func onListen(
+      withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink
+    ) -> FlutterError? {
+      self.eventSink = events
+      return nil
+    }
 
-  public func onCancel(withArguments arguments: Any?) -> FlutterError? {
-    self.eventSink = nil
-    return nil
-  }
+    public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+      self.eventSink = nil
+      return nil
+    }
   #endif
 }
 

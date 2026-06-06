@@ -12,19 +12,19 @@ import CoreGraphics
 ///
 /// - Note: Scaling is applied after rotation but before other transforms.
 func applyScale(
-    config: inout VideoCompositorConfig,
-    scaleX: Float?,
-    scaleY: Float?
+  config: inout VideoCompositorConfig,
+  scaleX: Float?,
+  scaleY: Float?
 ) {
-    let x = CGFloat(scaleX ?? 1.0)
-    let y = CGFloat(scaleY ?? 1.0)
+  let x = CGFloat(scaleX ?? 1.0)
+  let y = CGFloat(scaleY ?? 1.0)
 
-    config.scaleX = x
-    config.scaleY = y
+  config.scaleX = x
+  config.scaleY = y
 
-    if x != 1.0 || y != 1.0 {
-        let percentX = Int(x * 100)
-        let percentY = Int(y * 100)
-        PluginLog.print("[\(Tags.render)] 📏 Applying scale: X=\(percentX)%, Y=\(percentY)%")
-    }
+  if x != 1.0 || y != 1.0 {
+    let percentX = Int(x * 100)
+    let percentY = Int(y * 100)
+    PluginLog.print("[\(Tags.render)] 📏 Applying scale: X=\(percentX)%, Y=\(percentY)%")
+  }
 }

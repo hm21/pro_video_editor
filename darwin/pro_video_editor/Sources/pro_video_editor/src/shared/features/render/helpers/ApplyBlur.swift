@@ -11,12 +11,13 @@ import AVFoundation
 ///
 /// - Note: The actual blur is applied by the video compositor during rendering.
 func applyBlur(
-    config: inout VideoCompositorConfig,
-    sigma: Double?
+  config: inout VideoCompositorConfig,
+  sigma: Double?
 ) {
-    config.blurSigma = (sigma ?? 0) * 2.5
+  config.blurSigma = (sigma ?? 0) * 2.5
 
-    if sigma == nil || sigma == 0 { return }
+  if sigma == nil || sigma == 0 { return }
 
-    PluginLog.print("[\(Tags.render)] 🌫️ Applying Gaussian blur: sigma=\(String(format: "%.1f", sigma!))")
+  PluginLog.print(
+    "[\(Tags.render)] 🌫️ Applying Gaussian blur: sigma=\(String(format: "%.1f", sigma!))")
 }
