@@ -87,7 +87,7 @@ internal enum AudioPreRenderer {
     let audioTracks: [AVAssetTrack]
     do {
       if #available(macOS 12.0, iOS 15.0, *) {
-        audioTracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
+        audioTracks = try await asset.loadTracks(withMediaType: .audio)
       } else {
         audioTracks = asset.tracks(withMediaType: .audio)
       }

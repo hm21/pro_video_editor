@@ -1,7 +1,7 @@
 import Foundation
 
 /// Represents a video clip with optional trimming, volume and playback speed control
-internal struct VideoClip {
+internal struct VideoClip: Sendable {
   let inputPath: String
   let startUs: Int64?
   let endUs: Int64?

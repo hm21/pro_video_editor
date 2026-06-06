@@ -40,89 +40,101 @@ class ThumbnailGenerator {
     onError: @escaping (Error) -> Void
   ) {
     Task {
-      do {
-        let videoURL = URL(fileURLWithPath: config.inputPath)
-        let asset = AVURLAsset(url: videoURL)
-
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-
-        if config.lastFrameTolerance {
-          // Use a small tolerance so AVFoundation decodes the
-          // nearest frame instead of jumping to a distant keyframe.
-          generator.requestedTimeToleranceBefore = CMTime(
-            seconds: 0.1, preferredTimescale: 1_000_000)
-          generator.requestedTimeToleranceAfter = .zero
-        } else {
-          generator.requestedTimeToleranceBefore = .zero
-          generator.requestedTimeToleranceAfter = .zero
-        }
-
-        let times: [NSValue]
-        if !config.timestampsUs.isEmpty {
-          times = config.timestampsUs.map {
-            NSValue(time: CMTime(value: $0, timescale: 1_000_000))
-          }
-        } else if let maxFrames = config.maxOutputFrames {
-          times = await extractKeyframeTimestamps(asset: asset, maxFrames: maxFrames)
-        } else {
-          onComplete([])
-          return
-        }
-
-        let results = await withCheckedContinuation { continuation in
-          var resultData = [Data?](repeating: nil, count: times.count)
-
-          let totalCount = times.count
-          var completed = 0
-          let start = Date().timeIntervalSince1970
-
-          generator.generateCGImagesAsynchronously(forTimes: times) {
-            requestedTime, cgImage, actualTime, result, error in
-
-            let index = completed
-
-            if let cgImage = cgImage {
-              let resized = resizeCGImageKeepingAspect(
-                cgImage: cgImage,
-                targetWidth: config.outputWidth,
-                targetHeight: config.outputHeight,
-                boxFit: config.boxFit
-              )
-
-              let data = compressCGImage(
-                resized,
-                format: config.outputFormat,
-                jpegQuality: config.jpegQuality
-              )
-
-              resultData[index] = data
-
-              let elapsed = Int((Date().timeIntervalSince1970 - start) * 1000)
-
-              PluginLog.print(
-                "[\(index)] ✅ frame in \(elapsed) ms (\(data.count) bytes)"
-              )
-            } else {
-              let message = error?.localizedDescription ?? "Unknown error"
-              PluginLog.print("[\(index)] ❌ frame failed: \(message)")
-            }
-
-            completed += 1
-
-            onProgress(Double(completed) / Double(totalCount))
-
-            if completed == totalCount {
-              continuation.resume(returning: resultData.compactMap { $0 })
-            }
-          }
-        }
-
-        onComplete(results)
-
-      } catch {
+      let videoURL = URL(fileURLWithPath: config.inputPath)
+      if !FileManager.default.fileExists(atPath: config.inputPath) {
+        let error = NSError(
+          domain: "ThumbnailGenerator", code: 404,
+          userInfo: [NSLocalizedDescriptionKey: "Video file not found at path: \(config.inputPath)"]
+        )
         onError(error)
+        return
       }
+      let asset = AVURLAsset(url: videoURL)
+
+      let generator = AVAssetImageGenerator(asset: asset)
+      generator.appliesPreferredTrackTransform = true
+
+      if config.lastFrameTolerance {
+        // Use a small tolerance so AVFoundation decodes the
+        // nearest frame instead of jumping to a distant keyframe.
+        generator.requestedTimeToleranceBefore = CMTime(
+          seconds: 0.1, preferredTimescale: 1_000_000)
+        generator.requestedTimeToleranceAfter = .zero
+      } else {
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+      }
+
+      let times: [NSValue]
+      if !config.timestampsUs.isEmpty {
+        times = config.timestampsUs.map {
+          NSValue(time: CMTime(value: $0, timescale: 1_000_000))
+        }
+      } else if let maxFrames = config.maxOutputFrames {
+        times = await extractKeyframeTimestamps(asset: asset, maxFrames: maxFrames)
+      } else {
+        onComplete([])
+        return
+      }
+
+      let results = await withCheckedContinuation { continuation in
+        var resultData = [Data?](repeating: nil, count: times.count)
+
+        let totalCount = times.count
+        var completed = 0
+        let start = Date().timeIntervalSince1970
+
+        generator.generateCGImagesAsynchronously(forTimes: times) {
+          requestedTime, cgImage, actualTime, result, error in
+
+          let index = completed
+
+          if let cgImage = cgImage {
+            let resized = resizeCGImageKeepingAspect(
+              cgImage: cgImage,
+              targetWidth: config.outputWidth,
+              targetHeight: config.outputHeight,
+              boxFit: config.boxFit
+            )
+
+            let data = compressCGImage(
+              resized,
+              format: config.outputFormat,
+              jpegQuality: config.jpegQuality
+            )
+
+            resultData[index] = data
+
+            let elapsed = Int((Date().timeIntervalSince1970 - start) * 1000)
+
+            PluginLog.print(
+              "[\(index)] ✅ frame in \(elapsed) ms (\(data.count) bytes)"
+            )
+          } else {
+            let message = error?.localizedDescription ?? "Unknown error"
+            PluginLog.print("[\(index)] ❌ frame failed: \(message)")
+
+            let reportableError =
+              error
+              ?? NSError(
+                domain: "ThumbnailGenerator",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Frame generation failed at index \(index)"]
+              )
+            onError(reportableError)
+          }
+
+          completed += 1
+
+          onProgress(Double(completed) / Double(totalCount))
+
+          if completed == totalCount {
+            continuation.resume(returning: resultData.compactMap { $0 })
+          }
+        }
+      }
+
+      onComplete(results)
     }
   }
 

@@ -39,7 +39,7 @@ struct LayerAnimationConfig {
   }
 }
 
-public struct ImageLayerConfig {
+public struct ImageLayerConfig: Sendable {
   let imageData: Data
   let startUs: Int64
   /// endUs of -1 indicates the image should be displayed until the end of the video.
@@ -97,7 +97,7 @@ public struct ImageLayerConfig {
 }
 
 /// Configuration for a color filter with an optional time range.
-public struct ColorFilterConfig {
+public struct ColorFilterConfig: Sendable {
   let matrix: [Double]
   /// startUs of -1 means the filter applies from the start of the video.
   let startUs: Int64
@@ -153,7 +153,7 @@ struct AudioTrackConfig {
 /// This struct encapsulates all parameters required for rendering a video with
 /// effects, transformations, and audio mixing. It supports both single-video
 /// and multi-video rendering with comprehensive effect options.
-struct RenderConfig {
+struct RenderConfig: Sendable {
   /// List of video clips to render (concatenated in order)
   let videoClips: [VideoClip]
 
