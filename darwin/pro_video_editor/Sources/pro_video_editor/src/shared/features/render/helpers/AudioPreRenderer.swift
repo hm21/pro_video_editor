@@ -68,7 +68,7 @@ internal enum AudioPreRenderer {
 
     // Resolve the source duration.
     let sourceDuration: CMTime
-    if #available(iOS 15.0, *) {
+    if #available(macOS 12.0, iOS 15.0, *) {
       sourceDuration = (try? await asset.load(.duration)) ?? .zero
     } else {
       sourceDuration = asset.duration
@@ -86,8 +86,8 @@ internal enum AudioPreRenderer {
 
     let audioTracks: [AVAssetTrack]
     do {
-      if #available(iOS 15.0, *) {
-        audioTracks = try await asset.loadTracks(withMediaType: .audio)
+      if #available(macOS 12.0, iOS 15.0, *) {
+        audioTracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
       } else {
         audioTracks = asset.tracks(withMediaType: .audio)
       }

@@ -282,7 +282,7 @@ internal class VideoSequenceBuilder {
               reversedAudioTempURLs.append(reversed.outputURL)
               let wavAsset = AVURLAsset(url: reversed.outputURL)
               let wavTracks: [AVAssetTrack]
-              if #available(iOS 15.0, *) {
+              if #available(macOS 12.0, iOS 15.0, *) {
                 wavTracks = (try? await wavAsset.loadTracks(withMediaType: .audio)) ?? []
               } else {
                 wavTracks = wavAsset.tracks(withMediaType: .audio)
@@ -388,7 +388,7 @@ internal class VideoSequenceBuilder {
       endTime = CMTime(value: endUs, timescale: 1_000_000)
     } else {
       let assetDuration: CMTime
-      if #available(iOS 15.0, *) {
+      if #available(macOS 12.0, iOS 15.0, *) {
         assetDuration = (try? await asset.load(.duration)) ?? .zero
       } else {
         assetDuration = asset.duration
