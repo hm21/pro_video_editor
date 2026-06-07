@@ -52,12 +52,14 @@ flutter:
       android:
         package: ch.waio.pro_video_editor
         pluginClass: ProVideoEditorPlugin
-      ios:
-        pluginClass: ProVideoEditorPlugin
       linux:
         pluginClass: ProVideoEditorPlugin
+      ios:
+        pluginClass: ProVideoEditorPlugin
+        sharedDarwinSource: true
       macos:
         pluginClass: ProVideoEditorPlugin
+        sharedDarwinSource: true
       windows:
         pluginClass: ProVideoEditorPluginCApi
       web:

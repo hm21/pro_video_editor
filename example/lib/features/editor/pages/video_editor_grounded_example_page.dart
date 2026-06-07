@@ -4,9 +4,9 @@ import 'dart:math';
 import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pro_image_editor/designs/grounded/grounded_design.dart';
@@ -166,7 +166,17 @@ class _VideoEditorGroundedExamplePageState
                     builder: (context) => AlertDialog(
                       content: SingleChildScrollView(
                         child: ColorPicker(
-                          pickerColor: currentColor,
+                          wheelHasBorder: true,
+                          enableOpacity: true,
+                          showColorCode: true,
+                          colorCodeHasColor: false,
+                          enableShadesSelection: false,
+                          pickersEnabled: const {
+                            ColorPickerType.primary: false,
+                            ColorPickerType.accent: false,
+                            ColorPickerType.wheel: true,
+                          },
+                          color: currentColor,
                           onColorChanged: (color) {
                             newColor = color;
                           },
@@ -229,7 +239,16 @@ class _VideoEditorGroundedExamplePageState
                     builder: (context) => AlertDialog(
                       content: SingleChildScrollView(
                         child: ColorPicker(
-                          pickerColor: currentColor,
+                          enableOpacity: true,
+                          showColorCode: true,
+                          colorCodeHasColor: false,
+                          enableShadesSelection: false,
+                          pickersEnabled: const {
+                            ColorPickerType.primary: false,
+                            ColorPickerType.accent: false,
+                            ColorPickerType.wheel: true,
+                          },
+                          color: currentColor,
                           onColorChanged: (color) {
                             newColor = color;
                           },
@@ -703,15 +722,11 @@ class _VideoEditorGroundedExamplePageState
   ).floor();
   Future<VideoClip?> _addClip() async {
     // Open video picker
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
-      allowMultiple: false,
-    );
+    final file = await FilePicker.pickFile(type: FileType.video);
 
     // User cancelled picker
-    if (!mounted || result == null || result.files.isEmpty) return null;
+    if (!mounted || file == null) return null;
 
-    final file = result.files.single;
     final path = file.path;
     if (path == null) return null;
 

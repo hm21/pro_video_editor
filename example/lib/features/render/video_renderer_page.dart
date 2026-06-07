@@ -1,17 +1,18 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:chewie/chewie.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/shared/utils/render_cancel_capability.dart';
 import 'package:pro_video_editor_example/shared/widgets/video_renderer_progress.dart';
+import 'package:video_player/video_player.dart' hide VideoAudioTrack;
 
 import '/core/constants/example_constants.dart';
 import '/core/constants/example_filters.dart';
@@ -33,10 +34,13 @@ class VideoRendererPage extends StatefulWidget {
 class _VideoRendererPageState extends State<VideoRendererPage> {
   final _pve = ProVideoEditor.instance;
 
-  late final _playerContent = Player();
-  late final _controllerContent = VideoController(_playerContent);
-  late final _playerPreview = Player();
-  late final _controllerPreview = VideoController(_playerPreview);
+  late VideoPlayerController _controllerContent;
+  ChewieController? _chewieControllerContent;
+  bool isContentInitialized = false;
+
+  VideoPlayerController? _controllerPreview;
+  ChewieController? _chewieControllerPreview;
+  bool isPreviewInitialized = false;
 
   final _boundaryKey = GlobalKey();
   bool _isExporting = false;
@@ -60,17 +64,45 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   @override
   void initState() {
     super.initState();
-    _playerContent.open(
-      Media('asset:///$kVideoEditorExampleH264Path'),
-      play: false,
-    );
+    _initializePlayer();
     _video = EditorVideo.asset(kVideoEditorExampleH264Path);
+  }
+
+  Future<void> _initializePlayer() async {
+    _controllerContent = VideoPlayerController.asset(
+      kVideoEditorExampleH264Path,
+    );
+
+    await _controllerContent.initialize();
+
+    _chewieControllerContent = ChewieController(
+      videoPlayerController: _controllerContent,
+      autoPlay: true,
+      customControls: const MaterialControls(),
+      materialProgressColors: ChewieProgressColors(
+        playedColor: const Color(0xFFFF0000),
+        handleColor: const Color(0xFFFF0000),
+        bufferedColor: Colors.white.withValues(alpha: 0.3),
+        backgroundColor: Colors.white.withValues(alpha: 0.2),
+      ),
+      placeholder: Container(color: Colors.black),
+      autoInitialize: true,
+      showControlsOnInitialize: false,
+    );
+
+    setState(() => isContentInitialized = true);
   }
 
   @override
   void dispose() {
-    _playerContent.dispose();
-    _playerPreview.dispose();
+    if (isContentInitialized) {
+      _controllerContent.dispose();
+    }
+    if (isPreviewInitialized) {
+      _controllerPreview?.dispose();
+    }
+    _chewieControllerContent?.dispose();
+    _chewieControllerPreview?.dispose();
     super.dispose();
   }
 
@@ -1047,8 +1079,41 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   }
 
   Future<void> _renderVideo(VideoRenderData value) async {
+    if (_isExporting) {
+      debugPrint('An export task is already running. Action ignored.');
+      return;
+    }
     _taskId = DateTime.now().microsecondsSinceEpoch.toString();
-    setState(() => _isExporting = true);
+    setState(() {
+      _isExporting = true;
+      isPreviewInitialized = false;
+    });
+
+    if (_chewieControllerPreview != null) {
+      await _chewieControllerPreview!.pause();
+      _chewieControllerPreview!.dispose();
+      _chewieControllerPreview = null;
+    }
+    if (_controllerPreview != null) {
+      final controllerToDispose = _controllerPreview!;
+      _controllerPreview = null;
+
+      try {
+        controllerToDispose.removeListener(() {});
+      } catch (_) {}
+
+      unawaited(() async {
+        try {
+          await controllerToDispose.pause();
+
+          await Future.delayed(const Duration(milliseconds: 100));
+
+          await controllerToDispose.dispose();
+        } catch (e) {
+          debugPrint('Silent catch during old controller disposal: $e');
+        }
+      }());
+    }
 
     final directory = await getTemporaryDirectory();
     var sp = Stopwatch()..start();
@@ -1076,11 +1141,30 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
     _isExporting = false;
     _videoBytes = result;
+
+    _controllerPreview = VideoPlayerController.file(File(outputPath));
+    await _controllerPreview?.initialize();
+
     setState(() {});
 
-    await _playerPreview.open(Media(outputPath));
-    await _playerPreview.play();
-    await _playerPreview.setPlaylistMode(.loop);
+    _chewieControllerPreview = ChewieController(
+      videoPlayerController: _controllerPreview!,
+      autoPlay: true,
+      customControls: const MaterialControls(),
+
+      materialProgressColors: ChewieProgressColors(
+        playedColor: const Color(0xFFFF0000),
+        handleColor: const Color(0xFFFF0000),
+        bufferedColor: Colors.white.withValues(alpha: 0.3),
+        backgroundColor: Colors.white.withValues(alpha: 0.2),
+      ),
+      looping: true,
+      placeholder: Container(color: Colors.black),
+      autoInitialize: true,
+      showControlsOnInitialize: false,
+    );
+
+    setState(() => isPreviewInitialized = true);
   }
 
   Future<void> _cancelRender() async {
@@ -1135,6 +1219,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
                 alignment: WrapAlignment.center,
                 children: [
                   ConstrainedBox(
+                    key: ValueKey(isContentInitialized),
                     constraints: const BoxConstraints(maxWidth: 360),
                     child: _buildDemoEditorContent(),
                   ),
@@ -1164,7 +1249,9 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
             children: [
               ColorFilterGenerator(
                 filters: _colorFilters,
-                child: Video(controller: _controllerContent),
+                child: isContentInitialized == true
+                    ? Chewie(controller: _chewieControllerContent!)
+                    : const Center(child: CircularProgressIndicator()),
               ),
               IgnorePointer(
                 child: ClipRect(
@@ -1223,7 +1310,9 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
                   _outputMetadata?.resolution.aspectRatio ?? 0,
                   1280 / 720,
                 ),
-                child: Video(controller: _controllerPreview),
+                child: isPreviewInitialized == true
+                    ? Chewie(controller: _chewieControllerPreview!)
+                    : const Center(child: CircularProgressIndicator()),
               ),
               Text(
                 'Result: ${formatBytes(_videoBytes!.lengthInBytes)} '

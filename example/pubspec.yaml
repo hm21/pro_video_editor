@@ -14,23 +14,23 @@ dependencies:
 
 
   intl: ^0.20.1
-  cupertino_icons: ^1.0.8
+  cupertino_icons: ^1.0.9
 
-  pro_image_editor: ^12.4.3
+  pro_image_editor: ^12.4.7
   
-  google_fonts: ^6.3.2
-  flutter_colorpicker: ^1.1.0
-  file_picker: ^10.2.1
+  google_fonts: ^8.1.0
+  flex_color_picker: ^3.8.0
+  file_picker: 12.0.0-beta.5
   mime: ^2.0.0
   wav: 1.5.0
 
   path_provider: ^2.1.5
-  video_player: ^2.9.3
-  audioplayers: ^5.2.1
-  # Optional multiplatform video player
-  media_kit: ^1.1.11 # Primary package.
-  media_kit_video: ^1.2.5 # For video rendering.
-  media_kit_libs_video: ^1.0.5 # Native video dependencies.
+  audioplayers: ^6.7.1
+
+  # Video
+  video_player: ^2.11.1
+  fvp: ^0.37.2
+  chewie: ^1.14.1
 
 dev_dependencies:
   integration_test:

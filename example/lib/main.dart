@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
+import 'package:fvp/fvp.dart' as fvp;
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/features/editor/pages/video_editor_basic_example_page.dart';
 import 'package:pro_video_editor_example/features/editor/pages/video_editor_grounded_example_page.dart';
@@ -12,7 +12,7 @@ import 'features/thumbnail/thumbnail_example_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
+  fvp.registerWith();
 
   runApp(const MyApp());
 }
