@@ -1,3 +1,6 @@
+## 1.17.4
+- **FIX**(web, wasm): Fix pub.dev platform compatibility score. Replace direct `dart:io` and `package:path_provider` imports in the package's public import chain with conditional platform shims, eliminating the "Package does not support platform Web" and "Not compatible with runtime wasm" warnings.
+
 ## 1.17.3
 - **FEAT**(darwin): Add Swift Package Manager (SPM) support for iOS and macOS. The darwin implementation is now distributed as a local SPM package, replacing the previous CocoaPods-only setup.
 

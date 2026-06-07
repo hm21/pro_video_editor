@@ -1,6 +1,4 @@
 // Flutter imports:
-import 'dart:io' show IOSink;
-
 import 'package:flutter/services.dart';
 
 // Package imports:
