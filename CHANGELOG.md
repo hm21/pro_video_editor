@@ -1,3 +1,6 @@
+## 1.17.3
+- **FEAT**(darwin): Add Swift Package Manager (SPM) support for iOS and macOS. The darwin implementation is now distributed as a local SPM package, replacing the previous CocoaPods-only setup.
+
 ## 1.17.2
 - **FIX**(android): Prevent `RENDER_ERROR` codec exceptions on hardware encoders (e.g. Qualcomm AVC `c2.qti.avc.encoder`) by enabling encoder fallback in the main render path, clamping the requested bitrate into the codec's supported range, and preferring VBR over CBR at high bitrates.
 - **FIX**(android): Harden the reverse-video pre-render against crashes. The all-intra encoder is now configured with a clamped bitrate and progressive fallback to avoid `MediaCodec.CodecException`, and the in-memory remux is guarded against `OutOfMemoryError` by checking the temp file size against available heap before loading frames. On failure the clip gracefully degrades to forward playback.
