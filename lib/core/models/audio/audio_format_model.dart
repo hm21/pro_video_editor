@@ -1,6 +1,6 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
+
+import '/core/platform/io/io_helper.dart';
 
 /// Audio output formats supported for audio extraction.
 ///

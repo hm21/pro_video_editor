@@ -132,3 +132,15 @@ class Directory {
     return Directory();
   }
 }
+
+/// A stub for [IOSink] on the web platform.
+///
+/// File-based streaming is not supported on web; this class exists solely
+/// to satisfy the type system so the library compiles for web/WASM targets.
+class IOSink {
+  /// Flushes the sink (no-op on web).
+  Future<void> flush() async {}
+
+  /// Closes the sink (no-op on web).
+  Future<void> close() async {}
+}
