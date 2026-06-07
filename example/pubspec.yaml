@@ -20,7 +20,7 @@ dependencies:
   
   google_fonts: ^8.1.0
   flex_color_picker: ^3.8.0
-  file_picker: 12.0.0-beta.3 #^10.2.1
+  file_picker: 12.0.0-beta.5
   mime: ^2.0.0
   wav: 1.5.0
 
@@ -46,6 +46,3 @@ flutter:
   assets:
     - assets/
     - assets/tests/
-
-  config:
-    enable-swift-package-manager: false
