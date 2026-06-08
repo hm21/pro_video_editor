@@ -157,10 +157,20 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   }
 
   Future<void> _changeSpeed() async {
+    final customAudioFile = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio1Path,
+    );
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video)],
       // ignore: deprecated_member_use
-      playbackSpeed: .5,
+      playbackSpeed: 2,
+      audioTracks: [
+        VideoAudioTrack(
+          path: customAudioFile.path,
+          volume: 1, // Full volume for custom audio
+          loop: true,
+        ),
+      ],
     );
 
     await _renderVideo(data);

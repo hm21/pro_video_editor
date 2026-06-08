@@ -221,16 +221,14 @@ class VideoSequenceBuilder(
     }
 
     /**
-     * Calculates total duration of all video clips combined.
-     *
-     * @return Total duration in microseconds
-     */
-    /**
      * Calculates total duration of all video clips combined after global trim.
+     * Playback speed is included so parallel custom audio sequences are
+     * constrained to the rendered video timeline, not the source timeline.
      *
+     * @param globalPlaybackSpeed Speed multiplier applied to the whole composition
      * @return Total duration in microseconds
      */
-    fun calculateTotalDuration(): Long {
+    fun calculateTotalDuration(globalPlaybackSpeed: Float? = null): Long {
         // Apply global trim first to get accurate duration
         val trimmedClips = applyGlobalTrim(videoClips)
 
@@ -240,10 +238,17 @@ class VideoSequenceBuilder(
                 clip.endUs != null && clip.startUs != null -> clip.endUs - clip.startUs
                 clip.endUs != null -> clip.endUs
                 else -> MediaInfoExtractor.getVideoDuration(clip.inputPath)
-            }
-            totalDurationUs += clipDurationUs
+            }.coerceAtLeast(0L)
+            totalDurationUs += VideoTimelineDurationCalculator.renderedClipDurationUs(
+                sourceDurationUs = clipDurationUs,
+                clipPlaybackSpeed = clip.playbackSpeed,
+                globalPlaybackSpeed = globalPlaybackSpeed
+            )
         }
-        Log.d(RENDER_TAG, "Total video duration (after global trim): ${totalDurationUs / 1000} ms")
+        Log.d(
+            RENDER_TAG,
+            "Total rendered video duration (after trim/speed): ${totalDurationUs / 1000} ms"
+        )
         return totalDurationUs
     }
 
