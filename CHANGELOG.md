@@ -1,3 +1,6 @@
+## 1.17.5
+- **FIX**(android): Fix custom audio tracks extending sped-up renders to the original source duration. Custom audio is now constrained to the rendered video timeline after global and per-clip playback speed, preventing the final video frame from freezing after the sped-up video content ends.
+
 ## 1.17.4
 - **FIX**(web, wasm): Fix pub.dev platform compatibility score. Replace direct `dart:io` and `package:path_provider` imports in the package's public import chain with conditional platform shims, eliminating the "Package does not support platform Web" and "Not compatible with runtime wasm" warnings.
 
