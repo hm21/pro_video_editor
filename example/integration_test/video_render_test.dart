@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/core/constants/example_constants.dart';
 import 'package:pro_video_editor_example/core/constants/example_filters.dart';
@@ -46,6 +47,23 @@ Future<Uint8List> createTestOverlayImage({
   return byteData!.buffer.asUint8List();
 }
 
+/// Copies an audio asset to a temporary file so native renderers can read it
+/// through a filesystem path.
+Future<String> copyAssetToTempFile(String assetPath) async {
+  final byteData = await rootBundle.load(assetPath);
+  final tempDir = await getTemporaryDirectory();
+  final ext = assetPath.split('.').last;
+  final tempFile = File(
+    '${tempDir.path}/render_audio_'
+    '${DateTime.now().microsecondsSinceEpoch}.$ext',
+  );
+  await tempFile.writeAsBytes(
+    byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes),
+    flush: true,
+  );
+  return tempFile.path;
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -60,8 +78,9 @@ void main() {
 
   final isIOS = defaultTargetPlatform == TargetPlatform.iOS;
   final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
+  final isAndroid = !kIsWeb && Platform.isAndroid;
   final supportsCancel =
-      !kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS);
+      !kIsWeb && (isAndroid || Platform.isIOS || Platform.isMacOS);
 
   Future<VideoMetadata> testRender({
     required String description,
@@ -282,6 +301,80 @@ void main() {
       meta.duration.inSeconds,
       closeTo(7, 2),
       reason: 'Total duration should be ~7.5 s (1.5 s + 6 s)',
+    );
+  });
+
+  group('Playback speed with custom audio', () {
+    late String audioPath;
+
+    setUp(() async {
+      audioPath = await copyAssetToTempFile(kVideoEditorExampleAudio1Path);
+    });
+
+    tearDown(() async {
+      try {
+        await File(audioPath).delete();
+      } catch (_) {}
+    });
+
+    testWidgets(
+      'global speed keeps custom audio duration in sync',
+      (tester) async {
+        final meta = await testRender(
+          description: 'Global speed 2x with looped custom audio',
+          renderModel: VideoRenderData(
+            outputFormat: VideoOutputFormat.mp4,
+            videoSegments: [
+              VideoSegment(
+                video: inputVideo,
+                startTime: Duration.zero,
+                endTime: const Duration(seconds: 4),
+              ),
+            ],
+            playbackSpeed: 2.0,
+            audioTracks: [
+              VideoAudioTrack(path: audioPath, volume: 1, loop: true),
+            ],
+          ),
+        );
+
+        expect(
+          meta.duration.inMilliseconds,
+          closeTo(2000, 800),
+          reason: 'Custom audio must not extend a 4s clip sped up to 2s',
+        );
+      },
+      skip: !isAndroid && !isIOS && !isMacOS,
+    );
+
+    testWidgets(
+      'per-clip speed keeps custom audio duration in sync',
+      (tester) async {
+        final meta = await testRender(
+          description: 'Per-clip speed 2x with looped custom audio',
+          renderModel: VideoRenderData(
+            outputFormat: VideoOutputFormat.mp4,
+            videoSegments: [
+              VideoSegment(
+                video: inputVideo,
+                startTime: Duration.zero,
+                endTime: const Duration(seconds: 4),
+                playbackSpeed: 2.0,
+              ),
+            ],
+            audioTracks: [
+              VideoAudioTrack(path: audioPath, volume: 1, loop: true),
+            ],
+          ),
+        );
+
+        expect(
+          meta.duration.inMilliseconds,
+          closeTo(2000, 800),
+          reason: 'Custom audio must not extend a 4s segment sped up to 2s',
+        );
+      },
+      skip: !isAndroid && !isIOS && !isMacOS,
     );
   });
 

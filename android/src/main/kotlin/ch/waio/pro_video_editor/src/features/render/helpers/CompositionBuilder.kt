@@ -124,7 +124,7 @@ class CompositionBuilder(
         // AudioPreRenderer to avoid encoder frame realignment artifacts (clicks/gaps)
         // at loop and silence boundaries.
         if (hasCustomAudio) {
-            val totalVideoDuration = videoBuilder.calculateTotalDuration()
+            val totalVideoDuration = videoBuilder.calculateTotalDuration(config.playbackSpeed)
 
             for ((index, track) in config.audioTracks.withIndex()) {
                 Log.d(

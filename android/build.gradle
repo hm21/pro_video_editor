@@ -9,7 +9,7 @@ buildscript {
     }
 
     dependencies {
-        classpath("com.android.tools.build:gradle:8.7.0")
+        classpath("com.android.tools.build:gradle:8.11.1")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
     }
 }
@@ -52,7 +52,7 @@ android {
         testImplementation("org.mockito:mockito-core:5.1.1")
         
         // Media3 dependencies
-        def media3_version = "1.10.0"
+        def media3_version = "1.10.1"
         implementation "androidx.media3:media3-common:$media3_version"
         implementation("androidx.media3:media3-transformer:$media3_version")
         implementation("androidx.media3:media3-effect:$media3_version")
