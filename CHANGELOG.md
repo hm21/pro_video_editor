@@ -1,3 +1,6 @@
+## 1.17.6
+- **FIX**(iOS, macOS): Fix unstable/glitchy audio on reversed clips inside multi-clip timelines. `AudioReverser` now preserves the source audio format (sample rate and channel count) instead of forcing 44.1 kHz stereo, so a reversed clip's audio matches its untouched neighbours and AVFoundation no longer has to reconcile mixed formats within a single composition audio track during looped playback. The reversed segment is also written as an AVFoundation-authored CAF/PCM file (replacing the hand-authored WAV) and inserted at its decoded duration without padding, avoiding encoder priming artifacts and audio-timing drift in the exported video.
+
 ## 1.17.5
 - **FIX**(android): Fix custom audio tracks extending sped-up renders to the original source duration. Custom audio is now constrained to the rendered video timeline after global and per-clip playback speed, preventing the final video frame from freezing after the sped-up video content ends.
 
