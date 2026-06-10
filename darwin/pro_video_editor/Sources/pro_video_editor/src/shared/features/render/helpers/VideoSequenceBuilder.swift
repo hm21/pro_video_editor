@@ -263,34 +263,41 @@ internal class VideoSequenceBuilder {
 
         do {
           if clip.reverseVideo {
-            // True PCM-level reversal: decode → reverse samples → WAV.
-            // This avoids the ~30 audible artefacts/second that the
-            // frame-slice approach produces.
+            // True PCM-level reversal: decode → reverse samples → CAF/PCM.
+            // Keep the reversed audio at its decoded duration; padding it to
+            // the video duration changes the exported audio timing on iOS.
             if let reversed = await AudioReverser.reverse(
               inputPath: clip.inputPath,
               startTime: clipTimeRange.start,
               endTime: CMTimeRangeGetEnd(clipTimeRange)
             ) {
               reversedAudioTempURLs.append(reversed.outputURL)
-              let wavAsset = AVURLAsset(url: reversed.outputURL)
-              let wavTracks: [AVAssetTrack]
+              let reversedAsset = AVURLAsset(url: reversed.outputURL)
+              let reversedTracks: [AVAssetTrack]
               if #available(macOS 12.0, iOS 15.0, *) {
-                wavTracks = (try? await wavAsset.loadTracks(withMediaType: .audio)) ?? []
+                reversedTracks = (try? await reversedAsset.loadTracks(withMediaType: .audio)) ?? []
               } else {
-                wavTracks = wavAsset.tracks(withMediaType: .audio)
+                reversedTracks = reversedAsset.tracks(withMediaType: .audio)
               }
-              if let wavTrack = wavTracks.first {
-                // Clamp WAV duration to clipDuration to prevent audio
-                // overhang that would cause AVErrorInvalidVideoComposition.
-                let clampedDuration = CMTimeMinimum(reversed.duration, clipDuration)
-                let wavRange = CMTimeRange(start: .zero, duration: clampedDuration)
-                try sharedAudioTrack.insertTimeRange(wavRange, of: wavTrack, at: insertStart)
+              if let reversedTrack = reversedTracks.first {
+                let reversedTrackRange = reversedTrack.timeRange
+                let clampedDuration = CMTimeMinimum(reversedTrackRange.duration, clipDuration)
+                let reversedRange = CMTimeRange(
+                  start: reversedTrackRange.start,
+                  duration: clampedDuration
+                )
+                try sharedAudioTrack.insertTimeRange(
+                  reversedRange,
+                  of: reversedTrack,
+                  at: insertStart
+                )
                 if let speed = clip.playbackSpeed, speed > 0, speed != 1.0 {
                   let insertedRange = CMTimeRange(start: insertStart, duration: clipDuration)
                   sharedAudioTrack.scaleTimeRange(insertedRange, toDuration: effectiveDuration)
                 }
                 PluginLog.print(
-                  "   ✅ Reversed audio inserted (PCM-level, \(reversed.duration.seconds)s)")
+                  "   ✅ Reversed audio inserted (CAF/PCM, \(reversed.duration.seconds)s)"
+                )
               }
             } else {
               PluginLog.print("   ⚠️ AudioReverser returned nil, skipping audio for reversed clip")
@@ -439,7 +446,7 @@ internal struct VideoSequenceResult {
   let renderSize: CGSize
   let frameRate: Float
   let clipInstructions: [ClipInstruction]
-  /// Temporary WAV files created by AudioReverser for reversed clips.
+  /// Temporary audio files created by AudioReverser for reversed clips.
   /// Must be deleted after the export session finishes.
   let reversedAudioTempURLs: [URL]
 }

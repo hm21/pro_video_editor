@@ -1,20 +1,20 @@
 import AVFoundation
 import Foundation
 
-/// Pre-renders a reversed audio segment into a PCM WAV temp file.
+/// Pre-renders a reversed audio segment into a CoreAudio PCM temp file.
 ///
 /// Unlike the frame-slice approach used by the old `reverseTimeRanges`
 /// implementation (which reverses ~30 chunk positions per second but plays
 /// each chunk forward, causing ~30 audible artefacts per second), this
 /// class decodes the audio to raw PCM, reverses every sample in-place,
-/// and writes the result as a WAV file.  The caller inserts the WAV into
-/// the composition with a single `insertTimeRange` call — no clicks, no
-/// gaps, and the audio sounds exactly like the video played backwards.
+/// and writes the result as a CAF/PCM file. The caller inserts that file
+/// into the composition with a single `insertTimeRange` call — no clicks,
+/// no gaps, and the audio sounds exactly like the video played backwards.
 internal enum AudioReverser {
 
   /// Result of a successful reversal.
   struct Result {
-    /// Temporary PCM WAV file.  The caller MUST delete this once
+    /// Temporary CAF/PCM file.  The caller MUST delete this once
     /// the AVAssetExportSession has finished.
     let outputURL: URL
     /// Duration of the reversed audio.
@@ -25,7 +25,7 @@ internal enum AudioReverser {
 
   /// Decodes [startTime, endTime) from `inputPath`, reverses the PCM
   /// samples on the frame level (stereo 16-bit, 44.1 kHz), and writes
-  /// the result to a temporary WAV file.
+  /// the result to a temporary CAF/PCM file.
   ///
   /// Returns `nil` on failure (no audio track, empty PCM, write error)
   /// so the caller can fall back gracefully to no audio rather than
@@ -77,11 +77,30 @@ internal enum AudioReverser {
       return nil
     }
 
-    // Fixed decode format: 44.1 kHz stereo 16-bit LE PCM.
-    let sampleRate: Double = 44100
-    let channelCount: Int = 2
+    // Preserve the SOURCE audio format (sample rate + channel count) instead
+    // of forcing 44.1 kHz stereo. A reversed clip is dropped back into a
+    // multi-clip timeline next to untouched clips; if its audio track has a
+    // different sample rate / channel layout than its neighbours, AVFoundation
+    // has to reconcile mixed formats inside a single composition audio track,
+    // which destabilises looped playback. The reversed audio must look exactly
+    // like a normal clip's audio. We still decode to 16-bit LE PCM so the
+    // in-place frame reversal stays trivial.
     let bitsPerSample: Int = 16
-    let bytesPerFrame = channelCount * (bitsPerSample / 8)  // = 4
+    var sampleRate: Double = 44100
+    var channelCount: Int = 2
+    let sourceFormatDescriptions: [CMFormatDescription]
+    if #available(iOS 15.0, macOS 13.0, *) {
+      sourceFormatDescriptions = (try? await audioTrack.load(.formatDescriptions)) ?? []
+    } else {
+      sourceFormatDescriptions = audioTrack.formatDescriptions as! [CMFormatDescription]
+    }
+    if let formatDescription = sourceFormatDescriptions.first,
+      let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)?.pointee
+    {
+      if asbd.mSampleRate > 0 { sampleRate = asbd.mSampleRate }
+      if asbd.mChannelsPerFrame > 0 { channelCount = Int(asbd.mChannelsPerFrame) }
+    }
+    let bytesPerFrame = channelCount * (bitsPerSample / 8)
 
     let outputSettings: [String: Any] = [
       AVFormatIDKey: kAudioFormatLinearPCM,
@@ -112,8 +131,8 @@ internal enum AudioReverser {
       return nil
     }
 
-    // Reverse PCM on the frame level (swap frame 0 ↔ last, etc.).
     var bytes = [UInt8](pcm)
+    // Reverse PCM on the frame level (swap frame 0 ↔ last, etc.).
     let frameCount = bytes.count / bytesPerFrame
     var lo = 0
     var hi = frameCount - 1
@@ -127,18 +146,20 @@ internal enum AudioReverser {
       hi -= 1
     }
 
-    // Write WAV file.
-    let outputURL = makeTemporaryWavURL()
+    // Write an AVFoundation-authored CAF/PCM file. This avoids both the
+    // hand-authored WAV path and AAC encoder priming in the temporary
+    // reversed audio asset.
+    let outputURL = makeTemporaryCAFURL()
     do {
-      let wavData = makeWav(
-        pcmBytes: Data(bytes),
+      try writeCAF(
+        pcmBytes: bytes,
+        to: outputURL,
         sampleRate: Int(sampleRate),
         channelCount: channelCount,
         bitsPerSample: bitsPerSample
       )
-      try wavData.write(to: outputURL, options: .atomic)
     } catch {
-      PluginLog.print("⚠️ AudioReverser: WAV write failed: \(error)")
+      PluginLog.print("⚠️ AudioReverser: CAF write failed: \(error)")
       return nil
     }
 
@@ -149,7 +170,7 @@ internal enum AudioReverser {
     )
 
     PluginLog.print(
-      "⏪ AudioReverser: reversed \(bytes.count) bytes (\(duration.seconds)s) for \(inputPath)"
+      "⏪ AudioReverser: reversed \(bytes.count) bytes (\(duration.seconds)s) to CAF/PCM for \(inputPath)"
     )
     return Result(outputURL: outputURL, duration: duration)
   }
@@ -212,52 +233,76 @@ internal enum AudioReverser {
     return pcm
   }
 
-  private static func makeTemporaryWavURL() -> URL {
+  private static func makeTemporaryCAFURL() -> URL {
     let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
-    let name = "reverse_audio_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString).wav"
+    let name = "reverse_audio_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString).caf"
     return tmp.appendingPathComponent(name)
   }
 
-  private static func makeWav(
-    pcmBytes: Data,
+  private static func writeCAF(
+    pcmBytes: [UInt8],
+    to outputURL: URL,
     sampleRate: Int,
     channelCount: Int,
     bitsPerSample: Int
-  ) -> Data {
-    let byteRate = sampleRate * channelCount * bitsPerSample / 8
-    let blockAlign = channelCount * bitsPerSample / 8
-    let dataSize = UInt32(pcmBytes.count)
-    let chunkSize = UInt32(36) + dataSize
+  ) throws {
+    let bytesPerFrame = channelCount * (bitsPerSample / 8)
+    let frameCount = pcmBytes.count / bytesPerFrame
+    guard frameCount > 0 else {
+      throw NSError(
+        domain: "AudioReverser",
+        code: 3,
+        userInfo: [NSLocalizedDescriptionKey: "No PCM frames to write"]
+      )
+    }
 
-    var header = Data(capacity: 44)
-    header.append(contentsOf: [0x52, 0x49, 0x46, 0x46])  // "RIFF"
-    header.appendLE(UInt32(chunkSize))
-    header.append(contentsOf: [0x57, 0x41, 0x56, 0x45])  // "WAVE"
-    header.append(contentsOf: [0x66, 0x6D, 0x74, 0x20])  // "fmt "
-    header.appendLE(UInt32(16))
-    header.appendLE(UInt16(1))  // PCM
-    header.appendLE(UInt16(channelCount))
-    header.appendLE(UInt32(sampleRate))
-    header.appendLE(UInt32(byteRate))
-    header.appendLE(UInt16(blockAlign))
-    header.appendLE(UInt16(bitsPerSample))
-    header.append(contentsOf: [0x64, 0x61, 0x74, 0x61])  // "data"
-    header.appendLE(dataSize)
+    let outputSettings: [String: Any] = [
+      AVFormatIDKey: kAudioFormatLinearPCM,
+      AVSampleRateKey: sampleRate,
+      AVNumberOfChannelsKey: channelCount,
+      AVLinearPCMBitDepthKey: bitsPerSample,
+      AVLinearPCMIsFloatKey: false,
+      AVLinearPCMIsBigEndianKey: false,
+      AVLinearPCMIsNonInterleaved: false,
+    ]
 
-    var out = Data(capacity: header.count + pcmBytes.count)
-    out.append(header)
-    out.append(pcmBytes)
-    return out
-  }
-}
+    let audioFile = try AVAudioFile(
+      forWriting: outputURL,
+      settings: outputSettings,
+      commonFormat: .pcmFormatInt16,
+      interleaved: true
+    )
 
-extension Data {
-  fileprivate mutating func appendLE(_ v: UInt32) {
-    var x = v.littleEndian
-    Swift.withUnsafeBytes(of: &x) { append(contentsOf: $0) }
-  }
-  fileprivate mutating func appendLE(_ v: UInt16) {
-    var x = v.littleEndian
-    Swift.withUnsafeBytes(of: &x) { append(contentsOf: $0) }
+    guard
+      let buffer = AVAudioPCMBuffer(
+        pcmFormat: audioFile.processingFormat,
+        frameCapacity: AVAudioFrameCount(frameCount)
+      )
+    else {
+      throw NSError(
+        domain: "AudioReverser",
+        code: 4,
+        userInfo: [NSLocalizedDescriptionKey: "Failed to allocate PCM buffer"]
+      )
+    }
+
+    buffer.frameLength = AVAudioFrameCount(frameCount)
+    let audioBuffers = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+    guard audioBuffers.count == 1, let destination = audioBuffers[0].mData else {
+      throw NSError(
+        domain: "AudioReverser",
+        code: 5,
+        userInfo: [NSLocalizedDescriptionKey: "Unexpected PCM buffer layout"]
+      )
+    }
+
+    audioBuffers[0].mDataByteSize = UInt32(pcmBytes.count)
+    pcmBytes.withUnsafeBytes { source in
+      if let baseAddress = source.baseAddress {
+        destination.copyMemory(from: baseAddress, byteCount: pcmBytes.count)
+      }
+    }
+
+    try audioFile.write(from: buffer)
   }
 }
