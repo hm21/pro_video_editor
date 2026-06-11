@@ -1,3 +1,6 @@
+## 1.18.0
+- **FEAT**(android, iOS, macOS): Add `speed` to `AudioExtractConfigs` for pitch-preserving playback-speed changes during audio extraction (e.g. `2.0` for double speed, `0.5` for half). WAV applies the time-stretch directly on the decoded PCM (Android `SonicAudioProcessor`; AVFoundation `AVAssetReaderAudioMixOutput` with the spectral time-pitch algorithm), while compressed formats are re-encoded — Android via a Media3 `Transformer`, Darwin via `AVAssetExportPresetAppleM4A` with a scaled time range. Note: on Apple platforms a non-`1.0` speed re-encodes to AAC/M4A, so `caf` output falls back to M4A content.
+
 ## 1.17.6
 - **FIX**(iOS, macOS): Fix unstable/glitchy audio on reversed clips inside multi-clip timelines. `AudioReverser` now preserves the source audio format (sample rate and channel count) instead of forcing 44.1 kHz stereo, so a reversed clip's audio matches its untouched neighbours and AVFoundation no longer has to reconcile mixed formats within a single composition audio track during looped playback. The reversed segment is also written as an AVFoundation-authored CAF/PCM file (replacing the hand-authored WAV) and inserted at its decoded duration without padding, avoiding encoder priming artifacts and audio-timing drift in the exported video.
 

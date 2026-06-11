@@ -10,6 +10,7 @@ import io.flutter.plugin.common.MethodCall
  * @property format Output audio format (mp3, aac, wav, m4a, ogg)
  * @property startUs Optional start time in microseconds for trimming
  * @property endUs Optional end time in microseconds for trimming
+ * @property speed Playback speed multiplier (1.0 = original speed, pitch preserved)
  * @property outputPath Optional output file path (null = return bytes)
  */
 data class AudioExtractConfig(
@@ -18,6 +19,7 @@ data class AudioExtractConfig(
     val format: String,
     val startUs: Long?,
     val endUs: Long?,
+    val speed: Float,
     val outputPath: String?
 ) {
     companion object {
@@ -37,6 +39,7 @@ data class AudioExtractConfig(
             val format = call.argument<String>("format") ?: "mp3"
             val startUs = call.argument<Number>("startTime")?.toLong()
             val endUs = call.argument<Number>("endTime")?.toLong()
+            val speed = call.argument<Number>("speed")?.toFloat()?.takeIf { it > 0f } ?: 1.0f
             val outputPath = call.argument<String>("outputPath")
 
             return AudioExtractConfig(
@@ -45,6 +48,7 @@ data class AudioExtractConfig(
                 format = format,
                 startUs = startUs,
                 endUs = endUs,
+                speed = speed,
                 outputPath = outputPath
             )
         }
