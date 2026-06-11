@@ -28,6 +28,7 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
   String? _extractedAudioPath;
   bool _isExtracting = false;
   AudioFormat _selectedFormat = AudioFormat.mp3;
+  double _selectedSpeed = 1.0;
   final String _taskId = 'AudioExtractionTaskId';
 
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -110,6 +111,7 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
       final config = AudioExtractConfigs(
         video: EditorVideo.asset(kVideoEditorExampleH264Path),
         format: _selectedFormat,
+        speed: _selectedSpeed,
         // Optional: Add trimming
         // startTime: Duration(seconds: 5),
         // endTime: Duration(seconds: 15),
@@ -365,6 +367,7 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
         children: [
           _AudioExtractionCard(
             selectedFormat: _selectedFormat,
+            selectedSpeed: _selectedSpeed,
             isFormatSupported: _isFormatSupported,
             isExtracting: _isExtracting,
             taskId: _taskId,
@@ -374,6 +377,9 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
             duration: _duration,
             onFormatChanged: (format) => setState(() {
               _selectedFormat = format;
+            }),
+            onSpeedChanged: (speed) => setState(() {
+              _selectedSpeed = speed;
             }),
             onExtractAudio: _extractAudio,
             onPlayPause: _playAudio,
@@ -429,6 +435,7 @@ class _AudioExtractExamplePageState extends State<AudioExtractExamplePage> {
 class _AudioExtractionCard extends StatelessWidget {
   const _AudioExtractionCard({
     required this.selectedFormat,
+    required this.selectedSpeed,
     required this.isFormatSupported,
     required this.isExtracting,
     required this.taskId,
@@ -437,6 +444,7 @@ class _AudioExtractionCard extends StatelessWidget {
     required this.position,
     required this.duration,
     required this.onFormatChanged,
+    required this.onSpeedChanged,
     required this.onExtractAudio,
     required this.onPlayPause,
     required this.onSeek,
@@ -444,6 +452,7 @@ class _AudioExtractionCard extends StatelessWidget {
   });
 
   final AudioFormat selectedFormat;
+  final double selectedSpeed;
   final bool Function(AudioFormat) isFormatSupported;
   final bool isExtracting;
   final String taskId;
@@ -452,10 +461,13 @@ class _AudioExtractionCard extends StatelessWidget {
   final Duration position;
   final Duration duration;
   final ValueChanged<AudioFormat> onFormatChanged;
+  final ValueChanged<double> onSpeedChanged;
   final VoidCallback onExtractAudio;
   final VoidCallback onPlayPause;
   final ValueChanged<double> onSeek;
   final VoidCallback onDelete;
+
+  static const List<double> _speedOptions = [0.5, 1.0, 1.5, 2.0];
 
   String _formatDuration(Duration dur) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
@@ -504,6 +516,26 @@ class _AudioExtractionCard extends StatelessWidget {
                           }
                         : null,
                   ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Speed:',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: _speedOptions.map((speed) {
+                return ChoiceChip(
+                  label: Text('${speed}x'),
+                  selected: selectedSpeed == speed,
+                  onSelected: isExtracting
+                      ? null
+                      : (selected) {
+                          if (selected) onSpeedChanged(speed);
+                        },
                 );
               }).toList(),
             ),

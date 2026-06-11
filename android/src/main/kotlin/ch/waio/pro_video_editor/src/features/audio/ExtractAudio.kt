@@ -5,14 +5,28 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.SonicAudioProcessor
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.Effects
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.ProgressHolder
+import androidx.media3.transformer.Transformer
 import ch.waio.pro_video_editor.src.features.audio.models.AudioExtractConfig
 import ch.waio.pro_video_editor.src.features.audio.models.AudioExtractJobHandle
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import java.io.File
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Exception thrown when no audio track is found in the video file.
@@ -31,7 +45,13 @@ class NoAudioTrackException(message: String) : Exception(message)
  *
  * For WAV format, uses custom WAV file writer with PCM encoding.
  * For other formats, uses Android MediaExtractor and MediaMuxer.
+ *
+ * When a playback speed other than 1.0 is requested, compressed formats are
+ * re-encoded through a Media3 [Transformer] (with [SonicAudioProcessor] for a
+ * pitch-preserving time-stretch), while WAV applies the speed change directly
+ * on the decoded PCM in [WavFileWriter].
  */
+@UnstableApi
 class ExtractAudio(private val context: Context) {
 
     companion object {
@@ -58,12 +78,18 @@ class ExtractAudio(private val context: Context) {
         onComplete: (ByteArray?) -> Unit,
         onError: (Throwable) -> Unit
     ): AudioExtractJobHandle {
-        return if (config.format.lowercase() == "wav") {
-            // WAV format requires special handling
-            extractToWav(config, onProgress, onComplete, onError)
-        } else {
-            // Use MediaMuxer for other formats
-            extractWithMuxer(config, onProgress, onComplete, onError)
+        val applySpeed = config.speed > 0f && config.speed != 1.0f
+        return when {
+            // WAV applies the speed change on the decoded PCM (see WavFileWriter).
+            config.format.lowercase() == "wav" ->
+                extractToWav(config, onProgress, onComplete, onError)
+            // Compressed formats can't be re-timed by copying samples, so a
+            // speed change requires re-encoding through Media3 Transformer.
+            applySpeed ->
+                extractWithSpeed(config, onProgress, onComplete, onError)
+            // Fast path: copy the compressed audio samples unchanged.
+            else ->
+                extractWithMuxer(config, onProgress, onComplete, onError)
         }
     }
 
@@ -154,8 +180,9 @@ class ExtractAudio(private val context: Context) {
                     throw IllegalArgumentException("endUs must be greater than startUs")
                 }
 
-                // Create WAV writer (handles both compressed and PCM audio)
-                wavWriter = WavFileWriter(outputFile)
+                // Create WAV writer (handles both compressed and PCM audio,
+                // and applies a pitch-preserving speed change when requested)
+                wavWriter = WavFileWriter(outputFile, config.speed)
 
                 mainHandler.post { onProgress(0.0) }
                 
@@ -427,6 +454,169 @@ class ExtractAudio(private val context: Context) {
             shouldStop.set(true)
             mainHandler.removeCallbacksAndMessages(null)
             // File cleanup is handled by the background thread once it detects shouldStop
+        }
+    }
+
+    /**
+     * Extracts audio while applying a pitch-preserving playback speed change.
+     *
+     * Compressed output formats (AAC/M4A/MP3) can't be re-timed by simply
+     * copying samples, so the audio is re-encoded with a Media3 [Transformer].
+     * A [SonicAudioProcessor] performs the time-stretch and the result is muxed
+     * into an MP4/M4A container (matching the muxer path's output container).
+     */
+    private fun extractWithSpeed(
+        config: AudioExtractConfig,
+        onProgress: (Double) -> Unit,
+        onComplete: (ByteArray?) -> Unit,
+        onError: (Throwable) -> Unit
+    ): AudioExtractJobHandle {
+        val mainHandler = Handler(Looper.getMainLooper())
+        val shouldStopPolling = AtomicBoolean(false)
+        val canceled = AtomicBoolean(false)
+        val transformerRef = AtomicReference<Transformer?>(null)
+
+        val outputFile = if (config.outputPath != null) {
+            File(config.outputPath)
+        } else {
+            File(
+                context.cacheDir,
+                "audio_output_${System.currentTimeMillis()}.${config.getExtension()}"
+            )
+        }
+
+        fun cleanupOnFailure() {
+            if (config.outputPath == null && outputFile.exists()) {
+                outputFile.delete()
+            }
+        }
+
+        // Run the audio-track pre-check off the main thread, then start the
+        // Transformer (which must run on a thread with a Looper) on the main
+        // thread, mirroring the render pipeline.
+        Thread {
+            var probe: MediaExtractor? = null
+            val hasAudio: Boolean
+            try {
+                probe = MediaExtractor()
+                probe.setDataSource(config.inputPath)
+                hasAudio = findAudioTrack(probe) >= 0
+            } catch (e: Exception) {
+                mainHandler.post { onError(e) }
+                return@Thread
+            } finally {
+                try {
+                    probe?.release()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error releasing probe extractor: ${e.message}")
+                }
+            }
+
+            if (!hasAudio) {
+                mainHandler.post {
+                    onError(NoAudioTrackException("No audio track found in video file"))
+                }
+                return@Thread
+            }
+
+            mainHandler.post {
+                if (canceled.get()) return@post
+                try {
+                    val mediaItemBuilder = MediaItem.Builder()
+                        .setUri(Uri.fromFile(File(config.inputPath)))
+
+                    if (config.startUs != null || config.endUs != null) {
+                        val clipping = MediaItem.ClippingConfiguration.Builder().apply {
+                            config.startUs?.let { setStartPositionUs(it) }
+                            config.endUs?.let { setEndPositionUs(it) }
+                        }.build()
+                        mediaItemBuilder.setClippingConfiguration(clipping)
+                    }
+
+                    val sonic = SonicAudioProcessor().apply { setSpeed(config.speed) }
+                    val editedMediaItem = EditedMediaItem.Builder(mediaItemBuilder.build())
+                        .setRemoveVideo(true)
+                        .setEffects(Effects(listOf<AudioProcessor>(sonic), emptyList()))
+                        .build()
+
+                    val transformer = Transformer.Builder(context)
+                        .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                        .addListener(object : Transformer.Listener {
+                            override fun onCompleted(
+                                composition: Composition,
+                                result: ExportResult
+                            ) {
+                                shouldStopPolling.set(true)
+                                onProgress(1.0)
+                                try {
+                                    if (config.outputPath != null) {
+                                        onComplete(null)
+                                    } else {
+                                        onComplete(outputFile.readBytes())
+                                    }
+                                } catch (e: Exception) {
+                                    onError(e)
+                                } finally {
+                                    if (config.outputPath == null) outputFile.delete()
+                                }
+                            }
+
+                            override fun onError(
+                                composition: Composition,
+                                result: ExportResult,
+                                exception: ExportException
+                            ) {
+                                shouldStopPolling.set(true)
+                                cleanupOnFailure()
+                                onError(exception)
+                            }
+                        })
+                        .build()
+
+                    transformerRef.set(transformer)
+                    if (canceled.get()) {
+                        transformer.cancel()
+                        cleanupOnFailure()
+                        return@post
+                    }
+
+                    // Transformer fails if the destination already exists.
+                    if (outputFile.exists()) outputFile.delete()
+
+                    onProgress(0.0)
+                    transformer.start(editedMediaItem, outputFile.absolutePath)
+
+                    // Poll for progress until the export finishes.
+                    val progressHolder = ProgressHolder()
+                    mainHandler.post(object : Runnable {
+                        override fun run() {
+                            if (shouldStopPolling.get()) return
+                            val progressState = transformer.getProgress(progressHolder)
+                            if (progressHolder.progress >= 0) {
+                                onProgress(progressHolder.progress / 100.0)
+                            }
+                            if (!shouldStopPolling.get() &&
+                                progressState != Transformer.PROGRESS_STATE_NOT_STARTED
+                            ) {
+                                mainHandler.postDelayed(this, 200)
+                            }
+                        }
+                    })
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error extracting audio with speed: ${e.message}", e)
+                    cleanupOnFailure()
+                    onError(e)
+                }
+            }
+        }.start()
+
+        return AudioExtractJobHandle {
+            canceled.set(true)
+            shouldStopPolling.set(true)
+            mainHandler.post {
+                transformerRef.get()?.cancel()
+                cleanupOnFailure()
+            }
         }
     }
 

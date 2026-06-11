@@ -4,6 +4,7 @@ import android.media.AudioFormat
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import androidx.media3.common.util.UnstableApi
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
@@ -17,9 +18,16 @@ import java.nio.ByteOrder
  * - Writing a proper RIFF/WAVE header
  * - Decoding compressed audio to PCM samples
  * - Writing PCM data in the correct format
+ * - Optionally applying a pitch-preserving playback speed change
  * - Updating the file size fields after writing
+ *
+ * @param outputFile Destination WAV file.
+ * @param speed Playback speed multiplier (1.0 = original). Values other than
+ *   1.0 time-stretch the audio while keeping the original pitch. Only applied
+ *   to 16-bit PCM output.
  */
-class WavFileWriter(private val outputFile: File) {
+@UnstableApi
+class WavFileWriter(private val outputFile: File, private val speed: Float = 1.0f) {
 
     companion object {
         // Magic numbers for WAV format
@@ -38,6 +46,50 @@ class WavFileWriter(private val outputFile: File) {
     private var bitsPerSample: Int = 16
     private var isFloatPcm: Boolean = false
     private var totalDataSize: Long = 0
+
+    /** Active when a pitch-preserving speed change is being applied. */
+    private var speedProcessor: PcmSpeedProcessor? = null
+
+    /**
+     * Initializes the speed processor once the PCM format is known.
+     *
+     * Speed is only applied to 16-bit PCM (the format this writer always emits
+     * after float conversion); 8-bit sources are written unchanged.
+     */
+    private fun maybeInitSpeedProcessor() {
+        if (speed != 1.0f && bitsPerSample == 16 && speedProcessor == null) {
+            speedProcessor = PcmSpeedProcessor(speed, sampleRate, numChannels)
+        }
+    }
+
+    /**
+     * Writes a chunk of 16-bit PCM, routing it through the speed processor when
+     * a speed change is active. Accumulates the number of bytes actually
+     * written so the WAV header reflects the (re-timed) output length.
+     */
+    private fun writePcm(outputStream: FileOutputStream, pcm: ByteArray) {
+        val processor = speedProcessor
+        if (processor == null) {
+            outputStream.write(pcm)
+            totalDataSize += pcm.size
+        } else {
+            val processed = processor.process(pcm)
+            if (processed.isNotEmpty()) {
+                outputStream.write(processed)
+                totalDataSize += processed.size
+            }
+        }
+    }
+
+    /** Flushes any samples buffered inside the speed processor. */
+    private fun flushSpeedProcessor(outputStream: FileOutputStream) {
+        val processor = speedProcessor ?: return
+        val tail = processor.drain()
+        if (tail.isNotEmpty()) {
+            outputStream.write(tail)
+            totalDataSize += tail.size
+        }
+    }
 
     /**
      * Extracts audio from a video file and writes it as a WAV file.
@@ -162,6 +214,7 @@ class WavFileWriter(private val outputFile: File) {
             var outputEos = false
 
             onProgress(0.0)
+            maybeInitSpeedProcessor()
 
             while (!outputEos && !shouldStop()) {
                 if (!inputEos) {
@@ -280,6 +333,19 @@ class WavFileWriter(private val outputFile: File) {
                             
                                 raf.write(headerBytes)
                             }
+
+                            // Re-create the speed processor for the new PCM
+                            // format, flushing whatever it had buffered first.
+                            val processor = speedProcessor
+                            if (processor != null) {
+                                val tail = processor.drain()
+                                if (tail.isNotEmpty()) {
+                                    outputStream.write(tail)
+                                    totalDataSize += tail.size
+                                }
+                                speedProcessor = null
+                                maybeInitSpeedProcessor()
+                            }
                         }
                     }
                     outputBufferId >= 0 -> {
@@ -306,15 +372,13 @@ class WavFileWriter(private val outputFile: File) {
                                     val intValue = (floatValue.coerceIn(-1.0f, 1.0f) * 32767.0f).toInt().toShort()
                                     int16Buffer.putShort(intValue)
                                 }
-                                
-                                outputStream.write(int16Buffer.array())
-                                totalDataSize += int16Buffer.array().size
+
+                                writePcm(outputStream, int16Buffer.array())
                             } else {
                                 // Write PCM data directly (already in correct format)
                                 val pcmData = ByteArray(bufferInfo.size)
                                 decoderOutputBuffer.get(pcmData)
-                                outputStream.write(pcmData)
-                                totalDataSize += pcmData.size
+                                writePcm(outputStream, pcmData)
                             }
                         }
 
@@ -322,6 +386,9 @@ class WavFileWriter(private val outputFile: File) {
                     }
                 }
             }
+
+            // Flush any samples buffered by the speed processor.
+            flushSpeedProcessor(outputStream)
 
             outputStream.flush()
             outputStream.close()
@@ -402,6 +469,7 @@ class WavFileWriter(private val outputFile: File) {
             var currentTimeUs = startUs
 
             onProgress(0.0)
+            maybeInitSpeedProcessor()
 
             while (!shouldStop()) {
                 buffer.clear()
@@ -434,11 +502,9 @@ class WavFileWriter(private val outputFile: File) {
                         val intValue = (floatValue.coerceIn(-1.0f, 1.0f) * 32767.0f).toInt().toShort()
                         int16Buffer.putShort(intValue)
                     }
-                    outputStream.write(int16Buffer.array())
-                    totalDataSize += int16Buffer.array().size
+                    writePcm(outputStream, int16Buffer.array())
                 } else {
-                    outputStream.write(pcmData)
-                    totalDataSize += sampleSize
+                    writePcm(outputStream, pcmData)
                 }
 
                 currentTimeUs = presentationTimeUs
@@ -449,6 +515,9 @@ class WavFileWriter(private val outputFile: File) {
 
                 extractor.advance()
             }
+
+            // Flush any samples buffered by the speed processor.
+            flushSpeedProcessor(outputStream)
 
             outputStream.flush()
             outputStream.close()

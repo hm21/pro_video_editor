@@ -19,10 +19,13 @@ struct AudioExtractConfig {
     
     /// Optional start time in microseconds for trimming
     let startUs: Int64?
-    
+
     /// Optional end time in microseconds for trimming
     let endUs: Int64?
-    
+
+    /// Playback speed multiplier (1.0 = original speed, pitch preserved)
+    let speed: Double
+
     /// Optional output file path (nil = return bytes)
     let outputPath: String?
     
@@ -41,8 +44,9 @@ struct AudioExtractConfig {
         
         let startUs = args["startTime"] as? Int64
         let endUs = args["endTime"] as? Int64
+        let speed = (args["speed"] as? NSNumber)?.doubleValue ?? 1.0
         let outputPath = args["outputPath"] as? String
-        
+
         return AudioExtractConfig(
             id: id,
             inputPath: inputPath,
@@ -50,6 +54,7 @@ struct AudioExtractConfig {
             format: format,
             startUs: startUs,
             endUs: endUs,
+            speed: speed > 0 ? speed : 1.0,
             outputPath: outputPath
         )
     }

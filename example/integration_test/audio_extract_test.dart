@@ -140,6 +140,70 @@ void main() {
       },
       skip: skipPlatform || !isFormatSupported(format),
     );
+
+    testWidgets(
+      'extractAudio with $format at 2x speed produces valid, shorter output',
+      (tester) async {
+        if (!isFormatSupported(format)) return;
+
+        final directory = await getTemporaryDirectory();
+        final ts = DateTime.now().millisecondsSinceEpoch;
+        final normalPath =
+            '${directory.path}/test_audio_1x_$ts.${format.extension}';
+        final fastPath =
+            '${directory.path}/test_audio_2x_$ts.${format.extension}';
+
+        await pve.extractAudioToFile(
+          normalPath,
+          AudioExtractConfigs(video: testVideo, format: format),
+        );
+        await pve.extractAudioToFile(
+          fastPath,
+          AudioExtractConfigs(video: testVideo, format: format, speed: 2.0),
+        );
+
+        final normalFile = File(normalPath);
+        final fastFile = File(fastPath);
+
+        expect(
+          await fastFile.exists(),
+          isTrue,
+          reason: 'Sped-up audio file should exist',
+        );
+
+        // Extension-based MIME detection (see notes on the base test).
+        final mimeType = lookupMimeType(fastPath);
+        final expectedMimeTypes = switch (format) {
+          AudioFormat.aac => [format.mimeType, 'audio/mp4'],
+          AudioFormat.wav => [format.mimeType, 'audio/wav'],
+          _ => [format.mimeType],
+        };
+        expect(expectedMimeTypes, contains(mimeType));
+
+        expect(
+          await fastFile.length(),
+          greaterThan(1000),
+          reason: 'Sped-up audio should have content (>1KB)',
+        );
+
+        // WAV is uncompressed, so 2x speed roughly halves the PCM data. A
+        // generous bound keeps this robust across sample rates / bit depths.
+        if (format == AudioFormat.wav) {
+          final normalSize = await normalFile.length();
+          final fastSize = await fastFile.length();
+          expect(
+            fastSize,
+            lessThan(normalSize * 0.75),
+            reason: '2x WAV should be markedly smaller than the 1x extraction',
+          );
+        }
+
+        // Clean up
+        if (await normalFile.exists()) await normalFile.delete();
+        if (await fastFile.exists()) await fastFile.delete();
+      },
+      skip: skipPlatform || !isFormatSupported(format),
+    );
   }
 
   testWidgets('extractAudio emits progress updates', (tester) async {

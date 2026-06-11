@@ -89,6 +89,8 @@ class ExtractAudio {
         let sourceURL = URL(fileURLWithPath: config.inputPath)
         let asset = AVURLAsset(url: sourceURL)
 
+        let applySpeed = config.speed > 0 && config.speed != 1.0
+
         /// https://developer.apple.com/documentation/dispatch/dispatchsemaphore
         let semaphore = DispatchSemaphore(value: 0)
         var loadError: Error?
@@ -123,7 +125,10 @@ class ExtractAudio {
         try? FileManager.default.removeItem(at: outputURL)
 
         let fileExtension = outputURL.pathExtension.lowercased()
-        let outputFileType: AVFileType = (fileExtension == "caf") ? .caf : .m4a
+        // A speed change forces a re-encode through AVAssetExportPresetAppleM4A,
+        // which only supports the .m4a (AAC) output file type.
+        let outputFileType: AVFileType =
+          applySpeed ? .m4a : ((fileExtension == "caf") ? .caf : .m4a)
 
         let audioTracks = asset.tracks(withMediaType: .audio)
         guard let audioTrack = audioTracks.first else {
@@ -162,10 +167,22 @@ class ExtractAudio {
 
         try compositionAudioTrack.insertTimeRange(sourceTimeRange, of: audioTrack, at: .zero)
 
+        // Apply a pitch-preserving speed change by scaling the inserted range.
+        if applySpeed {
+          let scaled = CMTimeMultiplyByFloat64(
+            sourceTimeRange.duration, multiplier: 1.0 / config.speed)
+          compositionAudioTrack.scaleTimeRange(
+            CMTimeRange(start: .zero, duration: sourceTimeRange.duration), toDuration: scaled)
+        }
+
+        // Passthrough can't re-time samples, so a speed change requires a
+        // re-encoding preset.
+        let presetName =
+          applySpeed ? AVAssetExportPresetAppleM4A : AVAssetExportPresetPassthrough
         guard
           let session = AVAssetExportSession(
             asset: composition,
-            presetName: AVAssetExportPresetPassthrough
+            presetName: presetName
           )
         else {
           throw NSError(
@@ -176,6 +193,10 @@ class ExtractAudio {
 
         session.outputURL = outputURL
         session.outputFileType = outputFileType
+        if applySpeed {
+          // Preserve the original pitch while time-stretching.
+          session.audioTimePitchAlgorithm = .spectral
+        }
 
         // Sync context access back to main thread to cleanly initialize timers
         DispatchQueue.main.async {
@@ -379,9 +400,7 @@ class ExtractAudio {
           timeRange = audioTrack.timeRange
         }
 
-        let reader = try AVAssetReader(asset: asset)
-        assetReader = reader
-        reader.timeRange = timeRange
+        let applySpeed = config.speed > 0 && config.speed != 1.0
 
         let readerOutputSettings: [String: Any] = [
           AVFormatIDKey: kAudioFormatLinearPCM,
@@ -391,16 +410,73 @@ class ExtractAudio {
           AVLinearPCMIsNonInterleaved: false,
         ]
 
-        let readerOutput = AVAssetReaderTrackOutput(
-          track: audioTrack, outputSettings: readerOutputSettings)
-        readerOutput.alwaysCopiesSampleData = false
+        let reader: AVAssetReader
+        let readerOutput: AVAssetReaderOutput
+        // Duration/start used only for progress reporting.
+        let effectiveDuration: CMTime
+        let progressStartSeconds: Double
 
-        guard reader.canAdd(readerOutput) else {
-          throw NSError(
-            domain: "ExtractAudio", code: -7,
-            userInfo: [NSLocalizedDescriptionKey: "Cannot add reader output"])
+        if applySpeed {
+          // Build a composition holding only the requested range, then scale it
+          // to apply the speed change. Reading it through an audio-mix output
+          // lets us request a pitch-preserving time-stretch.
+          let composition = AVMutableComposition()
+          guard
+            let compositionAudioTrack = composition.addMutableTrack(
+              withMediaType: .audio,
+              preferredTrackID: kCMPersistentTrackID_Invalid
+            )
+          else {
+            throw NSError(
+              domain: "ExtractAudio", code: -14,
+              userInfo: [NSLocalizedDescriptionKey: "Failed to create composition audio track"])
+          }
+
+          try compositionAudioTrack.insertTimeRange(timeRange, of: audioTrack, at: .zero)
+          let scaled = CMTimeMultiplyByFloat64(timeRange.duration, multiplier: 1.0 / config.speed)
+          compositionAudioTrack.scaleTimeRange(
+            CMTimeRange(start: .zero, duration: timeRange.duration), toDuration: scaled)
+
+          let compositionReader = try AVAssetReader(asset: composition)
+          let mixOutput = AVAssetReaderAudioMixOutput(
+            audioTracks: composition.tracks(withMediaType: .audio),
+            audioSettings: readerOutputSettings)
+          mixOutput.audioTimePitchAlgorithm = .spectral
+          mixOutput.alwaysCopiesSampleData = false
+
+          guard compositionReader.canAdd(mixOutput) else {
+            throw NSError(
+              domain: "ExtractAudio", code: -7,
+              userInfo: [NSLocalizedDescriptionKey: "Cannot add reader output"])
+          }
+          compositionReader.add(mixOutput)
+
+          reader = compositionReader
+          readerOutput = mixOutput
+          effectiveDuration = scaled
+          // Composition samples start at zero.
+          progressStartSeconds = 0.0
+        } else {
+          let trackReader = try AVAssetReader(asset: asset)
+          trackReader.timeRange = timeRange
+
+          let trackOutput = AVAssetReaderTrackOutput(
+            track: audioTrack, outputSettings: readerOutputSettings)
+          trackOutput.alwaysCopiesSampleData = false
+
+          guard trackReader.canAdd(trackOutput) else {
+            throw NSError(
+              domain: "ExtractAudio", code: -7,
+              userInfo: [NSLocalizedDescriptionKey: "Cannot add reader output"])
+          }
+          trackReader.add(trackOutput)
+
+          reader = trackReader
+          readerOutput = trackOutput
+          effectiveDuration = timeRange.duration
+          progressStartSeconds = CMTimeGetSeconds(timeRange.start)
         }
-        reader.add(readerOutput)
+        assetReader = reader
 
         let fm = FileManager.default
         guard fm.createFile(atPath: outputURL.path, contents: nil) else {
@@ -430,7 +506,7 @@ class ExtractAudio {
 
         DispatchQueue.main.async { onProgress(0.0) }
 
-        let totalDuration = CMTimeGetSeconds(timeRange.duration)
+        let totalDuration = CMTimeGetSeconds(effectiveDuration)
         var totalPcmBytes: Int64 = 0
 
         while let sampleBuffer = readerOutput.copyNextSampleBuffer() {
@@ -456,7 +532,7 @@ class ExtractAudio {
           }
 
           let currentTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-          let elapsed = CMTimeGetSeconds(currentTime) - CMTimeGetSeconds(timeRange.start)
+          let elapsed = CMTimeGetSeconds(currentTime) - progressStartSeconds
           let progress = totalDuration > 0 ? min(max(elapsed / totalDuration, 0.0), 0.99) : 0.0
           DispatchQueue.main.async { onProgress(progress) }
         }
