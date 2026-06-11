@@ -45,6 +45,7 @@ class VideoRenderData {
     this.shouldOptimizeForNetworkUse = false,
     this.imageBytesWithCropping = false,
     @Deprecated('Use audioTracks instead.') this.loopCustomAudio = true,
+    this.audioLoopCrossfadeMillis = 0,
   })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
         assert(
           (video != null) != (videoSegments != null),
@@ -95,6 +96,10 @@ class VideoRenderData {
         assert(
           customAudioVolume == null || customAudioVolume >= 0,
           '[customAudioVolume] must be greater than or equal to 0',
+        ),
+        assert(
+          audioLoopCrossfadeMillis >= 0,
+          '[audioLoopCrossfadeMillis] must be greater than or equal to 0',
         );
 
   /// Creates a [VideoRenderData] with a predefined quality preset.
@@ -141,6 +146,7 @@ class VideoRenderData {
     bool shouldOptimizeForNetworkUse = false,
     bool imageBytesWithCropping = false,
     @Deprecated('Use audioTracks instead.') bool loopCustomAudio = true,
+    double audioLoopCrossfadeMillis = 0,
     String? id,
   }) {
     final qualityConfig = VideoQualityConfig.fromPreset(qualityPreset);
@@ -177,6 +183,7 @@ class VideoRenderData {
       imageBytesWithCropping: imageBytesWithCropping,
       // ignore: deprecated_member_use_from_same_package
       loopCustomAudio: loopCustomAudio,
+      audioLoopCrossfadeMillis: audioLoopCrossfadeMillis,
     );
   }
 
@@ -394,6 +401,22 @@ class VideoRenderData {
   @Deprecated('Use audioTracks instead.')
   final bool loopCustomAudio;
 
+  /// Length in milliseconds of the equal-power crossfade applied at the
+  /// loop seam of looping audio tracks, so a rendered video loops
+  /// seamlessly end-to-start without an audible click/"blob".
+  ///
+  /// Only affects audio tracks with `loop == true`. The first few
+  /// milliseconds of the looped body are blended with the loop
+  /// continuation (the samples that would follow it), keeping the wrap
+  /// continuous in both value and slope. Equal-power weighting keeps the
+  /// loudness constant, so there is no audible volume dip.
+  ///
+  /// Set to a value greater than `0` (e.g. `12`) to enable the crossfade;
+  /// `0` disables it.
+  ///
+  /// **Default**: `0` (disabled — no crossfade is applied)
+  final double audioLoopCrossfadeMillis;
+
   /// Returns a [Stream] of [ProgressModel] objects that provides updates on
   /// the progress of the video rendering process associated with this model's
   /// [id].
@@ -476,6 +499,7 @@ class VideoRenderData {
             'path': t.path,
             'volume': t.volume,
             'loop': t.loop,
+            'crossfadeMillis': audioLoopCrossfadeMillis,
             'audioStartUs': t.audioStartTime?.inMicroseconds,
             'audioEndUs': t.audioEndTime?.inMicroseconds,
             'startUs': t.startTime?.inMicroseconds,
@@ -490,6 +514,7 @@ class VideoRenderData {
           'volume': customAudioVolume ?? 1.0,
           // ignore: deprecated_member_use_from_same_package
           'loop': loopCustomAudio,
+          'crossfadeMillis': audioLoopCrossfadeMillis,
           // ignore: deprecated_member_use_from_same_package
           'audioStartUs': customAudioStartTime?.inMicroseconds,
           'audioEndUs': null,
@@ -575,6 +600,7 @@ class VideoRenderData {
     bool? shouldOptimizeForNetworkUse,
     bool? imageBytesWithCropping,
     bool? loopCustomAudio,
+    double? audioLoopCrossfadeMillis,
   }) {
     return VideoRenderData(
       id: id ?? this.id,
@@ -603,6 +629,8 @@ class VideoRenderData {
       imageBytesWithCropping:
           imageBytesWithCropping ?? this.imageBytesWithCropping,
       loopCustomAudio: loopCustomAudio ?? this.loopCustomAudio,
+      audioLoopCrossfadeMillis:
+          audioLoopCrossfadeMillis ?? this.audioLoopCrossfadeMillis,
     );
   }
 
@@ -632,6 +660,7 @@ class VideoRenderData {
       'shouldOptimizeForNetworkUse': shouldOptimizeForNetworkUse,
       'imageBytesWithCropping': imageBytesWithCropping,
       'loopCustomAudio': loopCustomAudio,
+      'audioLoopCrossfadeMillis': audioLoopCrossfadeMillis,
     };
   }
 
@@ -703,6 +732,8 @@ class VideoRenderData {
       shouldOptimizeForNetworkUse: map['shouldOptimizeForNetworkUse'] as bool,
       imageBytesWithCropping: map['imageBytesWithCropping'] as bool,
       loopCustomAudio: map['loopCustomAudio'] as bool,
+      audioLoopCrossfadeMillis:
+          safeParseDouble(map['audioLoopCrossfadeMillis'], fallback: 0),
     );
   }
 
@@ -735,7 +766,8 @@ class VideoRenderData {
         'customAudioVolume: $customAudioVolume, '
         'shouldOptimizeForNetworkUse: $shouldOptimizeForNetworkUse, '
         'imageBytesWithCropping: $imageBytesWithCropping, '
-        'loopCustomAudio: $loopCustomAudio)';
+        'loopCustomAudio: $loopCustomAudio, '
+        'audioLoopCrossfadeMillis: $audioLoopCrossfadeMillis)';
   }
 
   @override
@@ -765,7 +797,8 @@ class VideoRenderData {
         other.customAudioVolume == customAudioVolume &&
         other.shouldOptimizeForNetworkUse == shouldOptimizeForNetworkUse &&
         other.imageBytesWithCropping == imageBytesWithCropping &&
-        other.loopCustomAudio == loopCustomAudio;
+        other.loopCustomAudio == loopCustomAudio &&
+        other.audioLoopCrossfadeMillis == audioLoopCrossfadeMillis;
   }
 
   @override
@@ -793,7 +826,8 @@ class VideoRenderData {
         customAudioVolume.hashCode ^
         shouldOptimizeForNetworkUse.hashCode ^
         imageBytesWithCropping.hashCode ^
-        loopCustomAudio.hashCode;
+        loopCustomAudio.hashCode ^
+        audioLoopCrossfadeMillis.hashCode;
   }
 }
 

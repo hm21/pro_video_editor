@@ -50,6 +50,7 @@ class AudioSequenceBuilder(
     private var audioEndTimeUs: Long? = null
     private var compositionStartTimeUs: Long? = null
     private var compositionEndTimeUs: Long? = null
+    private var loopCrossfadeMillis: Double = 0.0
 
     /**
      * Sets whether the audio should loop to fill the play range.
@@ -94,6 +95,15 @@ class AudioSequenceBuilder(
     }
 
     /**
+     * Sets the equal-power crossfade length (ms) applied at the loop seam
+     * so the rendered file loops seamlessly. 0 disables it.
+     */
+    fun setLoopCrossfadeMillis(millis: Double): AudioSequenceBuilder {
+        this.loopCrossfadeMillis = millis.coerceAtLeast(0.0)
+        return this
+    }
+
+    /**
      * Builds the audio sequence by pre-rendering the source into a single
      * gap-less PCM WAV file.
      *
@@ -125,7 +135,8 @@ class AudioSequenceBuilder(
             loop = loopAudio,
             compositionStartUs = compStart,
             compositionDurationUs = playDurationUs,
-            videoDurationUs = videoDurationUs
+            videoDurationUs = videoDurationUs,
+            crossfadeMillis = loopCrossfadeMillis
         ) ?: return null
 
         val mediaItem = MediaItem.Builder()

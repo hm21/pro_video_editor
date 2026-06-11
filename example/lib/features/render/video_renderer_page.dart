@@ -517,6 +517,66 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Loop seam WITHOUT the crossfade — exposes the click/"blob" at every
+  /// loop restart.
+  ///
+  /// Uses the same short looped window as [_loopSeamStressShort] but sets
+  /// [VideoRenderData.audioLoopCrossfadeMillis] to `0`, disabling the
+  /// equal-power crossfade so the raw seam discontinuity is audible.
+  /// Render this and the "Crossfade ON" example back-to-back to A/B the
+  /// difference by ear.
+  Future<void> _loopSeamCrossfadeOff() async {
+    final customAudioFile = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio1Path,
+    );
+
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video, volume: 0)],
+      audioTracks: [
+        VideoAudioTrack(
+          path: customAudioFile.path,
+          volume: 1.0,
+          loop: true,
+          audioStartTime: const Duration(seconds: 2),
+          audioEndTime: const Duration(milliseconds: 3000),
+        ),
+      ],
+      // Disabled → the loop wraps with a hard sample jump (the "blob").
+      audioLoopCrossfadeMillis: 0,
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Loop seam WITH a strong equal-power crossfade — the seam is smoothed
+  /// so the looped audio sounds seamless.
+  ///
+  /// Same setup as [_loopSeamCrossfadeOff] but with a 50ms crossfade at the
+  /// loop seam (the default is 0, i.e. disabled). Compare both renders to
+  /// hear how the crossfade removes the click without an audible volume dip.
+  Future<void> _loopSeamCrossfadeOn() async {
+    final customAudioFile = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio1Path,
+    );
+
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video, volume: 0)],
+      audioTracks: [
+        VideoAudioTrack(
+          path: customAudioFile.path,
+          volume: 1.0,
+          loop: true,
+          audioStartTime: const Duration(seconds: 2),
+          audioEndTime: const Duration(milliseconds: 3000),
+        ),
+      ],
+      // Strong crossfade → the loop wraps continuously, seamless playback.
+      audioLoopCrossfadeMillis: 50,
+    );
+
+    await _renderVideo(data);
+  }
+
   /// Different volume levels per video segment.
   ///
   /// This example demonstrates per-clip volume control when concatenating
@@ -1555,6 +1615,22 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           title: const Text('Loop Seam Stress (multi-clip)'),
           subtitle: const Text(
             '2s audio window looped across 3 concatenated clips',
+          ),
+        ),
+        ListTile(
+          onTap: _loopSeamCrossfadeOff,
+          leading: const Icon(Icons.graphic_eq_outlined),
+          title: const Text('Loop Seam — Crossfade OFF'),
+          subtitle: const Text(
+            '1s window looped, crossfade disabled — click/"blob" audible',
+          ),
+        ),
+        ListTile(
+          onTap: _loopSeamCrossfadeOn,
+          leading: const Icon(Icons.blur_on_outlined),
+          title: const Text('Loop Seam — Crossfade ON (50ms)'),
+          subtitle: const Text(
+            'Same window with equal-power crossfade — seamless loop',
           ),
         ),
         ListTile(

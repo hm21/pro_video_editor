@@ -68,7 +68,8 @@ data class AudioTrackConfig(
     val audioStartUs: Long? = null,
     val audioEndUs: Long? = null,
     val startUs: Long? = null,
-    val endUs: Long? = null
+    val endUs: Long? = null,
+    val crossfadeMillis: Double = 0.0
 ) {
     companion object {
         fun fromMap(map: Map<String, Any?>): AudioTrackConfig {
@@ -79,7 +80,8 @@ data class AudioTrackConfig(
                 audioStartUs = (map["audioStartUs"] as? Number)?.toLong(),
                 audioEndUs = (map["audioEndUs"] as? Number)?.toLong(),
                 startUs = (map["startUs"] as? Number)?.toLong(),
-                endUs = (map["endUs"] as? Number)?.toLong()
+                endUs = (map["endUs"] as? Number)?.toLong(),
+                crossfadeMillis = (map["crossfadeMillis"] as? Number)?.toDouble() ?: 0.0
             )
         }
     }

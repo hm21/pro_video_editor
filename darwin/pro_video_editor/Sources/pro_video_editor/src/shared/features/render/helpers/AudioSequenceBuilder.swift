@@ -29,6 +29,9 @@ internal class AudioSequenceBuilder {
   /// How long this audio track should play in the composition.
   /// If nil, uses targetDuration minus compositionInsertTime.
   private var compositionPlayDuration: CMTime?
+  /// Equal-power crossfade length (ms) applied at the loop seam so the
+  /// rendered file loops seamlessly. 0 (default) disables it.
+  private var loopCrossfadeMillis: Double = 0
 
   /// Initializes builder with audio path and target (full video) duration.
   init(audioPath: String, targetDuration: CMTime) {
@@ -75,6 +78,14 @@ internal class AudioSequenceBuilder {
     return self
   }
 
+  /// Sets the equal-power crossfade length (ms) applied at the loop seam
+  /// so the rendered file loops seamlessly. 0 disables it.
+  @discardableResult
+  func setLoopCrossfadeMillis(_ ms: Double) -> AudioSequenceBuilder {
+    self.loopCrossfadeMillis = max(0, ms)
+    return self
+  }
+
   /// Pre-renders the audio and inserts it into `composition` with a
   /// single `insertTimeRange` call.
   func build(in composition: AVMutableComposition) async throws -> BuildResult? {
@@ -96,7 +107,8 @@ internal class AudioSequenceBuilder {
         audioStartTime: audioStartTime,
         audioEndTime: audioEndTime,
         loop: loopAudio,
-        targetBodyDuration: effectivePlayDuration
+        targetBodyDuration: effectivePlayDuration,
+        crossfadeMillis: loopCrossfadeMillis
       )
     else {
       return nil

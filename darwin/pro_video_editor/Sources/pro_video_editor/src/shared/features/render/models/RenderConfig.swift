@@ -131,6 +131,9 @@ struct AudioTrackConfig {
   let startUs: Int64
   /// When to stop playing in the composition timeline. -1 means until the end.
   let endUs: Int64
+  /// Equal-power crossfade length (ms) applied at the loop seam so the
+  /// rendered file loops seamlessly. 0 disables it.
+  let crossfadeMillis: Double
 
   static func fromArguments(_ args: [String: Any]?) -> AudioTrackConfig? {
     guard let args = args,
@@ -143,7 +146,8 @@ struct AudioTrackConfig {
       audioStartUs: (args["audioStartUs"] as? NSNumber)?.int64Value,
       audioEndUs: (args["audioEndUs"] as? NSNumber)?.int64Value,
       startUs: (args["startUs"] as? NSNumber)?.int64Value ?? -1,
-      endUs: (args["endUs"] as? NSNumber)?.int64Value ?? -1
+      endUs: (args["endUs"] as? NSNumber)?.int64Value ?? -1,
+      crossfadeMillis: (args["crossfadeMillis"] as? NSNumber)?.doubleValue ?? 0
     )
   }
 }

@@ -44,13 +44,17 @@ internal enum AudioPreRenderer {
   ///     `targetBodyDuration`. If false, the source plays once and the
   ///     remaining time is filled with silence.
   ///   - targetBodyDuration: How long the output audio should sound.
+  ///   - crossfadeMillis: Length of the equal-power crossfade applied at
+  ///     the loop seam (only when `loop` is true) so the rendered file
+  ///     loops seamlessly end-to-start. 0 disables it.
   /// - Returns: A [Result] on success, nil on failure.
   static func render(
     audioPath: String,
     audioStartTime: CMTime,
     audioEndTime: CMTime?,
     loop: Bool,
-    targetBodyDuration: CMTime
+    targetBodyDuration: CMTime,
+    crossfadeMillis: Double = 0
   ) async -> Result? {
     let sourceURL = URL(fileURLWithPath: audioPath)
     guard FileManager.default.fileExists(atPath: sourceURL.path) else {
@@ -159,6 +163,17 @@ internal enum AudioPreRenderer {
           outputBytes.append(trimmedPcm.subdata(in: 0..<remaining))
         }
       }
+
+      // The loop fill almost always cuts mid-window, so the file's last
+      // sample does not connect to its first. Blend the seam so the whole
+      // file loops without an audible click/"blob".
+      applyLoopCrossfade(
+        output: &outputBytes,
+        source: trimmedPcm,
+        sampleRate: sampleRate,
+        channelCount: channelCount,
+        crossfadeMillis: crossfadeMillis
+      )
     } else {
       // Play once, then pad with silence to targetBytes.
       let writeLen = min(trimmedPcm.count, targetBytes)
@@ -270,6 +285,62 @@ internal enum AudioPreRenderer {
     if !seconds.isFinite || seconds <= 0 { return 0 }
     let frames = Int(seconds * sampleRate)
     return frames * bytesPerFrame
+  }
+
+  /// Applies an equal-power crossfade at the loop seam so the whole
+  /// output file loops seamlessly (its last sample connects to its first
+  /// in both value and slope).
+  ///
+  /// The first `X` frames of `output` are replaced by a blend of the
+  /// natural head (`source[i]`) and the loop *continuation* — the samples
+  /// that would have followed the body if it kept looping
+  /// (`source[(totalFrames + i) % sourceFrames]`). Because those
+  /// continuation samples are real, consecutive source samples that
+  /// follow the body's last frame, the wrap stays click-free even when
+  /// the source itself is not a clean loop. Equal-power weights
+  /// (sin/cos) keep the perceived loudness constant, so there is no
+  /// audible volume dip ("breath") at the loop point.
+  ///
+  /// Operates in place on 16-bit signed little-endian interleaved PCM.
+  private static func applyLoopCrossfade(
+    output: inout Data,
+    source: Data,
+    sampleRate: Double,
+    channelCount: Int,
+    crossfadeMillis: Double
+  ) {
+    let bytesPerSample = 2  // 16-bit
+    let bytesPerFrame = channelCount * bytesPerSample
+    guard bytesPerFrame > 0, crossfadeMillis > 0 else { return }
+
+    let totalFrames = output.count / bytesPerFrame
+    let sourceFrames = source.count / bytesPerFrame
+    guard sourceFrames > 0, totalFrames > 0 else { return }
+
+    var xfadeFrames = Int((crossfadeMillis / 1000.0) * sampleRate)
+    xfadeFrames = min(xfadeFrames, sourceFrames, totalFrames / 2)
+    guard xfadeFrames >= 1 else { return }
+
+    let halfPi = Double.pi / 2
+    output.withUnsafeMutableBytes { (outRaw: UnsafeMutableRawBufferPointer) in
+      source.withUnsafeBytes { (srcRaw: UnsafeRawBufferPointer) in
+        guard let outBase = outRaw.baseAddress, let srcBase = srcRaw.baseAddress else { return }
+        let out = outBase.assumingMemoryBound(to: Int16.self)
+        let src = srcBase.assumingMemoryBound(to: Int16.self)
+        for i in 0..<xfadeFrames {
+          let t = (Double(i) + 0.5) / Double(xfadeFrames)
+          let headGain = sin(t * halfPi)  // natural head weight (0 → 1)
+          let contGain = cos(t * halfPi)  // continuation weight (1 → 0)
+          let contFrame = (totalFrames + i) % sourceFrames
+          for ch in 0..<channelCount {
+            let head = Double(src[i * channelCount + ch])
+            let cont = Double(src[contFrame * channelCount + ch])
+            let mixed = (head * headGain + cont * contGain).rounded()
+            out[i * channelCount + ch] = Int16(max(-32768.0, min(32767.0, mixed)))
+          }
+        }
+      }
+    }
   }
 
   /// Creates a unique temporary WAV file URL in the cache directory.

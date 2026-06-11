@@ -71,6 +71,9 @@ object AudioPreRenderer {
      *   on the composition timeline.
      * @param videoDurationUs Total duration of the composition (used to
      *   determine trailing silence).
+     * @param crossfadeMillis Length of the equal-power crossfade applied at
+     *   the loop seam (only when `loop` is true) so the rendered file loops
+     *   seamlessly end-to-start. 0 disables it.
      * @return [Result] on success, null on failure (file missing, decode
      *   error, invalid parameters).
      */
@@ -82,7 +85,8 @@ object AudioPreRenderer {
         loop: Boolean,
         compositionStartUs: Long,
         compositionDurationUs: Long,
-        videoDurationUs: Long
+        videoDurationUs: Long,
+        crossfadeMillis: Double = 0.0
     ): Result? {
         val sourceFile = File(audioPath)
         if (!sourceFile.exists()) {
@@ -142,6 +146,7 @@ object AudioPreRenderer {
 
                 writeSilence(raf, leadingSilenceBytes)
 
+                val bodyStartOffset = 44L + leadingSilenceBytes
                 writeAudioBody(
                     raf = raf,
                     sourcePcm = decoded.pcmBytes,
@@ -149,6 +154,22 @@ object AudioPreRenderer {
                     loop = loop,
                     bytesPerFrame = bytesPerFrame
                 )
+
+                if (loop) {
+                    // The loop fill almost always cuts mid-window, so the
+                    // body's last sample does not connect to its first.
+                    // Blend the seam so the whole file loops without an
+                    // audible click/"blob".
+                    applyLoopCrossfade(
+                        raf = raf,
+                        bodyStartOffset = bodyStartOffset,
+                        bodyBytes = bodyBytes,
+                        sourcePcm = decoded.pcmBytes,
+                        channelCount = channelCount,
+                        sampleRate = sampleRate,
+                        crossfadeMillis = crossfadeMillis
+                    )
+                }
 
                 writeSilence(raf, trailingSilenceBytes)
 
@@ -496,6 +517,70 @@ object AudioPreRenderer {
     ): Long {
         if (sourceSize <= 0L || targetBytes <= 0L) return 0L
         return if (loop) targetBytes else minOf(targetBytes, sourceSize)
+    }
+
+    /**
+     * Applies an equal-power crossfade at the loop seam so the body loops
+     * seamlessly (its last sample connects to its first in both value and
+     * slope).
+     *
+     * The first `X` frames of the body (at [bodyStartOffset]) are replaced
+     * by a blend of the natural head (`source[i]`) and the loop
+     * *continuation* — the samples that would have followed the body if it
+     * kept looping (`source[(bodyFrames + i) % sourceFrames]`). Because
+     * those continuation samples are real, consecutive source samples that
+     * follow the body's last frame, the wrap stays click-free even when the
+     * source itself is not a clean loop. Equal-power weights (sin/cos) keep
+     * the perceived loudness constant, so there is no audible volume dip.
+     *
+     * Operates on 16-bit signed little-endian interleaved PCM and restores
+     * the file position to the end of the body before returning.
+     */
+    private fun applyLoopCrossfade(
+        raf: RandomAccessFile,
+        bodyStartOffset: Long,
+        bodyBytes: Long,
+        sourcePcm: ByteArray,
+        channelCount: Int,
+        sampleRate: Int,
+        crossfadeMillis: Double
+    ) {
+        val bytesPerFrame = channelCount * 2 // 16-bit
+        if (bytesPerFrame <= 0 || crossfadeMillis <= 0.0) return
+
+        val totalFrames = bodyBytes / bytesPerFrame
+        val sourceFrames = sourcePcm.size / bytesPerFrame
+        if (totalFrames <= 0L || sourceFrames <= 0) return
+
+        val xfadeFrames = minOf(
+            ((crossfadeMillis / 1000.0) * sampleRate).toLong(),
+            sourceFrames.toLong(),
+            totalFrames / 2
+        ).toInt()
+        if (xfadeFrames < 1) return
+
+        val src = ByteBuffer.wrap(sourcePcm).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        val xfadeBytes = xfadeFrames * bytesPerFrame
+        val out = ByteBuffer.allocate(xfadeBytes).order(ByteOrder.LITTLE_ENDIAN)
+        val halfPi = Math.PI / 2.0
+
+        for (i in 0 until xfadeFrames) {
+            val t = (i + 0.5) / xfadeFrames
+            val headGain = Math.sin(t * halfPi) // natural head weight (0 → 1)
+            val contGain = Math.cos(t * halfPi) // continuation weight (1 → 0)
+            val contFrame = ((totalFrames + i) % sourceFrames).toInt()
+            for (ch in 0 until channelCount) {
+                val head = src.get(i * channelCount + ch).toDouble()
+                val cont = src.get(contFrame * channelCount + ch).toDouble()
+                val mixed = Math.round(head * headGain + cont * contGain)
+                out.putShort(mixed.coerceIn(-32768L, 32767L).toShort())
+            }
+        }
+
+        raf.seek(bodyStartOffset)
+        raf.write(out.array())
+        // Restore position to the end of the body for the trailing write.
+        raf.seek(bodyStartOffset + bodyBytes)
     }
 
     // ---------------------------------------------------------------------

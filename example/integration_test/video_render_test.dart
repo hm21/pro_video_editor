@@ -378,6 +378,98 @@ void main() {
     );
   });
 
+  group('Audio loop crossfade', () {
+    late String audioPath;
+
+    setUp(() async {
+      audioPath = await copyAssetToTempFile(kVideoEditorExampleAudio1Path);
+    });
+
+    tearDown(() async {
+      try {
+        await File(audioPath).delete();
+      } catch (_) {}
+    });
+
+    // A 4s clip with a looping audio track. The audio is repeated to fill the
+    // clip, so the file's last sample never lines up with its first — this is
+    // exactly the loop seam the crossfade smooths.
+    VideoRenderData buildModel({required double crossfadeMillis}) {
+      return VideoRenderData(
+        outputFormat: VideoOutputFormat.mp4,
+        videoSegments: [
+          VideoSegment(
+            video: inputVideo,
+            startTime: Duration.zero,
+            endTime: const Duration(seconds: 4),
+          ),
+        ],
+        audioTracks: [
+          VideoAudioTrack(path: audioPath, volume: 1, loop: true),
+        ],
+        audioLoopCrossfadeMillis: crossfadeMillis,
+      );
+    }
+
+    testWidgets(
+      'crossfade (12ms) renders looped audio successfully',
+      (tester) async {
+        final meta = await testRender(
+          description: 'Looped audio with 12ms crossfade',
+          renderModel: buildModel(crossfadeMillis: 12),
+        );
+
+        expect(
+          meta.duration.inMilliseconds,
+          closeTo(4000, 800),
+          reason: 'Crossfade must not change the output duration',
+        );
+      },
+      skip: !isAndroid && !isIOS && !isMacOS,
+    );
+
+    testWidgets(
+      'crossfade disabled (0ms) renders looped audio successfully',
+      (tester) async {
+        final meta = await testRender(
+          description: 'Looped audio with crossfade disabled',
+          renderModel: buildModel(crossfadeMillis: 0),
+        );
+
+        expect(
+          meta.duration.inMilliseconds,
+          closeTo(4000, 800),
+          reason: 'Disabling the crossfade must not change the duration',
+        );
+      },
+      skip: !isAndroid && !isIOS && !isMacOS,
+    );
+
+    testWidgets(
+      'crossfade length does not affect output duration',
+      (tester) async {
+        final disabled = await testRender(
+          description: 'Looped audio crossfade 0ms (baseline)',
+          renderModel: buildModel(crossfadeMillis: 0),
+        );
+        final custom = await testRender(
+          description: 'Looped audio crossfade 40ms',
+          renderModel: buildModel(crossfadeMillis: 40),
+        );
+
+        // The crossfade blends samples in place; it must not add or remove
+        // audio, so the rendered duration stays the same regardless of the
+        // crossfade length.
+        expect(
+          custom.duration.inMilliseconds,
+          closeTo(disabled.duration.inMilliseconds, 250),
+          reason: 'Crossfade length must not affect output duration',
+        );
+      },
+      skip: !isAndroid && !isIOS && !isMacOS,
+    );
+  });
+
   testWidgets('per-clip reverse: single trimmed segment', (tester) async {
     final meta = await testRender(
       description: 'Per-clip reverse single segment',

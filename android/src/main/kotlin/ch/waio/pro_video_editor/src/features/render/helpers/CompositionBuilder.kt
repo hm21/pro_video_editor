@@ -138,6 +138,7 @@ class CompositionBuilder(
                     .setAudioEndTime(track.audioEndUs)
                     .setCompositionStartTime(track.startUs)
                     .setCompositionEndTime(track.endUs)
+                    .setLoopCrossfadeMillis(track.crossfadeMillis)
                     .build()
 
                 if (result != null) {
