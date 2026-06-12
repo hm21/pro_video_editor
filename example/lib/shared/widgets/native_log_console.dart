@@ -123,7 +123,8 @@ class _NativeLogTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = _levelColor(entry.level);
     final time = entry.timestamp;
-    final stamp = '${time.hour.toString().padLeft(2, '0')}:'
+    final stamp =
+        '${time.hour.toString().padLeft(2, '0')}:'
         '${time.minute.toString().padLeft(2, '0')}:'
         '${time.second.toString().padLeft(2, '0')}';
 
