@@ -60,3 +60,32 @@ class WaveformStreamHandler: NSObject, FlutterStreamHandler {
     return nil
   }
 }
+
+/// FlutterStreamHandler for native log events.
+///
+/// Manages the event channel that forwards native log entries to Dart and
+/// wires `PluginLog.sink` so every emitted log reaches the active listener.
+class LogStreamHandler: NSObject, FlutterStreamHandler {
+  private weak var plugin: ProVideoEditorPlugin?
+
+  init(plugin: ProVideoEditorPlugin) {
+    self.plugin = plugin
+    super.init()
+  }
+
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink)
+    -> FlutterError?
+  {
+    plugin?.logSink = events
+    PluginLog.sink = { [weak plugin] level, message in
+      plugin?.postLog(level: level, message: message)
+    }
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    PluginLog.sink = nil
+    plugin?.logSink = nil
+    return nil
+  }
+}

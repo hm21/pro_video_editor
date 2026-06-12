@@ -132,6 +132,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 📊 **Progress**: Track the progress of one or multiple running tasks.
 - 🧵 **Multi-Tasking**: Execute multiple video processing tasks concurrently.
 - 🔇 **Native Log Level**: Control native log verbosity per API call with `NativeLogLevel` (`none`, `error`, `warning`, `info`, `debug`, `verbose`).
+- 🪵 **Native Log Stream**: Receive native logs (including renderer diagnostics) back in Dart via `logStream` to pipe into your own logger and export.
 
 
 ### Platform Support
@@ -633,6 +634,32 @@ VideoMetadata metadata = await ProVideoEditor.instance.getMetadata(
 );
 
 /// Available levels: none, error, warning, info, debug, verbose
+```
+
+#### Native Log Stream Example
+
+Capture native logs (including the renderer diagnostics) in Dart so you can
+forward them to your own logger and let users export them. The stream emits a
+`NativeLogEntry` for every native log on Android, iOS, and macOS, gated by the
+`nativeLogLevel` you pass to the operation. On Web, Windows, and Linux the
+stream stays empty.
+
+```dart
+final subscription = ProVideoEditor.instance.logStream.listen((entry) {
+    // entry: level, tag, message, timestamp, optional stackTrace
+    myLogger.log(entry.level.name, entry.message,
+        tag: entry.tag, stackTrace: entry.stackTrace);
+});
+
+// Emit the rich renderer logs by raising the level for the call.
+await ProVideoEditor.instance.renderVideoToFile(
+    outputPath,
+    renderData,
+    nativeLogLevel: NativeLogLevel.debug,
+);
+
+// Cancel when no longer needed.
+await subscription.cancel();
 ```
 
 

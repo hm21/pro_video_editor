@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:mime/mime.dart';
 import 'package:pro_video_editor/core/models/exceptions/audio_exceptions.dart';
+import 'package:pro_video_editor/core/models/platform/native_log_entry.dart';
 import 'package:pro_video_editor/core/models/platform/native_log_level.dart';
 
 import '/core/models/audio/audio_extract_configs_model.dart';
@@ -70,6 +71,13 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   final _waveformStreamChannel = const EventChannel(
     'pro_video_editor_waveform_stream',
   );
+
+  /// Event channel for receiving log entries forwarded from native code.
+  ///
+  /// Emits [NativeLogEntry] events whenever the native plugin logs something
+  /// (gated by the active `nativeLogLevel`), allowing host apps to capture
+  /// renderer diagnostics in their own Dart logger.
+  final _logChannel = const EventChannel('pro_video_editor_logs');
 
   @override
   Future<String?> getPlatformVersion() async {
@@ -440,6 +448,22 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
         return const ProgressModel(id: 'error', progress: 0);
       }
     }).listen(progressCtrl.add);
+
+    // Subscribe to native log events
+    _logChannel.receiveBroadcastStream().listen(
+      (event) {
+        if (event is! Map) return;
+        try {
+          logCtrl.add(NativeLogEntry.fromMap(event));
+        } catch (e, stack) {
+          // Never let a malformed log entry break the stream.
+          debugPrint('Error parsing native log event: $e\n$stack');
+        }
+      },
+      onError: (Object error, StackTrace stack) {
+        debugPrint('Native log stream error: $error\n$stack');
+      },
+    );
   }
 
   /// Extracts file extension from path using MIME type detection.

@@ -18,6 +18,7 @@ import '/core/constants/example_constants.dart';
 import '/core/constants/example_filters.dart';
 import '/shared/utils/bytes_formatter.dart';
 import '/shared/widgets/filter_generator.dart';
+import '/shared/widgets/native_log_console.dart';
 
 /// A page that handles the video export workflow.
 ///
@@ -1134,7 +1135,11 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     String outputPath = '${directory.path}/my_video_$now.$extension';
 
     try {
-      await _pve.renderVideoToFile(outputPath, value.copyWith(id: _taskId));
+      await _pve.renderVideoToFile(
+        outputPath,
+        value.copyWith(id: _taskId),
+        nativeLogLevel: NativeLogLevel.debug,
+      );
     } on RenderCanceledException {
       setState(() => _isExporting = false);
       return;
@@ -1241,6 +1246,10 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
               ),
             ),
             _buildOptions(),
+            Padding(
+              padding: const .symmetric(horizontal: 16.0),
+              child: NativeLogConsole(logStream: _pve.logStream),
+            ),
           ],
         ),
       ),

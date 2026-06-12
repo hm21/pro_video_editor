@@ -1,15 +1,83 @@
 PODS:
+  - audioplayers_darwin (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - file_picker (0.0.1):
+    - Flutter
+    - FlutterMacOS
   - FlutterMacOS (1.0.0)
+  - fvp (0.36.1):
+    - Flutter
+    - FlutterMacOS
+    - mdk (~> 0.36.0)
+  - mdk (0.36.0)
+  - package_info_plus (0.0.1):
+    - FlutterMacOS
+  - pro_image_editor (12.0.8):
+    - Flutter
+    - FlutterMacOS
+  - pro_video_editor (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - shared_preferences_foundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - video_player_avfoundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - wakelock_plus (0.0.1):
+    - FlutterMacOS
 
 DEPENDENCIES:
+  - audioplayers_darwin (from `Flutter/ephemeral/.symlinks/plugins/audioplayers_darwin/darwin`)
+  - file_picker (from `Flutter/ephemeral/.symlinks/plugins/file_picker/darwin`)
   - FlutterMacOS (from `Flutter/ephemeral`)
+  - fvp (from `Flutter/ephemeral/.symlinks/plugins/fvp/darwin`)
+  - package_info_plus (from `Flutter/ephemeral/.symlinks/plugins/package_info_plus/macos`)
+  - pro_image_editor (from `Flutter/ephemeral/.symlinks/plugins/pro_image_editor/darwin`)
+  - pro_video_editor (from `Flutter/ephemeral/.symlinks/plugins/pro_video_editor/darwin`)
+  - shared_preferences_foundation (from `Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin`)
+  - video_player_avfoundation (from `Flutter/ephemeral/.symlinks/plugins/video_player_avfoundation/darwin`)
+  - wakelock_plus (from `Flutter/ephemeral/.symlinks/plugins/wakelock_plus/macos`)
+
+SPEC REPOS:
+  trunk:
+    - mdk
 
 EXTERNAL SOURCES:
+  audioplayers_darwin:
+    :path: Flutter/ephemeral/.symlinks/plugins/audioplayers_darwin/darwin
+  file_picker:
+    :path: Flutter/ephemeral/.symlinks/plugins/file_picker/darwin
   FlutterMacOS:
     :path: Flutter/ephemeral
+  fvp:
+    :path: Flutter/ephemeral/.symlinks/plugins/fvp/darwin
+  package_info_plus:
+    :path: Flutter/ephemeral/.symlinks/plugins/package_info_plus/macos
+  pro_image_editor:
+    :path: Flutter/ephemeral/.symlinks/plugins/pro_image_editor/darwin
+  pro_video_editor:
+    :path: Flutter/ephemeral/.symlinks/plugins/pro_video_editor/darwin
+  shared_preferences_foundation:
+    :path: Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin
+  video_player_avfoundation:
+    :path: Flutter/ephemeral/.symlinks/plugins/video_player_avfoundation/darwin
+  wakelock_plus:
+    :path: Flutter/ephemeral/.symlinks/plugins/wakelock_plus/macos
 
 SPEC CHECKSUMS:
+  audioplayers_darwin: 835ced6edd4c9fc8ebb0a7cc9e294a91d99917d5
+  file_picker: 70164d9778c42c47218d6cd79ce435de0856b11a
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
+  fvp: f8b3b61cf8c696ecaa5608ae0d282ba710e65ae9
+  mdk: 3bfb53e0bcc9643180eaa864360051f281e4c17b
+  package_info_plus: f0052d280d17aa382b932f399edf32507174e870
+  pro_image_editor: e57a76b305fd8c2e06d57f92aec82b9c6a6e8d9f
+  pro_video_editor: 71c273c0a82a72996526e2bfc5c2fbd2bb35aaaa
+  shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
+  video_player_avfoundation: dd410b52df6d2466a42d28550e33e4146928280a
+  wakelock_plus: 917609be14d812ddd9e9528876538b2263aaa03b
 
 PODFILE CHECKSUM: d53808ad3e260398c64f5e8ffae8c72d2669e2a5
 

@@ -48,6 +48,10 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var eventChannel: EventChannel
     private var eventSink: EventChannel.EventSink? = null
 
+    /// Event channel for streaming native log entries back to Dart
+    private lateinit var logChannel: EventChannel
+    private var logSink: EventChannel.EventSink? = null
+
     private lateinit var renderVideo: RenderVideo
     private lateinit var metadata: Metadata
     private lateinit var thumbnailGenerator: ThumbnailGenerator
@@ -77,6 +81,8 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             EventChannel(flutterPluginBinding.binaryMessenger, "pro_video_editor_progress")
         waveformStreamChannel =
             EventChannel(flutterPluginBinding.binaryMessenger, "pro_video_editor_waveform_stream")
+        logChannel =
+            EventChannel(flutterPluginBinding.binaryMessenger, "pro_video_editor_logs")
 
         methodChannel.setMethodCallHandler(this)
         eventChannel.setStreamHandler(object : EventChannel.StreamHandler {
@@ -99,6 +105,20 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             }
         })
 
+        logChannel.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                logSink = events
+                Log.sink = { level, tag, message, throwable ->
+                    postLog(level, tag, message, throwable)
+                }
+            }
+
+            override fun onCancel(arguments: Any?) {
+                Log.sink = null
+                logSink = null
+            }
+        })
+
         renderVideo = RenderVideo(flutterPluginBinding.applicationContext)
         metadata = Metadata(flutterPluginBinding.applicationContext)
         thumbnailGenerator = ThumbnailGenerator(flutterPluginBinding.applicationContext)
@@ -118,6 +138,9 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         methodChannel.setMethodCallHandler(null)
         eventChannel.setStreamHandler(null)
         waveformStreamChannel.setStreamHandler(null)
+        logChannel.setStreamHandler(null)
+        Log.sink = null
+        logSink = null
     }
 
     /**
@@ -618,6 +641,28 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                 mapOf(
                     "id" to id,
                     "progress" to progress
+                )
+            )
+        }
+    }
+
+    /**
+     * Forwards a native log entry to Flutter via the log event channel.
+     *
+     * Log events are sent on the main thread with level, tag, message,
+     * timestamp, and an optional stack trace.
+     */
+    private fun postLog(level: String, tag: String, message: String, throwable: Throwable?) {
+        val timestamp = System.currentTimeMillis()
+        val stackTrace = throwable?.stackTraceToString()
+        mainHandler.post {
+            logSink?.success(
+                mapOf(
+                    "level" to level,
+                    "tag" to tag,
+                    "message" to message,
+                    "timestamp" to timestamp,
+                    "stackTrace" to stackTrace
                 )
             )
         }

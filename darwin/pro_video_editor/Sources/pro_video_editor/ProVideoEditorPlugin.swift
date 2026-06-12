@@ -28,6 +28,7 @@ import Foundation
 public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
   var eventSink: FlutterEventSink?
   var waveformStreamSink: FlutterEventSink?
+  var logSink: FlutterEventSink?
   private var activeRenderTasks: [String: RenderTask] = [:]
   private var activeAudioTasks: [String: AudioExtractTask] = [:]
   private var activeWaveformTasks: [String: WaveformTask] = [:]
@@ -45,11 +46,14 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       name: "pro_video_editor_progress", binaryMessenger: messenger)
     let waveformStreamChannel = FlutterEventChannel(
       name: "pro_video_editor_waveform_stream", binaryMessenger: messenger)
+    let logChannel = FlutterEventChannel(
+      name: "pro_video_editor_logs", binaryMessenger: messenger)
 
     let instance = ProVideoEditorPlugin()
     registrar.addMethodCallDelegate(instance, channel: methodChannel)
     eventChannel.setStreamHandler(instance)
     waveformStreamChannel.setStreamHandler(WaveformStreamHandler(plugin: instance))
+    logChannel.setStreamHandler(LogStreamHandler(plugin: instance))
   }
 
   /// Routes incoming method calls to appropriate handlers.
@@ -261,6 +265,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
         }
       },
       onError: { error in
+        PluginLog.print("❌ Render failed: \(error.localizedDescription)")
         DispatchQueue.main.async {
           let task = self.activeRenderTasks.removeValue(forKey: id)
           let code = (task?.isCanceled == true) ? "CANCELED" : "RENDER_ERROR"
@@ -339,6 +344,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
         }
       },
       onError: { error in
+        PluginLog.print("❌ Audio extraction failed: \(error.localizedDescription)")
         DispatchQueue.main.async {
           let task = self.activeAudioTasks.removeValue(forKey: id)
           let code: String
@@ -585,6 +591,22 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       self.eventSink?([
         "id": id,
         "progress": progress,
+      ])
+    }
+  }
+
+  /// Forwards a native log entry to Flutter via the log event channel.
+  ///
+  /// Log events are sent on the main thread with level, tag, message, and
+  /// timestamp (epoch milliseconds).
+  func postLog(level: PluginLogLevel, message: String) {
+    let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+    DispatchQueue.main.async {
+      self.logSink?([
+        "level": level.methodValue,
+        "tag": Tags.package,
+        "message": message,
+        "timestamp": timestamp,
       ])
     }
   }
