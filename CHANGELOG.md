@@ -1,3 +1,6 @@
+## 1.19.0
+- **FEAT**(android, iOS, macOS): Forward native plugin logs back to Dart via `ProVideoEditor.instance.logStream`. Every entry written through the shared native logger (including the full renderer diagnostics) is now emitted as a `NativeLogEntry` (`level`, `tag`, `message`, `timestamp`, optional `stackTrace`), so host apps can pipe these into their own Dart logger and export them. Forwarding is gated by the same `nativeLogLevel` as the native console output. Web/Windows/Linux keep an empty stream.
+
 ## 1.18.0
 - **FEAT**(android, iOS, macOS): Add `speed` to `AudioExtractConfigs` for pitch-preserving playback-speed changes during audio extraction (e.g. `2.0` for double speed, `0.5` for half). WAV applies the time-stretch directly on the decoded PCM (Android `SonicAudioProcessor`; AVFoundation `AVAssetReaderAudioMixOutput` with the spectral time-pitch algorithm), while compressed formats are re-encoded — Android via a Media3 `Transformer`, Darwin via `AVAssetExportPresetAppleM4A` with a scaled time range. Note: on Apple platforms a non-`1.0` speed re-encodes to AAC/M4A, so `caf` output falls back to M4A content.
 

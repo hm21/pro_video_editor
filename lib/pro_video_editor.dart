@@ -6,6 +6,7 @@ export '/core/models/audio/audio_track_model.dart';
 export '/core/models/audio/waveform_chunk_model.dart';
 export '/core/models/audio/waveform_configs_model.dart';
 export '/core/models/audio/waveform_data_model.dart';
+export '/core/models/platform/native_log_entry.dart';
 export '/core/models/platform/native_log_level.dart';
 export 'features/audio/widgets/audio_waveform.dart';
 export 'features/audio/models/waveform_style.dart';

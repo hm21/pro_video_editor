@@ -7,6 +7,7 @@ import '/core/models/audio/audio_extract_configs_model.dart';
 import '/core/models/audio/waveform_chunk_model.dart';
 import '/core/models/audio/waveform_configs_model.dart';
 import '/core/models/audio/waveform_data_model.dart';
+import '/core/models/platform/native_log_entry.dart';
 import '/core/models/platform/native_log_level.dart';
 import '/core/models/thumbnail/key_frames_configs_model.dart';
 import '/core/models/thumbnail/single_thumbnail_configs_model.dart';
@@ -76,6 +77,13 @@ abstract class ProVideoEditor extends PlatformInterface {
   /// exposed through [progressStream] and [progressStreamById].
   @protected
   final progressCtrl = StreamController<ProgressModel>.broadcast();
+
+  /// Broadcast stream controller for native log entries.
+  ///
+  /// Platform implementations forward log entries emitted by the native side
+  /// here, which are then exposed through [logStream].
+  @protected
+  final logCtrl = StreamController<NativeLogEntry>.broadcast();
 
   /// Retrieves the platform version.
   ///
@@ -550,4 +558,21 @@ abstract class ProVideoEditor extends PlatformInterface {
   /// individual video task independently.
   Stream<ProgressModel> progressStreamById(String taskId) =>
       progressStream.where((item) => item.id == taskId);
+
+  /// Stream of log entries forwarded from the native plugin implementation.
+  ///
+  /// Mirrors the native console output (gated by the `nativeLogLevel` of the
+  /// running operation) so host apps can capture renderer diagnostics in their
+  /// own Dart logger and export them.
+  ///
+  /// Currently emits on Android, iOS, and macOS. On Web, Windows, and Linux
+  /// the stream stays empty.
+  ///
+  /// Example:
+  /// ```dart
+  /// ProVideoEditor.instance.logStream.listen((entry) {
+  ///   myLogger.log(entry.level.name, entry.message);
+  /// });
+  /// ```
+  Stream<NativeLogEntry> get logStream => logCtrl.stream;
 }

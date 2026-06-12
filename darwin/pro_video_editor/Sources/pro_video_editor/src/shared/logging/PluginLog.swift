@@ -16,6 +16,18 @@ enum PluginLogLevel: Int {
     #endif
   }
 
+  /// String value matching `NativeLogLevel.methodValue` on the Dart side.
+  var methodValue: String {
+    switch self {
+    case .verbose: return "verbose"
+    case .debug: return "debug"
+    case .info: return "info"
+    case .warning: return "warning"
+    case .error: return "error"
+    case .none: return "none"
+    }
+  }
+
   static func from(methodValue: String) throws -> PluginLogLevel {
     switch methodValue.lowercased() {
     case "verbose":
@@ -50,6 +62,12 @@ enum PluginLogError: LocalizedError {
 enum PluginLog {
   private static var minimumLevel = PluginLogLevel.default
 
+  /// Optional sink that forwards every emitted log entry to Flutter.
+  ///
+  /// Set by the plugin while a Dart listener is attached to the
+  /// `pro_video_editor_logs` event channel.
+  static var sink: ((_ level: PluginLogLevel, _ message: String) -> Void)?
+
   static func setMinimumLevel(_ methodValue: String) throws {
     minimumLevel = try .from(methodValue: methodValue)
   }
@@ -63,6 +81,7 @@ enum PluginLog {
     let level = inferredLevel(for: message)
     guard shouldLog(level) else { return }
     Swift.print(message, terminator: terminator)
+    sink?(level, message)
   }
 
   private static func shouldLog(_ level: PluginLogLevel) -> Bool {
