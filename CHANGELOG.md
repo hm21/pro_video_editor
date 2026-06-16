@@ -1,3 +1,6 @@
+## 1.19.1
+- **FIX**(iOS, macOS): Fix custom audio tracks being silently dropped when the source asset's duration fails to resolve. `AudioPreRenderer` previously fell back to a zero duration on `asset.load(.duration)` failure, which collapsed an open-ended trim (`audioEndTime == nil`) into a zero-length range and discarded the track with a misleading `invalid trim range … end=0.0s` log. The renderer now loads the audio track first and falls back to its `timeRange` duration (the real audio length), only aborting when neither source resolves. Android already decodes to the real end-of-stream for an open-ended trim, so no change was needed there.
+
 ## 1.19.0
 - **FEAT**(android, iOS, macOS): Forward native plugin logs back to Dart via `ProVideoEditor.instance.logStream`. Every entry written through the shared native logger (including the full renderer diagnostics) is now emitted as a `NativeLogEntry` (`level`, `tag`, `message`, `timestamp`, optional `stackTrace`), so host apps can pipe these into their own Dart logger and export them. Forwarding is gated by the same `nativeLogLevel` as the native console output. Web/Windows/Linux keep an empty stream.
 
