@@ -66,24 +66,8 @@ internal enum AudioPreRenderer {
     // Step 1: decode the trimmed range to PCM bytes.
     let asset = AVURLAsset(url: sourceURL)
 
-    // Resolve the source duration.
-    let sourceDuration: CMTime
-    if #available(macOS 12.0, iOS 15.0, *) {
-      sourceDuration = (try? await asset.load(.duration)) ?? .zero
-    } else {
-      sourceDuration = asset.duration
-    }
-
-    let effectiveStart = CMTimeMaximum(audioStartTime, .zero)
-    let effectiveEnd = CMTimeMinimum(audioEndTime ?? sourceDuration, sourceDuration)
-    let trimDuration = CMTimeSubtract(effectiveEnd, effectiveStart)
-    if CMTimeCompare(trimDuration, .zero) <= 0 {
-      PluginLog.print(
-        "⚠️ AudioPreRenderer: invalid trim range start=\(effectiveStart.seconds)s end=\(effectiveEnd.seconds)s"
-      )
-      return nil
-    }
-
+    // Load the audio track first — its time range gives us the real
+    // audio length even when asset-level duration resolution fails.
     let audioTracks: [AVAssetTrack]
     do {
       if #available(macOS 12.0, iOS 15.0, *) {
@@ -98,6 +82,44 @@ internal enum AudioPreRenderer {
 
     guard let audioTrack = audioTracks.first else {
       PluginLog.print("⚠️ AudioPreRenderer: no audio tracks in source")
+      return nil
+    }
+
+    // Resolve the source duration. Prefer the asset duration, but fall
+    // back to the audio track's own time range when the asset-level
+    // duration fails to load or resolves to zero — otherwise a perfectly
+    // valid file would be dropped with a misleading "invalid trim range".
+    var sourceDuration: CMTime
+    if #available(macOS 12.0, iOS 15.0, *) {
+      sourceDuration = (try? await asset.load(.duration)) ?? .zero
+    } else {
+      sourceDuration = asset.duration
+    }
+    if CMTimeCompare(sourceDuration, .zero) <= 0 {
+      let trackDuration: CMTime
+      if #available(macOS 12.0, iOS 15.0, *) {
+        trackDuration = (try? await audioTrack.load(.timeRange))?.duration ?? .zero
+      } else {
+        trackDuration = audioTrack.timeRange.duration
+      }
+      if CMTimeCompare(trackDuration, .zero) > 0 {
+        PluginLog.print(
+          "ℹ️ AudioPreRenderer: asset duration unavailable, using audio track duration \(trackDuration.seconds)s"
+        )
+        sourceDuration = trackDuration
+      } else {
+        PluginLog.print("⚠️ AudioPreRenderer: could not resolve source duration")
+        return nil
+      }
+    }
+
+    let effectiveStart = CMTimeMaximum(audioStartTime, .zero)
+    let effectiveEnd = CMTimeMinimum(audioEndTime ?? sourceDuration, sourceDuration)
+    let trimDuration = CMTimeSubtract(effectiveEnd, effectiveStart)
+    if CMTimeCompare(trimDuration, .zero) <= 0 {
+      PluginLog.print(
+        "⚠️ AudioPreRenderer: invalid trim range start=\(effectiveStart.seconds)s end=\(effectiveEnd.seconds)s"
+      )
       return nil
     }
 
