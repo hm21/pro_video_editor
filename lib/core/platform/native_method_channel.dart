@@ -20,6 +20,7 @@ import '/core/models/video/editor_video_model.dart';
 import '/core/models/video/progress_model.dart';
 import '/core/models/video/video_metadata_model.dart';
 import '/core/platform/io/io_helper.dart';
+import '../models/video/stop_motion_render_data_model.dart';
 import '../models/video/video_render_data_model.dart';
 import 'platform_interface.dart';
 
@@ -410,6 +411,59 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       final renderData = await value.toAsyncMap();
 
       await methodChannel.invokeMethod<String>('renderVideo', {
+        ...renderData,
+        'outputPath': filePath,
+        'nativeLogLevel': nativeLogLevel?.methodValue,
+      });
+
+      return filePath;
+    } on PlatformException catch (error) {
+      if (error.code == renderCanceledErrorCode) {
+        throw const RenderCanceledException();
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<Uint8List> renderStopMotion(
+    StopMotionRenderData value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
+    try {
+      final renderData = await value.toAsyncMap();
+
+      final Uint8List? result = await methodChannel.invokeMethod<Uint8List>(
+        'renderStopMotion',
+        {
+          ...renderData,
+          'nativeLogLevel': nativeLogLevel?.methodValue,
+        },
+      );
+
+      if (result == null) {
+        throw ArgumentError('Failed to export the stop-motion video');
+      }
+
+      return result;
+    } on PlatformException catch (error) {
+      if (error.code == renderCanceledErrorCode) {
+        throw const RenderCanceledException();
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<String> renderStopMotionToFile(
+    String filePath,
+    StopMotionRenderData value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
+    try {
+      final renderData = await value.toAsyncMap();
+
+      await methodChannel.invokeMethod<String>('renderStopMotion', {
         ...renderData,
         'outputPath': filePath,
         'nativeLogLevel': nativeLogLevel?.methodValue,

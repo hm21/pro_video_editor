@@ -45,6 +45,8 @@ void main() {
           return [mockBytes, mockBytes];
         case 'renderVideo':
           return Uint8List(10);
+        case 'renderStopMotion':
+          return Uint8List(10);
         case 'cancelTask':
           return null;
         default:
@@ -128,6 +130,40 @@ void main() {
 
     expect(
         () async => await platform.renderVideo(mockModel), throwsArgumentError);
+  });
+
+  test('renderStopMotion returns rendered video bytes', () async {
+    final data = StopMotionRenderData(
+      frames: [StopMotionFrame(image: EditorLayerImage.memory(mockBytes))],
+      frameRate: 8,
+    );
+
+    final result = await platform.renderStopMotion(data);
+    expect(result, isA<Uint8List>());
+    expect(result.length, 10);
+  });
+
+  test('renderStopMotionToFile invokes renderStopMotion with outputPath',
+      () async {
+    MethodCall? capturedCall;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      capturedCall = methodCall;
+      return null;
+    });
+
+    final data = StopMotionRenderData(
+      frames: [StopMotionFrame(image: EditorLayerImage.memory(mockBytes))],
+    );
+
+    final path = await platform.renderStopMotionToFile('/tmp/out.mp4', data);
+
+    expect(path, '/tmp/out.mp4');
+    expect(capturedCall?.method, 'renderStopMotion');
+    final args = capturedCall?.arguments as Map;
+    expect(args['outputPath'], '/tmp/out.mp4');
+    expect(args['frames'], isA<List<dynamic>>());
+    expect(args['frames'] as List<dynamic>, hasLength(1));
   });
 
   test('cancel forwards to platform channel', () async {
