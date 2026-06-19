@@ -82,10 +82,7 @@ class _VideoMetadataExamplePageState extends State<VideoMetadataExamplePage> {
   Widget _buildSectionHeader(String label) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.titleMedium,
-      ),
+      child: Text(label, style: Theme.of(context).textTheme.titleMedium),
     );
   }
 

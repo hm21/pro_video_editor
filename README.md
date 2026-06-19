@@ -107,6 +107,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🎞️ **Keyframes**: Retrieve keyframe information from the video.
 - ✂️ **Trim**: Cut the video to a specified start and end time.
 - 🔗 **Merge Videos**: Concatenate multiple video clips into a single output.
+- 🎬 **Stop-Motion**: Turn a sequence of still images into a video, each frame held for a configurable duration.
 - ⏩ **Playback Speed**: Adjust the playback speed of the video.
 - ⏪ **Reverse Video**: Play a video segment backwards.
 - 🔇 **Mute Audio**: Remove or mute the audio track from the video.
@@ -157,6 +158,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 | `Blur background`          | 🧪      | 🧪  | 🧪     | ❌      | ❌     | 🚫   |
 | `Custom Audio Tracks`      | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Merge Videos`             | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
+| `Stop-Motion (Images→Video)`| ✅     | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Extract Audio`            | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Waveform`                 | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Waveform Streaming`       | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
@@ -269,6 +271,34 @@ Uint8List result = await ProVideoEditor.instance.renderVideo(data);
 
 /// Note: You must use either 'video' (single video) OR 'videoSegments' (multiple videos),
 /// but not both. The clips will be joined in the order they appear in the list.
+```
+
+#### Stop-Motion Example
+```dart
+/// Turn a sequence of still images into a video.
+/// Each frame is held for 1 / frameRate seconds, unless a per-frame
+/// duration is provided.
+var data = StopMotionRenderData(
+    frames: [
+        StopMotionFrame(image: EditorLayerImage.file(File('/path/to/frame1.png'))),
+        StopMotionFrame(image: EditorLayerImage.file(File('/path/to/frame2.png'))),
+        StopMotionFrame(
+            image: EditorLayerImage.memory(frame3Bytes),
+            duration: const Duration(milliseconds: 500), // hold this frame longer
+        ),
+    ],
+    frameRate: 12,                  // default frame duration = 1/12s
+    fit: StopMotionFit.contain,     // contain | cover | stretch
+    // resolution: Size(1080, 1920), // optional, defaults to the first frame size
+);
+
+Uint8List result = await ProVideoEditor.instance.renderStopMotion(data);
+
+/// For long sequences, write directly to a file to avoid high memory usage:
+/// await ProVideoEditor.instance.renderStopMotionToFile(outputPath, data);
+
+/// The stop-motion output is silent. To add background music, pass the result
+/// through renderVideo with `audioTracks`.
 ```
 
 #### Reverse Video Example

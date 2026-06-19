@@ -18,6 +18,7 @@ import '/core/models/thumbnail/thumbnail_configs_model.dart';
 import '/core/models/video/editor_video_model.dart';
 import '/core/models/video/video_metadata_model.dart';
 import '/core/services/web/web_manager.dart';
+import '../models/video/stop_motion_render_data_model.dart';
 import '../models/video/video_render_data_model.dart';
 import 'platform_interface.dart';
 
@@ -162,6 +163,25 @@ class ProVideoEditorWeb extends ProVideoEditor {
     NativeLogLevel? nativeLogLevel,
   }) {
     throw UnimplementedError('renderVideoToFile() has not been implemented.');
+  }
+
+  @override
+  Future<Uint8List> renderStopMotion(
+    StopMotionRenderData value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
+    throw UnimplementedError('renderStopMotion() is not supported on web.');
+  }
+
+  @override
+  Future<String> renderStopMotionToFile(
+    String filePath,
+    StopMotionRenderData value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
+    throw UnimplementedError(
+      'renderStopMotionToFile() is not supported on web.',
+    );
   }
 
   @override

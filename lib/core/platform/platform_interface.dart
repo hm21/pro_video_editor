@@ -15,6 +15,7 @@ import '/core/models/thumbnail/thumbnail_configs_model.dart';
 import '/core/models/video/editor_video_model.dart';
 import '/core/models/video/progress_model.dart';
 import '/core/models/video/video_metadata_model.dart';
+import '../models/video/stop_motion_render_data_model.dart';
 import '../models/video/video_render_data_model.dart';
 import 'native_method_channel.dart';
 
@@ -505,6 +506,67 @@ abstract class ProVideoEditor extends PlatformInterface {
     NativeLogLevel? nativeLogLevel,
   }) {
     throw UnimplementedError('renderVideoToFile() has not been implemented.');
+  }
+
+  /// Renders a stop-motion video from a sequence of still images and returns
+  /// the result in memory.
+  ///
+  /// Each frame in [StopMotionRenderData.frames] is held on screen for a fixed
+  /// duration (derived from [StopMotionRenderData.frameRate] or overridden per
+  /// frame) and encoded into a single video, producing the characteristic
+  /// choppy stop-motion look.
+  ///
+  /// The rendered output is silent. To add audio, pass the result through
+  /// [renderVideo] using `audioTracks`.
+  ///
+  /// **Warning:** Returns the entire video in memory. For long sequences, use
+  /// [renderStopMotionToFile] instead to avoid memory issues.
+  ///
+  /// [value] Complete stop-motion render configuration.
+  ///
+  /// Returns the rendered video as [Uint8List] in the specified output format.
+  ///
+  /// Throws:
+  /// - [RenderCanceledException] if cancelled via [cancel]
+  /// - [ArgumentError] if configuration is invalid
+  /// - [PlatformException] if rendering fails
+  ///
+  /// Progress updates are emitted via [progressStreamById] using
+  /// [StopMotionRenderData.id].
+  Future<Uint8List> renderStopMotion(
+    StopMotionRenderData value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
+    throw UnimplementedError('renderStopMotion() has not been implemented.');
+  }
+
+  /// Renders a stop-motion video from a sequence of still images and saves it
+  /// directly to a file.
+  ///
+  /// Similar to [renderStopMotion] but writes the output directly to disk
+  /// instead of returning it in memory. **Recommended for production use** as
+  /// it avoids memory issues with long sequences.
+  ///
+  /// [filePath] Absolute path where the rendered video will be saved.
+  /// [value] Complete stop-motion render configuration.
+  ///
+  /// Returns the [filePath] upon successful completion.
+  ///
+  /// Throws:
+  /// - [RenderCanceledException] if cancelled via [cancel]
+  /// - [ArgumentError] if configuration or path is invalid
+  /// - [PlatformException] if rendering or file writing fails
+  ///
+  /// Progress updates are emitted via [progressStreamById] using
+  /// [StopMotionRenderData.id].
+  Future<String> renderStopMotionToFile(
+    String filePath,
+    StopMotionRenderData value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
+    throw UnimplementedError(
+      'renderStopMotionToFile() has not been implemented.',
+    );
   }
 
   /// Cancels an active video processing task.

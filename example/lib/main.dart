@@ -8,6 +8,7 @@ import 'package:pro_video_editor_example/features/editor/pages/video_editor_grou
 import 'features/audio/audio_extract_example_page.dart';
 import 'features/metadata/video_metadata_example_page.dart';
 import 'features/render/video_renderer_page.dart';
+import 'features/stop_motion/stop_motion_example_page.dart';
 import 'features/thumbnail/thumbnail_example_page.dart';
 
 void main() {
@@ -75,6 +76,11 @@ class _HomePageState extends State<HomePage> {
       icon: Icons.developer_board_outlined,
       title: 'Video-Renderer',
       pageBuilder: () => const VideoRendererPage(),
+    ),
+    _ExampleListItem(
+      icon: Icons.burst_mode_outlined,
+      title: 'Stop-Motion',
+      pageBuilder: () => const StopMotionExamplePage(),
     ),
     _ExampleListItem(
       icon: Icons.edit,

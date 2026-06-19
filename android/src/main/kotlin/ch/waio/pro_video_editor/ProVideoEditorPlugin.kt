@@ -11,6 +11,8 @@ import ch.waio.pro_video_editor.src.features.metadata.models.MetadataConfig
 import ch.waio.pro_video_editor.src.features.render.RenderVideo
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderTask
+import ch.waio.pro_video_editor.src.features.stopmotion.StopMotionGenerator
+import ch.waio.pro_video_editor.src.features.stopmotion.models.StopMotionConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.features.thumbnail.ThumbnailGenerator
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailConfig
@@ -53,6 +55,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
     private var logSink: EventChannel.EventSink? = null
 
     private lateinit var renderVideo: RenderVideo
+    private lateinit var stopMotionGenerator: StopMotionGenerator
     private lateinit var metadata: Metadata
     private lateinit var thumbnailGenerator: ThumbnailGenerator
     private lateinit var extractAudio: ExtractAudio
@@ -120,6 +123,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         })
 
         renderVideo = RenderVideo(flutterPluginBinding.applicationContext)
+        stopMotionGenerator = StopMotionGenerator(flutterPluginBinding.applicationContext)
         metadata = Metadata(flutterPluginBinding.applicationContext)
         thumbnailGenerator = ThumbnailGenerator(flutterPluginBinding.applicationContext)
         extractAudio = ExtractAudio(flutterPluginBinding.applicationContext)
@@ -165,6 +169,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             "hasAudioTrack" -> handleHasAudioTrack(call, result)
             "getThumbnails" -> handleGetThumbnails(call, result)
             "renderVideo" -> handleRenderVideo(call, result)
+            "renderStopMotion" -> handleRenderStopMotion(call, result)
             "extractAudio" -> handleExtractAudio(call, result)
             "getWaveform" -> handleGetWaveform(call, result)
             "startWaveformStream" -> handleStartWaveformStream(call, result)
@@ -349,6 +354,74 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         } catch (e: Exception) {
             activeRenderTasks.remove(id)
             result.error("RENDER_ERROR", "Failed to start render: ${e.message}", null)
+        }
+    }
+
+    /**
+     * Starts an asynchronous stop-motion render job.
+     *
+     * Encodes a sequence of still images into a single (silent) video.
+     * Reuses the same task tracking as [handleRenderVideo] so [handleCancelTask]
+     * works unchanged.
+     */
+    private fun handleRenderStopMotion(call: MethodCall, result: MethodChannel.Result) {
+        val id = call.argument<String>("id") ?: ""
+        if (id.isBlank()) {
+            result.error("INVALID_ARGUMENTS", "Task id is required and cannot be empty", null)
+            return
+        }
+
+        if (activeRenderTasks.containsKey(id)) {
+            result.error(
+                "TASK_ALREADY_EXISTS",
+                "A render task with id '$id' is already active",
+                null
+            )
+            return
+        }
+
+        postProgress(id, 0.0)
+
+        val task = RenderTask(job = null, result = result)
+        activeRenderTasks[id] = task
+
+        try {
+            val config = StopMotionConfig.fromMethodCall(call)
+
+            val jobHandle = stopMotionGenerator.render(
+                config = config,
+                onProgress = { progress -> postProgress(id, progress) },
+                onComplete = { resultBytes ->
+                    mainHandler.post {
+                        postProgress(id, 1.0)
+                        val removedTask = activeRenderTasks.remove(id)
+                        removedTask?.sendSuccess(resultBytes)
+                    }
+                },
+                onError = { error ->
+                    Log.e("StopMotion", "Error rendering stop-motion: ${error.message}")
+                    mainHandler.post {
+                        val removedTask = activeRenderTasks.remove(id)
+                        val code = if (removedTask?.canceled?.get() == true) {
+                            "CANCELED"
+                        } else {
+                            "RENDER_ERROR"
+                        }
+                        removedTask?.sendError(code, error.message)
+                    }
+                }
+            )
+
+            task.job = jobHandle
+            if (task.canceled.get()) {
+                jobHandle.cancel()
+            }
+        } catch (e: IllegalArgumentException) {
+            activeRenderTasks.remove(id)
+            result.error("INVALID_ARGUMENTS", e.message, null)
+        } catch (e: Exception) {
+            activeRenderTasks.remove(id)
+            result.error("RENDER_ERROR", "Failed to start stop-motion render: ${e.message}", null)
         }
     }
 
