@@ -275,8 +275,7 @@ class StopMotionRenderData {
         ),
       ),
       frameRate: tryParseDouble(map['frameRate']) ?? 12,
-      resolution:
-          width != null && height != null ? Size(width, height) : null,
+      resolution: width != null && height != null ? Size(width, height) : null,
       fit: map['fit'] != null
           ? StopMotionFit.values.byName(map['fit'] as String)
           : StopMotionFit.contain,

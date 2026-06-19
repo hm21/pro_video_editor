@@ -64,29 +64,28 @@ class _StopMotionExamplePageState extends State<StopMotionExamplePage> {
       final t = count == 1 ? 0.0 : i / (count - 1);
 
       final recorder = ui.PictureRecorder();
-      final canvas = Canvas(
-        recorder,
-        Rect.fromLTWH(0, 0, size.width, size.height),
-      )..drawRect(
-          Offset.zero & size,
-          Paint()..color = Color.lerp(Colors.indigo, Colors.teal, t)!,
-        );
+      final canvas =
+          Canvas(recorder, Rect.fromLTWH(0, 0, size.width, size.height))
+            ..drawRect(
+              Offset.zero & size,
+              Paint()..color = Color.lerp(Colors.indigo, Colors.teal, t)!,
+            );
 
       final cx = size.width * t;
       final cy = size.height / 2 + sin(t * 2 * pi) * size.height / 4;
       canvas.drawCircle(Offset(cx, cy), 40, Paint()..color = Colors.amber);
 
       TextPainter(
-        text: TextSpan(
-          text: '${i + 1}',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 48,
-            fontWeight: FontWeight.bold,
+          text: TextSpan(
+            text: '${i + 1}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 48,
+              fontWeight: FontWeight.bold,
+            ),
           ),
-        ),
-        textDirection: TextDirection.ltr,
-      )
+          textDirection: TextDirection.ltr,
+        )
         ..layout()
         ..paint(canvas, const Offset(20, 20));
 
