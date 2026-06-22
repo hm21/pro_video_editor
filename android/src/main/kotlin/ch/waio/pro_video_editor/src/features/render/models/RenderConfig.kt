@@ -5,14 +5,48 @@ import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import io.flutter.plugin.common.MethodCall
 
 /**
+ * Represents the transition played between a clip and the next one.
+ *
+ * @property type Transition kind: "dissolve", "fadeToBlack", "fadeToWhite",
+ *  "slide", "push" or "wipe"
+ * @property durationUs Transition duration in microseconds
+ * @property curve Easing curve name (e.g. "linear", "easeInOut")
+ * @property direction Direction for directional transitions: "left", "right",
+ *  "up" or "down"
+ */
+data class TransitionConfig(
+    val type: String,
+    val durationUs: Long,
+    val curve: String = "linear",
+    val direction: String = "left"
+) {
+    /** True when this transition overlaps and blends the two clips. */
+    val isOverlap: Boolean
+        get() = type == "dissolve" || type == "slide" || type == "push" ||
+                type == "wipe"
+
+    companion object {
+        fun fromMap(map: Map<String, Any?>): TransitionConfig {
+            return TransitionConfig(
+                type = map["type"] as String,
+                durationUs = (map["durationUs"] as Number).toLong(),
+                curve = map["curve"] as? String ?: "linear",
+                direction = map["direction"] as? String ?: "left"
+            )
+        }
+    }
+}
+
+/**
  * Represents a video clip segment with optional trimming.
- * 
+ *
  * @property inputPath Absolute path to video file
  * @property startUs Start time in microseconds (null = from beginning)
  * @property endUs End time in microseconds (null = until end)
  * @property volume Volume multiplier for this clip (null = unchanged, 0.0=mute, 1.0=original)
  * @property playbackSpeed Speed multiplier for this clip (null = unchanged, 0.5=half, 2.0=double)
  * @property reverseVideo Whether to render this clip backwards
+ * @property transition Transition into the next clip (null = hard cut). Ignored on the last clip.
  */
 data class VideoClip(
     val inputPath: String,
@@ -20,7 +54,8 @@ data class VideoClip(
     val endUs: Long?,
     val volume: Float? = null,
     val playbackSpeed: Float? = null,
-    val reverseVideo: Boolean = false
+    val reverseVideo: Boolean = false,
+    val transition: TransitionConfig? = null
 )
 
 /**
@@ -231,17 +266,20 @@ data class RenderConfig(
             }
 
             val videoClips: List<VideoClip> = videoClipsRaw.mapIndexed { index, clipMap ->
+                @Suppress("UNCHECKED_CAST")
+                val transitionRaw = clipMap["transition"] as? Map<String, Any?>
                 val clip = VideoClip(
                     inputPath = clipMap["inputPath"] as String,
                     startUs = (clipMap["startUs"] as? Number)?.toLong(),
                     endUs = (clipMap["endUs"] as? Number)?.toLong(),
                     volume = (clipMap["volume"] as? Number)?.toFloat(),
                     playbackSpeed = (clipMap["playbackSpeed"] as? Number)?.toFloat(),
-                    reverseVideo = clipMap["reverseVideo"] as? Boolean ?: false
+                    reverseVideo = clipMap["reverseVideo"] as? Boolean ?: false,
+                    transition = transitionRaw?.let { TransitionConfig.fromMap(it) }
                 )
                 Log.d(
                     PACKAGE_TAG,
-                    "Clip $index: path=${clip.inputPath}, start=${clip.startUs}, end=${clip.endUs}, volume=${clip.volume}, speed=${clip.playbackSpeed}, reverse=${clip.reverseVideo}"
+                    "Clip $index: path=${clip.inputPath}, start=${clip.startUs}, end=${clip.endUs}, volume=${clip.volume}, speed=${clip.playbackSpeed}, reverse=${clip.reverseVideo}, transition=${clip.transition?.type}"
                 )
                 clip
             }

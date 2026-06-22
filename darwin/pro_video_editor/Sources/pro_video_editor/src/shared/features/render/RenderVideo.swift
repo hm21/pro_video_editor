@@ -69,7 +69,8 @@ class RenderVideo {
                 endUs: clip.endUs,
                 volume: clip.volume,
                 playbackSpeed: clip.playbackSpeed,
-                reverseVideo: clip.reverseVideo
+                reverseVideo: clip.reverseVideo,
+                transition: clip.transition
               )
             }
             return clip
@@ -81,6 +82,7 @@ class RenderVideo {
 
         var outputURL: URL!
         var temporaryAudioURLs: [URL] = []
+        var transitionURLs: [URL] = []
 
         let finalize: () -> Void = {
           try? cleanup(config.outputPath == nil ? [outputURL] : [])
@@ -91,6 +93,11 @@ class RenderVideo {
             try? FileManager.default.removeItem(at: url)
             PluginLog.print("🧹 Removed pre-rendered audio: \(url.lastPathComponent)")
           }
+          // Clean up pre-rendered overlap transition clips
+          for url in transitionURLs {
+            try? FileManager.default.removeItem(at: url)
+            PluginLog.print("🧹 Removed transition clip: \(url.lastPathComponent)")
+          }
         }
 
         let handleCompletion: (Result<Data?, Error>) -> Void = { result in
@@ -99,6 +106,20 @@ class RenderVideo {
           case .failure(let error): onError(error)
           }
           finalize()
+        }
+
+        // Pre-render overlap clip transitions (dissolve/slide/push/wipe) into
+        // short blended clips spliced between the neighbours, so the main
+        // composition still sees plain forward clips.
+        if workingConfig.videoClips.count > 1,
+          workingConfig.videoClips.contains(where: { $0.transition?.isOverlap == true })
+        {
+          let (newClips, urls) = await preRenderTransitions(
+            clips: workingConfig.videoClips,
+            enableAudio: workingConfig.enableAudio,
+            outputFormat: workingConfig.outputFormat)
+          workingConfig = workingConfig.copyWith(videoClips: newClips)
+          transitionURLs = urls
         }
 
         do {
@@ -139,7 +160,10 @@ class RenderVideo {
           var effectsConfig = VideoCompositorConfig()
 
           // Use composition helper to merge multiple video clips
-          let (composition, videoCompData, renderSize, audioMix, sourceTrackID, audioTempURLs) =
+          let (
+            composition, videoCompData, renderSize, audioMix, sourceTrackID, audioTempURLs,
+            fadeWindows
+          ) =
             try await applyComposition(
               videoClips: workingConfig.videoClips,
               videoEffects: effectsConfig,
@@ -151,6 +175,9 @@ class RenderVideo {
 
           // Set source track ID for fallback on older platform variations
           effectsConfig.sourceTrackID = sourceTrackID
+
+          // Dip-to-color (fade-to-black / fade-to-white) clip transitions.
+          effectsConfig.fadeWindows = fadeWindows
 
           // Apply playback speed to the entire composition
           videoCompConfig.instructions = applyPlaybackSpeed(
@@ -301,6 +328,124 @@ class RenderVideo {
   private static func temporaryURL(for format: String) -> URL {
     let filename = uniqueFilename(prefix: "output", extension: format)
     return FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+  }
+
+  // MARK: - Overlap transition pre-render
+
+  /// Pre-renders overlap transitions (dissolve/slide/push/wipe) into short
+  /// blended clips and rewrites the clip list, mirroring the Android pipeline.
+  ///
+  /// For a transition between clip *i* and *i+1*, clip *i* is shortened by the
+  /// (clamped) transition duration `d`, the blended clip (`d`) is inserted, and
+  /// clip *i+1*'s head is trimmed by `d`. Net timeline change: `-d` per
+  /// transition. Falls back to a hard cut when a transition cannot be rendered
+  /// (e.g. a neighbour is reversed, has per-clip speed, or has too little
+  /// content) — those cases are handled live by the main pipeline.
+  private static func preRenderTransitions(
+    clips: [VideoClip], enableAudio: Bool, outputFormat: String
+  ) async -> ([VideoClip], [URL]) {
+    var work = clips
+    var result: [VideoClip] = []
+    var urls: [URL] = []
+    var i = 0
+
+    while i < work.count {
+      let current = work[i]
+      let next: VideoClip? = (i + 1 < work.count) ? work[i + 1] : nil
+      let t = current.transition
+
+      let canOverlap =
+        next != nil && (t?.isOverlap ?? false)
+        && !current.reverseVideo && !(next!.reverseVideo)
+        && (current.playbackSpeed == nil || current.playbackSpeed == 1.0)
+        && (next!.playbackSpeed == nil || next!.playbackSpeed == 1.0)
+
+      if !canOverlap {
+        result.append(clearedOverlap(current))
+        i += 1
+        continue
+      }
+
+      let curStart = current.startUs ?? 0
+      let curEnd: Int64
+      if let e = current.endUs {
+        curEnd = e
+      } else {
+        curEnd = await clipDurationUs(current.inputPath)
+      }
+      let nextStart = next!.startUs ?? 0
+      let nextEnd: Int64
+      if let e = next!.endUs {
+        nextEnd = e
+      } else {
+        nextEnd = await clipDurationUs(next!.inputPath)
+      }
+      let curDur = curEnd - curStart
+      let nextDur = nextEnd - nextStart
+      let d = min(t!.durationUs, min(curDur, nextDur))
+
+      if d <= 0 || curDur - d <= 0 || nextDur - d <= 0 {
+        PluginLog.print("⚠️ Transition: not enough content at boundary \(i); hard cut")
+        result.append(clearedOverlap(current))
+        i += 1
+        continue
+      }
+
+      let includeAudio =
+        enableAudio && (current.volume ?? 1.0) > 0 && (next!.volume ?? 1.0) > 0
+      let rendered = await ClipTransitionRenderer.render(
+        outgoingPath: current.inputPath,
+        outTailStartUs: curEnd - d, outTailEndUs: curEnd,
+        incomingPath: next!.inputPath,
+        inHeadStartUs: nextStart, inHeadEndUs: nextStart + d,
+        type: t!.type, direction: t!.direction, curve: t!.curve,
+        includeAudio: includeAudio, outputFormat: outputFormat)
+
+      if let rendered = rendered {
+        urls.append(rendered.outputURL)
+        result.append(
+          VideoClip(
+            inputPath: current.inputPath, startUs: curStart, endUs: curEnd - d,
+            volume: current.volume, playbackSpeed: current.playbackSpeed,
+            reverseVideo: false, transition: nil))
+        result.append(
+          VideoClip(
+            inputPath: rendered.outputURL.path, startUs: 0, endUs: rendered.durationUs))
+        // Trim the incoming head in place; it keeps its own transition.
+        work[i + 1] = VideoClip(
+          inputPath: next!.inputPath, startUs: nextStart + d, endUs: nextEnd,
+          volume: next!.volume, playbackSpeed: next!.playbackSpeed,
+          reverseVideo: next!.reverseVideo, transition: next!.transition)
+      } else {
+        PluginLog.print("⚠️ Transition render failed at boundary \(i); hard cut")
+        result.append(clearedOverlap(current))
+      }
+      i += 1
+    }
+
+    return (result, urls)
+  }
+
+  /// Clears an overlap transition (already consumed / unsupported) so it is not
+  /// reinterpreted downstream; dip transitions are left untouched.
+  private static func clearedOverlap(_ clip: VideoClip) -> VideoClip {
+    guard clip.transition?.isOverlap == true else { return clip }
+    return VideoClip(
+      inputPath: clip.inputPath, startUs: clip.startUs, endUs: clip.endUs,
+      volume: clip.volume, playbackSpeed: clip.playbackSpeed,
+      reverseVideo: clip.reverseVideo, transition: nil)
+  }
+
+  /// Loads a clip's total duration in microseconds.
+  private static func clipDurationUs(_ path: String) async -> Int64 {
+    let asset = AVURLAsset(url: URL(fileURLWithPath: path))
+    let dur: CMTime
+    if #available(iOS 15.0, macOS 13.0, *) {
+      dur = (try? await asset.load(.duration)) ?? .zero
+    } else {
+      dur = asset.duration
+    }
+    return Int64(CMTimeGetSeconds(dur) * 1_000_000)
   }
 
   private static func loadVideoTrack(from asset: AVAsset) async throws -> AVAssetTrack {

@@ -20,6 +20,7 @@ import Foundation
 ///   - AVAudioMix?: Audio mix with volume controls (nil if no audio mixing needed)
 ///   - CMPersistentTrackID: The track ID of the video composition track (for fallback on older iOS)
 ///   - [URL]: Temporary file URLs (e.g. pre-rendered audio WAVs) the caller MUST delete after export
+///   - [FadeWindow]: Dip-to-color windows for fadeToBlack / fadeToWhite transitions
 ///
 /// - Throws: NSError if video clips are empty, files don't exist, or tracks can't be loaded.
 func applyComposition(
@@ -28,7 +29,8 @@ func applyComposition(
   enableAudio: Bool,
   audioTracks: [AudioTrackConfig]
 ) async throws -> (
-  AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID, [URL]
+  AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID, [URL],
+  [FadeWindow]
 ) {
   return try await CompositionBuilder(videoClips: videoClips, videoEffects: videoEffects)
     .setEnableAudio(enableAudio)

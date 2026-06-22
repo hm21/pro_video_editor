@@ -2,6 +2,24 @@ import AVFoundation
 import CoreImage
 import Foundation
 
+/// A dip-to-color (fade-to-black / fade-to-white) window in composition time.
+///
+/// Used by the custom compositor to darken/whiten frames at clip boundaries for
+/// `fadeToBlack` / `fadeToWhite` transitions.
+public struct FadeWindow: Sendable {
+  /// Inclusive start of the window in composition microseconds.
+  let startUs: Int64
+  /// Exclusive end of the window in composition microseconds.
+  let endUs: Int64
+  /// `true` = fade **in** from the dip color (color → video); `false` = fade
+  /// **out** to the dip color (video → color).
+  let fadeIn: Bool
+  /// Easing curve name (e.g. "linear", "easeInOut").
+  let curve: String
+  /// `true` dips through white, `false` dips through black.
+  let toWhite: Bool
+}
+
 /// Configuration properties used by a custom video compositor to apply visual effects.
 ///
 /// Holds properties for geometry adjustments (rotation, scale, crop, flips), spatial blurring,
@@ -25,6 +43,9 @@ public struct VideoCompositorConfig {
 
   /// Color filter configs with optional time ranges for per-frame LUT switching.
   var colorFilterConfigs: [ColorFilterConfig] = []
+
+  /// Dip-to-color windows for `fadeToBlack` / `fadeToWhite` clip transitions.
+  var fadeWindows: [FadeWindow] = []
 
   var videoRotationDegrees: Double = 0.0
   var shouldApplyOrientationCorrection: Bool = false

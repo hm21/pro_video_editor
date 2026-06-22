@@ -8,6 +8,8 @@ internal struct VideoClip: Sendable {
   let volume: Float?
   let playbackSpeed: Float?
   let reverseVideo: Bool
+  /// Transition into the next clip (nil = hard cut). Ignored on the last clip.
+  let transition: ClipTransitionConfig?
 
   init(
     inputPath: String,
@@ -15,7 +17,8 @@ internal struct VideoClip: Sendable {
     endUs: Int64? = nil,
     volume: Float? = nil,
     playbackSpeed: Float? = nil,
-    reverseVideo: Bool = false
+    reverseVideo: Bool = false,
+    transition: ClipTransitionConfig? = nil
   ) {
     self.inputPath = inputPath
     self.startUs = startUs
@@ -23,5 +26,6 @@ internal struct VideoClip: Sendable {
     self.volume = volume
     self.playbackSpeed = playbackSpeed
     self.reverseVideo = reverseVideo
+    self.transition = transition
   }
 }
