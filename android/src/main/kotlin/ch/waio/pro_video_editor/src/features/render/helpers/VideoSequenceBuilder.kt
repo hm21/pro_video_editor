@@ -12,6 +12,7 @@ import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.SpeedChangeEffect
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
@@ -275,9 +276,12 @@ class VideoSequenceBuilder(
             audioEffects.toList()
         }
 
+        // Compute per-clip fade-to-black windows from clip transitions.
+        val fadeInfos = computeFadeInfos(timelineClips)
+
         // Build EditedMediaItems for each clip
         val editedMediaItems = timelineClips.mapIndexed { index, clip ->
-            buildEditedMediaItem(index, clip, normalizedAudioEffects)
+            buildEditedMediaItem(index, clip, normalizedAudioEffects, fadeInfos[index])
         }
 
         Log.d(RENDER_TAG, "Total EditedMediaItems created: ${editedMediaItems.size}")
@@ -396,12 +400,102 @@ class VideoSequenceBuilder(
     }
 
     /**
+     * Per-clip dip (fade-to-black / fade-to-white) windows, expressed in
+     * output-local time.
+     *
+     * @property clipDurationUs Output duration of the clip (after per-clip speed)
+     * @property fadeInUs Fade-in-from-color window at the clip's head (0 = none)
+     * @property fadeOutUs Fade-out-to-color window at the clip's tail (0 = none)
+     * @property curve Easing curve for the fade
+     * @property dipColor ARGB color the clip dips to/from
+     */
+    private data class ClipFadeInfo(
+        val clipDurationUs: Long,
+        val fadeInUs: Long,
+        val fadeOutUs: Long,
+        val curve: String,
+        val dipColor: Int
+    )
+
+    /** Returns the dip color for a "fadeTo*" transition, or null otherwise. */
+    private fun dipColorFor(transition: ch.waio.pro_video_editor.src.features
+        .render.models.TransitionConfig?): Int? = when (transition?.type) {
+        "fadeToBlack" -> android.graphics.Color.BLACK
+        "fadeToWhite" -> android.graphics.Color.WHITE
+        else -> null
+    }
+
+    /**
+     * Source duration of a clip after trimming (microseconds).
+     */
+    private fun clipSourceDurationUs(clip: VideoClip): Long {
+        return when {
+            clip.endUs != null && clip.startUs != null -> clip.endUs - clip.startUs
+            clip.endUs != null -> clip.endUs
+            else -> MediaInfoExtractor.getVideoDuration(clip.inputPath)
+        }.coerceAtLeast(0L)
+    }
+
+    /**
+     * Output duration of a clip after per-clip playback speed (microseconds).
+     */
+    private fun clipOutputDurationUs(clip: VideoClip): Long {
+        val src = clipSourceDurationUs(clip)
+        val speed = clip.playbackSpeed?.takeIf { it > 0f } ?: 1.0f
+        return (src / speed).toLong()
+    }
+
+    /**
+     * Computes dip (fade-to-black / fade-to-white) windows for each timeline
+     * clip.
+     *
+     * A `fadeToBlack`/`fadeToWhite` transition on clip *i* dips the boundary
+     * between clip *i* and *i+1*: clip *i* fades out to the color over its last
+     * `duration/2`, and clip *i+1* fades in from the color over its first
+     * `duration/2`. Overlap transitions (dissolve/slide/push/wipe) are handled
+     * separately by [ClipTransitionRenderer] and never reach this method.
+     */
+    private fun computeFadeInfos(clips: List<VideoClip>): List<ClipFadeInfo?> {
+        return clips.indices.map { i ->
+            val clip = clips[i]
+            val prev = clips.getOrNull(i - 1)
+
+            val outgoingColor = dipColorFor(clip.transition)
+            val incomingColor = dipColorFor(prev?.transition)
+
+            val outgoingUs = if (outgoingColor != null) clip.transition!!.durationUs else 0L
+            val incomingUs = if (incomingColor != null) prev!!.transition!!.durationUs else 0L
+
+            if (outgoingColor == null && incomingColor == null) {
+                null
+            } else {
+                val outDur = clipOutputDurationUs(clip)
+                // When a clip both ends and starts with a dip, the outgoing
+                // (this clip's) transition wins for color/curve.
+                val curve = if (outgoingColor != null) {
+                    clip.transition!!.curve
+                } else {
+                    prev!!.transition!!.curve
+                }
+                ClipFadeInfo(
+                    clipDurationUs = outDur,
+                    fadeInUs = (incomingUs / 2).coerceAtMost(outDur),
+                    fadeOutUs = (outgoingUs / 2).coerceAtMost(outDur),
+                    curve = curve,
+                    dipColor = outgoingColor ?: incomingColor!!
+                )
+            }
+        }
+    }
+
+    /**
      * Builds an EditedMediaItem for a single video clip with all effects.
      */
     private fun buildEditedMediaItem(
         index: Int,
         clip: VideoClip,
-        normalizedAudioEffects: List<AudioProcessor>
+        normalizedAudioEffects: List<AudioProcessor>,
+        fadeInfo: ClipFadeInfo?
     ): EditedMediaItem {
         Log.d(RENDER_TAG, "Processing clip $index: ${clip.inputPath}")
         val inputFile = File(clip.inputPath)
@@ -541,6 +635,36 @@ class VideoSequenceBuilder(
             perClipAudioProcessors
         }
 
+        // Attach the dip (fade-to-black/white) overlay LAST so the entire
+        // composed frame — including any image-layer overlays — dips to the
+        // transition color at the clip boundary. The overlay is added after
+        // scale, so size the solid-color bitmap to cover the post-scale frame
+        // (centered, oversized overflow is clipped by Media3).
+        fadeInfo?.let { info ->
+            val sx = scaleX ?: 1f
+            val sy = scaleY ?: 1f
+            val dipW = maxOf(videoWidth, (videoWidth * sx).toInt())
+            val dipH = maxOf(videoHeight, (videoHeight * sy).toInt())
+            clipVideoEffects += OverlayEffect(
+                listOf(
+                    ClipFadeOverlay(
+                        videoWidth = dipW,
+                        videoHeight = dipH,
+                        dipColor = info.dipColor,
+                        clipDurationUs = info.clipDurationUs,
+                        fadeInUs = info.fadeInUs,
+                        fadeOutUs = info.fadeOutUs,
+                        curve = info.curve,
+                    )
+                )
+            )
+            Log.d(
+                RENDER_TAG,
+                "Clip $index dip transition: fadeInUs=${info.fadeInUs}, " +
+                        "fadeOutUs=${info.fadeOutUs}, color=${info.dipColor}"
+            )
+        }
+
         val effects = Effects(finalAudioEffects, clipVideoEffects)
 
         // Determine if audio should be removed
@@ -660,13 +784,9 @@ class VideoSequenceBuilder(
                 // Only add if there's still content left
                 if (newEndInSource > newStartInSource) {
                     result.add(
-                        VideoClip(
-                            inputPath = clip.inputPath,
+                        clip.copy(
                             startUs = newStartInSource,
-                            endUs = newEndInSource,
-                            volume = clip.volume,
-                            playbackSpeed = clip.playbackSpeed,
-                            reverseVideo = clip.reverseVideo
+                            endUs = newEndInSource
                         )
                     )
                     val trimmedDuration = newEndInSource - newStartInSource
@@ -742,12 +862,10 @@ class VideoSequenceBuilder(
                 )
                 temporaryFiles.add(java.io.File(reversed.outputPath))
                 result.add(
-                    VideoClip(
+                    clip.copy(
                         inputPath = reversed.outputPath,
                         startUs = 0L,
                         endUs = reversed.durationUs.takeIf { it > 0 },
-                        volume = clip.volume,
-                        playbackSpeed = clip.playbackSpeed,
                         reverseVideo = false
                     )
                 )

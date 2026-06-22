@@ -22,6 +22,8 @@ import ch.waio.pro_video_editor.src.features.render.helpers.VolumeControlAudioMi
 import ch.waio.pro_video_editor.src.features.render.helpers.ConfigurableInAppMp4Muxer
 import ch.waio.pro_video_editor.src.features.render.helpers.VideoTranscoder
 import ch.waio.pro_video_editor.src.features.render.helpers.VideoReverser
+import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionRenderer
+import ch.waio.pro_video_editor.src.features.render.helpers.MediaInfoExtractor
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderJobHandle
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
@@ -109,29 +111,40 @@ class RenderVideo(private val context: Context) {
         val mainHandler = Handler(Looper.getMainLooper())
         var transcodedFiles: List<String> = emptyList()
         var reversedFiles: List<String> = emptyList()
+        var transitionFiles: List<String> = emptyList()
         val transformerRef = AtomicReference<Transformer?>(null)
         val outputFileRef = AtomicReference<File?>(null)
 
         val needsPreTranscode = needsPreTranscoding(config)
         val needsPreReverse = config.videoClips.any { it.reverseVideo }
+        val needsPreTransitions = config.videoClips.size > 1 &&
+                config.videoClips.any { it.transition?.isOverlap == true }
 
-        // Progress split: reverse pre-render is the slowest stage, so it gets the
-        // largest share. Without reverse, the transformer owns the full bar.
-        val reverseShare = if (needsPreReverse) 0.6 else 0.0
-        val transformShare = 1.0 - reverseShare
+        // Progress split across the slow pre-render stages and the transformer.
+        // Reverse + overlap-transition pre-renders each get a share; whatever is
+        // left belongs to the transformer phase.
+        val reverseShare = if (needsPreReverse) 0.4 else 0.0
+        val transitionShare = if (needsPreTransitions) 0.4 else 0.0
+        val transformShare = 1.0 - reverseShare - transitionShare
         val reverseProgress: (Double) -> Unit = { p ->
             onProgress((p * reverseShare).coerceIn(0.0, 1.0))
         }
+        val transitionProgress: (Double) -> Unit = { p ->
+            onProgress((reverseShare + p * transitionShare).coerceIn(0.0, 1.0))
+        }
         val transformProgress: (Double) -> Unit = { p ->
-            onProgress((reverseShare + p * transformShare).coerceIn(0.0, 1.0))
+            onProgress(
+                (reverseShare + transitionShare + p * transformShare).coerceIn(0.0, 1.0)
+            )
         }
 
         val cleanupAllPreFiles: () -> Unit = {
             VideoTranscoder.cleanupTranscodedFiles(transcodedFiles)
             VideoReverser.cleanupReversedFiles(reversedFiles)
+            ClipTransitionRenderer.cleanupFiles(transitionFiles)
         }
 
-        if (!needsPreTranscode && !needsPreReverse) {
+        if (!needsPreTranscode && !needsPreReverse && !needsPreTransitions) {
             // Fast path: nothing to pre-process.
             renderInternal(
                 config = config,
@@ -166,14 +179,7 @@ class RenderVideo(private val context: Context) {
                         val updatedClips = workingConfig.videoClips.map { clip ->
                             val newPath = transcodeMap[clip.inputPath] ?: clip.inputPath
                             if (newPath != clip.inputPath) {
-                                VideoClip(
-                                    newPath,
-                                    clip.startUs,
-                                    clip.endUs,
-                                    clip.volume,
-                                    clip.playbackSpeed,
-                                    clip.reverseVideo
-                                )
+                                clip.copy(inputPath = newPath)
                             } else clip
                         }
                         workingConfig = workingConfig.copy(videoClips = updatedClips)
@@ -199,6 +205,23 @@ class RenderVideo(private val context: Context) {
                         // Make sure the bar fully fills the reverse share before
                         // the transformer phase starts.
                         reverseProgress(1.0)
+                    }
+
+                    // 3) Pre-render overlap transitions (dissolve/slide/push/wipe)
+                    //    into short blended clips spliced between the neighbours.
+                    if (needsPreTransitions && !shouldStopPolling.get()) {
+                        Log.d(RENDER_TAG, "Pre-rendering overlap clip transitions")
+                        val paths = mutableListOf<String>()
+                        val transitionedClips = preRenderTransitions(
+                            workingConfig.videoClips,
+                            enableAudio = workingConfig.enableAudio,
+                            shouldStop = shouldStopPolling,
+                            collectPath = { paths.add(it) },
+                            onProgress = { f -> transitionProgress(f.toDouble()) },
+                        )
+                        transitionFiles = paths
+                        workingConfig = workingConfig.copy(videoClips = transitionedClips)
+                        transitionProgress(1.0)
                     }
 
                     val finalConfig = workingConfig
@@ -240,6 +263,7 @@ class RenderVideo(private val context: Context) {
             transformerRef.get()?.cancel()
             VideoTranscoder.cleanupTranscodedFiles(transcodedFiles)
             VideoReverser.cleanupReversedFiles(reversedFiles)
+            ClipTransitionRenderer.cleanupFiles(transitionFiles)
             if (config.outputPath == null) {
                 outputFileRef.get()?.delete()
             }
@@ -285,12 +309,10 @@ class RenderVideo(private val context: Context) {
                     },
                 )
                 collectPath(reversed.outputPath)
-                result[clipIdx] = VideoClip(
+                result[clipIdx] = clip.copy(
                     inputPath = reversed.outputPath,
                     startUs = 0L,
                     endUs = reversed.durationUs.takeIf { it > 0 },
-                    volume = clip.volume,
-                    playbackSpeed = clip.playbackSpeed,
                     reverseVideo = false,
                 )
             } catch (e: Exception) {
@@ -302,6 +324,111 @@ class RenderVideo(private val context: Context) {
                 result[clipIdx] = clip.copy(reverseVideo = false)
             }
         }
+        return result
+    }
+
+    /**
+     * Pre-renders overlap transitions (dissolve/slide/push/wipe) into short
+     * blended MP4 clips and rewrites the clip list so the main pipeline sees
+     * plain forward clips:
+     *
+     * For a transition between clip *i* and *i+1*, clip *i* is shortened by the
+     * (clamped) transition duration `d`, the blended clip (`d`) is inserted, and
+     * clip *i+1*'s head is trimmed by `d`. Net timeline change: `-d` per
+     * transition. If a transition cannot be rendered (e.g. dimension mismatch,
+     * per-clip speed, or not enough content) it degrades to a hard cut.
+     */
+    private fun preRenderTransitions(
+        clips: List<VideoClip>,
+        enableAudio: Boolean,
+        shouldStop: AtomicBoolean,
+        collectPath: (String) -> Unit,
+        onProgress: (Float) -> Unit,
+    ): List<VideoClip> {
+        if (clips.size < 2) return clips
+        val total = (0 until clips.size - 1)
+            .count { clips[it].transition?.isOverlap == true }
+        if (total == 0) return clips
+
+        val work = clips.toMutableList()
+        val result = mutableListOf<VideoClip>()
+        var doneCount = 0
+        var i = 0
+
+        while (i < work.size) {
+            val current = work[i]
+            val next = work.getOrNull(i + 1)
+            val transition = current.transition
+
+            val canOverlap = next != null && transition != null && transition.isOverlap &&
+                    !current.reverseVideo && !next.reverseVideo &&
+                    (current.playbackSpeed == null || current.playbackSpeed == 1.0f) &&
+                    (next.playbackSpeed == null || next.playbackSpeed == 1.0f)
+
+            if (shouldStop.get() || !canOverlap) {
+                // Clear an overlap transition so it is not reinterpreted later.
+                result.add(if (transition?.isOverlap == true) current.copy(transition = null) else current)
+                i++
+                continue
+            }
+
+            val curStart = current.startUs ?: 0L
+            val curEnd = current.endUs ?: MediaInfoExtractor.getVideoDuration(current.inputPath)
+            val nextStart = next!!.startUs ?: 0L
+            val nextEnd = next.endUs ?: MediaInfoExtractor.getVideoDuration(next.inputPath)
+            val curDur = curEnd - curStart
+            val nextDur = nextEnd - nextStart
+            val d = transition!!.durationUs.coerceAtMost(minOf(curDur, nextDur))
+
+            if (d <= 0L || curDur - d <= 0L || nextDur - d <= 0L) {
+                Log.w(RENDER_TAG, "Transition: not enough content for boundary $i, hard cut")
+                result.add(current.copy(transition = null))
+                doneCount++
+                onProgress((doneCount.toFloat() / total).coerceIn(0f, 1f))
+                i++
+                continue
+            }
+
+            val rendered = ClipTransitionRenderer.renderSync(
+                context = context,
+                outgoingPath = current.inputPath,
+                outTailStartUs = curEnd - d,
+                outTailEndUs = curEnd,
+                incomingPath = next.inputPath,
+                inHeadStartUs = nextStart,
+                inHeadEndUs = nextStart + d,
+                type = transition.type,
+                direction = transition.direction,
+                curve = transition.curve,
+                includeAudio = enableAudio &&
+                        (current.volume ?: 1.0f) > 0f && (next.volume ?: 1.0f) > 0f,
+                onProgress = { f ->
+                    onProgress(((doneCount + f) / total).coerceIn(0f, 1f))
+                },
+            )
+
+            if (rendered != null) {
+                collectPath(rendered.outputPath)
+                result.add(current.copy(endUs = curEnd - d, transition = null))
+                result.add(
+                    VideoClip(
+                        inputPath = rendered.outputPath,
+                        startUs = 0L,
+                        endUs = rendered.durationUs.takeIf { it > 0 },
+                    )
+                )
+                // Trim the incoming head in place; it keeps its own transition.
+                work[i + 1] = next.copy(startUs = nextStart + d)
+            } else {
+                Log.w(RENDER_TAG, "Transition render failed for boundary $i, hard cut")
+                result.add(current.copy(transition = null))
+            }
+
+            doneCount++
+            onProgress((doneCount.toFloat() / total).coerceIn(0f, 1f))
+            i++
+        }
+
         return result
     }
 

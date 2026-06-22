@@ -39,6 +39,37 @@ struct LayerAnimationConfig {
   }
 }
 
+/// Configuration for a transition played between a clip and the next one.
+struct ClipTransitionConfig {
+  /// Transition kind: "dissolve", "fadeToBlack", "fadeToWhite", "slide",
+  /// "push" or "wipe".
+  let type: String
+  /// Transition duration in microseconds.
+  let durationUs: Int64
+  /// Easing curve: "linear", "easeIn", "easeOut", "easeInOut", …
+  let curve: String
+  /// Direction for directional transitions: "left", "right", "up", "down".
+  let direction: String
+
+  /// True when this transition overlaps and blends the two clips.
+  var isOverlap: Bool {
+    type == "dissolve" || type == "slide" || type == "push" || type == "wipe"
+  }
+
+  static func fromArguments(_ args: [String: Any]?) -> ClipTransitionConfig? {
+    guard let args = args,
+      let type = args["type"] as? String,
+      let durationUs = (args["durationUs"] as? NSNumber)?.int64Value
+    else { return nil }
+    return ClipTransitionConfig(
+      type: type,
+      durationUs: durationUs,
+      curve: args["curve"] as? String ?? "linear",
+      direction: args["direction"] as? String ?? "left"
+    )
+  }
+}
+
 public struct ImageLayerConfig: Sendable {
   let imageData: Data
   let startUs: Int64
@@ -276,7 +307,10 @@ struct RenderConfig: Sendable {
           endUs: (clipMap["endUs"] as? NSNumber)?.int64Value,
           volume: (clipMap["volume"] as? NSNumber)?.floatValue,
           playbackSpeed: (clipMap["playbackSpeed"] as? NSNumber)?.floatValue,
-          reverseVideo: clipMap["reverseVideo"] as? Bool ?? false
+          reverseVideo: clipMap["reverseVideo"] as? Bool ?? false,
+          transition: ClipTransitionConfig.fromArguments(
+            clipMap["transition"] as? [String: Any]
+          )
         )
       }
     }

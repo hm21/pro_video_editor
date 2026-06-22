@@ -225,6 +225,198 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Cross-dissolve transition between two split clips.
+  ///
+  /// The two clips overlap by 800ms and blend (outgoing fades out while the
+  /// incoming fades in). The total output is shortened by the overlap.
+  Future<void> _clipDissolve() async {
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 5),
+          transition: const ClipTransition(
+            type: ClipTransitionType.dissolve,
+            duration: Duration(milliseconds: 800),
+            curve: AnimationCurve.easeInOut,
+          ),
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 15),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Fade-to-black (dip-to-black) transition between two split clips.
+  ///
+  /// The outgoing clip dips to black and the incoming rises from black at the
+  /// boundary. The total duration is unchanged.
+  Future<void> _clipFadeToBlack() async {
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 5),
+          transition: const ClipTransition(
+            type: ClipTransitionType.fadeToBlack,
+            duration: Duration(milliseconds: 1700),
+            curve: AnimationCurve.easeInOut,
+          ),
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 15),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Fade-to-white (dip-to-white) transition between two split clips.
+  Future<void> _clipFadeToWhite() async {
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 5),
+          transition: const ClipTransition(
+            type: ClipTransitionType.fadeToWhite,
+            duration: Duration(milliseconds: 700),
+          ),
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 15),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Slide transition: the incoming clip slides in from the right over the
+  /// outgoing clip.
+  Future<void> _clipSlide() async {
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 5),
+          transition: const ClipTransition(
+            type: ClipTransitionType.slide,
+            duration: Duration(milliseconds: 700),
+            direction: ClipTransitionDirection.left,
+            curve: AnimationCurve.easeOutCubic,
+          ),
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 15),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Push transition: the incoming clip pushes the outgoing clip out of frame.
+  Future<void> _clipPush() async {
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 5),
+          transition: const ClipTransition(
+            type: ClipTransitionType.push,
+            duration: Duration(milliseconds: 700),
+            direction: ClipTransitionDirection.left,
+          ),
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 15),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Wipe transition: the incoming clip is revealed with a moving edge.
+  Future<void> _clipWipe() async {
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 5),
+          transition: const ClipTransition(
+            type: ClipTransitionType.wipe,
+            duration: Duration(milliseconds: 700),
+            direction: ClipTransitionDirection.right,
+          ),
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 15),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Combined transitions across three clips: a dissolve into the second clip,
+  /// then a fade-to-black into the third.
+  Future<void> _clipTransitionsCombined() async {
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 5),
+          transition: const ClipTransition(
+            type: ClipTransitionType.dissolve,
+            duration: Duration(milliseconds: 800),
+            curve: AnimationCurve.easeInOut,
+          ),
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 8),
+          endTime: const Duration(seconds: 13),
+          transition: const ClipTransition(
+            type: ClipTransitionType.fadeToBlack,
+            duration: Duration(milliseconds: 600),
+          ),
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 15),
+          endTime: const Duration(seconds: 20),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   Future<void> _removeAudio() async {
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video)],
@@ -1488,6 +1680,49 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           leading: const Icon(Icons.auto_awesome_outlined),
           title: const Text('Combined Animations'),
           subtitle: const Text('Fade + slide + scale with curves'),
+        ),
+        ..._buildSectionTitle('Clip Transitions'),
+        ListTile(
+          onTap: _clipDissolve,
+          leading: const Icon(Icons.gradient_outlined),
+          title: const Text('Dissolve'),
+          subtitle: const Text('800ms cross-dissolve between two clips'),
+        ),
+        ListTile(
+          onTap: _clipFadeToBlack,
+          leading: const Icon(Icons.nightlight_outlined),
+          title: const Text('Fade to Black'),
+          subtitle: const Text('Dip to black at the clip boundary'),
+        ),
+        ListTile(
+          onTap: _clipFadeToWhite,
+          leading: const Icon(Icons.wb_sunny_outlined),
+          title: const Text('Fade to White'),
+          subtitle: const Text('Dip to white at the clip boundary'),
+        ),
+        ListTile(
+          onTap: _clipSlide,
+          leading: const Icon(Icons.slideshow_outlined),
+          title: const Text('Slide'),
+          subtitle: const Text('Incoming slides in over the outgoing clip'),
+        ),
+        ListTile(
+          onTap: _clipPush,
+          leading: const Icon(Icons.swap_horizontal_circle_outlined),
+          title: const Text('Push'),
+          subtitle: const Text('Incoming pushes the outgoing clip out'),
+        ),
+        ListTile(
+          onTap: _clipWipe,
+          leading: const Icon(Icons.compare_outlined),
+          title: const Text('Wipe'),
+          subtitle: const Text('Incoming revealed with a moving edge'),
+        ),
+        ListTile(
+          onTap: _clipTransitionsCombined,
+          leading: const Icon(Icons.auto_awesome_motion_outlined),
+          title: const Text('Combined Transitions'),
+          subtitle: const Text('Dissolve → fade-to-black across 3 clips'),
         ),
         ..._buildSectionTitle('Video Concatenation'),
         ListTile(

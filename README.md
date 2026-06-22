@@ -124,6 +124,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🕐 **Timed Image Layers**: Position image overlays at specific coordinates with optional start/end times.
 - 📐 **Layer Size**: Scale image layers to custom dimensions via the `size` property.
 - 🎬 **Layer Animations**: Animate image layers with fade, slide, and scale effects, configurable easing curves, and in/out/inOut phases.
+- 🎞️ **Clip Transitions**: Add transitions between adjacent clips — `dissolve`, `fadeToBlack`, `fadeToWhite`, `slide`, `push`, and `wipe` — with configurable duration, easing curve, and direction.
 - 🧮 **Color Matrix**: Apply one or multiple 4x5 color matrices (e.g., for filters).
 - 💧 **Blur**: Add a blur effect to the video.
 - 📡 **Bitrate**: Set a custom video bitrate. If constant bitrate (CBR) isn't supported, it will gracefully fall back to the next available mode.
@@ -152,6 +153,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 | `Overlay Layers`           | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Timed Image Layers`       | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Layer Animations`          | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
+| `Clip Transitions`          | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Layer Size`                | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Multiple ColorMatrix 4x5` | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Cancel export task`       | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
@@ -316,6 +318,47 @@ var data = VideoRenderData(
 );
 
 Uint8List result = await ProVideoEditor.instance.renderVideo(data);
+```
+
+#### Clip Transitions Example
+```dart
+/// Add a transition between adjacent clips via `VideoSegment.transition`.
+/// The transition describes how a clip moves into the NEXT clip and is
+/// ignored on the last segment.
+///
+/// Overlap transitions (dissolve, slide, push, wipe) blend the two clips and
+/// shorten the total output by the transition duration. Dip transitions
+/// (fadeToBlack, fadeToWhite) dip through a color and keep the duration.
+var data = VideoRenderData(
+    videoSegments: [
+        VideoSegment(
+            video: EditorVideo.asset('assets/clip-a.mp4'),
+            endTime: const Duration(seconds: 5),
+            transition: const ClipTransition(
+                type: ClipTransitionType.dissolve,
+                duration: Duration(milliseconds: 800),
+                curve: AnimationCurve.easeInOut,
+            ),
+        ),
+        VideoSegment(
+            video: EditorVideo.asset('assets/clip-b.mp4'),
+            // A directional transition (slide / push / wipe) uses `direction`.
+            transition: const ClipTransition(
+                type: ClipTransitionType.wipe,
+                duration: Duration(milliseconds: 700),
+                direction: ClipTransitionDirection.right,
+            ),
+        ),
+        VideoSegment(video: EditorVideo.asset('assets/clip-c.mp4')),
+    ],
+    outputFormat: VideoOutputFormat.mp4,
+);
+
+Uint8List result = await ProVideoEditor.instance.renderVideo(data);
+
+/// Note: overlap transitions require the neighbouring clips to share the same
+/// dimensions (split clips from one source always do); otherwise the boundary
+/// falls back to a hard cut.
 ```
 
 #### Extract Audio Example
@@ -577,9 +620,13 @@ Represents a video clip segment for merging multiple videos.
 
 ```dart
 VideoSegment({
-  required EditorVideo video,  // Video source (file, asset, network, memory)
-  Duration? startTime,          // Optional: Start time for trimming
-  Duration? endTime,            // Optional: End time for trimming
+  required EditorVideo video,    // Video source (file, asset, network, memory)
+  Duration? startTime,           // Optional: Start time for trimming
+  Duration? endTime,             // Optional: End time for trimming
+  double? volume,                // Optional: Per-clip volume multiplier
+  double? playbackSpeed,         // Optional: Per-clip playback speed
+  bool reverseVideo = false,     // Optional: Play this clip backwards
+  ClipTransition? transition,    // Optional: Transition into the NEXT clip
 })
 ```
 
@@ -587,6 +634,10 @@ VideoSegment({
 - `video` (required): The video source using `EditorVideo.file()`, `EditorVideo.asset()`, `EditorVideo.network()`, or `EditorVideo.memory()`.
 - `startTime` (optional): The starting point for this clip. If omitted, starts from the beginning (0:00).
 - `endTime` (optional): The ending point for this clip. If omitted, uses the full video duration.
+- `volume` (optional): Per-clip audio volume multiplier (`0.0` = mute, `1.0` = original).
+- `playbackSpeed` (optional): Per-clip playback speed (e.g. `0.5` = half, `2.0` = double).
+- `reverseVideo` (optional): Renders this clip backwards when `true`.
+- `transition` (optional): A `ClipTransition` describing how this clip transitions into the **next** clip (dissolve, fade-to-black, slide, etc.). Ignored on the last segment.
 
 **Usage Example:**
 ```dart

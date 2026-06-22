@@ -47,7 +47,8 @@ internal class CompositionBuilder {
   /// - Returns: Tuple containing composition, video composition, render size, audio mix, source track ID, and temporary file URLs to clean up after export
   /// - Throws: Error if composition creation fails
   func build() async throws -> (
-    AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID, [URL]
+    AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID, [URL],
+    [FadeWindow]
   ) {
     guard !videoClips.isEmpty else {
       throw NSError(
@@ -180,10 +181,60 @@ internal class CompositionBuilder {
     // Return the track ID for fallback on older system environments
     let sourceTrackID = videoResult.videoTrack.trackID
 
+    // Compute dip-to-color windows for fadeToBlack / fadeToWhite transitions.
+    let fadeWindows = computeFadeWindows(clipInstructions: videoResult.clipInstructions)
+
     return (
       composition, videoCompositionData, videoResult.renderSize, audioMix, sourceTrackID,
-      temporaryAudioURLs
+      temporaryAudioURLs, fadeWindows
     )
+  }
+
+  /// Builds the dip-to-color windows for `fadeToBlack` / `fadeToWhite`
+  /// transitions from the per-clip instruction time ranges.
+  ///
+  /// For a dip transition on clip *i*, the boundary between clip *i* and *i+1*
+  /// dips: clip *i* fades out to the color over its last `duration/2`, and clip
+  /// *i+1* fades in from the color over its first `duration/2`. Overlap
+  /// transitions are handled by the pre-render and never reach this method.
+  private func computeFadeWindows(clipInstructions: [ClipInstruction]) -> [FadeWindow] {
+    var windows: [FadeWindow] = []
+    for (i, clip) in videoClips.enumerated() {
+      guard i + 1 < clipInstructions.count, let transition = clip.transition else { continue }
+      let toWhite: Bool
+      switch transition.type {
+      case "fadeToBlack": toWhite = false
+      case "fadeToWhite": toWhite = true
+      default: continue
+      }
+
+      let dHalfUs = transition.durationUs / 2
+      let instr = clipInstructions[i]
+      let clipStartUs = Int64(CMTimeGetSeconds(instr.timeRange.start) * 1_000_000)
+      let boundaryUs = Int64(CMTimeGetSeconds(CMTimeRangeGetEnd(instr.timeRange)) * 1_000_000)
+      let nextEndUs = Int64(
+        CMTimeGetSeconds(CMTimeRangeGetEnd(clipInstructions[i + 1].timeRange)) * 1_000_000)
+
+      // Fade out (to color) over the tail of clip i.
+      windows.append(
+        FadeWindow(
+          startUs: max(clipStartUs, boundaryUs - dHalfUs),
+          endUs: boundaryUs,
+          fadeIn: false,
+          curve: transition.curve,
+          toWhite: toWhite
+        ))
+      // Fade in (from color) over the head of clip i+1.
+      windows.append(
+        FadeWindow(
+          startUs: boundaryUs,
+          endUs: min(nextEndUs, boundaryUs + dHalfUs),
+          fadeIn: true,
+          curve: transition.curve,
+          toWhite: toWhite
+        ))
+    }
+    return windows
   }
 
   /// Creates audio mix with per-clip and per-track volume parameters.

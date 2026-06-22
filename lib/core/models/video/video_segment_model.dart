@@ -18,6 +18,7 @@ class VideoSegment {
     this.volume,
     this.playbackSpeed,
     this.reverseVideo = false,
+    this.transition,
   })  : assert(
           startTime == null || endTime == null || startTime < endTime,
           'startTime must be before endTime',
@@ -71,6 +72,16 @@ class VideoSegment {
   /// **Default**: `false`
   final bool reverseVideo;
 
+  /// The transition played between this clip and the **next** clip.
+  ///
+  /// Describes how this segment transitions into the following segment (e.g. a
+  /// dissolve or fade-to-black). The transition is ignored on the last segment
+  /// because there is no following clip.
+  ///
+  /// Currently supported on Android and iOS/macOS only; other platforms
+  /// ignore this field.
+  final ClipTransition? transition;
+
   /// Converts this clip to a map for platform channel communication.
   Future<Map<String, dynamic>> toAsyncMap() async {
     final inputPath = await video.safeFilePath();
@@ -82,6 +93,7 @@ class VideoSegment {
       'volume': volume,
       'playbackSpeed': playbackSpeed,
       'reverseVideo': reverseVideo,
+      'transition': transition?.toMap(),
     };
   }
 
@@ -93,6 +105,7 @@ class VideoSegment {
     double? volume,
     double? playbackSpeed,
     bool? reverseVideo,
+    ClipTransition? transition,
   }) {
     return VideoSegment(
       video: video ?? this.video,
@@ -101,6 +114,7 @@ class VideoSegment {
       volume: volume ?? this.volume,
       playbackSpeed: playbackSpeed ?? this.playbackSpeed,
       reverseVideo: reverseVideo ?? this.reverseVideo,
+      transition: transition ?? this.transition,
     );
   }
 
@@ -113,7 +127,8 @@ class VideoSegment {
         other.endTime == endTime &&
         other.volume == volume &&
         other.playbackSpeed == playbackSpeed &&
-        other.reverseVideo == reverseVideo;
+        other.reverseVideo == reverseVideo &&
+        other.transition == transition;
   }
 
   @override
@@ -123,7 +138,8 @@ class VideoSegment {
         endTime.hashCode ^
         volume.hashCode ^
         playbackSpeed.hashCode ^
-        reverseVideo.hashCode;
+        reverseVideo.hashCode ^
+        transition.hashCode;
   }
 
   @override
@@ -133,7 +149,8 @@ class VideoSegment {
         'endTime: $endTime, '
         'volume: $volume, '
         'playbackSpeed: $playbackSpeed, '
-        'reverseVideo: $reverseVideo)';
+        'reverseVideo: $reverseVideo, '
+        'transition: $transition)';
   }
 
   Map<String, dynamic> toMap() {
@@ -144,6 +161,7 @@ class VideoSegment {
       'volume': volume,
       'playbackSpeed': playbackSpeed,
       'reverseVideo': reverseVideo,
+      'transition': transition?.toMap(),
     };
   }
 
@@ -159,6 +177,9 @@ class VideoSegment {
       volume: tryParseDouble(map['volume']),
       playbackSpeed: tryParseDouble(map['playbackSpeed']),
       reverseVideo: map['reverseVideo'] as bool? ?? false,
+      transition: map['transition'] != null
+          ? ClipTransition.fromMap(map['transition'] as Map<String, dynamic>)
+          : null,
     );
   }
 

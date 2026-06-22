@@ -49,6 +49,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// Color filter configs for per-frame LUT computation
   private var colorFilterConfigs: [ColorFilterConfig] = []
 
+  /// Dip-to-color windows for fadeToBlack / fadeToWhite clip transitions
+  private var fadeWindows: [FadeWindow] = []
+
   /// Cache for computed LUTs keyed by active filter indices
   private let lutCacheQueue = DispatchQueue(label: "lut.cache.queue")
   private var lutCache: [String: (data: Data, size: Int)] = [:]
@@ -86,6 +89,40 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
     self.setOverlayImageLayers(from: config.imageLayerConfigs)
     self.colorFilterConfigs = config.colorFilterConfigs
+    self.fadeWindows = config.fadeWindows
+  }
+
+  /// Applies a dip-to-color (fade-to-black / fade-to-white) at the given
+  /// composition time, if any fade window is active. The video is mixed toward
+  /// the dip color by `dipAmount` (0 = full video, 1 = full color).
+  private func applyFadeDip(to image: CIImage, at compositionTime: CMTime) -> CIImage {
+    guard !fadeWindows.isEmpty else { return image }
+    let tUs = Int64(CMTimeGetSeconds(compositionTime) * 1_000_000)
+
+    var dipAmount = 0.0
+    var toWhite = false
+    for w in fadeWindows where w.endUs > w.startUs && tUs >= w.startUs && tUs < w.endUs {
+      let raw = Double(tUs - w.startUs) / Double(w.endUs - w.startUs)
+      let eased = applyEasing(max(0, min(1, raw)), curve: w.curve)
+      let amt = w.fadeIn ? (1.0 - eased) : eased
+      if amt > dipAmount {
+        dipAmount = amt
+        toWhite = w.toWhite
+      }
+    }
+
+    guard dipAmount > 0 else { return image }
+    let s = CGFloat(1.0 - dipAmount)
+    let b = toWhite ? CGFloat(dipAmount) : 0
+    return image.applyingFilter(
+      "CIColorMatrix",
+      parameters: [
+        "inputRVector": CIVector(x: s, y: 0, z: 0, w: 0),
+        "inputGVector": CIVector(x: 0, y: s, z: 0, w: 0),
+        "inputBVector": CIVector(x: 0, y: 0, z: s, w: 0),
+        "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+        "inputBiasVector": CIVector(x: b, y: b, z: b, w: 0),
+      ])
   }
 
   func setOverlayImageLayers(from layers: [ImageLayerConfig]) {
@@ -514,6 +551,10 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         }
       }
     }
+
+    // Apply dip-to-color (fade-to-black / fade-to-white) clip transitions last,
+    // so the entire composed frame (including overlays) dips uniformly.
+    outputImage = applyFadeDip(to: outputImage, at: request.compositionTime)
 
     guard let outputBuffer = request.renderContext.newPixelBuffer() else {
       request.finish(with: NSError(domain: "VideoCompositor", code: -2, userInfo: nil))

@@ -1,3 +1,6 @@
+## 1.21.0
+- **FEAT**(android, iOS, macOS): Add clip transitions between adjacent `VideoSegment`s via a new `transition` field (`ClipTransition` with `type`, `duration`, `curve`, `direction`). Supports `dissolve`, `slide`, `push` and `wipe` (overlap and shorten the output) plus `fadeToBlack` and `fadeToWhite` (dip through a color, duration unchanged). Web/Windows/Linux ignore the field.
+
 ## 1.20.0
 - **FEAT**(android, iOS, macOS): Add stop-motion support to turn a sequence of still images into a video via `ProVideoEditor.instance.renderStopMotion` / `renderStopMotionToFile`. Each `StopMotionFrame` is held for `1 / frameRate` seconds (or a per-frame `duration` override) and encoded into a single silent video. The output size defaults to the first frame and frames are mapped onto it via `StopMotionFit` (`contain` / `cover` / `stretch`). Darwin encodes with `AVAssetWriter` + a pixel-buffer adaptor; Android uses Media3 Transformer image input with a `Presentation` effect. Progress and cancellation reuse the existing render task infrastructure. Audio is not mixed in — pass the result through `renderVideo` with `audioTracks` to add music. Web/Windows/Linux are not supported.
 
