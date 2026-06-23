@@ -40,6 +40,7 @@ internal enum ClipTransitionRenderer {
     incomingPath: String,
     inHeadStartUs: Int64,
     inHeadEndUs: Int64,
+    outputDurationUs: Int64,
     type: String,
     direction: String,
     curve: String,
@@ -53,9 +54,15 @@ internal enum ClipTransitionRenderer {
       let outVideo = try await MediaInfoExtractor.loadVideoTrack(from: outAsset)
       let inVideo = try await MediaInfoExtractor.loadVideoTrack(from: inAsset)
 
-      let dUs = max(outTailEndUs - outTailStartUs, inHeadEndUs - inHeadStartUs)
-      guard dUs > 0 else { return nil }
+      // Source spans consumed from each side (already speed-scaled by the
+      // caller) and the shared OUTPUT (post-speed) duration of the blend.
+      let outTailDurUs = outTailEndUs - outTailStartUs
+      let inHeadDurUs = inHeadEndUs - inHeadStartUs
+      let dUs = outputDurationUs
+      guard dUs > 0, outTailDurUs > 0, inHeadDurUs > 0 else { return nil }
       let d = CMTime(value: dUs, timescale: 1_000_000)
+      let outTailDur = CMTime(value: outTailDurUs, timescale: 1_000_000)
+      let inHeadDur = CMTime(value: inHeadDurUs, timescale: 1_000_000)
 
       let composition = AVMutableComposition()
       guard
@@ -68,9 +75,21 @@ internal enum ClipTransitionRenderer {
       let outStart = CMTime(value: outTailStartUs, timescale: 1_000_000)
       let inStart = CMTime(value: inHeadStartUs, timescale: 1_000_000)
       try trackA.insertTimeRange(
-        CMTimeRange(start: outStart, duration: d), of: outVideo, at: .zero)
+        CMTimeRange(start: outStart, duration: outTailDur), of: outVideo, at: .zero)
       try trackB.insertTimeRange(
-        CMTimeRange(start: inStart, duration: d), of: inVideo, at: .zero)
+        CMTimeRange(start: inStart, duration: inHeadDur), of: inVideo, at: .zero)
+
+      // Apply each side's playback speed by scaling its inserted span to the
+      // shared output duration, so the footage inside the blend plays at the
+      // requested speed (the ramps below all run over the output duration `d`).
+      if outTailDur != d {
+        trackA.scaleTimeRange(
+          CMTimeRange(start: .zero, duration: outTailDur), toDuration: d)
+      }
+      if inHeadDur != d {
+        trackB.scaleTimeRange(
+          CMTimeRange(start: .zero, duration: inHeadDur), toDuration: d)
+      }
 
       let transformA = try await loadPreferredTransform(outVideo)
       let transformB = try await loadPreferredTransform(inVideo)
@@ -85,8 +104,8 @@ internal enum ClipTransitionRenderer {
       if includeAudio {
         audioMix = try await buildAudioMix(
           composition: composition,
-          outAsset: outAsset, outStart: outStart,
-          inAsset: inAsset, inStart: inStart,
+          outAsset: outAsset, outStart: outStart, outDuration: outTailDur,
+          inAsset: inAsset, inStart: inStart, inDuration: inHeadDur,
           duration: d, curve: curve)
       }
 
@@ -260,8 +279,8 @@ internal enum ClipTransitionRenderer {
 
   private static func buildAudioMix(
     composition: AVMutableComposition,
-    outAsset: AVURLAsset, outStart: CMTime,
-    inAsset: AVURLAsset, inStart: CMTime,
+    outAsset: AVURLAsset, outStart: CMTime, outDuration: CMTime,
+    inAsset: AVURLAsset, inStart: CMTime, inDuration: CMTime,
     duration d: CMTime, curve: String
   ) async throws -> AVMutableAudioMix? {
     guard
@@ -273,8 +292,19 @@ internal enum ClipTransitionRenderer {
         withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
     else { return nil }
 
-    try trackA.insertTimeRange(CMTimeRange(start: outStart, duration: d), of: outAudio, at: .zero)
-    try trackB.insertTimeRange(CMTimeRange(start: inStart, duration: d), of: inAudio, at: .zero)
+    try trackA.insertTimeRange(
+      CMTimeRange(start: outStart, duration: outDuration), of: outAudio, at: .zero)
+    try trackB.insertTimeRange(
+      CMTimeRange(start: inStart, duration: inDuration), of: inAudio, at: .zero)
+
+    // Speed-scale each side's audio to the shared output duration so it stays
+    // aligned with the speed-adjusted video and the blend length matches.
+    if outDuration != d {
+      trackA.scaleTimeRange(CMTimeRange(start: .zero, duration: outDuration), toDuration: d)
+    }
+    if inDuration != d {
+      trackB.scaleTimeRange(CMTimeRange(start: .zero, duration: inDuration), toDuration: d)
+    }
 
     let paramsA = AVMutableAudioMixInputParameters(track: trackA)
     let paramsB = AVMutableAudioMixInputParameters(track: trackB)

@@ -417,6 +417,69 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Cross-dissolve between two clips that both play at 2× speed.
+  ///
+  /// Demonstrates that per-segment `playbackSpeed` is applied to the footage
+  /// *inside* an overlap transition, not just outside it: both clips
+  /// fast-forward and the blend itself plays at 2×. The transition duration is
+  /// interpreted in output (post-speed) time.
+  Future<void> _clipDissolveSpeed() async {
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 5),
+          playbackSpeed: 2.0,
+          transition: const ClipTransition(
+            type: ClipTransitionType.dissolve,
+            duration: Duration(milliseconds: 600),
+            curve: AnimationCurve.easeInOut,
+          ),
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 15),
+          playbackSpeed: 2.0,
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Cross-dissolve with independent per-clip speeds.
+  ///
+  /// The outgoing clip plays at 2× and the incoming clip at 0.5×, so each side
+  /// of the blend is time-scaled with its own factor while sharing a single
+  /// output-time transition duration.
+  Future<void> _clipDissolveMixedSpeed() async {
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 5),
+          playbackSpeed: 2.0, // Fast-forward outgoing
+          transition: const ClipTransition(
+            type: ClipTransitionType.dissolve,
+            duration: Duration(milliseconds: 600),
+            curve: AnimationCurve.easeInOut,
+          ),
+        ),
+        VideoSegment(
+          video: _video,
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 15),
+          playbackSpeed: 0.5, // Slow-motion incoming
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   Future<void> _removeAudio() async {
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video)],
@@ -1723,6 +1786,18 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           leading: const Icon(Icons.auto_awesome_motion_outlined),
           title: const Text('Combined Transitions'),
           subtitle: const Text('Dissolve → fade-to-black across 3 clips'),
+        ),
+        ListTile(
+          onTap: _clipDissolveSpeed,
+          leading: const Icon(Icons.fast_forward_outlined),
+          title: const Text('Dissolve + Speed'),
+          subtitle: const Text('Both clips at 2× — blend plays sped up too'),
+        ),
+        ListTile(
+          onTap: _clipDissolveMixedSpeed,
+          leading: const Icon(Icons.compare_arrows_outlined),
+          title: const Text('Dissolve + Mixed Speed'),
+          subtitle: const Text('Outgoing 2× · incoming 0.5×'),
         ),
         ..._buildSectionTitle('Video Concatenation'),
         ListTile(

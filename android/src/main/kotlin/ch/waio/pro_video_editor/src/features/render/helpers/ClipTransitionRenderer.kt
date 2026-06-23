@@ -52,6 +52,11 @@ object ClipTransitionRenderer {
      * @param outTailEndUs Exclusive source end of the outgoing clip's tail.
      * @param inHeadStartUs Inclusive source start of the incoming clip's head.
      * @param inHeadEndUs Exclusive source end of the incoming clip's head.
+     * @param outputDurationUs Output (post-speed) duration of the blended clip.
+     *  The outgoing tail and incoming head source ranges are each replayed
+     *  across this duration, so a tail/head longer than [outputDurationUs]
+     *  is sped up by its clip's playback speed (and vice-versa). `<= 0`
+     *  preserves the legacy 1× behavior (output = outgoing tail duration).
      * @return The rendered transition clip, or `null` if it could not be
      *  produced (caller should fall back to a hard cut).
      */
@@ -67,6 +72,7 @@ object ClipTransitionRenderer {
         direction: String,
         curve: String,
         includeAudio: Boolean,
+        outputDurationUs: Long = 0L,
         onProgress: (Float) -> Unit = {},
     ): TransitionResult? {
         val outputFile = File(context.cacheDir, "transition_${System.currentTimeMillis()}.mp4")
@@ -103,9 +109,19 @@ object ClipTransitionRenderer {
 
             val width = outSeg.width
             val height = outSeg.height
-            val frameCount = outSeg.frames.size
             val tailDurationUs = (outTailEndUs - outTailStartUs).coerceAtLeast(1L)
-            val frameDurationUs = tailDurationUs / frameCount
+            // Number of OUTPUT frames. When [outputDurationUs] is shorter than the
+            // decoded tail (clip sped up) we emit proportionally fewer frames so
+            // the full tail/head footage is replayed faster; when it is longer
+            // (slowed down) we emit more. Defaults to the decoded tail (1×).
+            val frameCount = ClipTransitionGeometry.outputFrameCount(
+                decodedTailFrames = outSeg.frames.size,
+                tailSourceDurationUs = tailDurationUs,
+                outputDurationUs = outputDurationUs,
+            )
+            val effectiveDurationUs =
+                if (outputDurationUs > 0L) outputDurationUs else tailDurationUs
+            val frameDurationUs = (effectiveDurationUs / frameCount).coerceAtLeast(1L)
 
             // Frames are decoded in their *coded* orientation (decoding to a
             // ByteBuffer/Image does not apply the container rotation), so the
@@ -133,7 +149,7 @@ object ClipTransitionRenderer {
                     audioPre = preEncodeCrossfadeAudio(
                         outgoingPath, outTailStartUs, outTailEndUs,
                         incomingPath, inHeadStartUs, inHeadEndUs,
-                        curve, workDir
+                        curve, effectiveDurationUs, workDir
                     )
                 } catch (e: Exception) {
                     Log.w(RENDER_TAG, "Transition audio crossfade failed: ${e.message}")
@@ -165,11 +181,17 @@ object ClipTransitionRenderer {
                                 nextEncoderFrame.toDouble() / (frameCount - 1)
                             } else 1.0
                             val eased = applyEasing(progress, curve)
+                            // Sample BOTH sides by progress so each source range
+                            // (tail/head) is replayed across the output frames,
+                            // applying that clip's playback speed to its footage.
+                            val aIdx = if (frameCount > 1) {
+                                (progress * (outSeg.frames.size - 1)).roundToInt()
+                            } else outSeg.frames.size - 1
                             val bIdx = if (frameCount > 1) {
                                 (progress * (inSeg.frames.size - 1)).roundToInt()
                             } else inSeg.frames.size - 1
                             val blended = blendFrame(
-                                outSeg.frames[nextEncoderFrame],
+                                outSeg.frames[aIdx.coerceIn(0, outSeg.frames.size - 1)],
                                 inSeg.frames[bIdx.coerceIn(0, inSeg.frames.size - 1)],
                                 width, height, eased, type, blendDirection
                             )
@@ -649,14 +671,16 @@ object ClipTransitionRenderer {
     private data class AudioPreEncoded(val format: MediaFormat, val packetsFile: File)
 
     /**
-     * Decodes both segments' audio to PCM, cross-fades them sample-by-sample
-     * (outgoing gain 1→0, incoming gain 0→1, eased), and re-encodes AAC into a
-     * packet file (so it can be muxed after the video track is known).
+     * Decodes both segments' audio to PCM, time-scales each side to
+     * [outputDurationUs] (so it inherits its clip's playback speed), cross-fades
+     * them sample-by-sample (outgoing gain 1→0, incoming gain 0→1, eased), and
+     * re-encodes AAC into a packet file (so it can be muxed after the video
+     * track is known).
      */
     private fun preEncodeCrossfadeAudio(
         outgoingPath: String, outStartUs: Long, outEndUs: Long,
         incomingPath: String, inStartUs: Long, inEndUs: Long,
-        curve: String, workDir: File,
+        curve: String, outputDurationUs: Long, workDir: File,
     ): AudioPreEncoded? {
         val outPcm = decodePcm(outgoingPath, outStartUs, outEndUs) ?: return null
         val inPcm = decodePcm(incomingPath, inStartUs, inEndUs) ?: return null
@@ -668,22 +692,32 @@ object ClipTransitionRenderer {
         val sampleRate = outPcm.sampleRate
         val channelCount = outPcm.channelCount
         val frameSize = channelCount * 2
-        val totalFrames = max(outPcm.pcm.size, inPcm.pcm.size) / frameSize
-        if (totalFrames <= 0) return null
+
+        // Resample each side to the output (post-speed) duration so the
+        // crossfade is aligned and the audio matches the blended video length.
+        val targetFrames = if (outputDurationUs > 0L) {
+            ((outputDurationUs * sampleRate) / 1_000_000L).toInt().coerceAtLeast(1)
+        } else {
+            max(outPcm.pcm.size, inPcm.pcm.size) / frameSize
+        }
+        if (targetFrames <= 0) return null
+
+        val outScaled = resamplePcm(outPcm.pcm, frameSize, targetFrames)
+        val inScaled = resamplePcm(inPcm.pcm, frameSize, targetFrames)
 
         // Mix into a single PCM buffer with an eased gain ramp.
-        val mixed = ByteArray(totalFrames * frameSize)
-        for (f in 0 until totalFrames) {
+        val mixed = ByteArray(targetFrames * frameSize)
+        for (f in 0 until targetFrames) {
             val p = applyEasing(
-                if (totalFrames > 1) f.toDouble() / (totalFrames - 1) else 1.0,
+                if (targetFrames > 1) f.toDouble() / (targetFrames - 1) else 1.0,
                 curve
             )
             val gOut = (1.0 - p)
             val gIn = p
             for (c in 0 until channelCount) {
                 val idx = (f * channelCount + c) * 2
-                val aSample = readSample(outPcm.pcm, idx)
-                val bSample = readSample(inPcm.pcm, idx)
+                val aSample = readSample(outScaled, idx)
+                val bSample = readSample(inScaled, idx)
                 val mixedSample = (aSample * gOut + bSample * gIn)
                     .roundToInt().coerceIn(-32768, 32767)
                 mixed[idx] = (mixedSample and 0xFF).toByte()
@@ -692,6 +726,28 @@ object ClipTransitionRenderer {
         }
 
         return encodeAac(mixed, sampleRate, channelCount, workDir)
+    }
+
+    /**
+     * Time-scales 16-bit PCM to [targetFrames] audio frames via nearest-sample
+     * mapping. Speeds up (fewer source frames per output) or slows down without
+     * changing pitch handling here — pitch is acceptable for a sub-second blend.
+     */
+    private fun resamplePcm(pcm: ByteArray, frameSize: Int, targetFrames: Int): ByteArray {
+        val srcFrames = pcm.size / frameSize
+        if (srcFrames <= 0) return ByteArray(targetFrames * frameSize)
+        if (srcFrames == targetFrames) return pcm
+        val out = ByteArray(targetFrames * frameSize)
+        val denom = if (targetFrames > 1) (targetFrames - 1).toDouble() else 1.0
+        for (f in 0 until targetFrames) {
+            val srcFrame = if (targetFrames > 1) {
+                ((f / denom) * (srcFrames - 1)).roundToInt().coerceIn(0, srcFrames - 1)
+            } else {
+                srcFrames - 1
+            }
+            System.arraycopy(pcm, srcFrame * frameSize, out, f * frameSize, frameSize)
+        }
+        return out
     }
 
     private fun readSample(pcm: ByteArray, idx: Int): Int {
