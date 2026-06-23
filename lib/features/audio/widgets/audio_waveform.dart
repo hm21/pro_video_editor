@@ -50,11 +50,11 @@ class AudioWaveform extends StatefulWidget {
     super.key,
     required this.waveform,
     this.style = const WaveformStyle(),
-  }) : config = null,
-       currentPosition = null,
-       onSeek = null,
-       showPositionIndicator = false,
-       onComplete = null;
+  })  : config = null,
+        currentPosition = null,
+        onSeek = null,
+        showPositionIndicator = false,
+        onComplete = null;
 
   /// Creates an interactive [AudioWaveform] with position indicator and
   /// seek support.
@@ -69,9 +69,9 @@ class AudioWaveform extends StatefulWidget {
     required this.currentPosition,
     required this.onSeek,
     this.style = const WaveformStyle(),
-  }) : config = null,
-       showPositionIndicator = true,
-       onComplete = null;
+  })  : config = null,
+        showPositionIndicator = true,
+        onComplete = null;
 
   /// Creates a streaming [AudioWaveform] that displays chunks progressively.
   ///
@@ -168,17 +168,16 @@ class _AudioWaveformState extends State<AudioWaveform> {
         child: widget.showPositionIndicator
             ? LayoutBuilder(
                 builder: (context, constraints) {
-                  final positionRatio =
-                      widget.currentPosition != null &&
+                  final positionRatio = widget.currentPosition != null &&
                           _duration > Duration.zero
                       ? widget.currentPosition!.inMilliseconds /
-                            _duration.inMilliseconds
+                          _duration.inMilliseconds
                       : 0.0;
                   final indicatorPosition =
                       (constraints.maxWidth * positionRatio).clamp(
-                        0.0,
-                        constraints.maxWidth - 2,
-                      );
+                    0.0,
+                    constraints.maxWidth - 2,
+                  );
 
                   return Stack(
                     alignment: AlignmentGeometry.center,
@@ -215,8 +214,7 @@ class _AudioWaveformState extends State<AudioWaveform> {
                           bottom: 0,
                           child: Container(
                             width: 2,
-                            color:
-                                widget.style.positionIndicatorColor ??
+                            color: widget.style.positionIndicatorColor ??
                                 widget.style.waveColor,
                           ),
                         ),

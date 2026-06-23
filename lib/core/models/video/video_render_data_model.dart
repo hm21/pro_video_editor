@@ -45,57 +45,57 @@ class VideoRenderData {
     this.shouldOptimizeForNetworkUse = false,
     this.imageBytesWithCropping = false,
     @Deprecated('Use audioTracks instead.') this.loopCustomAudio = true,
-  }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
-       assert(
-         (video != null) != (videoSegments != null),
-         'You must provide either video OR videoSegments, but not both',
-       ),
-       assert(
-         videoSegments == null || videoSegments.isNotEmpty,
-         'videoSegments must not be empty if provided',
-       ),
-       assert(
-         imageBytes == null || imageLayers == null || imageLayers.isEmpty,
-         'Cannot use both imageBytes and imageLayers. '
-         'Use imageLayers instead.',
-       ),
-       assert(
-         colorMatrixList.isEmpty || colorFilters.isEmpty,
-         'Cannot use both colorMatrixList and colorFilters. '
-         'Use colorFilters instead.',
-       ),
-       assert(
-         audioTracks.isEmpty ||
-             (customAudioPath == null &&
-                 customAudioStartTime == null &&
-                 customAudioVolume == null),
-         'Cannot use both audioTracks and customAudio* fields. '
-         'Use audioTracks instead.',
-       ),
-       assert(
-         startTime == null || endTime == null || startTime < endTime,
-         'startTime must be before endTime',
-       ),
-       assert(
-         blur == null || blur >= 0,
-         '[blur] must be greater than or equal to 0',
-       ),
-       assert(
-         playbackSpeed == null || playbackSpeed > 0,
-         '[playbackSpeed] must be greater than 0',
-       ),
-       assert(
-         bitrate == null || bitrate > 0,
-         '[bitrate] must be greater than 0',
-       ),
-       assert(
-         originalAudioVolume == null || originalAudioVolume >= 0,
-         '[originalAudioVolume] must be greater than or equal to 0',
-       ),
-       assert(
-         customAudioVolume == null || customAudioVolume >= 0,
-         '[customAudioVolume] must be greater than or equal to 0',
-       );
+  })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+        assert(
+          (video != null) != (videoSegments != null),
+          'You must provide either video OR videoSegments, but not both',
+        ),
+        assert(
+          videoSegments == null || videoSegments.isNotEmpty,
+          'videoSegments must not be empty if provided',
+        ),
+        assert(
+          imageBytes == null || imageLayers == null || imageLayers.isEmpty,
+          'Cannot use both imageBytes and imageLayers. '
+          'Use imageLayers instead.',
+        ),
+        assert(
+          colorMatrixList.isEmpty || colorFilters.isEmpty,
+          'Cannot use both colorMatrixList and colorFilters. '
+          'Use colorFilters instead.',
+        ),
+        assert(
+          audioTracks.isEmpty ||
+              (customAudioPath == null &&
+                  customAudioStartTime == null &&
+                  customAudioVolume == null),
+          'Cannot use both audioTracks and customAudio* fields. '
+          'Use audioTracks instead.',
+        ),
+        assert(
+          startTime == null || endTime == null || startTime < endTime,
+          'startTime must be before endTime',
+        ),
+        assert(
+          blur == null || blur >= 0,
+          '[blur] must be greater than or equal to 0',
+        ),
+        assert(
+          playbackSpeed == null || playbackSpeed > 0,
+          '[playbackSpeed] must be greater than 0',
+        ),
+        assert(
+          bitrate == null || bitrate > 0,
+          '[bitrate] must be greater than 0',
+        ),
+        assert(
+          originalAudioVolume == null || originalAudioVolume >= 0,
+          '[originalAudioVolume] must be greater than or equal to 0',
+        ),
+        assert(
+          customAudioVolume == null || customAudioVolume >= 0,
+          '[customAudioVolume] must be greater than or equal to 0',
+        );
 
   /// Creates a [VideoRenderData] with a predefined quality preset.
   ///
@@ -413,8 +413,7 @@ class VideoRenderData {
 
     // Handle quality config
     if (qualityConfig != null && scaleX == null && scaleY == null) {
-      final targetVideo =
-          video ??
+      final targetVideo = video ??
           (videoSegments != null && videoSegments!.isNotEmpty
               ? videoSegments!.first.video
               : null);

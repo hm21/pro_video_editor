@@ -41,15 +41,14 @@ class WaveformPainter extends CustomPainter {
 
     final samplesPerBar = samples.length / barsCount;
     final centerY = size.height / 2;
-    final maxAmplitude = waveform.isStereo
-        ? size.height / 4 - 2
-        : size.height / 2 - 2;
+    final maxAmplitude =
+        waveform.isStereo ? size.height / 4 - 2 : size.height / 2 - 2;
 
     // Calculate position for played/unplayed coloring
     final positionRatio =
         currentPosition != null && waveform.duration.inMilliseconds > 0
-        ? currentPosition!.inMilliseconds / waveform.duration.inMilliseconds
-        : 0.0;
+            ? currentPosition!.inMilliseconds / waveform.duration.inMilliseconds
+            : 0.0;
     final playedBars = (barsCount * positionRatio).floor();
 
     // Prepare paints

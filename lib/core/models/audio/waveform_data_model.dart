@@ -169,9 +169,9 @@ class WaveformData {
         .floor()
         .clamp(0, sampleCount);
     final endSample = (end.inMilliseconds / millisecondsPerSample).ceil().clamp(
-      0,
-      sampleCount,
-    );
+          0,
+          sampleCount,
+        );
     final length = endSample - startSample;
 
     if (length <= 0) {

@@ -102,16 +102,14 @@ class WebThumbnailGenerator {
   }
 
   Future<
-    (
-      web.HTMLVideoElement,
-      web.HTMLCanvasElement,
-      web.CanvasRenderingContext2D,
-      int,
-      int,
-      String,
-    )?
-  >
-  _prepareVideoRendering({
+      (
+        web.HTMLVideoElement,
+        web.HTMLCanvasElement,
+        web.CanvasRenderingContext2D,
+        int,
+        int,
+        String,
+      )?> _prepareVideoRendering({
     required Uint8List videoBytes,
     required int outputWidth,
   }) async {

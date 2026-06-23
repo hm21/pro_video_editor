@@ -107,8 +107,7 @@ class ProVideoEditorWeb extends ProVideoEditor {
   }) async {
     Duration timestamp;
     if (value.position == ThumbnailPosition.last) {
-      final duration =
-          value.videoDuration ??
+      final duration = value.videoDuration ??
           (await _manager.getMetadata(value.video)).duration;
       timestamp = duration;
     } else {
