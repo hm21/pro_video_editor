@@ -169,7 +169,10 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     Duration timestamp;
     if (isLastFrame) {
       final duration = value.videoDuration ??
-          (await getMetadata(value.video, nativeLogLevel: nativeLogLevel))
+          (await getMetadata(
+            value.video,
+            nativeLogLevel: nativeLogLevel,
+          ))
               .duration;
       timestamp = duration;
     } else {
@@ -382,10 +385,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
 
       final Uint8List? result = await methodChannel.invokeMethod<Uint8List>(
         'renderVideo',
-        {
-          ...renderData,
-          'nativeLogLevel': nativeLogLevel?.methodValue,
-        },
+        {...renderData, 'nativeLogLevel': nativeLogLevel?.methodValue},
       );
 
       if (result == null) {
@@ -435,10 +435,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
 
       final Uint8List? result = await methodChannel.invokeMethod<Uint8List>(
         'renderStopMotion',
-        {
-          ...renderData,
-          'nativeLogLevel': nativeLogLevel?.methodValue,
-        },
+        {...renderData, 'nativeLogLevel': nativeLogLevel?.methodValue},
       );
 
       if (result == null) {

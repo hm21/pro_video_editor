@@ -44,10 +44,7 @@ void main() {
       });
 
       test('throws for empty map', () {
-        expect(
-          () => EditorLayerImage.fromMap({}),
-          throwsArgumentError,
-        );
+        expect(() => EditorLayerImage.fromMap({}), throwsArgumentError);
       });
     });
   });

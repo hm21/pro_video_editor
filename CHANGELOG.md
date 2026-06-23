@@ -1,3 +1,6 @@
+## 1.21.2
+- **FIX**(android, iOS, macOS): Fix per-segment `playbackSpeed` being ignored on clips that take part in an overlap clip transition (dissolve/slide/push/wipe). The transition pre-render now resolves the blend in output (post-speed) time and replays each side at its own speed, so footage inside the transition plays at the requested speed instead of falling back to 1×. Independent per-side speeds are supported; dip transitions (`fadeToBlack`/`fadeToWhite`) already honored speed.
+
 ## 1.21.1
 - **FIX**(android): Fix overlap clip transitions (dissolve/slide/push/wipe) appearing rotated 90°/180° when a clip carries container rotation metadata (e.g. portrait phone videos). The transition pre-render decodes coded (un-rotated) frames, so it now re-applies the source rotation via `MediaMuxer.setOrientationHint` and maps geometric directions into coded space.
 

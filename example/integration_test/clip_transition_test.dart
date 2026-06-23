@@ -168,6 +168,130 @@ void main() {
   });
 
   // ───────────────────────────────────────────────────────────
+  // Per-segment playback speed × transitions
+  //
+  // Regression guard: per-clip `playbackSpeed` must be applied to the footage
+  // that participates in a transition. The blend duration is interpreted in
+  // output (post-speed) time, so each side consumes `output × speed` of source.
+  // ───────────────────────────────────────────────────────────
+  group('Clip transitions — playback speed', () {
+    // Output seconds of a single 5s source clip at [speed].
+    double clipOutSeconds(double speed) =>
+        clipDuration.inMilliseconds / 1000 / speed;
+
+    /// Two 5s source clips with a [transition] and independent per-clip speeds.
+    VideoRenderData twoClipsSpeed(
+      ClipTransition transition, {
+      required double speed1,
+      required double speed2,
+    }) => VideoRenderData(
+      outputFormat: VideoOutputFormat.mp4,
+      videoSegments: [
+        VideoSegment(
+          video: inputVideo,
+          startTime: Duration.zero,
+          endTime: clipDuration,
+          playbackSpeed: speed1,
+          transition: transition,
+        ),
+        VideoSegment(
+          video: inputVideo,
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 15),
+          playbackSpeed: speed2,
+        ),
+      ],
+    );
+
+    for (final speed in [2.0, 0.5]) {
+      testWidgets('dissolve @ ${speed}x — overlap shortens, footage sped', (
+        _,
+      ) async {
+        final meta = await render(
+          'dissolve ${speed}x',
+          twoClipsSpeed(
+            const ClipTransition(
+              type: ClipTransitionType.dissolve,
+              duration: overlapDuration,
+            ),
+            speed1: speed,
+            speed2: speed,
+          ),
+        );
+        // Both clips sped to 5/s, overlapping by the output-time transition.
+        // (At 2× this is ~4.2s — clearly distinct from the unfixed 5.0s
+        //  dropped-transition or 9.2s speed-ignored results.)
+        final expected = Duration(
+          milliseconds:
+              (2 * clipOutSeconds(speed) * 1000 -
+                      overlapDuration.inMilliseconds)
+                  .round(),
+        );
+        expectDuration(
+          meta,
+          expected,
+          'dissolve @ ${speed}x: footage must be sped AND overlapped',
+        );
+      });
+
+      testWidgets('fadeToBlack @ ${speed}x — dip keeps speed-adjusted length', (
+        _,
+      ) async {
+        final meta = await render(
+          'fadeToBlack ${speed}x',
+          twoClipsSpeed(
+            const ClipTransition(
+              type: ClipTransitionType.fadeToBlack,
+              duration: dipDuration,
+            ),
+            speed1: speed,
+            speed2: speed,
+          ),
+        );
+        // Dip does not shorten; the total is just both clips sped to 5/s.
+        final expected = Duration(
+          milliseconds: (2 * clipOutSeconds(speed) * 1000).round(),
+        );
+        expectDuration(
+          meta,
+          expected,
+          'fadeToBlack @ ${speed}x: total must reflect per-clip speed',
+        );
+      });
+    }
+
+    testWidgets('dissolve with mixed speeds (outgoing 2× · incoming 0.5×)', (
+      _,
+    ) async {
+      final meta = await render(
+        'dissolve mixed-speed',
+        twoClipsSpeed(
+          const ClipTransition(
+            type: ClipTransitionType.dissolve,
+            duration: overlapDuration,
+          ),
+          speed1: 2.0,
+          speed2: 0.5,
+        ),
+      );
+      // clip1 → 2.5s, clip2 → 10s, overlapping by 0.8s → ~11.7s. Each side is
+      // time-scaled with its own factor across a single output-time blend.
+      final expected = Duration(
+        milliseconds:
+            (clipOutSeconds(2.0) * 1000 +
+                    clipOutSeconds(0.5) * 1000 -
+                    overlapDuration.inMilliseconds)
+                .round(),
+      );
+      expectDuration(
+        meta,
+        expected,
+        'mixed-speed dissolve: each side must keep its own speed',
+      );
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────
   // Combined: dissolve → fade-to-black across three clips
   // ───────────────────────────────────────────────────────────
   group('Clip transitions — combined', () {

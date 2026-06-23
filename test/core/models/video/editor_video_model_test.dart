@@ -54,10 +54,7 @@ void main() {
       });
 
       test('fromMap with null sources throws assertion', () {
-        expect(
-          () => EditorVideo.fromMap({}),
-          throwsA(isA<AssertionError>()),
-        );
+        expect(() => EditorVideo.fromMap({}), throwsA(isA<AssertionError>()));
       });
     });
   });

@@ -22,8 +22,10 @@ void main() {
     });
 
     test('falls back to info for unknown values', () {
-      expect(NativeLogLevel.fromMethodValue('totally-unknown'),
-          NativeLogLevel.info);
+      expect(
+        NativeLogLevel.fromMethodValue('totally-unknown'),
+        NativeLogLevel.info,
+      );
     });
   });
 

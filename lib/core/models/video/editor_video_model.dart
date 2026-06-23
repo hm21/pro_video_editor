@@ -29,12 +29,8 @@ class EditorVideo {
   ///
   /// At least one of `byteArray`, `file`, `networkUrl`, or `assetPath`
   /// must not be null.
-  EditorVideo._({
-    this.byteArray,
-    this.networkUrl,
-    this.assetPath,
-    dynamic file,
-  })  : file = file == null ? null : ensureFileInstance(file),
+  EditorVideo._({this.byteArray, this.networkUrl, this.assetPath, dynamic file})
+      : file = file == null ? null : ensureFileInstance(file),
         assert(
           byteArray != null ||
               file != null ||
@@ -320,5 +316,5 @@ enum EditorVideoType {
   memory,
 
   /// Represents a video loaded from an asset path.
-  asset
+  asset,
 }

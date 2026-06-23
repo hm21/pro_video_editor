@@ -108,7 +108,7 @@ class WebThumbnailGenerator {
         web.CanvasRenderingContext2D,
         int,
         int,
-        String
+        String,
       )?> _prepareVideoRendering({
     required Uint8List videoBytes,
     required int outputWidth,

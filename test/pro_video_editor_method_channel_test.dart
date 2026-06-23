@@ -105,9 +105,9 @@ void main() {
     final mockModel = MockVideoRenderData();
 
     when(mockModel.video).thenReturn(mockVideo);
-    when(mockModel.toAsyncMap()).thenAnswer((_) async => {
-          'inputPath': 'test.mp4',
-        });
+    when(
+      mockModel.toAsyncMap(),
+    ).thenAnswer((_) async => {'inputPath': 'test.mp4'});
 
     final result = await platform.renderVideo(mockModel);
     expect(result, isA<Uint8List>());
@@ -124,12 +124,14 @@ void main() {
     final mockVideo = MockEditorVideo();
 
     when(mockModel.video).thenReturn(mockVideo);
-    when(mockModel.toAsyncMap()).thenAnswer((_) async => {
-          'inputPath': 'test.mp4',
-        });
+    when(
+      mockModel.toAsyncMap(),
+    ).thenAnswer((_) async => {'inputPath': 'test.mp4'});
 
     expect(
-        () async => await platform.renderVideo(mockModel), throwsArgumentError);
+      () async => await platform.renderVideo(mockModel),
+      throwsArgumentError,
+    );
   });
 
   test('renderStopMotion returns rendered video bytes', () async {
@@ -143,28 +145,30 @@ void main() {
     expect(result.length, 10);
   });
 
-  test('renderStopMotionToFile invokes renderStopMotion with outputPath',
-      () async {
-    MethodCall? capturedCall;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-      capturedCall = methodCall;
-      return null;
-    });
+  test(
+    'renderStopMotionToFile invokes renderStopMotion with outputPath',
+    () async {
+      MethodCall? capturedCall;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+        capturedCall = methodCall;
+        return null;
+      });
 
-    final data = StopMotionRenderData(
-      frames: [StopMotionFrame(image: EditorLayerImage.memory(mockBytes))],
-    );
+      final data = StopMotionRenderData(
+        frames: [StopMotionFrame(image: EditorLayerImage.memory(mockBytes))],
+      );
 
-    final path = await platform.renderStopMotionToFile('/tmp/out.mp4', data);
+      final path = await platform.renderStopMotionToFile('/tmp/out.mp4', data);
 
-    expect(path, '/tmp/out.mp4');
-    expect(capturedCall?.method, 'renderStopMotion');
-    final args = capturedCall?.arguments as Map;
-    expect(args['outputPath'], '/tmp/out.mp4');
-    expect(args['frames'], isA<List<dynamic>>());
-    expect(args['frames'] as List<dynamic>, hasLength(1));
-  });
+      expect(path, '/tmp/out.mp4');
+      expect(capturedCall?.method, 'renderStopMotion');
+      final args = capturedCall?.arguments as Map;
+      expect(args['outputPath'], '/tmp/out.mp4');
+      expect(args['frames'], isA<List<dynamic>>());
+      expect(args['frames'] as List<dynamic>, hasLength(1));
+    },
+  );
 
   test('cancel forwards to platform channel', () async {
     MethodCall? capturedCall;

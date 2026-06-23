@@ -74,7 +74,8 @@ class ProVideoEditorWeb extends ProVideoEditor {
     NativeLogLevel? nativeLogLevel,
   }) {
     throw UnimplementedError(
-        'hasAudioTrack() has not been implemented on web.');
+      'hasAudioTrack() has not been implemented on web.',
+    );
   }
 
   @override
@@ -145,7 +146,8 @@ class ProVideoEditorWeb extends ProVideoEditor {
     NativeLogLevel? nativeLogLevel,
   }) {
     throw UnimplementedError(
-        'extractAudioToFile() has not been implemented on web.');
+      'extractAudioToFile() has not been implemented on web.',
+    );
   }
 
   @override

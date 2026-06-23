@@ -22,6 +22,7 @@ import ch.waio.pro_video_editor.src.features.render.helpers.VolumeControlAudioMi
 import ch.waio.pro_video_editor.src.features.render.helpers.ConfigurableInAppMp4Muxer
 import ch.waio.pro_video_editor.src.features.render.helpers.VideoTranscoder
 import ch.waio.pro_video_editor.src.features.render.helpers.VideoReverser
+import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionGeometry
 import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionRenderer
 import ch.waio.pro_video_editor.src.features.render.helpers.MediaInfoExtractor
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
@@ -332,11 +333,14 @@ class RenderVideo(private val context: Context) {
      * blended MP4 clips and rewrites the clip list so the main pipeline sees
      * plain forward clips:
      *
-     * For a transition between clip *i* and *i+1*, clip *i* is shortened by the
-     * (clamped) transition duration `d`, the blended clip (`d`) is inserted, and
-     * clip *i+1*'s head is trimmed by `d`. Net timeline change: `-d` per
-     * transition. If a transition cannot be rendered (e.g. dimension mismatch,
-     * per-clip speed, or not enough content) it degrades to a hard cut.
+     * For a transition between clip *i* and *i+1*, [ClipTransitionGeometry]
+     * resolves the blend in OUTPUT (post-speed) time: clip *i* is shortened by
+     * `output * speed_i` of source, the blended clip (output duration) is
+     * inserted, and clip *i+1*'s head is trimmed by `output * speed_{i+1}` of
+     * source. The blend itself is rendered at the requested speed for each side,
+     * so footage inside the transition plays at the same speed as the rest of
+     * the clip. If a transition cannot be rendered (e.g. dimension mismatch or
+     * not enough content) it degrades to a hard cut.
      */
     private fun preRenderTransitions(
         clips: List<VideoClip>,
@@ -361,9 +365,7 @@ class RenderVideo(private val context: Context) {
             val transition = current.transition
 
             val canOverlap = next != null && transition != null && transition.isOverlap &&
-                    !current.reverseVideo && !next.reverseVideo &&
-                    (current.playbackSpeed == null || current.playbackSpeed == 1.0f) &&
-                    (next.playbackSpeed == null || next.playbackSpeed == 1.0f)
+                    !current.reverseVideo && !next.reverseVideo
 
             if (shouldStop.get() || !canOverlap) {
                 // Clear an overlap transition so it is not reinterpreted later.
@@ -378,9 +380,19 @@ class RenderVideo(private val context: Context) {
             val nextEnd = next.endUs ?: MediaInfoExtractor.getVideoDuration(next.inputPath)
             val curDur = curEnd - curStart
             val nextDur = nextEnd - nextStart
-            val d = transition!!.durationUs.coerceAtMost(minOf(curDur, nextDur))
 
-            if (d <= 0L || curDur - d <= 0L || nextDur - d <= 0L) {
+            // Resolve the overlap geometry in OUTPUT (post-speed) time so the
+            // requested transition duration matches the non-transition timeline
+            // and each side consumes `output * speed` of its own source.
+            val plan = ClipTransitionGeometry.planOverlap(
+                outgoingSourceDurationUs = curDur,
+                incomingSourceDurationUs = nextDur,
+                transitionDurationUs = transition!!.durationUs,
+                outgoingSpeed = current.playbackSpeed,
+                incomingSpeed = next.playbackSpeed,
+            )
+
+            if (plan == null) {
                 Log.w(RENDER_TAG, "Transition: not enough content for boundary $i, hard cut")
                 result.add(current.copy(transition = null))
                 doneCount++
@@ -389,14 +401,18 @@ class RenderVideo(private val context: Context) {
                 continue
             }
 
+            val tailSrc = plan.outgoingTailSourceUs
+            val headSrc = plan.incomingHeadSourceUs
+
             val rendered = ClipTransitionRenderer.renderSync(
                 context = context,
                 outgoingPath = current.inputPath,
-                outTailStartUs = curEnd - d,
+                outTailStartUs = curEnd - tailSrc,
                 outTailEndUs = curEnd,
                 incomingPath = next.inputPath,
                 inHeadStartUs = nextStart,
-                inHeadEndUs = nextStart + d,
+                inHeadEndUs = nextStart + headSrc,
+                outputDurationUs = plan.outputDurationUs,
                 type = transition.type,
                 direction = transition.direction,
                 curve = transition.curve,
@@ -409,7 +425,9 @@ class RenderVideo(private val context: Context) {
 
             if (rendered != null) {
                 collectPath(rendered.outputPath)
-                result.add(current.copy(endUs = curEnd - d, transition = null))
+                // Keep the outgoing clip's speed; it now ends `tailSrc` of source
+                // earlier (those frames moved into the speed-adjusted blend).
+                result.add(current.copy(endUs = curEnd - tailSrc, transition = null))
                 result.add(
                     VideoClip(
                         inputPath = rendered.outputPath,
@@ -417,8 +435,8 @@ class RenderVideo(private val context: Context) {
                         endUs = rendered.durationUs.takeIf { it > 0 },
                     )
                 )
-                // Trim the incoming head in place; it keeps its own transition.
-                work[i + 1] = next.copy(startUs = nextStart + d)
+                // Trim the incoming head in place; it keeps its own speed/transition.
+                work[i + 1] = next.copy(startUs = nextStart + headSrc)
             } else {
                 Log.w(RENDER_TAG, "Transition render failed for boundary $i, hard cut")
                 result.add(current.copy(transition = null))

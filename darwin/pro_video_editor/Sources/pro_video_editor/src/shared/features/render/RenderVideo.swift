@@ -335,12 +335,15 @@ class RenderVideo {
   /// Pre-renders overlap transitions (dissolve/slide/push/wipe) into short
   /// blended clips and rewrites the clip list, mirroring the Android pipeline.
   ///
-  /// For a transition between clip *i* and *i+1*, clip *i* is shortened by the
-  /// (clamped) transition duration `d`, the blended clip (`d`) is inserted, and
-  /// clip *i+1*'s head is trimmed by `d`. Net timeline change: `-d` per
-  /// transition. Falls back to a hard cut when a transition cannot be rendered
-  /// (e.g. a neighbour is reversed, has per-clip speed, or has too little
-  /// content) — those cases are handled live by the main pipeline.
+  /// For a transition between clip *i* and *i+1*, `ClipTransitionGeometry`
+  /// resolves the blend in OUTPUT (post-speed) time: clip *i* is shortened by
+  /// `output * speed_i` of source, the blended clip (output duration) is
+  /// inserted, and clip *i+1*'s head is trimmed by `output * speed_{i+1}` of
+  /// source. The blend itself is rendered at the requested speed for each side,
+  /// so footage inside the transition plays at the same speed as the rest of
+  /// the clip. Falls back to a hard cut when a transition cannot be rendered
+  /// (e.g. a neighbour is reversed or has too little content) — those cases are
+  /// handled live by the main pipeline.
   private static func preRenderTransitions(
     clips: [VideoClip], enableAudio: Bool, outputFormat: String
   ) async -> ([VideoClip], [URL]) {
@@ -357,8 +360,6 @@ class RenderVideo {
       let canOverlap =
         next != nil && (t?.isOverlap ?? false)
         && !current.reverseVideo && !(next!.reverseVideo)
-        && (current.playbackSpeed == nil || current.playbackSpeed == 1.0)
-        && (next!.playbackSpeed == nil || next!.playbackSpeed == 1.0)
 
       if !canOverlap {
         result.append(clearedOverlap(current))
@@ -382,38 +383,53 @@ class RenderVideo {
       }
       let curDur = curEnd - curStart
       let nextDur = nextEnd - nextStart
-      let d = min(t!.durationUs, min(curDur, nextDur))
 
-      if d <= 0 || curDur - d <= 0 || nextDur - d <= 0 {
+      // Resolve the overlap geometry in OUTPUT (post-speed) time so the
+      // requested transition duration matches the non-transition timeline and
+      // each side consumes `output * speed` of its own source.
+      guard
+        let plan = ClipTransitionGeometry.planOverlap(
+          outgoingSourceDurationUs: curDur,
+          incomingSourceDurationUs: nextDur,
+          transitionDurationUs: t!.durationUs,
+          outgoingSpeed: current.playbackSpeed,
+          incomingSpeed: next!.playbackSpeed)
+      else {
         PluginLog.print("⚠️ Transition: not enough content at boundary \(i); hard cut")
         result.append(clearedOverlap(current))
         i += 1
         continue
       }
 
+      let tailSrc = plan.outgoingTailSourceUs
+      let headSrc = plan.incomingHeadSourceUs
+
       let includeAudio =
         enableAudio && (current.volume ?? 1.0) > 0 && (next!.volume ?? 1.0) > 0
       let rendered = await ClipTransitionRenderer.render(
         outgoingPath: current.inputPath,
-        outTailStartUs: curEnd - d, outTailEndUs: curEnd,
+        outTailStartUs: curEnd - tailSrc, outTailEndUs: curEnd,
         incomingPath: next!.inputPath,
-        inHeadStartUs: nextStart, inHeadEndUs: nextStart + d,
+        inHeadStartUs: nextStart, inHeadEndUs: nextStart + headSrc,
+        outputDurationUs: plan.outputDurationUs,
         type: t!.type, direction: t!.direction, curve: t!.curve,
         includeAudio: includeAudio, outputFormat: outputFormat)
 
       if let rendered = rendered {
         urls.append(rendered.outputURL)
+        // Keep the outgoing clip's speed; it now ends `tailSrc` of source
+        // earlier (those frames moved into the speed-adjusted blend).
         result.append(
           VideoClip(
-            inputPath: current.inputPath, startUs: curStart, endUs: curEnd - d,
+            inputPath: current.inputPath, startUs: curStart, endUs: curEnd - tailSrc,
             volume: current.volume, playbackSpeed: current.playbackSpeed,
             reverseVideo: false, transition: nil))
         result.append(
           VideoClip(
             inputPath: rendered.outputURL.path, startUs: 0, endUs: rendered.durationUs))
-        // Trim the incoming head in place; it keeps its own transition.
+        // Trim the incoming head in place; it keeps its own speed/transition.
         work[i + 1] = VideoClip(
-          inputPath: next!.inputPath, startUs: nextStart + d, endUs: nextEnd,
+          inputPath: next!.inputPath, startUs: nextStart + headSrc, endUs: nextEnd,
           volume: next!.volume, playbackSpeed: next!.playbackSpeed,
           reverseVideo: next!.reverseVideo, transition: next!.transition)
       } else {

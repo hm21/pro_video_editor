@@ -57,7 +57,8 @@ class WaveformData {
       );
     } else {
       throw ArgumentError(
-          'Invalid leftChannel data type: ${leftData.runtimeType}');
+        'Invalid leftChannel data type: ${leftData.runtimeType}',
+      );
     }
 
     Float32List? rightChannel;
@@ -167,9 +168,10 @@ class WaveformData {
     final startSample = (start.inMilliseconds / millisecondsPerSample)
         .floor()
         .clamp(0, sampleCount);
-    final endSample = (end.inMilliseconds / millisecondsPerSample)
-        .ceil()
-        .clamp(0, sampleCount);
+    final endSample = (end.inMilliseconds / millisecondsPerSample).ceil().clamp(
+          0,
+          sampleCount,
+        );
     final length = endSample - startSample;
 
     if (length <= 0) {

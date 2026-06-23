@@ -30,10 +30,8 @@ enum StopMotionFit {
 class StopMotionFrame {
   /// Creates a [StopMotionFrame] from the given [image] and optional
   /// [duration].
-  const StopMotionFrame({
-    required this.image,
-    this.duration,
-  }) : assert(
+  const StopMotionFrame({required this.image, this.duration})
+      : assert(
           duration == null || duration > Duration.zero,
           '[duration] must be greater than zero',
         );
@@ -60,10 +58,7 @@ class StopMotionFrame {
   }
 
   /// Creates a copy with updated values.
-  StopMotionFrame copyWith({
-    EditorLayerImage? image,
-    Duration? duration,
-  }) {
+  StopMotionFrame copyWith({EditorLayerImage? image, Duration? duration}) {
     return StopMotionFrame(
       image: image ?? this.image,
       duration: duration ?? this.duration,
@@ -279,11 +274,13 @@ class StopMotionRenderData {
       fit: map['fit'] != null
           ? StopMotionFit.values.byName(map['fit'] as String)
           : StopMotionFit.contain,
-      outputFormat:
-          VideoOutputFormat.values.byName(map['outputFormat'] as String),
+      outputFormat: VideoOutputFormat.values.byName(
+        map['outputFormat'] as String,
+      ),
       qualityConfig: map['qualityConfig'] != null
           ? VideoQualityConfig.fromMap(
-              map['qualityConfig'] as Map<String, dynamic>)
+              map['qualityConfig'] as Map<String, dynamic>,
+            )
           : null,
       bitrate: map['bitrate'] != null ? safeParseInt(map['bitrate']) : null,
     );

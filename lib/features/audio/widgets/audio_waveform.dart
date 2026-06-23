@@ -136,7 +136,8 @@ class _AudioWaveformState extends State<AudioWaveform> {
     final position = details.localPosition.dx / box.size.width;
     final seekMs = (position * _duration.inMilliseconds).round();
     widget.onSeek?.call(
-        Duration(milliseconds: seekMs.clamp(0, _duration.inMilliseconds)));
+      Duration(milliseconds: seekMs.clamp(0, _duration.inMilliseconds)),
+    );
   }
 
   void _handleDrag(DragUpdateDetails details) {
@@ -144,7 +145,8 @@ class _AudioWaveformState extends State<AudioWaveform> {
     final position = details.localPosition.dx / box.size.width;
     final seekMs = (position * _duration.inMilliseconds).round();
     widget.onSeek?.call(
-        Duration(milliseconds: seekMs.clamp(0, _duration.inMilliseconds)));
+      Duration(milliseconds: seekMs.clamp(0, _duration.inMilliseconds)),
+    );
   }
 
   @override
@@ -172,8 +174,10 @@ class _AudioWaveformState extends State<AudioWaveform> {
                           _duration.inMilliseconds
                       : 0.0;
                   final indicatorPosition =
-                      (constraints.maxWidth * positionRatio)
-                          .clamp(0.0, constraints.maxWidth - 2);
+                      (constraints.maxWidth * positionRatio).clamp(
+                    0.0,
+                    constraints.maxWidth - 2,
+                  );
 
                   return Stack(
                     alignment: AlignmentGeometry.center,
@@ -214,7 +218,7 @@ class _AudioWaveformState extends State<AudioWaveform> {
                                 widget.style.waveColor,
                           ),
                         ),
-                      ]
+                      ],
                     ],
                   );
                 },
