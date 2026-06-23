@@ -1,3 +1,6 @@
+## 1.21.3
+- **FIX**(android): Fix `OutOfMemoryError` when pre-rendering longer overlap clip transitions (dissolve/slide/push/wipe). Both sides previously decoded every I420 frame into memory at once (~370 MB for a 2 s 1080p30 transition); frames are now spilled to a temp file and streamed back one at a time during encoding, so heap use stays constant regardless of duration/fps/resolution — at full quality.
+
 ## 1.21.2
 - **FIX**(android, iOS, macOS): Fix per-segment `playbackSpeed` being ignored on clips that take part in an overlap clip transition (dissolve/slide/push/wipe). The transition pre-render now resolves the blend in output (post-speed) time and replays each side at its own speed, so footage inside the transition plays at the requested speed instead of falling back to 1×. Independent per-side speeds are supported; dip transitions (`fadeToBlack`/`fadeToWhite`) already honored speed.
 
