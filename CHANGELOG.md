@@ -1,3 +1,6 @@
+## 1.21.1
+- **FIX**(android): Fix overlap clip transitions (dissolve/slide/push/wipe) appearing rotated 90°/180° when a clip carries container rotation metadata (e.g. portrait phone videos). The transition pre-render decodes coded (un-rotated) frames, so it now re-applies the source rotation via `MediaMuxer.setOrientationHint` and maps geometric directions into coded space.
+
 ## 1.21.0
 - **FEAT**(android, iOS, macOS): Add clip transitions between adjacent `VideoSegment`s via a new `transition` field (`ClipTransition` with `type`, `duration`, `curve`, `direction`). Supports `dissolve`, `slide`, `push` and `wipe` (overlap and shorten the output) plus `fadeToBlack` and `fadeToWhite` (dip through a color, duration unchanged). Web/Windows/Linux ignore the field.
 
