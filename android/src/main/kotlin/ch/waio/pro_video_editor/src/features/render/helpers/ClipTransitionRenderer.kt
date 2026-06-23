@@ -107,6 +107,25 @@ object ClipTransitionRenderer {
             val tailDurationUs = (outTailEndUs - outTailStartUs).coerceAtLeast(1L)
             val frameDurationUs = tailDurationUs / frameCount
 
+            // Frames are decoded in their *coded* orientation (decoding to a
+            // ByteBuffer/Image does not apply the container rotation), so the
+            // rotation must be re-attached to the output muxer. Otherwise the
+            // pre-rendered transition clip plays back un-rotated while the
+            // surrounding clips — which the main Media3 pipeline auto-rotates —
+            // stay upright, making the whole transition appear rotated 90°/180°.
+            val rotation = outSeg.rotation
+            if (inSeg.rotation != outSeg.rotation) {
+                Log.w(
+                    RENDER_TAG,
+                    "Transition: clips have different rotations " +
+                            "(${outSeg.rotation}° vs ${inSeg.rotation}°); using ${outSeg.rotation}°"
+                )
+            }
+            // Geometric transitions (wipe/slide/push) are authored in display
+            // space; map the requested direction back into coded space so they
+            // still move the right way after the orientation hint is applied.
+            val blendDirection = rotatedDirection(direction, rotation)
+
             // 2) Pre-encode the cross-faded audio (best effort, no muxer yet).
             var audioPre: AudioPreEncoded? = null
             if (includeAudio) {
@@ -124,6 +143,8 @@ object ClipTransitionRenderer {
 
             // 3) Encode the blended video frames into the shared muxer.
             val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            // Must be set before muxer.start() (called on INFO_OUTPUT_FORMAT_CHANGED).
+            if (rotation != 0) muxer.setOrientationHint(rotation)
             var muxerStarted = false
             var audioTrackIdx = -1
             var videoTrackIdx = -1
@@ -150,7 +171,7 @@ object ClipTransitionRenderer {
                             val blended = blendFrame(
                                 outSeg.frames[nextEncoderFrame],
                                 inSeg.frames[bIdx.coerceIn(0, inSeg.frames.size - 1)],
-                                width, height, eased, type, direction
+                                width, height, eased, type, blendDirection
                             )
                             val encImage = encoder.getInputImage(inIdx)
                             if (encImage != null) {
@@ -262,7 +283,31 @@ object ClipTransitionRenderer {
         val frames: MutableList<ByteArray>,
         val width: Int,
         val height: Int,
+        /** Container rotation in degrees (0/90/180/270); frames are coded, un-rotated. */
+        val rotation: Int,
     )
+
+    /**
+     * Maps a display-space transition [direction] into the coded
+     * (pre-rotation) frame space, given the container [rotation] that is
+     * re-applied via [MediaMuxer.setOrientationHint] on playback.
+     *
+     * The renderer blends raw coded frames, so a direction the user perceives
+     * in display space must be rotated back (counter-clockwise) by [rotation]
+     * to land on the matching coded axis. Dissolve ignores direction, so this
+     * is a no-op there.
+     */
+    private fun rotatedDirection(direction: String, rotation: Int): String {
+        val steps = (((rotation % 360) + 360) % 360) / 90
+        if (steps == 0) return direction
+        // Inverse (CCW) of the clockwise rotation the orientation hint applies.
+        val ccw = mapOf(
+            "up" to "left", "left" to "down", "down" to "right", "right" to "up",
+        )
+        var d = direction
+        repeat(steps) { d = ccw[d] ?: d }
+        return d
+    }
 
     /**
      * Decodes [path] within [[startUs]..[endUs]] into packed I420 frames.
@@ -279,6 +324,8 @@ object ClipTransitionRenderer {
         }
         val width = inputFormat.getInteger(MediaFormat.KEY_WIDTH)
         val height = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
+        val rotation = if (inputFormat.containsKey(MediaFormat.KEY_ROTATION))
+            inputFormat.getInteger(MediaFormat.KEY_ROTATION) else 0
 
         val decoderFormat = inputFormat.also {
             it.setInteger(
@@ -349,7 +396,7 @@ object ClipTransitionRenderer {
             try { extractor.release() } catch (_: Exception) {}
         }
 
-        return if (frames.isEmpty()) null else DecodedSegment(frames, width, height)
+        return if (frames.isEmpty()) null else DecodedSegment(frames, width, height, rotation)
     }
 
     // ---------------------------------------------------------------------
