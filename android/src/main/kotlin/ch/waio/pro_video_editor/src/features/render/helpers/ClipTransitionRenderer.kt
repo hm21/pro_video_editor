@@ -14,6 +14,7 @@ import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import kotlin.math.max
 import kotlin.math.min
@@ -87,12 +88,17 @@ object ClipTransitionRenderer {
         )
 
         try {
-            // 1) Decode both segments to packed I420 frames.
-            val outSeg = decodeSegment(outgoingPath, outTailStartUs, outTailEndUs)
-            val inSeg = decodeSegment(incomingPath, inHeadStartUs, inHeadEndUs)
+            // 1) Decode both segments to packed I420 frames, spilled to disk so
+            //    long/high-res transitions don't OOM the heap.
+            val outSeg = decodeSegment(
+                outgoingPath, outTailStartUs, outTailEndUs, File(workDir, "out_frames.i420")
+            )
+            val inSeg = decodeSegment(
+                incomingPath, inHeadStartUs, inHeadEndUs, File(workDir, "in_frames.i420")
+            )
 
             if (outSeg == null || inSeg == null ||
-                outSeg.frames.isEmpty() || inSeg.frames.isEmpty()
+                outSeg.frameCount == 0 || inSeg.frameCount == 0
             ) {
                 Log.w(RENDER_TAG, "Transition: failed to decode one of the segments")
                 return null
@@ -115,7 +121,7 @@ object ClipTransitionRenderer {
             // the full tail/head footage is replayed faster; when it is longer
             // (slowed down) we emit more. Defaults to the decoded tail (1×).
             val frameCount = ClipTransitionGeometry.outputFrameCount(
-                decodedTailFrames = outSeg.frames.size,
+                decodedTailFrames = outSeg.frameCount,
                 tailSourceDurationUs = tailDurationUs,
                 outputDurationUs = outputDurationUs,
             )
@@ -166,8 +172,17 @@ object ClipTransitionRenderer {
             var videoTrackIdx = -1
             val encoder = createEncoder(width, height, frameDurationUs)
             val encInfo = MediaCodec.BufferInfo()
+            var outFramesRaf: RandomAccessFile? = null
+            var inFramesRaf: RandomAccessFile? = null
 
             try {
+                // Read decoded frames back from disk one at a time; since they
+                // are fixed-size each output frame maps to a byte offset, so the
+                // heap only ever holds one frame per side.
+                val outRaf = RandomAccessFile(outSeg.framesFile, "r").also { outFramesRaf = it }
+                val inRaf = RandomAccessFile(inSeg.framesFile, "r").also { inFramesRaf = it }
+                val outFrameBuf = ByteArray(outSeg.frameBytes)
+                val inFrameBuf = ByteArray(inSeg.frameBytes)
                 var nextEncoderFrame = 0
                 var outputDone = false
 
@@ -185,14 +200,15 @@ object ClipTransitionRenderer {
                             // (tail/head) is replayed across the output frames,
                             // applying that clip's playback speed to its footage.
                             val aIdx = if (frameCount > 1) {
-                                (progress * (outSeg.frames.size - 1)).roundToInt()
-                            } else outSeg.frames.size - 1
+                                (progress * (outSeg.frameCount - 1)).roundToInt()
+                            } else outSeg.frameCount - 1
                             val bIdx = if (frameCount > 1) {
-                                (progress * (inSeg.frames.size - 1)).roundToInt()
-                            } else inSeg.frames.size - 1
+                                (progress * (inSeg.frameCount - 1)).roundToInt()
+                            } else inSeg.frameCount - 1
+                            readFrame(outRaf, aIdx.coerceIn(0, outSeg.frameCount - 1), outFrameBuf)
+                            readFrame(inRaf, bIdx.coerceIn(0, inSeg.frameCount - 1), inFrameBuf)
                             val blended = blendFrame(
-                                outSeg.frames[aIdx.coerceIn(0, outSeg.frames.size - 1)],
-                                inSeg.frames[bIdx.coerceIn(0, inSeg.frames.size - 1)],
+                                outFrameBuf, inFrameBuf,
                                 width, height, eased, type, blendDirection
                             )
                             val encImage = encoder.getInputImage(inIdx)
@@ -269,6 +285,8 @@ object ClipTransitionRenderer {
                 }
                 try { muxer.release() } catch (_: Exception) {}
                 try { audioPre?.packetsFile?.delete() } catch (_: Exception) {}
+                try { outFramesRaf?.close() } catch (_: Exception) {}
+                try { inFramesRaf?.close() } catch (_: Exception) {}
             }
 
             val durationUs = frameCount * frameDurationUs
@@ -301,8 +319,19 @@ object ClipTransitionRenderer {
     // VIDEO DECODE
     // ---------------------------------------------------------------------
 
+    /**
+     * A decoded transition segment whose frames are **spilled to disk** rather
+     * than held in the heap. Frames are packed I420, each exactly [frameBytes]
+     * long, written sequentially to [framesFile]; frame `i` lives at byte offset
+     * `i * frameBytes`, so the encoder can random-access any frame with a single
+     * seek. This bounds heap use to one frame per side regardless of transition
+     * duration/fps/resolution — the prior in-heap `List<ByteArray>` held every
+     * frame at once and OOM'd on long 1080p transitions.
+     */
     private class DecodedSegment(
-        val frames: MutableList<ByteArray>,
+        val framesFile: File,
+        val frameCount: Int,
+        val frameBytes: Int,
         val width: Int,
         val height: Int,
         /** Container rotation in degrees (0/90/180/270); frames are coded, un-rotated. */
@@ -332,9 +361,13 @@ object ClipTransitionRenderer {
     }
 
     /**
-     * Decodes [path] within [[startUs]..[endUs]] into packed I420 frames.
+     * Decodes [path] within [[startUs]..[endUs]] into packed I420 frames,
+     * writing each frame sequentially to [framesFile] (one fixed-size frame
+     * after another) instead of accumulating them in the heap.
      */
-    private fun decodeSegment(path: String, startUs: Long, endUs: Long): DecodedSegment? {
+    private fun decodeSegment(
+        path: String, startUs: Long, endUs: Long, framesFile: File,
+    ): DecodedSegment? {
         val extractor = MediaExtractor().apply { setDataSource(path) }
         val videoTrackIndex = findTrack(extractor, "video/") ?: run {
             extractor.release(); return null
@@ -348,6 +381,7 @@ object ClipTransitionRenderer {
         val height = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
         val rotation = if (inputFormat.containsKey(MediaFormat.KEY_ROTATION))
             inputFormat.getInteger(MediaFormat.KEY_ROTATION) else 0
+        val frameBytes = width * height * 3 / 2
 
         val decoderFormat = inputFormat.also {
             it.setInteger(
@@ -359,7 +393,10 @@ object ClipTransitionRenderer {
         decoder.configure(decoderFormat, null, null, 0)
         decoder.start()
 
-        val frames = mutableListOf<ByteArray>()
+        // Spill frames to disk as they decode: a long 1080p transition holds
+        // hundreds of MB of I420 frames, which OOM'd when kept in a list.
+        val framesOut = framesFile.outputStream().buffered()
+        var frameCount = 0
         val info = MediaCodec.BufferInfo()
         var inputDone = false
         var outputDone = false
@@ -401,7 +438,8 @@ object ClipTransitionRenderer {
                         if (info.size > 0 && info.presentationTimeUs in startUs until endUs) {
                             val image = decoder.getOutputImage(outIdx)
                             if (image != null) {
-                                frames.add(imageToI420(image, width, height))
+                                framesOut.write(imageToI420(image, width, height))
+                                frameCount++
                                 image.close()
                             }
                         }
@@ -416,9 +454,24 @@ object ClipTransitionRenderer {
             try { decoder.stop() } catch (_: Exception) {}
             try { decoder.release() } catch (_: Exception) {}
             try { extractor.release() } catch (_: Exception) {}
+            try { framesOut.close() } catch (_: Exception) {}
         }
 
-        return if (frames.isEmpty()) null else DecodedSegment(frames, width, height, rotation)
+        if (frameCount == 0) {
+            framesFile.delete()
+            return null
+        }
+        return DecodedSegment(framesFile, frameCount, frameBytes, width, height, rotation)
+    }
+
+    /**
+     * Reads frame [index] (0-based) from a disk-spilled segment into [buf],
+     * which must be exactly one frame ([DecodedSegment.frameBytes]) long. Frames
+     * are fixed-size and packed sequentially, so this is a single seek + read.
+     */
+    private fun readFrame(raf: RandomAccessFile, index: Int, buf: ByteArray) {
+        raf.seek(index.toLong() * buf.size)
+        raf.readFully(buf)
     }
 
     // ---------------------------------------------------------------------
