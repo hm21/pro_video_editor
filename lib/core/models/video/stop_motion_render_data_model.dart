@@ -30,13 +30,11 @@ enum StopMotionFit {
 class StopMotionFrame {
   /// Creates a [StopMotionFrame] from the given [image] and optional
   /// [duration].
-  const StopMotionFrame({
-    required this.image,
-    this.duration,
-  }) : assert(
-          duration == null || duration > Duration.zero,
-          '[duration] must be greater than zero',
-        );
+  const StopMotionFrame({required this.image, this.duration})
+    : assert(
+        duration == null || duration > Duration.zero,
+        '[duration] must be greater than zero',
+      );
 
   /// The image source for this frame.
   ///
@@ -60,10 +58,7 @@ class StopMotionFrame {
   }
 
   /// Creates a copy with updated values.
-  StopMotionFrame copyWith({
-    EditorLayerImage? image,
-    Duration? duration,
-  }) {
+  StopMotionFrame copyWith({EditorLayerImage? image, Duration? duration}) {
     return StopMotionFrame(
       image: image ?? this.image,
       duration: duration ?? this.duration,
@@ -123,13 +118,13 @@ class StopMotionRenderData {
     this.outputFormat = VideoOutputFormat.mp4,
     this.qualityConfig,
     this.bitrate,
-  })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
-        assert(frames.isNotEmpty, 'frames must not be empty'),
-        assert(frameRate > 0, '[frameRate] must be greater than 0'),
-        assert(
-          bitrate == null || bitrate > 0,
-          '[bitrate] must be greater than 0',
-        );
+  }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+       assert(frames.isNotEmpty, 'frames must not be empty'),
+       assert(frameRate > 0, '[frameRate] must be greater than 0'),
+       assert(
+         bitrate == null || bitrate > 0,
+         '[bitrate] must be greater than 0',
+       );
 
   /// Creates a [StopMotionRenderData] with a predefined quality preset.
   ///
@@ -279,11 +274,13 @@ class StopMotionRenderData {
       fit: map['fit'] != null
           ? StopMotionFit.values.byName(map['fit'] as String)
           : StopMotionFit.contain,
-      outputFormat:
-          VideoOutputFormat.values.byName(map['outputFormat'] as String),
+      outputFormat: VideoOutputFormat.values.byName(
+        map['outputFormat'] as String,
+      ),
       qualityConfig: map['qualityConfig'] != null
           ? VideoQualityConfig.fromMap(
-              map['qualityConfig'] as Map<String, dynamic>)
+              map['qualityConfig'] as Map<String, dynamic>,
+            )
           : null,
       bitrate: map['bitrate'] != null ? safeParseInt(map['bitrate']) : null,
     );

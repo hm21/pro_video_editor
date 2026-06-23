@@ -52,10 +52,7 @@ Future<File> writeMemoryVideoToFile(Uint8List bytes, String filePath) async {
   final file = File(filePath);
 
   await file.parent.create(recursive: true);
-  await file.writeAsBytes(
-    bytes,
-    flush: true,
-  );
+  await file.writeAsBytes(bytes, flush: true);
 
   return file;
 }

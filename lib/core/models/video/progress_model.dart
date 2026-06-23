@@ -3,10 +3,7 @@ import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 /// Model representing a progress update.
 class ProgressModel {
   /// Creates a [ProgressModel] with given [id] and [progress].
-  const ProgressModel({
-    required this.id,
-    required this.progress,
-  });
+  const ProgressModel({required this.id, required this.progress});
 
   /// Creates a [ProgressModel] from a map.
   factory ProgressModel.fromMap(Map<dynamic, dynamic> map) {

@@ -22,8 +22,9 @@ void main() {
     });
 
     test('creates 1080p high preset with correct values', () {
-      final config =
-          VideoQualityConfig.fromPreset(VideoQualityPreset.p1080High);
+      final config = VideoQualityConfig.fromPreset(
+        VideoQualityPreset.p1080High,
+      );
 
       expect(config.bitrate, equals(16000000)); // 16 Mbps
       expect(config.resolution, equals(const Size(1920, 1080)));

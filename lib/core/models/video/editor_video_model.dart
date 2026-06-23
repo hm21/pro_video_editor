@@ -18,8 +18,9 @@ class EditorVideo {
           ? Uint8List.fromList(List<int>.from(map['byteArray'] as List))
           : null,
       file: map['file'] != null ? map['file'] as String : null,
-      networkUrl:
-          map['networkUrl'] != null ? map['networkUrl'] as String : null,
+      networkUrl: map['networkUrl'] != null
+          ? map['networkUrl'] as String
+          : null,
       assetPath: map['assetPath'] != null ? map['assetPath'] as String : null,
     );
   }
@@ -29,20 +30,16 @@ class EditorVideo {
   ///
   /// At least one of `byteArray`, `file`, `networkUrl`, or `assetPath`
   /// must not be null.
-  EditorVideo._({
-    this.byteArray,
-    this.networkUrl,
-    this.assetPath,
-    dynamic file,
-  })  : file = file == null ? null : ensureFileInstance(file),
-        assert(
-          byteArray != null ||
-              file != null ||
-              networkUrl != null ||
-              assetPath != null,
-          'At least one of bytes, file, networkUrl, or assetPath must not '
-          'be null.',
-        );
+  EditorVideo._({this.byteArray, this.networkUrl, this.assetPath, dynamic file})
+    : file = file == null ? null : ensureFileInstance(file),
+      assert(
+        byteArray != null ||
+            file != null ||
+            networkUrl != null ||
+            assetPath != null,
+        'At least one of bytes, file, networkUrl, or assetPath must not '
+        'be null.',
+      );
 
   /// Creates an [EditorVideo] instance from any supported source.
   ///
@@ -320,5 +317,5 @@ enum EditorVideoType {
   memory,
 
   /// Represents a video loaded from an asset path.
-  asset
+  asset,
 }

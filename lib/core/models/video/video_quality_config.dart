@@ -46,10 +46,7 @@ class VideoQualityConfig {
   /// Creates a custom configuration with specific bitrate and resolution.
   ///
   /// Useful when you need fine-grained control over quality settings.
-  factory VideoQualityConfig.custom({
-    required int bitrate,
-    Size? resolution,
-  }) {
+  factory VideoQualityConfig.custom({required int bitrate, Size? resolution}) {
     return VideoQualityConfig(
       bitrate: bitrate,
       resolution: resolution,

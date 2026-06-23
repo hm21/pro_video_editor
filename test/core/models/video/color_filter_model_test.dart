@@ -24,7 +24,7 @@ void main() {
         0.0,
         0.0,
         1.0,
-        0.0
+        0.0,
       ],
       startTime: const Duration(seconds: 2),
       endTime: const Duration(seconds: 8),
@@ -91,9 +91,7 @@ void main() {
 
     group('copyWith', () {
       test('creates copy with updated fields', () {
-        final copy = filter.copyWith(
-          startTime: const Duration(seconds: 0),
-        );
+        final copy = filter.copyWith(startTime: const Duration(seconds: 0));
 
         expect(copy.startTime, Duration.zero);
         expect(copy.endTime, filter.endTime);
@@ -108,9 +106,7 @@ void main() {
       });
 
       test('different instances are not equal', () {
-        final other = filter.copyWith(
-          startTime: const Duration(seconds: 5),
-        );
+        final other = filter.copyWith(startTime: const Duration(seconds: 5));
         expect(other, isNot(filter));
       });
     });

@@ -184,29 +184,29 @@ void main() {
       ClipTransition transition, {
       required double speed1,
       required double speed2,
-    }) =>
-        VideoRenderData(
-          outputFormat: VideoOutputFormat.mp4,
-          videoSegments: [
-            VideoSegment(
-              video: inputVideo,
-              startTime: Duration.zero,
-              endTime: clipDuration,
-              playbackSpeed: speed1,
-              transition: transition,
-            ),
-            VideoSegment(
-              video: inputVideo,
-              startTime: const Duration(seconds: 10),
-              endTime: const Duration(seconds: 15),
-              playbackSpeed: speed2,
-            ),
-          ],
-        );
+    }) => VideoRenderData(
+      outputFormat: VideoOutputFormat.mp4,
+      videoSegments: [
+        VideoSegment(
+          video: inputVideo,
+          startTime: Duration.zero,
+          endTime: clipDuration,
+          playbackSpeed: speed1,
+          transition: transition,
+        ),
+        VideoSegment(
+          video: inputVideo,
+          startTime: const Duration(seconds: 10),
+          endTime: const Duration(seconds: 15),
+          playbackSpeed: speed2,
+        ),
+      ],
+    );
 
     for (final speed in [2.0, 0.5]) {
-      testWidgets('dissolve @ ${speed}x — overlap shortens, footage sped',
-          (_) async {
+      testWidgets('dissolve @ ${speed}x — overlap shortens, footage sped', (
+        _,
+      ) async {
         final meta = await render(
           'dissolve ${speed}x',
           twoClipsSpeed(
@@ -222,9 +222,10 @@ void main() {
         // (At 2× this is ~4.2s — clearly distinct from the unfixed 5.0s
         //  dropped-transition or 9.2s speed-ignored results.)
         final expected = Duration(
-          milliseconds: (2 * clipOutSeconds(speed) * 1000 -
-                  overlapDuration.inMilliseconds)
-              .round(),
+          milliseconds:
+              (2 * clipOutSeconds(speed) * 1000 -
+                      overlapDuration.inMilliseconds)
+                  .round(),
         );
         expectDuration(
           meta,
@@ -233,8 +234,9 @@ void main() {
         );
       });
 
-      testWidgets('fadeToBlack @ ${speed}x — dip keeps speed-adjusted length',
-          (_) async {
+      testWidgets('fadeToBlack @ ${speed}x — dip keeps speed-adjusted length', (
+        _,
+      ) async {
         final meta = await render(
           'fadeToBlack ${speed}x',
           twoClipsSpeed(
@@ -258,8 +260,9 @@ void main() {
       });
     }
 
-    testWidgets('dissolve with mixed speeds (outgoing 2× · incoming 0.5×)',
-        (_) async {
+    testWidgets('dissolve with mixed speeds (outgoing 2× · incoming 0.5×)', (
+      _,
+    ) async {
       final meta = await render(
         'dissolve mixed-speed',
         twoClipsSpeed(
@@ -274,10 +277,11 @@ void main() {
       // clip1 → 2.5s, clip2 → 10s, overlapping by 0.8s → ~11.7s. Each side is
       // time-scaled with its own factor across a single output-time blend.
       final expected = Duration(
-        milliseconds: (clipOutSeconds(2.0) * 1000 +
-                clipOutSeconds(0.5) * 1000 -
-                overlapDuration.inMilliseconds)
-            .round(),
+        milliseconds:
+            (clipOutSeconds(2.0) * 1000 +
+                    clipOutSeconds(0.5) * 1000 -
+                    overlapDuration.inMilliseconds)
+                .round(),
       );
       expectDuration(
         meta,

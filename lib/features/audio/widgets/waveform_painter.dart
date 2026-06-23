@@ -41,14 +41,15 @@ class WaveformPainter extends CustomPainter {
 
     final samplesPerBar = samples.length / barsCount;
     final centerY = size.height / 2;
-    final maxAmplitude =
-        waveform.isStereo ? size.height / 4 - 2 : size.height / 2 - 2;
+    final maxAmplitude = waveform.isStereo
+        ? size.height / 4 - 2
+        : size.height / 2 - 2;
 
     // Calculate position for played/unplayed coloring
     final positionRatio =
         currentPosition != null && waveform.duration.inMilliseconds > 0
-            ? currentPosition!.inMilliseconds / waveform.duration.inMilliseconds
-            : 0.0;
+        ? currentPosition!.inMilliseconds / waveform.duration.inMilliseconds
+        : 0.0;
     final playedBars = (barsCount * positionRatio).floor();
 
     // Prepare paints
@@ -83,10 +84,14 @@ class WaveformPainter extends CustomPainter {
 
       if (waveform.isStereo) {
         // Stereo: left channel above center, right below
-        final leftHeight =
-            (leftPeak * maxAmplitude).clamp(style.minBarHeight, maxAmplitude);
-        final rightHeight =
-            (rightPeak * maxAmplitude).clamp(style.minBarHeight, maxAmplitude);
+        final leftHeight = (leftPeak * maxAmplitude).clamp(
+          style.minBarHeight,
+          maxAmplitude,
+        );
+        final rightHeight = (rightPeak * maxAmplitude).clamp(
+          style.minBarHeight,
+          maxAmplitude,
+        );
 
         final paint = isPlayed ? playedPaint : unplayedPaint;
 
@@ -97,7 +102,6 @@ class WaveformPainter extends CustomPainter {
             Offset(x, centerY - 1 - leftHeight),
             paint,
           )
-
           // Right channel (below center)
           ..drawLine(
             Offset(x, centerY + 1),
@@ -106,8 +110,10 @@ class WaveformPainter extends CustomPainter {
           );
       } else {
         // Mono: symmetric around center
-        final height =
-            (leftPeak * maxAmplitude).clamp(style.minBarHeight, maxAmplitude);
+        final height = (leftPeak * maxAmplitude).clamp(
+          style.minBarHeight,
+          maxAmplitude,
+        );
         canvas.drawLine(
           Offset(x, centerY - height),
           Offset(x, centerY + height),

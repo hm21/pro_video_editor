@@ -45,57 +45,57 @@ class VideoRenderData {
     this.shouldOptimizeForNetworkUse = false,
     this.imageBytesWithCropping = false,
     @Deprecated('Use audioTracks instead.') this.loopCustomAudio = true,
-  })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
-        assert(
-          (video != null) != (videoSegments != null),
-          'You must provide either video OR videoSegments, but not both',
-        ),
-        assert(
-          videoSegments == null || videoSegments.isNotEmpty,
-          'videoSegments must not be empty if provided',
-        ),
-        assert(
-          imageBytes == null || imageLayers == null || imageLayers.isEmpty,
-          'Cannot use both imageBytes and imageLayers. '
-          'Use imageLayers instead.',
-        ),
-        assert(
-          colorMatrixList.isEmpty || colorFilters.isEmpty,
-          'Cannot use both colorMatrixList and colorFilters. '
-          'Use colorFilters instead.',
-        ),
-        assert(
-          audioTracks.isEmpty ||
-              (customAudioPath == null &&
-                  customAudioStartTime == null &&
-                  customAudioVolume == null),
-          'Cannot use both audioTracks and customAudio* fields. '
-          'Use audioTracks instead.',
-        ),
-        assert(
-          startTime == null || endTime == null || startTime < endTime,
-          'startTime must be before endTime',
-        ),
-        assert(
-          blur == null || blur >= 0,
-          '[blur] must be greater than or equal to 0',
-        ),
-        assert(
-          playbackSpeed == null || playbackSpeed > 0,
-          '[playbackSpeed] must be greater than 0',
-        ),
-        assert(
-          bitrate == null || bitrate > 0,
-          '[bitrate] must be greater than 0',
-        ),
-        assert(
-          originalAudioVolume == null || originalAudioVolume >= 0,
-          '[originalAudioVolume] must be greater than or equal to 0',
-        ),
-        assert(
-          customAudioVolume == null || customAudioVolume >= 0,
-          '[customAudioVolume] must be greater than or equal to 0',
-        );
+  }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+       assert(
+         (video != null) != (videoSegments != null),
+         'You must provide either video OR videoSegments, but not both',
+       ),
+       assert(
+         videoSegments == null || videoSegments.isNotEmpty,
+         'videoSegments must not be empty if provided',
+       ),
+       assert(
+         imageBytes == null || imageLayers == null || imageLayers.isEmpty,
+         'Cannot use both imageBytes and imageLayers. '
+         'Use imageLayers instead.',
+       ),
+       assert(
+         colorMatrixList.isEmpty || colorFilters.isEmpty,
+         'Cannot use both colorMatrixList and colorFilters. '
+         'Use colorFilters instead.',
+       ),
+       assert(
+         audioTracks.isEmpty ||
+             (customAudioPath == null &&
+                 customAudioStartTime == null &&
+                 customAudioVolume == null),
+         'Cannot use both audioTracks and customAudio* fields. '
+         'Use audioTracks instead.',
+       ),
+       assert(
+         startTime == null || endTime == null || startTime < endTime,
+         'startTime must be before endTime',
+       ),
+       assert(
+         blur == null || blur >= 0,
+         '[blur] must be greater than or equal to 0',
+       ),
+       assert(
+         playbackSpeed == null || playbackSpeed > 0,
+         '[playbackSpeed] must be greater than 0',
+       ),
+       assert(
+         bitrate == null || bitrate > 0,
+         '[bitrate] must be greater than 0',
+       ),
+       assert(
+         originalAudioVolume == null || originalAudioVolume >= 0,
+         '[originalAudioVolume] must be greater than or equal to 0',
+       ),
+       assert(
+         customAudioVolume == null || customAudioVolume >= 0,
+         '[customAudioVolume] must be greater than or equal to 0',
+       );
 
   /// Creates a [VideoRenderData] with a predefined quality preset.
   ///
@@ -413,7 +413,8 @@ class VideoRenderData {
 
     // Handle quality config
     if (qualityConfig != null && scaleX == null && scaleY == null) {
-      final targetVideo = video ??
+      final targetVideo =
+          video ??
           (videoSegments != null && videoSegments!.isNotEmpty
               ? videoSegments!.first.video
               : null);
@@ -436,10 +437,12 @@ class VideoRenderData {
     List<Map<String, dynamic>>? videoSegmentsMaps;
     if (videoSegments != null) {
       videoSegmentsMaps = await Future.wait(
-        videoSegments!.map((clip) async => {
-              ...await clip.toAsyncMap(),
-              'volume': clip.volume ?? fallbackVolume,
-            }),
+        videoSegments!.map(
+          (clip) async => {
+            ...await clip.toAsyncMap(),
+            'volume': clip.volume ?? fallbackVolume,
+          },
+        ),
       );
     } else if (video != null) {
       // Single video: convert to single clip format
@@ -457,30 +460,32 @@ class VideoRenderData {
     // Merge deprecated colorMatrixList into colorFilters
     // ignore: deprecated_member_use_from_same_package
     final mergedColorFilters = [
-      ...colorFilters.map((f) => {
-            'matrix': f.matrix,
-            'startUs': f.startTime?.inMicroseconds,
-            'endUs': f.endTime?.inMicroseconds,
-          }),
+      ...colorFilters.map(
+        (f) => {
+          'matrix': f.matrix,
+          'startUs': f.startTime?.inMicroseconds,
+          'endUs': f.endTime?.inMicroseconds,
+        },
+      ),
       // ignore: deprecated_member_use_from_same_package
-      ...colorMatrixList.map((matrix) => {
-            'matrix': matrix,
-            'startUs': null,
-            'endUs': null,
-          }),
+      ...colorMatrixList.map(
+        (matrix) => {'matrix': matrix, 'startUs': null, 'endUs': null},
+      ),
     ];
 
     // Merge deprecated customAudio* fields into audioTracks
     final mergedAudioTracks = [
-      ...audioTracks.map((t) => {
-            'path': t.path,
-            'volume': t.volume,
-            'loop': t.loop,
-            'audioStartUs': t.audioStartTime?.inMicroseconds,
-            'audioEndUs': t.audioEndTime?.inMicroseconds,
-            'startUs': t.startTime?.inMicroseconds,
-            'endUs': t.endTime?.inMicroseconds,
-          }),
+      ...audioTracks.map(
+        (t) => {
+          'path': t.path,
+          'volume': t.volume,
+          'loop': t.loop,
+          'audioStartUs': t.audioStartTime?.inMicroseconds,
+          'audioEndUs': t.audioEndTime?.inMicroseconds,
+          'startUs': t.startTime?.inMicroseconds,
+          'endUs': t.endTime?.inMicroseconds,
+        },
+      ),
       // ignore: deprecated_member_use_from_same_package
       if (customAudioPath != null)
         {
@@ -502,16 +507,18 @@ class VideoRenderData {
     final mergedImageLayers = [
       if (imageLayers != null)
         ...await Future.wait(
-          imageLayers!.map((layer) async => {
-                'imageData': await layer.image.safeByteArray(),
-                'startUs': layer.startTime?.inMicroseconds,
-                'endUs': layer.endTime?.inMicroseconds,
-                'x': layer.offset?.dx.toInt(),
-                'y': layer.offset?.dy.toInt(),
-                'width': layer.size?.width,
-                'height': layer.size?.height,
-                'animations': layer.animations.map((a) => a.toMap()).toList(),
-              }),
+          imageLayers!.map(
+            (layer) async => {
+              'imageData': await layer.image.safeByteArray(),
+              'startUs': layer.startTime?.inMicroseconds,
+              'endUs': layer.endTime?.inMicroseconds,
+              'x': layer.offset?.dx.toInt(),
+              'y': layer.offset?.dy.toInt(),
+              'width': layer.size?.width,
+              'height': layer.size?.height,
+              'animations': layer.animations.map((a) => a.toMap()).toList(),
+            },
+          ),
         ),
       // ignore: deprecated_member_use_from_same_package
       if (imageBytes != null)
@@ -640,10 +647,12 @@ class VideoRenderData {
       id: map['id'] as String,
       qualityConfig: map['qualityConfig'] != null
           ? VideoQualityConfig.fromMap(
-              map['qualityConfig'] as Map<String, dynamic>)
+              map['qualityConfig'] as Map<String, dynamic>,
+            )
           : null,
-      outputFormat:
-          VideoOutputFormat.values.byName(map['outputFormat'] as String),
+      outputFormat: VideoOutputFormat.values.byName(
+        map['outputFormat'] as String,
+      ),
       video: map['video'] != null
           ? EditorVideo.fromMap(map['video'] as Map<String, dynamic>)
           : null,

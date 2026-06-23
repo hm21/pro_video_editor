@@ -52,10 +52,7 @@ void main() {
     });
 
     test('respects custom transform parameter', () {
-      const customTransform = ExportTransform(
-        flipX: true,
-        rotateTurns: 1,
-      );
+      const customTransform = ExportTransform(flipX: true, rotateTurns: 1);
 
       final model = VideoRenderData.withQualityPreset(
         video: testVideo,

@@ -64,7 +64,8 @@ class WaveformChunk {
       );
     } else {
       throw ArgumentError(
-          'Invalid leftChannel data type: ${leftData.runtimeType}');
+        'Invalid leftChannel data type: ${leftData.runtimeType}',
+      );
     }
 
     Float32List? rightChannel;
@@ -84,8 +85,9 @@ class WaveformChunk {
       startIndex: (map['startIndex'] as num).toInt(),
       progress: (map['progress'] as num).toDouble(),
       sampleRate: (map['sampleRate'] as num).toInt(),
-      totalDuration:
-          Duration(milliseconds: (map['totalDuration'] as num).toInt()),
+      totalDuration: Duration(
+        milliseconds: (map['totalDuration'] as num).toInt(),
+      ),
       samplesPerSecond: (map['samplesPerSecond'] as num).toInt(),
       isComplete: map['isComplete'] as bool? ?? false,
     );

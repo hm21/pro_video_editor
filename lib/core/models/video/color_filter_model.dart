@@ -16,14 +16,11 @@ import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 class ColorFilter with TimeRangeMixin {
   /// Creates a [ColorFilter] with the given [matrix], [startTime],
   /// and optional [endTime].
-  const ColorFilter({
-    required this.matrix,
-    this.startTime,
-    this.endTime,
-  }) : assert(
-          startTime == null || endTime == null || startTime < endTime,
-          'startTime must be before endTime',
-        );
+  const ColorFilter({required this.matrix, this.startTime, this.endTime})
+    : assert(
+        startTime == null || endTime == null || startTime < endTime,
+        'startTime must be before endTime',
+      );
 
   /// A 4x5 color matrix used to apply color filters
   /// (e.g., saturation, brightness).

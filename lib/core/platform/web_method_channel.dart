@@ -74,7 +74,8 @@ class ProVideoEditorWeb extends ProVideoEditor {
     NativeLogLevel? nativeLogLevel,
   }) {
     throw UnimplementedError(
-        'hasAudioTrack() has not been implemented on web.');
+      'hasAudioTrack() has not been implemented on web.',
+    );
   }
 
   @override
@@ -106,7 +107,8 @@ class ProVideoEditorWeb extends ProVideoEditor {
   }) async {
     Duration timestamp;
     if (value.position == ThumbnailPosition.last) {
-      final duration = value.videoDuration ??
+      final duration =
+          value.videoDuration ??
           (await _manager.getMetadata(value.video)).duration;
       timestamp = duration;
     } else {
@@ -145,7 +147,8 @@ class ProVideoEditorWeb extends ProVideoEditor {
     NativeLogLevel? nativeLogLevel,
   }) {
     throw UnimplementedError(
-        'extractAudioToFile() has not been implemented on web.');
+      'extractAudioToFile() has not been implemented on web.',
+    );
   }
 
   @override

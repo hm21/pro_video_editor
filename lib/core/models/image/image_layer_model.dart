@@ -22,9 +22,9 @@ class ImageLayer with TimeRangeMixin {
     this.size,
     this.animations = const [],
   }) : assert(
-          startTime == null || endTime == null || startTime < endTime,
-          'startTime must be before endTime',
-        );
+         startTime == null || endTime == null || startTime < endTime,
+         'startTime must be before endTime',
+       );
 
   /// The image to overlay on the video.
   final EditorLayerImage image;
@@ -85,8 +85,9 @@ class ImageLayer with TimeRangeMixin {
       'startTime': startTime?.inMicroseconds,
       'endTime': endTime?.inMicroseconds,
       'offset': offset != null ? {'dx': offset!.dx, 'dy': offset!.dy} : null,
-      'size':
-          size != null ? {'width': size!.width, 'height': size!.height} : null,
+      'size': size != null
+          ? {'width': size!.width, 'height': size!.height}
+          : null,
       'animations': animations.map((a) => a.toMap()).toList(),
     };
   }
@@ -112,7 +113,8 @@ class ImageLayer with TimeRangeMixin {
               safeParseDouble((map['size'] as Map<String, dynamic>)['height']),
             )
           : null,
-      animations: (map['animations'] as List<dynamic>?)
+      animations:
+          (map['animations'] as List<dynamic>?)
               ?.map((a) => LayerAnimation.fromMap(a as Map<String, dynamic>))
               .toList() ??
           const [],

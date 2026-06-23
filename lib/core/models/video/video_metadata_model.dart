@@ -9,10 +9,7 @@ import '/shared/utils/parser/int_parser.dart';
 /// metadata, typically representing where the video was recorded.
 class GpsCoordinates {
   /// Creates a [GpsCoordinates] instance.
-  const GpsCoordinates({
-    required this.latitude,
-    required this.longitude,
-  });
+  const GpsCoordinates({required this.latitude, required this.longitude});
 
   /// The GPS latitude coordinate.
   ///
@@ -103,8 +100,9 @@ class VideoMetadata {
       author: value['author'] ?? '',
       album: value['album'] ?? '',
       albumArtist: value['albumArtist'] ?? '',
-      date:
-          (value['date'] ?? '') != '' ? DateTime.tryParse(value['date']) : null,
+      date: (value['date'] ?? '') != ''
+          ? DateTime.tryParse(value['date'])
+          : null,
       isOptimizedForStreaming: value['isOptimizedForStreaming'] as bool?,
       gpsCoordinates: value['latitude'] != null && value['longitude'] != null
           ? GpsCoordinates(

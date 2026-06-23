@@ -19,18 +19,18 @@ class VideoSegment {
     this.playbackSpeed,
     this.reverseVideo = false,
     this.transition,
-  })  : assert(
-          startTime == null || endTime == null || startTime < endTime,
-          'startTime must be before endTime',
-        ),
-        assert(
-          volume == null || volume >= 0,
-          '[volume] must be greater than or equal to 0',
-        ),
-        assert(
-          playbackSpeed == null || playbackSpeed > 0,
-          '[playbackSpeed] must be greater than 0',
-        );
+  }) : assert(
+         startTime == null || endTime == null || startTime < endTime,
+         'startTime must be before endTime',
+       ),
+       assert(
+         volume == null || volume >= 0,
+         '[volume] must be greater than or equal to 0',
+       ),
+       assert(
+         playbackSpeed == null || playbackSpeed > 0,
+         '[playbackSpeed] must be greater than 0',
+       );
 
   /// The video source for this clip.
   ///
