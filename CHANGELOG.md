@@ -1,3 +1,6 @@
+## 1.21.4
+- **FIX**(android, iOS, macOS): Fix layer `slide` animations only moving the layer by its own size, leaving it partly visible at the animation's start/end. Slides are now edge-aware and carry the layer fully off-screen in the slide direction. Requires the matching `pro_image_editor` release so the in-editor preview matches the export.
+
 ## 1.21.3
 - **FIX**(android): Fix `OutOfMemoryError` when pre-rendering longer overlap clip transitions (dissolve/slide/push/wipe). Both sides previously decoded every I420 frame into memory at once (~370 MB for a 2 s 1080p30 transition); frames are now spilled to a temp file and streamed back one at a time during encoding, so heap use stays constant regardless of duration/fps/resolution — at full quality.
 
