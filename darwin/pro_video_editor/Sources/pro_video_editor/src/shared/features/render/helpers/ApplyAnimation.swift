@@ -54,6 +54,34 @@ func applyEasing(_ t: Double, curve: String) -> Double {
   }
 }
 
+/// Computes the slide translation (frame pixel space, Core Graphics Y bottom-up)
+/// that moves an overlay fully out of the frame in `direction`, edge-aware
+/// rather than overlay-size-relative.
+///
+/// At `invP == 1` the overlay's trailing edge sits exactly on the frame edge in
+/// the slide direction (so the overlay is just completely outside); at
+/// `invP == 0` the offset is `.zero` (overlay at rest). Visually identical to
+/// the Android `slideOffset` in normalized coordinates.
+func slideOffset(
+  direction: String,
+  invP: CGFloat,
+  overlayExtent: CGRect,
+  frameExtent: CGRect
+) -> CGPoint {
+  switch direction {
+  case "left":  // right edge → frame left
+    return CGPoint(x: (frameExtent.minX - overlayExtent.maxX) * invP, y: 0)
+  case "right":  // left edge → frame right
+    return CGPoint(x: (frameExtent.maxX - overlayExtent.minX) * invP, y: 0)
+  case "top":  // bottom edge → frame top (Core Graphics top edge is maxY)
+    return CGPoint(x: 0, y: (frameExtent.maxY - overlayExtent.minY) * invP)
+  case "bottom":  // top edge → frame bottom (Core Graphics bottom edge is minY)
+    return CGPoint(x: 0, y: (frameExtent.minY - overlayExtent.maxY) * invP)
+  default:
+    return .zero
+  }
+}
+
 /// Computes animation transforms and opacity for overlaying an image layer.
 /// Returns (opacity, additionalTransform) to apply to the overlay.
 func computeAnimation(
@@ -112,24 +140,14 @@ func computeAnimation(
 
     case "slide":
       let direction = anim.slideDirection ?? "left"
-      var dx: CGFloat = 0
-      var dy: CGFloat = 0
       let invP = CGFloat(1.0 - p)
-
-      switch direction {
-      case "left":
-        dx = -overlayExtent.width * invP
-      case "right":
-        dx = overlayExtent.width * invP
-      case "top":
-        // Core Graphics Y is bottom-up, so "top" means positive Y
-        dy = overlayExtent.height * invP
-      case "bottom":
-        dy = -overlayExtent.height * invP
-      default:
-        break
-      }
-      animTransform = animTransform.translatedBy(x: dx, y: dy)
+      let off = slideOffset(
+        direction: direction,
+        invP: invP,
+        overlayExtent: overlayExtent,
+        frameExtent: frameExtent
+      )
+      animTransform = animTransform.translatedBy(x: off.x, y: off.y)
 
     case "scale":
       let scaleFrom = CGFloat(anim.scaleFrom ?? 0.0)

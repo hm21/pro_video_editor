@@ -1123,6 +1123,56 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Edge-aware slide showcase — verifies the slide fix.
+  ///
+  /// A centered sticker slides fully in from off-screen and fully back out
+  /// for each direction in sequence (left → right → top → bottom). With the
+  /// fix the sticker must be completely off-screen at the start/end of every
+  /// window; the old behavior only moved it by its own size, so it stayed
+  /// partly visible. A `linear` curve makes the travel easy to judge.
+  Future<void> _layerSlideEdgeAware() async {
+    final stickerImage = EditorLayerImage.asset('assets/sticker.png');
+
+    const stickerSize = 200.0;
+    const videoWidth = 1280.0;
+    const videoHeight = 720.0;
+    const center = Offset(
+      (videoWidth - stickerSize) / 2,
+      (videoHeight - stickerSize) / 2,
+    );
+
+    ImageLayer slideWindow(SlideDirection direction, int fromSec, int toSec) {
+      return ImageLayer(
+        image: stickerImage,
+        offset: center,
+        size: const Size(stickerSize, stickerSize),
+        startTime: Duration(seconds: fromSec),
+        endTime: Duration(seconds: toSec),
+        animations: [
+          LayerAnimation(
+            type: LayerAnimationType.slide,
+            phase: AnimationPhase.animateInOut,
+            duration: const Duration(milliseconds: 700),
+            slideDirection: direction,
+            curve: AnimationCurve.linear,
+          ),
+        ],
+      );
+    }
+
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      imageLayers: [
+        slideWindow(SlideDirection.left, 0, 3),
+        slideWindow(SlideDirection.right, 3, 6),
+        slideWindow(SlideDirection.top, 6, 9),
+        slideWindow(SlideDirection.bottom, 9, 12),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   /// Combined animations on image layer.
   ///
   /// This example combines fade, slide, and scale animations on a single
@@ -1737,6 +1787,14 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           leading: const Icon(Icons.swap_horiz_outlined),
           title: const Text('Slide Animation'),
           subtitle: const Text('Slide in from left, out to bottom'),
+        ),
+        ListTile(
+          onTap: _layerSlideEdgeAware,
+          leading: const Icon(Icons.open_in_full_outlined),
+          title: const Text('Slide Edge-Aware (all directions)'),
+          subtitle: const Text(
+            'Centered sticker slides fully off-screen: L → R → T → B',
+          ),
         ),
         ListTile(
           onTap: _layerCombinedAnimations,

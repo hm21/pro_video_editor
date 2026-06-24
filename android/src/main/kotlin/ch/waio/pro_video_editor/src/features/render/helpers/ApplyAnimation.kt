@@ -60,6 +60,70 @@ internal fun applyEasing(t: Double, curve: String): Double {
 }
 
 /**
+ * Normalized slide offset (OpenGL coordinates, [-1, 1], +x right / +y up).
+ */
+internal data class SlideOffset(val x: Float, val y: Float)
+
+/**
+ * Computes the slide translation that moves a layer fully out of the canvas
+ * in [direction], edge-aware rather than layer-size-relative.
+ *
+ * At [invP] == 1 the layer's trailing edge sits exactly on the canvas edge in
+ * the slide direction (so the layer is just completely outside); at [invP] == 0
+ * the offset is zero (layer at rest). The canvas spans [-1, 1] on both axes.
+ *
+ * @param baseNormX Layer center X in [-1, 1] (+x right).
+ * @param baseNormY Layer center Y in [-1, 1] (+y up).
+ * @param halfNormW Layer half-width in [-1, 1] units (imageWidth / videoWidth).
+ * @param halfNormH Layer half-height in [-1, 1] units (imageHeight / videoHeight).
+ */
+internal fun slideOffset(
+    direction: String?,
+    invP: Float,
+    baseNormX: Float,
+    baseNormY: Float,
+    halfNormW: Float,
+    halfNormH: Float,
+): SlideOffset = when (direction) {
+    "left" -> SlideOffset(invP * (-1f - baseNormX - halfNormW), 0f) // right edge → -1
+    "right" -> SlideOffset(invP * (1f - baseNormX + halfNormW), 0f) // left edge → +1
+    "top" -> SlideOffset(0f, invP * (1f - baseNormY + halfNormH)) // bottom edge → +1 (Y up)
+    "bottom" -> SlideOffset(0f, invP * (-1f - baseNormY - halfNormH)) // top edge → -1 (Y up)
+    else -> SlideOffset(0f, 0f)
+}
+
+/**
+ * A background-frame anchor paired with an overlay-frame anchor, both in the
+ * Media3 [-1, 1] range.
+ */
+internal data class OverlayAnchors(
+    val backgroundAnchor: Float,
+    val overlayAnchor: Float,
+)
+
+/**
+ * Splits a desired layer-center position (in [-1, 1] NDC, possibly beyond the
+ * canvas to place the layer off-screen) into the two anchors Media3 accepts.
+ *
+ * Media3 clamps both [StaticOverlaySettings.Builder.setBackgroundFrameAnchor]
+ * and [StaticOverlaySettings.Builder.setOverlayFrameAnchor] to [-1, 1], so a
+ * single background anchor cannot move a layer fully off-screen. The background
+ * anchor covers the on-canvas part; the overlay anchor supplies the remaining
+ * off-canvas shift — its ±1 range maps to ±[halfNorm] of background travel,
+ * which is exactly one layer half-size, enough for an edge-flush slide-out.
+ *
+ * @param targetCenter Desired layer center on this axis (may exceed [-1, 1]).
+ * @param halfNorm Layer half-size on this axis in [-1, 1] units.
+ */
+internal fun resolveAnchor(targetCenter: Float, halfNorm: Float): OverlayAnchors {
+    val background = targetCenter.coerceIn(-1f, 1f)
+    val overflow = targetCenter - background
+    // overlayCenter = background − overlayAnchor * halfNorm  ⇒  solve for anchor.
+    val overlay = if (halfNorm > 0f) (-overflow / halfNorm).coerceIn(-1f, 1f) else 0f
+    return OverlayAnchors(background, overlay)
+}
+
+/**
  * Custom BitmapOverlay that computes per-frame overlay settings for animations.
  *
  * Uses [getOverlaySettings] to dynamically compute alpha, position offsets,
@@ -86,6 +150,10 @@ internal class AnimatedBitmapOverlay(
         var offsetX = 0f
         var offsetY = 0f
         var scaleVal = 1.0f
+
+        // Layer half-size in [-1, 1] units (canvas spans [-1, 1]).
+        val halfNormW = imageWidth.toFloat() / videoWidth
+        val halfNormH = imageHeight.toFloat() / videoHeight
 
         val effectiveStartUs = if (layerStartUs == -1L) 0L else layerStartUs
         val effectiveEndUs = if (layerEndUs == -1L) Long.MAX_VALUE else layerEndUs
@@ -130,15 +198,12 @@ internal class AnimatedBitmapOverlay(
                 "fade" -> alpha *= progress.toFloat()
                 "slide" -> {
                     val invP = (1.0 - progress).toFloat()
-                    // Normalized offset in OpenGL coordinates [-1, 1]
-                    val normWidth = (imageWidth.toFloat() / videoWidth) * 2f
-                    val normHeight = (imageHeight.toFloat() / videoHeight) * 2f
-                    when (anim.slideDirection) {
-                        "left" -> offsetX -= normWidth * invP
-                        "right" -> offsetX += normWidth * invP
-                        "top" -> offsetY += normHeight * invP  // OpenGL Y is up
-                        "bottom" -> offsetY -= normHeight * invP
-                    }
+                    val off = slideOffset(
+                        anim.slideDirection, invP,
+                        baseNormX, baseNormY, halfNormW, halfNormH
+                    )
+                    offsetX += off.x
+                    offsetY += off.y
                 }
                 "scale" -> {
                     val scaleFrom = anim.scaleFrom?.toFloat() ?: 0f
@@ -151,10 +216,15 @@ internal class AnimatedBitmapOverlay(
         val clampedAlpha = alpha.coerceIn(0f, 1f)
         val clampedScale = scaleVal.coerceAtLeast(0f)
 
+        // Media3 clamps each anchor to [-1, 1], so a fully off-screen slide is
+        // split across the background and overlay anchors (see resolveAnchor).
+        val anchorX = resolveAnchor(baseNormX + offsetX, halfNormW)
+        val anchorY = resolveAnchor(baseNormY + offsetY, halfNormH)
+
         return StaticOverlaySettings.Builder()
             .setAlphaScale(clampedAlpha)
-            .setBackgroundFrameAnchor(baseNormX + offsetX, baseNormY + offsetY)
-            .setOverlayFrameAnchor(0f, 0f)
+            .setBackgroundFrameAnchor(anchorX.backgroundAnchor, anchorY.backgroundAnchor)
+            .setOverlayFrameAnchor(anchorX.overlayAnchor, anchorY.overlayAnchor)
             .setScale(clampedScale, clampedScale)
             .build()
     }
