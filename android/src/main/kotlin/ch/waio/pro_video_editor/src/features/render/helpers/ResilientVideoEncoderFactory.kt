@@ -30,8 +30,8 @@ import com.google.common.collect.ImmutableList
  *  1. Tries the fast configuration first (Media3's default
  *     `operating-rate = MAX`), so devices that work keep their original speed.
  *  2. Retries through a fallback chain when the encoder rejects it: capped
- *     operating-rate → operating-rate unset → software encoder → Main profile →
- *     Baseline profile (see [VideoEncoderConfig]).
+ *     operating-rate → operating-rate unset → Main profile → Baseline profile →
+ *     software encoder (the slow last resort, see [VideoEncoderConfig]).
  *  3. Surfaces a descriptive [ExportException] (`ERROR_CODE_ENCODER_INIT_FAILED`)
  *     when every attempt fails, so the failure can be reported as a proper
  *     error state instead of a generic render failure.

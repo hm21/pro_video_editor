@@ -481,10 +481,11 @@ class RenderVideo(private val context: Context) {
         val outputMimeType = mapFormatToMimeType(config.outputFormat)
         // Resilient factory tries Media3's fast default first (operating-rate =
         // MAX, so working devices keep their speed) and only retries through a
-        // fallback chain (capped operating-rate → unset → software encoder →
-        // Main/Baseline profile) when the encoder rejects it — the cause of the
-        // codec exception on many Qualcomm c2 encoders. It also keeps Media3's
-        // own per-encoder fallback for bitrate/profile/level adjustments.
+        // fallback chain (capped operating-rate → unset → Main/Baseline profile
+        // → software encoder as the slow last resort) when the encoder rejects
+        // it — the cause of the codec exception on many Qualcomm c2 encoders. It
+        // also keeps Media3's own per-encoder fallback for bitrate/profile/level
+        // adjustments.
         val encoderFactory = ResilientVideoEncoderFactory(
             context = context,
             mimeType = outputMimeType,

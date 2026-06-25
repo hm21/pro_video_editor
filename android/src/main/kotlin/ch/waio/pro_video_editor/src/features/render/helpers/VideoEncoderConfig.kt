@@ -97,13 +97,18 @@ object VideoEncoderConfig {
      *  2. Hardware encoder with the operating-rate capped to the source frame
      *     rate (the primary fix for encoders that reject MAX).
      *  3. Hardware encoder with the operating-rate key omitted entirely.
-     *  4. A software encoder (capped operating-rate).
-     *  5. Hardware encoder forced to H.264 Main profile (only for AVC).
-     *  6. Hardware encoder forced to H.264 Baseline profile (only for AVC).
+     *  4. Hardware encoder forced to H.264 Main profile (only for AVC).
+     *  5. Hardware encoder forced to H.264 Baseline profile (only for AVC).
+     *  6. A software encoder.
+     *
+     * All hardware attempts are tried first because a rejected attempt fails
+     * fast (during codec init, before any frame is encoded). The software
+     * encoder is genuinely slower at 1080p, so it is deliberately the very last
+     * resort — only reached when every fast hardware option has failed.
      *
      * @param sourceFrameRate Source frame rate used to cap the operating-rate.
-     * @param includeProfileFallbacks Whether to append the Main/Baseline profile
-     *  attempts (H.264 only).
+     * @param includeProfileFallbacks Whether to include the Main/Baseline
+     *  profile attempts (H.264 only).
      */
     fun buildAttempts(
         sourceFrameRate: Float?,
@@ -136,13 +141,6 @@ object VideoEncoderConfig {
                 profile = EncoderProfilePreference.ENCODER_DEFAULT,
                 useSoftwareEncoder = false,
             ),
-            EncoderAttempt(
-                label = "software-encoder",
-                operatingRate = cappedRate,
-                priority = unset,
-                profile = EncoderProfilePreference.ENCODER_DEFAULT,
-                useSoftwareEncoder = true,
-            ),
         )
 
         if (includeProfileFallbacks) {
@@ -161,6 +159,16 @@ object VideoEncoderConfig {
                 useSoftwareEncoder = false,
             )
         }
+
+        // Software encoder is the slow last resort, reached only when every
+        // hardware attempt above has failed.
+        attempts += EncoderAttempt(
+            label = "software-encoder",
+            operatingRate = cappedRate,
+            priority = unset,
+            profile = EncoderProfilePreference.ENCODER_DEFAULT,
+            useSoftwareEncoder = true,
+        )
 
         return attempts
     }

@@ -105,18 +105,29 @@ internal class VideoEncoderConfigTest {
     }
 
     @Test
-    fun buildAttempts_ordersFastFirstThenSaferFallbacks() {
+    fun buildAttempts_ordersFastFirstAndSoftwareLast() {
         val labels = VideoEncoderConfig.buildAttempts(sourceFrameRate = 30f).map { it.label }
         assertEquals(
             listOf(
                 "hw-fast-operating-rate",
                 "hw-capped-operating-rate",
                 "hw-operating-rate-unset",
-                "software-encoder",
                 "hw-main-profile",
                 "hw-baseline-profile",
+                "software-encoder",
             ),
             labels,
         )
+        // The slow software encoder must be the very last resort.
+        assertEquals("software-encoder", labels.last())
+    }
+
+    @Test
+    fun buildAttempts_softwareEncoderIsLastEvenWithoutProfileFallbacks() {
+        val attempts = VideoEncoderConfig.buildAttempts(
+            sourceFrameRate = 30f,
+            includeProfileFallbacks = false,
+        )
+        assertTrue(attempts.last().useSoftwareEncoder)
     }
 }
