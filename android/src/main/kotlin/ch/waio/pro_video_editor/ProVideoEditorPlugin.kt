@@ -11,6 +11,7 @@ import ch.waio.pro_video_editor.src.features.metadata.models.MetadataConfig
 import ch.waio.pro_video_editor.src.features.render.RenderVideo
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderTask
+import ch.waio.pro_video_editor.src.features.render.models.VideoEncoderConfigurationException
 import ch.waio.pro_video_editor.src.features.stopmotion.StopMotionGenerator
 import ch.waio.pro_video_editor.src.features.stopmotion.models.StopMotionConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
@@ -24,6 +25,7 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -65,6 +67,26 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
     private val activeRenderTasks = ConcurrentHashMap<String, RenderTask>()
     private val activeAudioTasks = ConcurrentHashMap<String, AudioExtractTask>()
     private val activeWaveformTasks = ConcurrentHashMap<String, WaveformTask>()
+
+    /**
+     * Task ids that received a cancel request before their start handler had
+     * registered them.
+     *
+     * The Dart layer awaits asynchronous work (e.g. [VideoRenderData.toAsyncMap])
+     * before invoking `renderVideo`, so a quick follow-up `cancelTask` can reach
+     * native first. Recording the cancel here lets the start handler consume it
+     * and abort immediately instead of starting an un-cancellable render. The
+     * set is bounded so stray cancels for ids that never start cannot leak.
+     */
+    private val pendingCancellations: MutableSet<String> = Collections.synchronizedSet(
+        Collections.newSetFromMap(
+            object : LinkedHashMap<String, Boolean>() {
+                override fun removeEldestEntry(
+                    eldest: MutableMap.MutableEntry<String, Boolean>
+                ): Boolean = size > 128
+            }
+        )
+    )
 
     /// Event channel for streaming waveform chunks
     private lateinit var waveformStreamChannel: EventChannel
@@ -312,6 +334,8 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             return
         }
 
+        if (consumePendingCancellation(id, result)) return
+
         postProgress(id, 0.0)
 
         val task = RenderTask(job = null, result = result)
@@ -334,10 +358,10 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                     Log.e("RenderVideo", "Error rendering video: ${error.message}")
                     mainHandler.post {
                         val removedTask = activeRenderTasks.remove(id)
-                        val code = if (removedTask?.canceled?.get() == true) {
-                            "CANCELED"
-                        } else {
-                            "RENDER_ERROR"
+                        val code = when {
+                            removedTask?.canceled?.get() == true -> "CANCELED"
+                            error is VideoEncoderConfigurationException -> "ENCODER_NOT_SUPPORTED"
+                            else -> "RENDER_ERROR"
                         }
                         removedTask?.sendError(code, error.message)
                     }
@@ -379,6 +403,8 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             )
             return
         }
+
+        if (consumePendingCancellation(id, result)) return
 
         postProgress(id, 0.0)
 
@@ -448,6 +474,8 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             return
         }
 
+        if (consumePendingCancellation(id, result)) return
+
         postProgress(id, 0.0)
 
         val task = AudioExtractTask(job = null, result = result)
@@ -514,6 +542,8 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             )
             return
         }
+
+        if (consumePendingCancellation(id, result)) return
 
         postProgress(id, 0.0)
 
@@ -590,6 +620,8 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             )
             return
         }
+
+        if (consumePendingCancellation(id, result)) return
 
         val task = WaveformTask(job = null, result = result)
         activeWaveformTasks[id] = task
@@ -699,7 +731,30 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             return
         }
 
-        result.error("TASK_NOT_FOUND", "No active task found with id '$id'", null)
+        // No active task with this id yet. This is most likely a cancel that
+        // raced ahead of its start handler (the Dart layer awaits async work
+        // before invoking the render). Record the cancellation so the start
+        // handler aborts as soon as it registers, and treat this as a safe
+        // no-op instead of a TASK_NOT_FOUND error.
+        pendingCancellations.add(id)
+        Log.d("ProVideoEditor", "Cancel for unknown task '$id' recorded as pending")
+        result.success(true)
+    }
+
+    /**
+     * Consumes a pre-registration cancel for [id], if one exists.
+     *
+     * @return true if the task was canceled before it started (the caller should
+     *  abort and has already been answered with a CANCELED error), false to
+     *  continue starting the task.
+     */
+    private fun consumePendingCancellation(id: String, result: MethodChannel.Result): Boolean {
+        if (pendingCancellations.remove(id)) {
+            Log.d("ProVideoEditor", "Task '$id' was canceled before it started; skipping")
+            result.error("CANCELED", "Task was canceled", null)
+            return true
+        }
+        return false
     }
 
     /**

@@ -45,6 +45,13 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   /// [RenderCanceledException] for cleaner error handling.
   static const String renderCanceledErrorCode = 'CANCELED';
 
+  /// Error code used when the device's video encoder rejected the export
+  /// configuration even after the native fallback chain was exhausted.
+  ///
+  /// This is thrown as a [PlatformException] code and converted to
+  /// [RenderEncoderException] for cleaner error handling.
+  static const String encoderNotSupportedErrorCode = 'ENCODER_NOT_SUPPORTED';
+
   /// Error code used when a video has no audio track.
   ///
   /// This is thrown as a [PlatformException] code during audio extraction
@@ -397,6 +404,9 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       if (error.code == renderCanceledErrorCode) {
         throw const RenderCanceledException();
       }
+      if (error.code == encoderNotSupportedErrorCode) {
+        throw RenderEncoderException(error.message);
+      }
       rethrow;
     }
   }
@@ -420,6 +430,9 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     } on PlatformException catch (error) {
       if (error.code == renderCanceledErrorCode) {
         throw const RenderCanceledException();
+      }
+      if (error.code == encoderNotSupportedErrorCode) {
+        throw RenderEncoderException(error.message);
       }
       rethrow;
     }
