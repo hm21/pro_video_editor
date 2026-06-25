@@ -1,7 +1,9 @@
 package ch.waio.pro_video_editor
 
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import kotlin.test.BeforeTest
 import kotlin.test.Test
 import org.mockito.Mockito
 
@@ -14,6 +16,14 @@ import org.mockito.Mockito
  */
 
 internal class ProVideoEditorPluginTest {
+
+  @BeforeTest
+  fun silenceNativeLogging() {
+    // PluginLog forwards to android.util.Log, which is not mocked in plain JVM
+    // unit tests. Muting it keeps these tests free of "not mocked" failures.
+    PluginLog.setMinimumLevel("none")
+  }
+
   @Test
   fun onMethodCall_getPlatformVersion_returnsExpectedValue() {
     val plugin = ProVideoEditorPlugin()
@@ -24,5 +34,20 @@ internal class ProVideoEditorPluginTest {
 
     Mockito.verify(mockResult).success("Android " + android.os.Build.VERSION.RELEASE)
   }
-  // TODO(@hm21): Implement extended unit tests for video merging.
+
+  @Test
+  fun cancelTask_forUnknownId_returnsTaskNotFound() {
+    val plugin = ProVideoEditorPlugin()
+
+    val cancelResult: MethodChannel.Result = Mockito.mock(MethodChannel.Result::class.java)
+    plugin.onMethodCall(MethodCall("cancelTask", mapOf("id" to "missing-task")), cancelResult)
+
+    // Cancelling an id that maps to no active task is a TASK_NOT_FOUND error.
+    // The render/cancel race (a cancel that races ahead of its start) is handled
+    // in the shared Dart layer before the request reaches native, so native can
+    // keep this strict contract for genuinely unknown ids.
+    Mockito.verify(cancelResult)
+      .error(Mockito.eq("TASK_NOT_FOUND"), Mockito.any(), Mockito.any())
+    Mockito.verify(cancelResult, Mockito.never()).success(Mockito.any())
+  }
 }

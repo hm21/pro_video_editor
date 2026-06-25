@@ -11,6 +11,7 @@ import ch.waio.pro_video_editor.src.features.metadata.models.MetadataConfig
 import ch.waio.pro_video_editor.src.features.render.RenderVideo
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderTask
+import ch.waio.pro_video_editor.src.features.render.models.VideoEncoderConfigurationException
 import ch.waio.pro_video_editor.src.features.stopmotion.StopMotionGenerator
 import ch.waio.pro_video_editor.src.features.stopmotion.models.StopMotionConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
@@ -334,10 +335,10 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                     Log.e("RenderVideo", "Error rendering video: ${error.message}")
                     mainHandler.post {
                         val removedTask = activeRenderTasks.remove(id)
-                        val code = if (removedTask?.canceled?.get() == true) {
-                            "CANCELED"
-                        } else {
-                            "RENDER_ERROR"
+                        val code = when {
+                            removedTask?.canceled?.get() == true -> "CANCELED"
+                            error is VideoEncoderConfigurationException -> "ENCODER_NOT_SUPPORTED"
+                            else -> "RENDER_ERROR"
                         }
                         removedTask?.sendError(code, error.message)
                     }

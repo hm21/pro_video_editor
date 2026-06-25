@@ -45,6 +45,13 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   /// [RenderCanceledException] for cleaner error handling.
   static const String renderCanceledErrorCode = 'CANCELED';
 
+  /// Error code used when the device's video encoder rejected the export
+  /// configuration even after the native fallback chain was exhausted.
+  ///
+  /// This is thrown as a [PlatformException] code and converted to
+  /// [RenderEncoderException] for cleaner error handling.
+  static const String encoderNotSupportedErrorCode = 'ENCODER_NOT_SUPPORTED';
+
   /// Error code used when a video has no audio track.
   ///
   /// This is thrown as a [PlatformException] code during audio extraction
@@ -79,6 +86,49 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   /// (gated by the active `nativeLogLevel`), allowing host apps to capture
   /// renderer diagnostics in their own Dart logger.
   final _logChannel = const EventChannel('pro_video_editor_logs');
+
+  /// Task ids whose start request is being prepared on the Dart side but has
+  /// not yet been dispatched to the native layer (e.g. while
+  /// [VideoRenderData.toAsyncMap] is awaited).
+  ///
+  /// The Dart layer awaits async work before invoking the native render, so a
+  /// quick follow-up [cancel] can run while the task is still in this window.
+  /// Tracking the id here lets that cancel abort the pending start instead of
+  /// launching an un-cancellable native task. Once the task is dispatched the
+  /// id is removed and cancellation is routed to native as usual — so the
+  /// native layer keeps returning `TASK_NOT_FOUND` only for genuinely unknown
+  /// ids.
+  final Set<String> _pendingDispatchTaskIds = <String>{};
+
+  /// Ids from [_pendingDispatchTaskIds] that were cancelled before their native
+  /// task was dispatched. Consumed by [_handoffToNative].
+  final Set<String> _cancelledBeforeDispatchTaskIds = <String>{};
+
+  /// Marks [id] as a task being prepared on the Dart side, before its native
+  /// start request is dispatched. Must be called before the first `await` so a
+  /// concurrent [cancel] can observe it.
+  void _beginDispatch(String id) {
+    if (id.isEmpty) return;
+    _pendingDispatchTaskIds.add(id);
+  }
+
+  /// Hands [id] off to the native layer: from here a [cancel] is routed to the
+  /// native task. Throws [RenderCanceledException] if a [cancel] arrived while
+  /// the task was still being prepared, so the native task is never started.
+  void _handoffToNative(String id) {
+    if (id.isEmpty) return;
+    final wasCancelled = _cancelledBeforeDispatchTaskIds.remove(id);
+    _pendingDispatchTaskIds.remove(id);
+    if (wasCancelled) throw const RenderCanceledException();
+  }
+
+  /// Idempotent cleanup of [id]'s pre-dispatch bookkeeping. Safe to call in a
+  /// `finally` whether the task was dispatched or aborted.
+  void _endDispatch(String id) {
+    if (id.isEmpty) return;
+    _pendingDispatchTaskIds.remove(id);
+    _cancelledBeforeDispatchTaskIds.remove(id);
+  }
 
   @override
   Future<String?> getPlatformVersion() async {
@@ -380,8 +430,10 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     VideoRenderData value, {
     NativeLogLevel? nativeLogLevel,
   }) async {
+    _beginDispatch(value.id);
     try {
       final renderData = await value.toAsyncMap();
+      _handoffToNative(value.id);
 
       final Uint8List? result = await methodChannel.invokeMethod<Uint8List>(
         'renderVideo',
@@ -397,7 +449,12 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       if (error.code == renderCanceledErrorCode) {
         throw const RenderCanceledException();
       }
+      if (error.code == encoderNotSupportedErrorCode) {
+        throw RenderEncoderException(error.message);
+      }
       rethrow;
+    } finally {
+      _endDispatch(value.id);
     }
   }
 
@@ -407,8 +464,10 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     VideoRenderData value, {
     NativeLogLevel? nativeLogLevel,
   }) async {
+    _beginDispatch(value.id);
     try {
       final renderData = await value.toAsyncMap();
+      _handoffToNative(value.id);
 
       await methodChannel.invokeMethod<String>('renderVideo', {
         ...renderData,
@@ -421,7 +480,12 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       if (error.code == renderCanceledErrorCode) {
         throw const RenderCanceledException();
       }
+      if (error.code == encoderNotSupportedErrorCode) {
+        throw RenderEncoderException(error.message);
+      }
       rethrow;
+    } finally {
+      _endDispatch(value.id);
     }
   }
 
@@ -430,8 +494,10 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     StopMotionRenderData value, {
     NativeLogLevel? nativeLogLevel,
   }) async {
+    _beginDispatch(value.id);
     try {
       final renderData = await value.toAsyncMap();
+      _handoffToNative(value.id);
 
       final Uint8List? result = await methodChannel.invokeMethod<Uint8List>(
         'renderStopMotion',
@@ -448,6 +514,8 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
         throw const RenderCanceledException();
       }
       rethrow;
+    } finally {
+      _endDispatch(value.id);
     }
   }
 
@@ -457,8 +525,10 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     StopMotionRenderData value, {
     NativeLogLevel? nativeLogLevel,
   }) async {
+    _beginDispatch(value.id);
     try {
       final renderData = await value.toAsyncMap();
+      _handoffToNative(value.id);
 
       await methodChannel.invokeMethod<String>('renderStopMotion', {
         ...renderData,
@@ -472,6 +542,8 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
         throw const RenderCanceledException();
       }
       rethrow;
+    } finally {
+      _endDispatch(value.id);
     }
   }
 
@@ -479,6 +551,16 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   Future<void> cancel(String taskId) async {
     if (taskId.isEmpty) {
       throw ArgumentError('taskId cannot be empty');
+    }
+
+    // If the task is still being prepared on the Dart side (its start hasn't
+    // been dispatched to native yet), cancel it locally so the pending start
+    // aborts instead of launching an un-cancellable native task. The native
+    // layer never sees this id, so it keeps reporting TASK_NOT_FOUND only for
+    // genuinely unknown ids.
+    if (_pendingDispatchTaskIds.contains(taskId)) {
+      _cancelledBeforeDispatchTaskIds.add(taskId);
+      return;
     }
 
     await methodChannel.invokeMethod<void>('cancelTask', {'id': taskId});

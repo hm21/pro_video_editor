@@ -1,3 +1,7 @@
+## 1.21.5
+- **FIX**(android): Fix video export failing with a codec exception on Qualcomm `c2.qti.*` encoders. The encoder is now retried through a fallback chain (operating-rate cap → unset → Main/Baseline profile → software) before surfacing a typed `RenderEncoderException`; working devices keep their original export speed.
+- **FIX**(android, iOS, macOS): Fix a render/cancel race where cancelling right after starting an export failed with `TASK_NOT_FOUND`. An early cancel is now handled in the Dart layer before the native task starts, so the render resolves as canceled.
+
 ## 1.21.4
 - **FIX**(android, iOS, macOS): Fix layer `slide` animations only moving the layer by its own size, leaving it partly visible at the animation's start/end. Slides are now edge-aware and carry the layer fully off-screen in the slide direction. Requires the matching `pro_image_editor` release so the in-editor preview matches the export.
 

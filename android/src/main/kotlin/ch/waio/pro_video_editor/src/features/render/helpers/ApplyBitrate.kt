@@ -6,10 +6,17 @@ import androidx.media3.transformer.VideoEncoderSettings
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 
 /**
- * Configures video encoder bitrate settings.
+ * An encoder-safe bitrate configuration: a bitrate clamped to the codec's
+ * supported range plus a bitrate mode the codec actually accepts.
  *
- * Validates bitrate against codec capabilities and selects an encoder-safe
- * configuration:
+ * @property bitrate Bitrate in bits per second.
+ * @property bitrateMode One of [MediaCodecInfo.EncoderCapabilities] BITRATE_MODE_*.
+ */
+data class BitrateChoice(val bitrate: Int, val bitrateMode: Int)
+
+/**
+ * Resolves an encoder-safe bitrate configuration for the given MIME type.
+ *
  * - Clamps the requested bitrate into the codec's supported range
  * - Uses CBR (Constant Bitrate) for predictable file size when supported and
  *   the bitrate is not in the upper portion of the range
@@ -17,17 +24,15 @@ import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
  *   bitrate is high, since high-bitrate CBR is frequently rejected by
  *   hardware encoders
  *
- * @param encoderFactoryBuilder Encoder factory to configure
  * @param mimeType Video MIME type (e.g., "video/avc" for H.264)
- * @param bitrate Target bitrate in bits per second
+ * @param bitrate Target bitrate in bits per second, or null to leave the
+ *  encoder on its default bitrate.
+ * @return The resolved [BitrateChoice], or null when no bitrate was requested or
+ *  no encoder could be found for [mimeType].
  */
 @UnstableApi
-fun applyBitrate(
-    encoderFactoryBuilder: DefaultEncoderFactory.Builder,
-    mimeType: String?,
-    bitrate: Int?
-) {
-    if (bitrate == null) return
+fun resolveBitrateSettings(mimeType: String?, bitrate: Int?): BitrateChoice? {
+    if (bitrate == null) return null
     Log.d(RENDER_TAG, "Configuring bitrate: ${bitrate / 1000} kbps")
 
     val codecInfo = MediaCodecList(MediaCodecList.ALL_CODECS)
@@ -36,7 +41,7 @@ fun applyBitrate(
 
     if (codecInfo == null) {
         Log.e(RENDER_TAG, "No encoder found for $mimeType")
-        return
+        return null
     }
 
     val capabilities = codecInfo.getCapabilitiesForType(mimeType)
@@ -73,9 +78,31 @@ fun applyBitrate(
         MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
     }
 
-    val builder = VideoEncoderSettings.Builder()
-        .setBitrateMode(bitrateMode)
-        .setBitrate(safeBitrate)
+    return BitrateChoice(safeBitrate, bitrateMode)
+}
 
-    encoderFactoryBuilder.setRequestedVideoEncoderSettings(builder.build())
+/**
+ * Configures video encoder bitrate settings on [encoderFactoryBuilder].
+ *
+ * Thin wrapper around [resolveBitrateSettings] kept for callers (e.g.
+ * stop-motion rendering) that configure a [DefaultEncoderFactory.Builder]
+ * directly.
+ *
+ * @param encoderFactoryBuilder Encoder factory to configure
+ * @param mimeType Video MIME type (e.g., "video/avc" for H.264)
+ * @param bitrate Target bitrate in bits per second
+ */
+@UnstableApi
+fun applyBitrate(
+    encoderFactoryBuilder: DefaultEncoderFactory.Builder,
+    mimeType: String?,
+    bitrate: Int?
+) {
+    val choice = resolveBitrateSettings(mimeType, bitrate) ?: return
+    encoderFactoryBuilder.setRequestedVideoEncoderSettings(
+        VideoEncoderSettings.Builder()
+            .setBitrateMode(choice.bitrateMode)
+            .setBitrate(choice.bitrate)
+            .build()
+    )
 }

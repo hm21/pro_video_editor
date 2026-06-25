@@ -104,6 +104,7 @@ void main() {
   test('renderVideo returns rendered video bytes', () async {
     final mockModel = MockVideoRenderData();
 
+    when(mockModel.id).thenReturn('test-render-id');
     when(mockModel.video).thenReturn(mockVideo);
     when(
       mockModel.toAsyncMap(),
@@ -123,6 +124,7 @@ void main() {
     final mockModel = MockVideoRenderData();
     final mockVideo = MockEditorVideo();
 
+    when(mockModel.id).thenReturn('test-render-id');
     when(mockModel.video).thenReturn(mockVideo);
     when(
       mockModel.toAsyncMap(),

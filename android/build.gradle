@@ -64,6 +64,11 @@ android {
     }
 
     testOptions {
+        // Return default values (null/0/false) for un-mocked android.* calls so
+        // plugin unit tests can construct the plugin (which touches
+        // Handler/Looper) without Robolectric.
+        unitTests.returnDefaultValues = true
+
         unitTests.all {
             useJUnitPlatform()
 

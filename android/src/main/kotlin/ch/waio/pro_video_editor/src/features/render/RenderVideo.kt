@@ -6,7 +6,6 @@ import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.Composition
-import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
@@ -15,8 +14,8 @@ import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import applyBitrate
 import mapFormatToMimeType
+import ch.waio.pro_video_editor.src.features.render.helpers.ResilientVideoEncoderFactory
 import ch.waio.pro_video_editor.src.features.render.helpers.applyComposition
 import ch.waio.pro_video_editor.src.features.render.helpers.VolumeControlAudioMixerFactory
 import ch.waio.pro_video_editor.src.features.render.helpers.ConfigurableInAppMp4Muxer
@@ -28,6 +27,7 @@ import ch.waio.pro_video_editor.src.features.render.helpers.MediaInfoExtractor
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderJobHandle
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
+import ch.waio.pro_video_editor.src.features.render.models.VideoEncoderConfigurationException
 
 /**
  * Service for rendering video with applied effects and transformations.
@@ -479,14 +479,18 @@ class RenderVideo(private val context: Context) {
         val (videoEffects, audioEffects) = effectsProcessor.process(config)
 
         val outputMimeType = mapFormatToMimeType(config.outputFormat)
-        val encoderFactoryBuilder = DefaultEncoderFactory.Builder(context)
-            // Allow Media3 to fall back to supported encoder settings when the
-            // hardware encoder rejects the requested configuration (e.g. an
-            // unsupported bitrate/profile/level combination on Qualcomm encoders)
-            // instead of failing the whole render with a codec exception.
-            .setEnableFallback(true)
-
-        applyBitrate(encoderFactoryBuilder, outputMimeType, config.bitrate)
+        // Resilient factory tries Media3's fast default first (operating-rate =
+        // MAX, so working devices keep their speed) and only retries through a
+        // fallback chain (capped operating-rate → unset → Main/Baseline profile
+        // → software encoder as the slow last resort) when the encoder rejects
+        // it — the cause of the codec exception on many Qualcomm c2 encoders. It
+        // also keeps Media3's own per-encoder fallback for bitrate/profile/level
+        // adjustments.
+        val encoderFactory = ResilientVideoEncoderFactory(
+            context = context,
+            mimeType = outputMimeType,
+            bitrate = config.bitrate,
+        )
 
         // Declare transformer before listener to make it accessible
         lateinit var transformer: Transformer
@@ -501,7 +505,7 @@ class RenderVideo(private val context: Context) {
 
         // Build transformer with callbacks
         val transformerBuilder = Transformer.Builder(context)
-            .setEncoderFactory(encoderFactoryBuilder.build())
+            .setEncoderFactory(encoderFactory)
             .setVideoMimeType(outputMimeType)
 
         // Configure muxer for streaming optimization (moov atom placement)
@@ -553,7 +557,7 @@ class RenderVideo(private val context: Context) {
                     exception: ExportException
                 ) {
                     shouldStopPolling.set(true)
-                    onError(exception)
+                    onError(mapExportException(exception))
                     if (config.outputPath == null) outputFile.delete()
                 }
             })
@@ -621,6 +625,33 @@ class RenderVideo(private val context: Context) {
                 }
             }
         }.start()
+    }
+
+    /**
+     * Translates a Media3 [ExportException] into a more specific, descriptive
+     * error where possible.
+     *
+     * Encoder configuration failures (which survive the
+     * [ResilientVideoEncoderFactory] fallback chain) are wrapped in a typed
+     * [VideoEncoderConfigurationException] so the Flutter layer can show a
+     * proper "encoder/format not supported" error state instead of a generic
+     * render failure. All other failures are passed through unchanged.
+     */
+    private fun mapExportException(exception: ExportException): Throwable {
+        return when (exception.errorCode) {
+            ExportException.ERROR_CODE_ENCODER_INIT_FAILED,
+            ExportException.ERROR_CODE_ENCODING_FORMAT_UNSUPPORTED ->
+                VideoEncoderConfigurationException(
+                    "The video encoder rejected the export configuration after " +
+                            "exhausting all fallbacks (operating-rate cap/removal, " +
+                            "software encoder, profile downgrade). " +
+                            "Underlying error: ${exception.getErrorCodeName()} - " +
+                            "${exception.message}",
+                    exception
+                )
+
+            else -> exception
+        }
     }
 
     /**
