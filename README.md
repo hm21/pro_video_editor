@@ -585,6 +585,7 @@ var task = VideoRenderData(
       ImageLayer(
         image: EditorLayerImage.memory(layerBytes),
         offset: const Offset(100, 50),
+        rotation: 45 * pi / 180, // clockwise, in radians (like Transform.rotate)
         startTime: const Duration(seconds: 2),
         endTime: const Duration(seconds: 8),
       ),

@@ -1,3 +1,6 @@
+## 2.1.0
+- **FEAT**(android, iOS, macOS): Add per-layer rotation to image overlays via a new `rotation` field on `ImageLayer` (radians, clockwise around the layer center — matches Flutter's `Transform.rotate`, so a `pro_image_editor` layer rotation can be forwarded directly). `offset`/`size` keep describing the layout box before rotation. Web/Windows/Linux ignore the field.
+
 ## 2.0.0
 - **BREAKING**: Remove the previously deprecated APIs. Migrate as follows:
   - `VideoRenderData.video` → `videoSegments: [VideoSegment(video: …)]`

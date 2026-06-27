@@ -3,6 +3,7 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 import RENDER_TAG
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
@@ -151,6 +152,14 @@ fun applyTimedImageLayers(
                 )
             }
 
+            // Rotate the overlay around its center. baseNormX/baseNormY describe
+            // the (unrotated) layout center; rotating about the bitmap center
+            // keeps that point fixed, so the anchor stays correct while the
+            // bounding box grows symmetrically.
+            val rotatedOverlay = rotateBitmap(
+                finalOverlay, Math.toDegrees(layer.rotation).toFloat()
+            )
+
             // Convert times from microseconds
             val startTimeUs = layer.startUs
             val endTimeUs = layer.endUs
@@ -165,10 +174,10 @@ fun applyTimedImageLayers(
             val bitmapOverlay: BitmapOverlay
 
             if (hasAnimations) {
-                val imageWidth = finalOverlay.width
-                val imageHeight = finalOverlay.height
+                val imageWidth = rotatedOverlay.width
+                val imageHeight = rotatedOverlay.height
                 bitmapOverlay = AnimatedBitmapOverlay(
-                    bitmap = finalOverlay,
+                    bitmap = rotatedOverlay,
                     baseNormX = baseNormX,
                     baseNormY = baseNormY,
                     imageWidth = imageWidth,
@@ -182,7 +191,7 @@ fun applyTimedImageLayers(
                 Log.d(RENDER_TAG, "Layer: using AnimatedBitmapOverlay with ${layer.animations.size} animation(s)")
             } else {
                 bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(
-                    finalOverlay, overlaySettings
+                    rotatedOverlay, overlaySettings
                 )
             }
             val overlayEffect = OverlayEffect(listOf(bitmapOverlay))
@@ -202,6 +211,27 @@ fun applyTimedImageLayers(
             Log.e(RENDER_TAG, "Failed to decode image layer: ${e.message}")
         }
     }
+}
+
+/**
+ * Rotates [bitmap] clockwise by [degrees] around its center.
+ *
+ * Returns a new bitmap sized to the rotated bounding box; the source center
+ * maps to the new center, so a center-anchored overlay keeps its position.
+ * The source bitmap is recycled when a new one is produced. A rotation that is
+ * a multiple of 360° (including `0`) returns the input unchanged.
+ *
+ * The input is expected to carry straight (un-premultiplied) alpha so the
+ * bilinear edge pixels introduced by the rotation interpolate correctly.
+ */
+private fun rotateBitmap(bitmap: Bitmap, degrees: Float): Bitmap {
+    if (degrees % 360f == 0f) return bitmap
+    val matrix = Matrix().apply { postRotate(degrees) }
+    val rotated = Bitmap.createBitmap(
+        bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true
+    )
+    if (rotated !== bitmap) bitmap.recycle()
+    return rotated
 }
 
 /**

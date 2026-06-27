@@ -20,6 +20,7 @@ class ImageLayer with TimeRangeMixin {
     this.endTime,
     this.offset,
     this.size,
+    this.rotation = 0.0,
     this.animations = const [],
   }) : assert(
           startTime == null || endTime == null || startTime < endTime,
@@ -54,6 +55,16 @@ class ImageLayer with TimeRangeMixin {
   /// fill the frame when [offset] is also `null`).
   final Size? size;
 
+  /// Clockwise rotation applied to the image layer, in **radians**.
+  ///
+  /// The image is rotated around its own center, so [offset] and [size] still
+  /// describe the unrotated layout box. This matches Flutter's
+  /// [Transform.rotate] convention, which makes it possible to forward a
+  /// `pro_image_editor` layer rotation directly.
+  ///
+  /// **Default**: `0.0` (no rotation).
+  final double rotation;
+
   /// Animations to apply to this layer (e.g. fade, slide, scale).
   ///
   /// Multiple animations can be combined. Each animation specifies its
@@ -67,6 +78,7 @@ class ImageLayer with TimeRangeMixin {
     Duration? endTime,
     Offset? offset,
     Size? size,
+    double? rotation,
     List<LayerAnimation>? animations,
   }) {
     return ImageLayer(
@@ -75,6 +87,7 @@ class ImageLayer with TimeRangeMixin {
       endTime: endTime ?? this.endTime,
       offset: offset ?? this.offset,
       size: size ?? this.size,
+      rotation: rotation ?? this.rotation,
       animations: animations ?? this.animations,
     );
   }
@@ -87,6 +100,7 @@ class ImageLayer with TimeRangeMixin {
       'offset': offset != null ? {'dx': offset!.dx, 'dy': offset!.dy} : null,
       'size':
           size != null ? {'width': size!.width, 'height': size!.height} : null,
+      'rotation': rotation,
       'animations': animations.map((a) => a.toMap()).toList(),
     };
   }
@@ -112,6 +126,8 @@ class ImageLayer with TimeRangeMixin {
               safeParseDouble((map['size'] as Map<String, dynamic>)['height']),
             )
           : null,
+      rotation:
+          map['rotation'] != null ? safeParseDouble(map['rotation']) : 0.0,
       animations: (map['animations'] as List<dynamic>?)
               ?.map((a) => LayerAnimation.fromMap(a as Map<String, dynamic>))
               .toList() ??
@@ -132,6 +148,7 @@ class ImageLayer with TimeRangeMixin {
         'endTime: $endTime, '
         'offset: $offset, '
         'size: $size, '
+        'rotation: $rotation, '
         'animations: $animations'
         ')';
   }
@@ -145,6 +162,7 @@ class ImageLayer with TimeRangeMixin {
         other.endTime == endTime &&
         other.offset == offset &&
         other.size == size &&
+        other.rotation == rotation &&
         listEquals(other.animations, animations);
   }
 
@@ -155,6 +173,7 @@ class ImageLayer with TimeRangeMixin {
         endTime.hashCode ^
         offset.hashCode ^
         size.hashCode ^
+        rotation.hashCode ^
         animations.hashCode;
   }
 }
