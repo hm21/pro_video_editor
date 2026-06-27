@@ -7,11 +7,11 @@ void main() {
 
     test('creates model with 1080p quality preset', () {
       final model = VideoRenderData.withQualityPreset(
-        video: testVideo,
+        videoSegments: [VideoSegment(video: testVideo)],
         qualityPreset: VideoQualityPreset.p1080,
       );
 
-      expect(model.video, equals(testVideo));
+      expect(model.videoSegments!.first.video, equals(testVideo));
       expect(model.bitrate, equals(8000000)); // 8 Mbps
       expect(model.outputFormat, equals(VideoOutputFormat.mp4));
       expect(model.enableAudio, isTrue);
@@ -19,7 +19,7 @@ void main() {
 
     test('creates model with 720p quality preset', () {
       final model = VideoRenderData.withQualityPreset(
-        video: testVideo,
+        videoSegments: [VideoSegment(video: testVideo)],
         qualityPreset: VideoQualityPreset.p720,
       );
 
@@ -31,7 +31,7 @@ void main() {
 
     test('creates model with 4K quality preset', () {
       final model = VideoRenderData.withQualityPreset(
-        video: testVideo,
+        videoSegments: [VideoSegment(video: testVideo)],
         qualityPreset: VideoQualityPreset.k4,
       );
 
@@ -43,7 +43,7 @@ void main() {
 
     test('allows bitrate override', () {
       final model = VideoRenderData.withQualityPreset(
-        video: testVideo,
+        videoSegments: [VideoSegment(video: testVideo)],
         qualityPreset: VideoQualityPreset.p1080,
         bitrateOverride: 12000000,
       );
@@ -55,7 +55,7 @@ void main() {
       const customTransform = ExportTransform(flipX: true, rotateTurns: 1);
 
       final model = VideoRenderData.withQualityPreset(
-        video: testVideo,
+        videoSegments: [VideoSegment(video: testVideo)],
         qualityPreset: VideoQualityPreset.p1080,
         transform: customTransform,
       );
@@ -67,31 +67,36 @@ void main() {
 
     test('creates model with all optional parameters', () {
       final model = VideoRenderData.withQualityPreset(
-        video: testVideo,
+        videoSegments: [VideoSegment(video: testVideo)],
         qualityPreset: VideoQualityPreset.p720,
         outputFormat: VideoOutputFormat.mov,
         enableAudio: false,
-        playbackSpeed: 2.0,
         startTime: const Duration(seconds: 5),
         endTime: const Duration(seconds: 10),
         blur: 5.0,
-        colorMatrixList: const [
-          [1.0, 0.0, 0.0, 0.0, 0.0],
+        colorFilters: const [
+          ColorFilter(
+            matrix: [
+              1.0, 0.0, 0.0, 0.0, 0.0, //
+              0.0, 1.0, 0.0, 0.0, 0.0, //
+              0.0, 0.0, 1.0, 0.0, 0.0, //
+              0.0, 0.0, 0.0, 1.0, 0.0, //
+            ],
+          ),
         ],
       );
 
       expect(model.outputFormat, equals(VideoOutputFormat.mov));
       expect(model.enableAudio, isFalse);
-      expect(model.playbackSpeed, equals(2.0));
       expect(model.startTime, equals(const Duration(seconds: 5)));
       expect(model.endTime, equals(const Duration(seconds: 10)));
       expect(model.blur, equals(5.0));
-      expect(model.colorMatrixList.length, equals(1));
+      expect(model.colorFilters.length, equals(1));
     });
 
     test('creates model with custom ID', () {
       final model = VideoRenderData.withQualityPreset(
-        video: testVideo,
+        videoSegments: [VideoSegment(video: testVideo)],
         qualityPreset: VideoQualityPreset.p1080,
         id: 'custom-task-id',
       );
@@ -101,7 +106,7 @@ void main() {
 
     test('creates model with low quality preset', () {
       final model = VideoRenderData.withQualityPreset(
-        video: testVideo,
+        videoSegments: [VideoSegment(video: testVideo)],
         qualityPreset: VideoQualityPreset.low,
       );
 
@@ -113,7 +118,7 @@ void main() {
 
     test('creates model with ultra 4K preset', () {
       final model = VideoRenderData.withQualityPreset(
-        video: testVideo,
+        videoSegments: [VideoSegment(video: testVideo)],
         qualityPreset: VideoQualityPreset.ultra4K,
       );
 
@@ -125,7 +130,7 @@ void main() {
 
     test('custom preset does not set transform', () {
       final model = VideoRenderData.withQualityPreset(
-        video: testVideo,
+        videoSegments: [VideoSegment(video: testVideo)],
         qualityPreset: VideoQualityPreset.custom,
       );
 

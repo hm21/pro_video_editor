@@ -169,13 +169,6 @@ class VideoMetadata {
     return isRotated90Or270 ? resolution.flipped : resolution;
   }
 
-  /// The original resolution of the video before rotation is applied.
-  ///
-  /// @Deprecated: Use [rawResolution] instead. This getter will be removed
-  /// in a future version.
-  @Deprecated('Use rawResolution instead')
-  Size get originalResolution => rawResolution;
-
   /// The rotation of the video.
   final int rotation;
 
@@ -276,7 +269,6 @@ class VideoMetadata {
     DateTime? date,
     int? fileSize,
     Size? resolution,
-    @Deprecated('No longer supported, has no effect') Size? originalResolution,
     int? rotation,
     Duration? duration,
     Duration? audioDuration,

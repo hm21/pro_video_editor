@@ -374,12 +374,6 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
       ) as bool);
 
   @override
-  List<List<double>> get colorMatrixList => (super.noSuchMethod(
-        Invocation.getter(#colorMatrixList),
-        returnValue: <List<double>>[],
-      ) as List<List<double>>);
-
-  @override
   List<_i4.ColorFilter> get colorFilters => (super.noSuchMethod(
         Invocation.getter(#colorFilters),
         returnValue: <_i4.ColorFilter>[],
@@ -404,12 +398,6 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
       ) as bool);
 
   @override
-  bool get loopCustomAudio => (super.noSuchMethod(
-        Invocation.getter(#loopCustomAudio),
-        returnValue: false,
-      ) as bool);
-
-  @override
   _i7.Stream<_i11.ProgressModel> get progressStream => (super.noSuchMethod(
         Invocation.getter(#progressStream),
         returnValue: _i7.Stream<_i11.ProgressModel>.empty(),
@@ -430,28 +418,19 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
     String? id,
     _i4.VideoQualityConfig? qualityConfig,
     _i4.VideoOutputFormat? outputFormat,
-    _i2.EditorVideo? video,
     List<_i4.VideoSegment>? videoSegments,
     _i4.VideoComposition? composition,
-    _i5.Uint8List? imageBytes,
     List<_i4.ImageLayer>? imageLayers,
     _i4.ExportTransform? transform,
     bool? enableAudio,
-    double? playbackSpeed,
     Duration? startTime,
     Duration? endTime,
-    List<List<double>>? colorMatrixList,
     List<_i4.ColorFilter>? colorFilters,
     List<_i4.VideoAudioTrack>? audioTracks,
     double? blur,
     int? bitrate,
-    String? customAudioPath,
-    Duration? customAudioStartTime,
-    double? originalAudioVolume,
-    double? customAudioVolume,
     bool? shouldOptimizeForNetworkUse,
     bool? imageBytesWithCropping,
-    bool? loopCustomAudio,
   }) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -461,28 +440,19 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
             #id: id,
             #qualityConfig: qualityConfig,
             #outputFormat: outputFormat,
-            #video: video,
             #videoSegments: videoSegments,
             #composition: composition,
-            #imageBytes: imageBytes,
             #imageLayers: imageLayers,
             #transform: transform,
             #enableAudio: enableAudio,
-            #playbackSpeed: playbackSpeed,
             #startTime: startTime,
             #endTime: endTime,
-            #colorMatrixList: colorMatrixList,
             #colorFilters: colorFilters,
             #audioTracks: audioTracks,
             #blur: blur,
             #bitrate: bitrate,
-            #customAudioPath: customAudioPath,
-            #customAudioStartTime: customAudioStartTime,
-            #originalAudioVolume: originalAudioVolume,
-            #customAudioVolume: customAudioVolume,
             #shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
             #imageBytesWithCropping: imageBytesWithCropping,
-            #loopCustomAudio: loopCustomAudio,
           },
         ),
         returnValue: _FakeVideoRenderData_2(
@@ -494,28 +464,19 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
               #id: id,
               #qualityConfig: qualityConfig,
               #outputFormat: outputFormat,
-              #video: video,
               #videoSegments: videoSegments,
               #composition: composition,
-              #imageBytes: imageBytes,
               #imageLayers: imageLayers,
               #transform: transform,
               #enableAudio: enableAudio,
-              #playbackSpeed: playbackSpeed,
               #startTime: startTime,
               #endTime: endTime,
-              #colorMatrixList: colorMatrixList,
               #colorFilters: colorFilters,
               #audioTracks: audioTracks,
               #blur: blur,
               #bitrate: bitrate,
-              #customAudioPath: customAudioPath,
-              #customAudioStartTime: customAudioStartTime,
-              #originalAudioVolume: originalAudioVolume,
-              #customAudioVolume: customAudioVolume,
               #shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
               #imageBytesWithCropping: imageBytesWithCropping,
-              #loopCustomAudio: loopCustomAudio,
             },
           ),
         ),

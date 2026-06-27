@@ -1,3 +1,13 @@
+## 2.0.0
+- **BREAKING**: Remove the previously deprecated APIs. Migrate as follows:
+  - `VideoRenderData.video` → `videoSegments: [VideoSegment(video: …)]`
+  - `VideoRenderData.imageBytes` → `imageLayers`
+  - `VideoRenderData.playbackSpeed` → `VideoSegment.playbackSpeed`
+  - `VideoRenderData.colorMatrixList` → `colorFilters` (`ColorFilter`)
+  - `VideoRenderData.customAudioPath` / `customAudioStartTime` / `customAudioVolume` / `loopCustomAudio` → `audioTracks` (`VideoAudioTrack`)
+  - `VideoRenderData.originalAudioVolume` → `VideoSegment.volume`
+  - `VideoMetadata.originalResolution` → `rawResolution`
+
 ## 1.22.0
 - **FEAT**(android, iOS, macOS): Add multi-layer video compositions via a new `composition` field on `VideoRenderData` (`VideoComposition`). A composition stacks several `VideoLayer`s on a fixed-size canvas, each layer being a time-ordered track of `VideoSegment`s composited bottom-to-top with its own `opacity` and placement (`SegmentTransform`: `offset`, `size`, `fit` = `fill`/`contain`/`cover`). Clips gain `timelineStart` (delayed entry on a layer) and `transform` (per-clip placement), enabling picture-in-picture, side-by-side and grid layouts over a configurable `backgroundColor`. Android composites layered Media3 sequences with a per-clip GL transform (cover overflow is scissored to its rect); Darwin uses a custom `AVVideoCompositing` compositor. Per-clip `transition`, `playbackSpeed` and `reverseVideo` are not applied inside a composition. Web/Windows/Linux ignore the field.
 

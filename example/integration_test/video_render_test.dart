@@ -1,5 +1,3 @@
-// ignore_for_file: deprecated_member_use
-
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -231,9 +229,8 @@ void main() {
 
     Future<void> testSpeed(double speed) async {
       final renderModel = VideoRenderData(
-        videoSegments: [VideoSegment(video: inputVideo)],
+        videoSegments: [VideoSegment(video: inputVideo, playbackSpeed: speed)],
         outputFormat: VideoOutputFormat.mp4,
-        playbackSpeed: speed,
       );
       final meta = await testRender(
         description: 'Speed x$speed',
@@ -329,9 +326,9 @@ void main() {
                 video: inputVideo,
                 startTime: Duration.zero,
                 endTime: const Duration(seconds: 4),
+                playbackSpeed: 2.0,
               ),
             ],
-            playbackSpeed: 2.0,
             audioTracks: [
               VideoAudioTrack(path: audioPath, volume: 1, loop: true),
             ],
@@ -836,9 +833,8 @@ void main() {
       final originalMeta = await ProVideoEditor.instance.getMetadata(hevcVideo);
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          videoSegments: [VideoSegment(video: hevcVideo)],
+          videoSegments: [VideoSegment(video: hevcVideo, playbackSpeed: 2.0)],
           outputFormat: VideoOutputFormat.mp4,
-          playbackSpeed: 2.0,
         ),
       );
       expect(result, isNotNull, reason: 'HEVC with speed change failed');
@@ -862,10 +858,10 @@ void main() {
               video: hevcVideo,
               startTime: Duration.zero,
               endTime: const Duration(seconds: 2),
+              playbackSpeed: 0.5,
             ),
           ],
           outputFormat: VideoOutputFormat.mp4,
-          playbackSpeed: 0.5,
         ),
       );
       expect(result, isNotNull, reason: 'HEVC with slow motion failed');
@@ -1147,9 +1143,8 @@ void main() {
       final originalMeta = await ProVideoEditor.instance.getMetadata(h264Video);
       final result = await ProVideoEditor.instance.renderVideo(
         VideoRenderData(
-          videoSegments: [VideoSegment(video: h264Video)],
+          videoSegments: [VideoSegment(video: h264Video, playbackSpeed: 2.0)],
           outputFormat: VideoOutputFormat.mp4,
-          playbackSpeed: 2.0,
         ),
       );
       expect(result, isNotNull, reason: 'H.264 with speed change failed');
@@ -1173,10 +1168,10 @@ void main() {
               video: h264Video,
               startTime: Duration.zero,
               endTime: const Duration(seconds: 2),
+              playbackSpeed: 0.5,
             ),
           ],
           outputFormat: VideoOutputFormat.mp4,
-          playbackSpeed: 0.5,
         ),
       );
       expect(result, isNotNull, reason: 'H.264 with slow motion failed');
@@ -1546,10 +1541,10 @@ void main() {
                 video: video,
                 startTime: Duration.zero,
                 endTime: end,
+                playbackSpeed: 2.0,
               ),
             ],
             outputFormat: VideoOutputFormat.mp4,
-            playbackSpeed: 2.0,
           ),
         );
       }

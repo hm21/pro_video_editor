@@ -105,7 +105,6 @@ void main() {
     final mockModel = MockVideoRenderData();
 
     when(mockModel.id).thenReturn('test-render-id');
-    when(mockModel.video).thenReturn(mockVideo);
     when(
       mockModel.toAsyncMap(),
     ).thenAnswer((_) async => {'inputPath': 'test.mp4'});
@@ -122,10 +121,8 @@ void main() {
     });
 
     final mockModel = MockVideoRenderData();
-    final mockVideo = MockEditorVideo();
 
     when(mockModel.id).thenReturn('test-render-id');
-    when(mockModel.video).thenReturn(mockVideo);
     when(
       mockModel.toAsyncMap(),
     ).thenAnswer((_) async => {'inputPath': 'test.mp4'});

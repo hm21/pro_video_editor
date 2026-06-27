@@ -210,11 +210,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
             builder: (context, animatedValue, _) {
               return Column(
                 children: [
-                  CircularProgressIndicator(
-                    value: animatedValue,
-                    // ignore: deprecated_member_use
-                    year2023: false,
-                  ),
+                  CircularProgressIndicator(value: animatedValue),
                   Text('${(animatedValue * 100).toStringAsFixed(1)} / 100'),
                 ],
               );

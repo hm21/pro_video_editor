@@ -35,11 +35,7 @@ class VideoRendererProgressPanel extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               spacing: 12,
               children: [
-                CircularProgressIndicator(
-                  value: animatedValue,
-                  // ignore: deprecated_member_use
-                  year2023: false,
-                ),
+                CircularProgressIndicator(value: animatedValue),
                 Text('${(animatedValue * 100).toStringAsFixed(1)} / 100'),
                 if (supportsCancel && onCancel != null)
                   FilledButton.icon(
