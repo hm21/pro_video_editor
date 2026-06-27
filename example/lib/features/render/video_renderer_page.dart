@@ -1512,7 +1512,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   Future<void> _limitFrameRate() async {
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video)],
-      maxFrameRate: 30,
+      maxFrameRate: 5,
     );
 
     await _renderVideo(data);
@@ -2098,7 +2098,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           onTap: _limitFrameRate,
           leading: const Icon(Icons.speed_outlined),
           title: const Text('Limit frame rate'),
-          subtitle: const Text('Cap the output at 30 fps'),
+          subtitle: const Text('Cap the output at 5 fps'),
         ),
         if (!kIsWeb && (Platform.isIOS || Platform.isMacOS))
           ListTile(
