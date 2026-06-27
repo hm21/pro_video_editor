@@ -311,6 +311,9 @@ struct RenderConfig: Sendable {
   /// Target bitrate in bits per second (nil = auto)
   let bitrate: Int?
 
+  /// Upper limit for the output frame rate in fps (nil = keep source fps)
+  let maxFrameRate: Int?
+
   /// Whether to include audio in output
   let enableAudio: Bool
 
@@ -362,6 +365,7 @@ struct RenderConfig: Sendable {
       scaleX: self.scaleX,
       scaleY: self.scaleY,
       bitrate: self.bitrate,
+      maxFrameRate: self.maxFrameRate,
       enableAudio: self.enableAudio,
       playbackSpeed: self.playbackSpeed,
       colorFilters: self.colorFilters,
@@ -428,6 +432,7 @@ struct RenderConfig: Sendable {
       scaleX: (args["scaleX"] as? NSNumber)?.floatValue,
       scaleY: (args["scaleY"] as? NSNumber)?.floatValue,
       bitrate: args["bitrate"] as? Int,
+      maxFrameRate: (args["maxFrameRate"] as? NSNumber)?.intValue,
       enableAudio: args["enableAudio"] as? Bool ?? true,
       playbackSpeed: (args["playbackSpeed"] as? NSNumber)?.floatValue,
       colorFilters: colorFilters,

@@ -276,9 +276,24 @@ class RenderVideo {
             )
           }
 
+          // Cap the output frame rate when a maximum was requested. The
+          // builders derive frameDuration from the source fps; lower the rate
+          // only when it exceeds the cap, so a slower source is left untouched.
+          var outputFrameDuration = videoCompConfig.frameDuration
+          if let maxFps = workingConfig.maxFrameRate, maxFps > 0 {
+            let current = outputFrameDuration
+            let currentFps =
+              current.value > 0 && current.timescale > 0
+              ? Double(current.timescale) / Double(current.value)
+              : Double(maxFps)
+            if Double(maxFps) < currentFps {
+              outputFrameDuration = CMTime(value: 1, timescale: CMTimeScale(maxFps))
+            }
+          }
+
           // Build the final AVMutableVideoComposition
           let videoComposition = AVMutableVideoComposition()
-          videoComposition.frameDuration = videoCompConfig.frameDuration
+          videoComposition.frameDuration = outputFrameDuration
           videoComposition.renderSize = finalRenderSize
           videoComposition.instructions = videoCompConfig.instructions
           videoComposition.customVideoCompositorClass = makeVideoCompositorSubclass(

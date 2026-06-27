@@ -1504,6 +1504,20 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Cap the output frame rate.
+  ///
+  /// [VideoRenderData.maxFrameRate] is an upper limit: a faster source is
+  /// slowed to it (here 30 fps) while a slower source is left untouched. This
+  /// reduces the encoding workload and output file size.
+  Future<void> _limitFrameRate() async {
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      maxFrameRate: 5,
+    );
+
+    await _renderVideo(data);
+  }
+
   Future<void> _generateMov() async {
     var data = VideoRenderData(
       outputFormat: VideoOutputFormat.mov,
@@ -2079,6 +2093,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           onTap: _bitrate,
           leading: const Icon(Icons.animation),
           title: const Text('Bitrate'),
+        ),
+        ListTile(
+          onTap: _limitFrameRate,
+          leading: const Icon(Icons.speed_outlined),
+          title: const Text('Limit frame rate'),
+          subtitle: const Text('Cap the output at 5 fps'),
         ),
         if (!kIsWeb && (Platform.isIOS || Platform.isMacOS))
           ListTile(

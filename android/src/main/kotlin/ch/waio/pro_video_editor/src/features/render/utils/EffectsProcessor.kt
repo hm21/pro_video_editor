@@ -5,6 +5,7 @@ import androidx.media3.common.audio.AudioProcessor
 import applyBlur
 import applyColorMatrix
 import applyFlip
+import applyMaxFrameRate
 import applyPlaybackSpeed
 import applyRotation
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
@@ -36,6 +37,7 @@ class EffectsProcessor {
      * 4. Color Matrix - Applies color transformations (filters, adjustments)
      * 5. Blur - Applies blur effect
      * 6. Playback Speed - Adjusts video/audio speed
+     * 7. Frame Rate - Caps the output frame rate (drops surplus frames)
      *
      * @param config The render configuration containing effect parameters
      * @return ProcessedEffects containing lists of video and audio effects
@@ -55,6 +57,9 @@ class EffectsProcessor {
         applyColorMatrix(videoEffects, config.colorFilters)
         applyBlur(videoEffects, config.blur)
         applyPlaybackSpeed(videoEffects, audioEffects, config.playbackSpeed)
+        // Drop surplus frames last so the cap applies to the final timeline
+        // (after any playback-speed change).
+        applyMaxFrameRate(videoEffects, config.maxFrameRate)
 
         return ProcessedEffects(videoEffects, audioEffects)
     }

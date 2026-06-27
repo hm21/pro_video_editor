@@ -340,6 +340,8 @@ data class RenderConfig(
     val scaleX: Float? = null,
     val scaleY: Float? = null,
     val bitrate: Int? = null,
+    /** Upper limit for the output frame rate (fps). Null = keep source fps. */
+    val maxFrameRate: Int? = null,
     val enableAudio: Boolean = true,
     val playbackSpeed: Float? = null,
     val colorFilters: List<ColorFilterConfig> = emptyList(),
@@ -454,6 +456,7 @@ data class RenderConfig(
                 scaleX = call.argument<Number>("scaleX")?.toFloat(),
                 scaleY = call.argument<Number>("scaleY")?.toFloat(),
                 bitrate = call.argument<Number>("bitrate")?.toInt(),
+                maxFrameRate = call.argument<Number>("maxFrameRate")?.toInt(),
                 enableAudio = call.argument<Boolean>("enableAudio") ?: true,
                 playbackSpeed = call.argument<Number>("playbackSpeed")?.toFloat(),
                 colorFilters = colorFilters,
