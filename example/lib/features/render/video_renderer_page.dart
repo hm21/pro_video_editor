@@ -882,7 +882,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       audioTracks: [
         VideoAudioTrack(
           path: customAudioFile.path,
-          startTime: const Duration(seconds: 5),
+          audioStartTime: const Duration(seconds: 5),
           volume: 1.0,
           loop: false,
         ),
