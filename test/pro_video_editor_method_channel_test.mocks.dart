@@ -429,6 +429,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
     List<_i4.VideoAudioTrack>? audioTracks,
     double? blur,
     int? bitrate,
+    int? maxFrameRate,
     bool? shouldOptimizeForNetworkUse,
     bool? imageBytesWithCropping,
   }) =>
@@ -451,6 +452,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
             #audioTracks: audioTracks,
             #blur: blur,
             #bitrate: bitrate,
+            #maxFrameRate: maxFrameRate,
             #shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
             #imageBytesWithCropping: imageBytesWithCropping,
           },
@@ -475,6 +477,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
               #audioTracks: audioTracks,
               #blur: blur,
               #bitrate: bitrate,
+              #maxFrameRate: maxFrameRate,
               #shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
               #imageBytesWithCropping: imageBytesWithCropping,
             },

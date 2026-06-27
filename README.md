@@ -595,6 +595,7 @@ var task = VideoRenderData(
     endTime: const Duration(seconds: 20),
     blur: 10,
     bitrate: 5000000,
+    maxFrameRate: 30, // cap output at 30 fps (drops surplus frames)
     enableAudio: false,
     audioTracks: [
       VideoAudioTrack(

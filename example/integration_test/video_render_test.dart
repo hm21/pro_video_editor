@@ -205,6 +205,28 @@ void main() {
     expect(originalMeta.resolution / factor, meta.resolution);
   });
 
+  testWidgets('limit frame rate (max 15 fps)', (tester) async {
+    final originalMeta = await ProVideoEditor.instance.getMetadata(inputVideo);
+    final meta = await testRender(
+      description: 'Limit fps to 15',
+      renderModel: VideoRenderData(
+        videoSegments: [VideoSegment(video: inputVideo)],
+        outputFormat: VideoOutputFormat.mp4,
+        maxFrameRate: 15,
+      ),
+    );
+
+    // Only meaningful when the source actually plays faster than the cap.
+    if ((originalMeta.frameRate ?? 0) > 15) {
+      expect(meta.frameRate, isNotNull, reason: 'fps missing in output');
+      expect(
+        meta.frameRate!,
+        lessThanOrEqualTo(16.5),
+        reason: 'output fps should be capped near 15',
+      );
+    }
+  });
+
   // Note: This test uses h264Video (demo.mp4, ~30s) since hevcVideo
   // is only ~2.5s
   testWidgets('trim video (7s - 20s)', (tester) async {

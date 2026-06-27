@@ -36,6 +36,7 @@ class VideoRenderData {
     this.audioTracks = const [],
     this.blur,
     this.bitrate,
+    this.maxFrameRate,
     this.shouldOptimizeForNetworkUse = false,
     this.imageBytesWithCropping = false,
   })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
@@ -58,6 +59,10 @@ class VideoRenderData {
         assert(
           bitrate == null || bitrate > 0,
           '[bitrate] must be greater than 0',
+        ),
+        assert(
+          maxFrameRate == null || maxFrameRate > 0,
+          '[maxFrameRate] must be greater than 0',
         );
 
   /// Creates a [VideoRenderData] with a predefined quality preset.
@@ -90,6 +95,7 @@ class VideoRenderData {
     Duration? endTime,
     double? blur,
     int? bitrateOverride,
+    int? maxFrameRate,
     List<ColorFilter> colorFilters = const [],
     List<VideoAudioTrack> audioTracks = const [],
     bool shouldOptimizeForNetworkUse = false,
@@ -110,6 +116,7 @@ class VideoRenderData {
       endTime: endTime,
       blur: blur,
       bitrate: bitrateOverride ?? qualityConfig.bitrate,
+      maxFrameRate: maxFrameRate,
       colorFilters: colorFilters,
       audioTracks: audioTracks,
       qualityConfig: qualityConfig,
@@ -212,6 +219,19 @@ class VideoRenderData {
   /// bitrate, instant it will choose a preset which is the most near to the
   /// applied bitrate.
   final int? bitrate;
+
+  /// Caps the frame rate (frames per second) of the exported video.
+  ///
+  /// This is an upper limit, not a target: when the source plays faster than
+  /// [maxFrameRate], frames are dropped to bring it down (e.g. a 60 fps source
+  /// capped at `30` is exported at 30 fps). A source that is already at or
+  /// below the cap is left untouched.
+  ///
+  /// Lowering the frame rate reduces the encoding workload and output file
+  /// size. When `null` (default), the source frame rate is preserved.
+  ///
+  /// **Note:** Ignored on Web, Windows and Linux.
+  final int? maxFrameRate;
 
   /// Whether to optimize the video for network streaming (fast start).
   ///
@@ -348,6 +368,7 @@ class VideoRenderData {
       'outputFormat': outputFormat.name,
       'blur': blur,
       'bitrate': bitrate,
+      'maxFrameRate': maxFrameRate,
       'scaleX': scaleX,
       'scaleY': scaleY,
       // Global trim across the whole timeline (for videoSegments and
@@ -375,6 +396,7 @@ class VideoRenderData {
     List<VideoAudioTrack>? audioTracks,
     double? blur,
     int? bitrate,
+    int? maxFrameRate,
     bool? shouldOptimizeForNetworkUse,
     bool? imageBytesWithCropping,
   }) {
@@ -393,6 +415,7 @@ class VideoRenderData {
       audioTracks: audioTracks ?? this.audioTracks,
       blur: blur ?? this.blur,
       bitrate: bitrate ?? this.bitrate,
+      maxFrameRate: maxFrameRate ?? this.maxFrameRate,
       shouldOptimizeForNetworkUse:
           shouldOptimizeForNetworkUse ?? this.shouldOptimizeForNetworkUse,
       imageBytesWithCropping:
@@ -416,6 +439,7 @@ class VideoRenderData {
       'audioTracks': audioTracks.map((x) => x.toMap()).toList(),
       'blur': blur,
       'bitrate': bitrate,
+      'maxFrameRate': maxFrameRate,
       'shouldOptimizeForNetworkUse': shouldOptimizeForNetworkUse,
       'imageBytesWithCropping': imageBytesWithCropping,
     };
@@ -471,6 +495,9 @@ class VideoRenderData {
       ),
       blur: tryParseDouble(map['blur']),
       bitrate: map['bitrate'] != null ? safeParseInt(map['bitrate']) : null,
+      maxFrameRate: map['maxFrameRate'] != null
+          ? safeParseInt(map['maxFrameRate'])
+          : null,
       shouldOptimizeForNetworkUse: map['shouldOptimizeForNetworkUse'] as bool,
       imageBytesWithCropping: map['imageBytesWithCropping'] as bool,
     );
@@ -497,6 +524,7 @@ class VideoRenderData {
         'audioTracks: $audioTracks, '
         'blur: $blur, '
         'bitrate: $bitrate, '
+        'maxFrameRate: $maxFrameRate, '
         'shouldOptimizeForNetworkUse: $shouldOptimizeForNetworkUse, '
         'imageBytesWithCropping: $imageBytesWithCropping)';
   }
@@ -519,6 +547,7 @@ class VideoRenderData {
         listEquals(other.audioTracks, audioTracks) &&
         other.blur == blur &&
         other.bitrate == bitrate &&
+        other.maxFrameRate == maxFrameRate &&
         other.shouldOptimizeForNetworkUse == shouldOptimizeForNetworkUse &&
         other.imageBytesWithCropping == imageBytesWithCropping;
   }
@@ -539,6 +568,7 @@ class VideoRenderData {
         audioTracks.hashCode ^
         blur.hashCode ^
         bitrate.hashCode ^
+        maxFrameRate.hashCode ^
         shouldOptimizeForNetworkUse.hashCode ^
         imageBytesWithCropping.hashCode;
   }
