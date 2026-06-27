@@ -197,8 +197,7 @@ void main() {
     });
 
     testWidgets('animated GIF layer (looping)', (_) async {
-      final gifImage =
-          EditorLayerImage.asset('assets/dev.gif');
+      final gifImage = EditorLayerImage.asset('assets/dev.gif');
       await testRender(
         description: 'Animated GIF layer',
         renderModel: VideoRenderData(
@@ -218,8 +217,7 @@ void main() {
     });
 
     testWidgets('animated GIF layer (play once, no loop)', (_) async {
-      final gifImage =
-          EditorLayerImage.asset('assets/dev.gif');
+      final gifImage = EditorLayerImage.asset('assets/dev.gif');
       await testRender(
         description: 'Animated GIF layer (loop=false)',
         renderModel: VideoRenderData(
