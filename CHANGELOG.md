@@ -1,7 +1,5 @@
-## 2.2.0
-- **FEAT**(android, iOS, macOS): Add an output frame-rate cap via a new `maxFrameRate` field on `VideoRenderData`. It is an upper limit, not a target: a faster source is reduced to it (e.g. 60→30 fps) while a slower source is left untouched, lowering encoding cost and output file size. Android drops surplus frames with Media3's `FrameDropEffect`; Darwin caps the composition `frameDuration`. Web/Windows/Linux ignore the field.
-
 ## 2.1.0
+- **FEAT**(android, iOS, macOS): Add an output frame-rate cap via a new `maxFrameRate` field on `VideoRenderData`. It is an upper limit, not a target: a faster source is reduced to it (e.g. 60→30 fps) while a slower source is left untouched, lowering encoding cost and output file size. Android drops surplus frames with Media3's `FrameDropEffect`; Darwin caps the composition `frameDuration`. Web/Windows/Linux ignore the field.
 - **FEAT**(android, iOS, macOS): Add per-layer rotation to image overlays via a new `rotation` field on `ImageLayer` (radians, clockwise around the layer center — matches Flutter's `Transform.rotate`, so a `pro_image_editor` layer rotation can be forwarded directly). `offset`/`size` keep describing the layout box before rotation. Web/Windows/Linux ignore the field.
 
 ## 2.0.0
