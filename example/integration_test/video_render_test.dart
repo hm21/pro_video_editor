@@ -227,8 +227,9 @@ void main() {
     }
   });
 
-  testWidgets('custom quality resolution letterboxes to exact output',
-      (tester) async {
+  testWidgets('custom quality resolution letterboxes to exact output', (
+    tester,
+  ) async {
     // A square target differs in aspect from the (landscape) source, so the
     // output must be exactly the requested size with black padding — not the
     // aspect-scaled size the old behavior produced.
