@@ -339,7 +339,10 @@ class RenderVideo {
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyyMMdd_HHmmss_SSS"
     let timestamp = formatter.string(from: Date())
-    return "\(prefix)_\(timestamp).\(ext)"
+    // A random suffix keeps concurrent renders from colliding on the same
+    // millisecond timestamp.
+    let random = UInt32.random(in: 0...UInt32.max)
+    return "\(prefix)_\(timestamp)_\(random).\(ext)"
   }
 
   private static func temporaryURL(for format: String) -> URL {

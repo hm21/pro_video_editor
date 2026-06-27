@@ -86,7 +86,7 @@ object VideoTranscoder {
 
         val outputFile = File(
             context.cacheDir,
-            "transcoded_${System.currentTimeMillis()}.mp4"
+            "transcoded_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}.mp4"
         )
 
         val resultRef = AtomicReference<TranscodeResult>()
