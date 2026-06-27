@@ -304,6 +304,31 @@ void main() {
     }
   }, skip: skipPlatform);
 
+  testWidgets('extractAudio throws on a video without an audio track', (
+    tester,
+  ) async {
+    final format = Platform.isAndroid ? AudioFormat.mp3 : AudioFormat.m4a;
+
+    final directory = await getTemporaryDirectory();
+    final outputPath =
+        '${directory.path}/test_audio_noaudio_${DateTime.now().millisecondsSinceEpoch}.${format.extension}';
+
+    final config = AudioExtractConfigs(
+      video: EditorVideo.asset('assets/demo_muted.mp4'),
+      format: format,
+    );
+
+    await expectLater(
+      ProVideoEditor.instance.extractAudioToFile(outputPath, config),
+      throwsA(isA<AudioNoTrackException>()),
+    );
+
+    final file = File(outputPath);
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }, skip: skipPlatform);
+
   testWidgets('extractAudio handles invalid time ranges gracefully', (
     tester,
   ) async {

@@ -243,4 +243,64 @@ void main() {
       );
     },
   );
+
+  group('getSingleThumbnail', () {
+    for (final position in ThumbnailPosition.values) {
+      testWidgets('extracts the ${position.name} frame', (tester) async {
+        final thumb = await ProVideoEditor.instance.getSingleThumbnail(
+          SingleThumbnailConfigs(
+            video: testVideo,
+            outputFormat: ThumbnailFormat.jpeg,
+            outputSize: const Size(outputWidth, outputHeight),
+            boxFit: ThumbnailBoxFit.cover,
+            position: position,
+          ),
+        );
+
+        expect(thumb, isNotNull);
+        expect(thumb!.lengthInBytes, greaterThan(100));
+
+        final mime = lookupMimeType('', headerBytes: thumb);
+        expect(mime, equals(formatMimeMap[ThumbnailFormat.jpeg]));
+
+        final image = await decodeImageFromList(thumb);
+        expect(image.width, equals(outputWidth));
+        expect(image.height, equals(outputHeight));
+      });
+    }
+
+    testWidgets('last frame uses an explicit videoDuration', (tester) async {
+      final meta = await ProVideoEditor.instance.getMetadata(testVideo);
+
+      final thumb = await ProVideoEditor.instance.getSingleThumbnail(
+        SingleThumbnailConfigs(
+          video: testVideo,
+          outputFormat: ThumbnailFormat.jpeg,
+          outputSize: const Size(outputWidth, outputHeight),
+          boxFit: ThumbnailBoxFit.cover,
+          position: ThumbnailPosition.last,
+          videoDuration: meta.duration,
+        ),
+      );
+
+      expect(thumb, isNotNull);
+      expect(thumb!.lengthInBytes, greaterThan(100));
+    });
+
+    testWidgets('honors the png output format', (tester) async {
+      final thumb = await ProVideoEditor.instance.getSingleThumbnail(
+        SingleThumbnailConfigs(
+          video: testVideo,
+          outputFormat: ThumbnailFormat.png,
+          outputSize: const Size(outputWidth, outputHeight),
+          boxFit: ThumbnailBoxFit.cover,
+          position: ThumbnailPosition.first,
+        ),
+      );
+
+      expect(thumb, isNotNull);
+      final mime = lookupMimeType('', headerBytes: thumb!);
+      expect(mime, equals(formatMimeMap[ThumbnailFormat.png]));
+    });
+  });
 }
