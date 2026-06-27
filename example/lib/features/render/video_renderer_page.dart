@@ -1137,6 +1137,39 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Rotate image layers around their own center.
+  ///
+  /// [ImageLayer.rotation] is in radians (clockwise, like Flutter's
+  /// `Transform.rotate`), so a `pro_image_editor` layer rotation can be
+  /// forwarded directly. [offset] and [size] keep describing the layout box
+  /// before rotation.
+  Future<void> _layersWithRotation() async {
+    final stickerImage = EditorLayerImage.asset('assets/sticker.png');
+
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      imageLayers: [
+        /// Tilted 30° clockwise at top-left
+        ImageLayer(
+          image: stickerImage,
+          offset: const Offset(40, 40),
+          size: const Size(200, 200),
+          rotation: 30 * pi / 180,
+        ),
+
+        /// Tilted 45° counter-clockwise in the center
+        ImageLayer(
+          image: stickerImage,
+          offset: const Offset(500, 300),
+          size: const Size(200, 200),
+          rotation: -45 * pi / 180,
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   Future<void> _colorMatrix() async {
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video)],
@@ -2008,6 +2041,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           leading: const Icon(Icons.photo_size_select_large_outlined),
           title: const Text('Layers with custom size'),
           subtitle: const Text('Scale layers to specific dimensions'),
+        ),
+        ListTile(
+          onTap: _layersWithRotation,
+          leading: const Icon(Icons.rotate_right_outlined),
+          title: const Text('Layers with rotation'),
+          subtitle: const Text('Rotate layers around their own center'),
         ),
         ListTile(
           onTap: _colorMatrix,

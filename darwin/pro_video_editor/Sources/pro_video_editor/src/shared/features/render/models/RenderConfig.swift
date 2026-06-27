@@ -83,6 +83,8 @@ public struct ImageLayerConfig: Sendable {
   let width: Double?
   /// Target height in pixels. When nil, the image is used at its original height.
   let height: Double?
+  /// Clockwise rotation around the layer center, in radians.
+  let rotation: Double
   /// Animations to apply to this layer.
   let animations: [LayerAnimationConfig]
 
@@ -111,6 +113,7 @@ public struct ImageLayerConfig: Sendable {
     // Parse optional size
     let width = (args["width"] as? NSNumber)?.doubleValue
     let height = (args["height"] as? NSNumber)?.doubleValue
+    let rotation = (args["rotation"] as? NSNumber)?.doubleValue ?? 0.0
 
     // Use -1 as sentinel value for "from start" when startUs is null
     // Use -1 for endUs to signify "until the end of the video"
@@ -122,6 +125,7 @@ public struct ImageLayerConfig: Sendable {
       y: (args["y"] as? NSNumber)?.int64Value,
       width: width,
       height: height,
+      rotation: rotation,
       animations: animations
     )
   }

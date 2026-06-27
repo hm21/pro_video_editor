@@ -20,8 +20,27 @@ struct ImageLayer {
   let width: Double?
   /// Target height in pixels. When nil, the image is used at its original height.
   let height: Double?
+  /// Clockwise rotation around the layer center, in radians.
+  let rotation: Double
   /// Animations applied to this layer.
   let animations: [LayerAnimationConfig]
+}
+
+/// Rotates [overlay] clockwise by [radians] around its own center.
+///
+/// CoreImage uses a y-up coordinate space where a positive `rotationAngle`
+/// turns counter-clockwise, so the sign is flipped to match the clockwise
+/// (Flutter `Transform.rotate`) convention used by `ImageLayer.rotation`.
+/// Rotating around the center keeps the layer's placement fixed while the
+/// bounding box grows symmetrically.
+private func rotateOverlayAroundCenter(_ overlay: CIImage, radians: Double) -> CIImage {
+  if radians == 0 { return overlay }
+  let cx = overlay.extent.midX
+  let cy = overlay.extent.midY
+  let transform = CGAffineTransform(translationX: cx, y: cy)
+    .rotated(by: CGFloat(-radians))
+    .translatedBy(x: -cx, y: -cy)
+  return overlay.transformed(by: transform)
 }
 
 class VideoCompositor: NSObject, AVVideoCompositing {
@@ -151,6 +170,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
           y: layer.y,
           width: layer.width,
           height: layer.height,
+          rotation: layer.rotation,
           animations: layer.animations
         ))
     }
@@ -537,14 +557,15 @@ class VideoCompositor: NSObject, AVVideoCompositing {
               by: CGAffineTransform(translationX: posX, y: cgY))
           }
 
+          let rotated = rotateOverlayAroundCenter(overlay, radians: layer.rotation)
           let (opacity, animTransform) = computeAnimation(
             layer: layer,
             currentTimeUs: currentTimeUs,
-            overlayExtent: overlay.extent,
+            overlayExtent: rotated.extent,
             frameExtent: imageRect
           )
           outputImage = compositeOverlay(
-            overlay, over: outputImage, opacity: opacity, transform: animTransform)
+            rotated, over: outputImage, opacity: opacity, transform: animTransform)
         }
       }
     }
@@ -651,14 +672,15 @@ class VideoCompositor: NSObject, AVVideoCompositing {
               by: CGAffineTransform(translationX: posX, y: cgY))
           }
 
+          let rotated = rotateOverlayAroundCenter(overlay, radians: layer.rotation)
           let (opacity, animTransform) = computeAnimation(
             layer: layer,
             currentTimeUs: currentTimeUs,
-            overlayExtent: overlay.extent,
+            overlayExtent: rotated.extent,
             frameExtent: imageRect
           )
           outputImage = compositeOverlay(
-            overlay, over: outputImage, opacity: opacity, transform: animTransform)
+            rotated, over: outputImage, opacity: opacity, transform: animTransform)
         }
       }
     }

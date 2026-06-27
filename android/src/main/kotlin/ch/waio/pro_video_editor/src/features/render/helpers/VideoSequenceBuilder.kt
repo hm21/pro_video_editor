@@ -76,6 +76,8 @@ class VideoSequenceBuilder(
         val y: Int? = null,
         val width: Double? = null,
         val height: Double? = null,
+        /** Clockwise rotation around the layer center, in radians. */
+        val rotation: Double = 0.0,
         val animations: List<LayerAnimationConfig> = emptyList()
     )
 

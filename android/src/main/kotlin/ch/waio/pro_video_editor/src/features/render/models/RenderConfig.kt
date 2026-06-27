@@ -280,6 +280,7 @@ data class LayerAnimationConfig(
  * @property y Vertical offset in pixels (null = stretch to fill)
  * @property width Target width in pixels (null = original width)
  * @property height Target height in pixels (null = original height)
+ * @property rotation Clockwise rotation around the layer center, in radians
  * @property animations List of animations to apply to this layer
  */
 data class ImageLayer(
@@ -290,6 +291,7 @@ data class ImageLayer(
     val y: Int? = null,
     val width: Double? = null,
     val height: Double? = null,
+    val rotation: Double = 0.0,
     val animations: List<LayerAnimationConfig> = emptyList()
 ) {
     override fun equals(other: Any?): Boolean {
@@ -303,6 +305,7 @@ data class ImageLayer(
                 y == other.y &&
                 width == other.width &&
                 height == other.height &&
+                rotation == other.rotation &&
                 animations == other.animations
     }
 
@@ -314,6 +317,7 @@ data class ImageLayer(
         result = 31 * result + (y?.hashCode() ?: 0)
         result = 31 * result + (width?.hashCode() ?: 0)
         result = 31 * result + (height?.hashCode() ?: 0)
+        result = 31 * result + rotation.hashCode()
         result = 31 * result + animations.hashCode()
         return result
     }
@@ -405,6 +409,7 @@ data class RenderConfig(
                 val y = (layerMap["y"] as? Number)?.toInt()
                 val width = (layerMap["width"] as? Number)?.toDouble()
                 val height = (layerMap["height"] as? Number)?.toDouble()
+                val rotation = (layerMap["rotation"] as? Number)?.toDouble() ?: 0.0
 
                 // Parse animations
                 @Suppress("UNCHECKED_CAST")
@@ -414,7 +419,7 @@ data class RenderConfig(
                 if (imageData == null || imageData.isEmpty()) {
                     null
                 } else {
-                    ImageLayer(imageData, startUs, endUs, x, y, width, height, animations)
+                    ImageLayer(imageData, startUs, endUs, x, y, width, height, rotation, animations)
                 }
             } ?: emptyList()
 

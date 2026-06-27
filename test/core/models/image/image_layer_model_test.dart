@@ -17,6 +17,7 @@ void main() {
           endTime: const Duration(seconds: 10),
           offset: const Offset(100, 200),
           size: const Size(300, 150),
+          rotation: 1.5,
         );
         final map = layer.toMap();
 
@@ -25,6 +26,7 @@ void main() {
         expect(map['endTime'], 10000000);
         expect(map['offset'], {'dx': 100.0, 'dy': 200.0});
         expect(map['size'], {'width': 300.0, 'height': 150.0});
+        expect(map['rotation'], 1.5);
       });
 
       test('serializes null fields as null', () {
@@ -35,6 +37,7 @@ void main() {
         expect(map['endTime'], isNull);
         expect(map['offset'], isNull);
         expect(map['size'], isNull);
+        expect(map['rotation'], 0.0);
       });
     });
 
@@ -46,6 +49,7 @@ void main() {
           endTime: const Duration(seconds: 10),
           offset: const Offset(100, 200),
           size: const Size(300, 150),
+          rotation: 1.5,
         );
         final map = layer.toMap();
         final restored = ImageLayer.fromMap(map);
@@ -54,6 +58,7 @@ void main() {
         expect(restored.endTime, const Duration(seconds: 10));
         expect(restored.offset, const Offset(100, 200));
         expect(restored.size, const Size(300, 150));
+        expect(restored.rotation, 1.5);
       });
 
       test('handles null optional fields', () {
@@ -65,6 +70,26 @@ void main() {
         expect(restored.endTime, isNull);
         expect(restored.offset, isNull);
         expect(restored.size, isNull);
+        expect(restored.rotation, 0.0);
+      });
+
+      test('defaults rotation to 0 when absent from map', () {
+        final map = {
+          'image': image.toMap(),
+        };
+        final restored = ImageLayer.fromMap(map);
+
+        expect(restored.rotation, 0.0);
+      });
+
+      test('parses numeric string for rotation safely', () {
+        final map = {
+          'image': image.toMap(),
+          'rotation': '0.75',
+        };
+        final restored = ImageLayer.fromMap(map);
+
+        expect(restored.rotation, 0.75);
       });
 
       test('parses numeric strings safely for offset', () {
@@ -108,12 +133,21 @@ void main() {
           startTime: const Duration(seconds: 2),
           offset: const Offset(10, 20),
           size: const Size(640, 480),
+          rotation: 0.5,
         );
 
         expect(copy.startTime, const Duration(seconds: 2));
         expect(copy.offset, const Offset(10, 20));
         expect(copy.size, const Size(640, 480));
+        expect(copy.rotation, 0.5);
         expect(copy.endTime, isNull);
+      });
+
+      test('keeps original rotation when not overridden', () {
+        final layer = ImageLayer(image: image, rotation: 1.2);
+        final copy = layer.copyWith(offset: const Offset(5, 5));
+
+        expect(copy.rotation, 1.2);
       });
     });
 

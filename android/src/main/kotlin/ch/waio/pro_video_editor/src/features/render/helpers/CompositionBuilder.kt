@@ -90,6 +90,7 @@ class CompositionBuilder(
                     y = imageLayer.y,
                     width = imageLayer.width,
                     height = imageLayer.height,
+                    rotation = imageLayer.rotation,
                     animations = imageLayer.animations
                 )
             })

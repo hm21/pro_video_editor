@@ -329,6 +329,7 @@ class VideoRenderData {
                 'y': layer.offset?.dy.toInt(),
                 'width': layer.size?.width,
                 'height': layer.size?.height,
+                'rotation': layer.rotation,
                 'animations': layer.animations.map((a) => a.toMap()).toList(),
               },
             ),
