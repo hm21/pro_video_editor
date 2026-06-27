@@ -470,7 +470,10 @@ class RenderVideo(private val context: Context) {
             } else {
                 File(
                     context.cacheDir,
-                    "video_output_${System.currentTimeMillis()}.${config.outputFormat}"
+                    // A UUID keeps concurrent renders from colliding on the same
+                    // millisecond timestamp.
+                    "video_output_${System.currentTimeMillis()}_" +
+                        "${java.util.UUID.randomUUID()}.${config.outputFormat}"
                 )
             }
         outputFileRef.set(outputFile)

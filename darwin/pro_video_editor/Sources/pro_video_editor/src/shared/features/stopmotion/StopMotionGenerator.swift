@@ -227,7 +227,8 @@ internal enum StopMotionGenerator {
     }
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyyMMdd_HHmmss_SSS"
-    let filename = "stopmotion_\(formatter.string(from: Date())).\(format)"
+    let random = UInt32.random(in: 0...UInt32.max)
+    let filename = "stopmotion_\(formatter.string(from: Date()))_\(random).\(format)"
     return FileManager.default.temporaryDirectory.appendingPathComponent(filename)
   }
 

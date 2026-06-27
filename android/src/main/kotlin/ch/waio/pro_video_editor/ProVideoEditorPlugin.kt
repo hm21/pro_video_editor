@@ -539,8 +539,10 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                 onComplete = { waveformData ->
                     mainHandler.post {
                         postProgress(id, 1.0)
-                        val removedTask = activeWaveformTasks.remove(id)
-                        if (removedTask?.isCanceled == true) {
+                        activeWaveformTasks.remove(id)
+                        // Use the captured task: handleCancelTask may have already
+                        // removed it from the map, so the map lookup can be null.
+                        if (task.isCanceled) {
                             result.error("CANCELED", "Waveform generation was cancelled", null)
                         } else {
                             result.success(waveformData)
@@ -549,9 +551,9 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                 },
                 onError = { error ->
                     mainHandler.post {
-                        val removedTask = activeWaveformTasks.remove(id)
+                        activeWaveformTasks.remove(id)
                         val code = when {
-                            removedTask?.isCanceled == true -> "CANCELED"
+                            task.isCanceled -> "CANCELED"
                             error is NoAudioTrackException -> "NO_AUDIO"
                             else -> "WAVEFORM_ERROR"
                         }
@@ -623,9 +625,11 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                 },
                 onError = { error ->
                     mainHandler.post {
-                        val removedTask = activeWaveformTasks.remove(id)
+                        activeWaveformTasks.remove(id)
+                        // Use the captured task: handleCancelTask may have already
+                        // removed it from the map, so the map lookup can be null.
                         val code = when {
-                            removedTask?.isCanceled == true -> "CANCELED"
+                            task.isCanceled -> "CANCELED"
                             error is NoAudioTrackException -> "NO_AUDIO"
                             else -> "WAVEFORM_ERROR"
                         }

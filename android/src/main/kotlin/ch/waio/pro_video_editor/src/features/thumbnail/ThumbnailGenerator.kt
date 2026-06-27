@@ -137,7 +137,7 @@ class ThumbnailGenerator(private val context: Context) {
 
                     // Extract frame at specified timestamp (closest frame)
                     val bitmap =
-                        retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                        extractFrame(retriever, timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
                     if (bitmap != null) {
                         val resized =
                             resizeBitmapKeepingAspect(bitmap, outputWidth, outputHeight, boxFit)
@@ -219,7 +219,11 @@ class ThumbnailGenerator(private val context: Context) {
 
                     // Extract keyframe (OPTION_CLOSEST_SYNC ensures we get exact keyframe)
                     val bitmap =
-                        retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        extractFrame(
+                            retriever,
+                            timeUs,
+                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                        )
                     if (bitmap != null) {
                         val resized =
                             resizeBitmapKeepingAspect(bitmap, outputWidth, outputHeight, boxFit)
@@ -302,6 +306,54 @@ class ThumbnailGenerator(private val context: Context) {
         return List(maxOutputFrames) { i ->
             allKeyframes[(i * step).toInt()]
         }
+    }
+
+    /**
+     * Extracts a frame at [timeUs], falling back through alternative seek
+     * options when the preferred [primaryOption] returns null.
+     *
+     * Some devices return a null frame for 10-bit HDR HEVC at non-sync
+     * timestamps with OPTION_CLOSEST, so we retry at the nearest sync frames
+     * before giving up. Any frame is normalized to a software ARGB_8888 bitmap
+     * so the downstream resize/compress path can read its pixels.
+     */
+    private fun extractFrame(
+        retriever: MediaMetadataRetriever,
+        timeUs: Long,
+        primaryOption: Int,
+    ): Bitmap? {
+        val options = linkedSetOf(
+            primaryOption,
+            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+            MediaMetadataRetriever.OPTION_PREVIOUS_SYNC,
+            MediaMetadataRetriever.OPTION_NEXT_SYNC,
+        )
+        for (option in options) {
+            val frame = try {
+                retriever.getFrameAtTime(timeUs, option)
+            } catch (e: Exception) {
+                null
+            }
+            if (frame != null) return normalizeBitmap(frame)
+        }
+        // Last resort: a representative frame near the start of the video.
+        return try {
+            retriever.getFrameAtTime()?.let { normalizeBitmap(it) }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Converts a frame to a software ARGB_8888 bitmap when needed (e.g. HDR
+     * frames decoded as RGBA_1010102 or hardware bitmaps can't be read
+     * directly by the resize/compress path).
+     */
+    private fun normalizeBitmap(bitmap: Bitmap): Bitmap {
+        if (bitmap.config == Bitmap.Config.ARGB_8888) return bitmap
+        val converted = bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: return bitmap
+        if (converted !== bitmap) bitmap.recycle()
+        return converted
     }
 
     /**
