@@ -61,4 +61,9 @@ public struct VideoCompositorConfig {
   /// Fallback source track ID for older iOS/macOS versions where sourceTrackIDs may be empty.
   /// This is used when the custom compositor doesn't receive track IDs properly from the instruction context.
   var sourceTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
+
+  /// Exact output canvas size. When set, the composed frame is scaled to fit
+  /// inside it (preserving aspect ratio), centered, and padded with black as a
+  /// final step. Nil = keep the composed frame's own size.
+  var outputResolution: CGSize? = nil
 }

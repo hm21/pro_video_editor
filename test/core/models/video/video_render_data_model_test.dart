@@ -1,5 +1,8 @@
+import 'dart:ui';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/core/models/video/editor_video_model.dart';
+import 'package:pro_video_editor/core/models/video/video_quality_config.dart';
 import 'package:pro_video_editor/core/models/video/video_quality_preset.dart';
 import 'package:pro_video_editor/core/models/video/video_render_data_model.dart';
 import 'package:pro_video_editor/core/models/video/video_segment_model.dart';
@@ -61,6 +64,43 @@ void main() {
         maxFrameRate: 30,
       );
       expect(data.maxFrameRate, 30);
+    });
+  });
+
+  group('VideoRenderData qualityConfig output resolution', () {
+    VideoRenderData buildData(VideoQualityConfig qualityConfig) {
+      return VideoRenderData(
+        id: 'test',
+        videoSegments: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+        qualityConfig: qualityConfig,
+      );
+    }
+
+    test('custom resolution maps to an exact output canvas (no scale)',
+        () async {
+      final map = await buildData(
+        VideoQualityConfig.custom(
+          bitrate: 8000000,
+          resolution: const Size(1080, 1920),
+        ),
+      ).toAsyncMap();
+
+      // Exact output canvas → letterboxed natively, not a uniform scale.
+      expect(map['outputWidth'], 1080);
+      expect(map['outputHeight'], 1920);
+      expect(map['scaleX'], isNull);
+      expect(map['scaleY'], isNull);
+    });
+
+    test('falls back to the quality config bitrate when none is set', () async {
+      final map = await buildData(
+        VideoQualityConfig.custom(
+          bitrate: 8000000,
+          resolution: const Size(1080, 1920),
+        ),
+      ).toAsyncMap();
+
+      expect(map['bitrate'], 8000000);
     });
   });
 }

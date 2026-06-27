@@ -1578,6 +1578,25 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Export to an exact custom resolution (portrait), letterboxed.
+  ///
+  /// [VideoQualityConfig.custom] with a `resolution` produces a video of
+  /// exactly that size: the source is scaled to fit (preserving aspect ratio),
+  /// centered, and the remaining space is padded with black. A landscape source
+  /// exported to 1080x1920 therefore ends up centered with black bars top and
+  /// bottom.
+  Future<void> _qualityCustomResolution() async {
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      qualityConfig: VideoQualityConfig.custom(
+        bitrate: 8000000,
+        resolution: const Size(1080, 1920),
+      ),
+    );
+
+    await _renderVideo(data);
+  }
+
   Future<void> _concatenateVideos() async {
     var data = VideoRenderData(
       videoSegments: [
@@ -2319,6 +2338,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           leading: const Icon(Icons.four_k),
           title: const Text('Export with 4K Quality Preset'),
           subtitle: const Text('35 Mbps bitrate'),
+        ),
+        ListTile(
+          onTap: _qualityCustomResolution,
+          leading: const Icon(Icons.aspect_ratio_outlined),
+          title: const Text('Custom resolution (1080x1920)'),
+          subtitle: const Text('Exact output, contain-fit + black padding'),
         ),
         ..._buildSectionTitle('Network Streaming'),
         ListTile(

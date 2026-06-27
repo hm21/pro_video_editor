@@ -128,6 +128,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// Fallback source track ID for older OS versions
   var sourceTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
 
+  /// Exact output canvas size; the composed frame is letterboxed into it.
+  var outputResolution: CGSize? = nil
+
   /// Color filter configs for per-frame LUT computation
   private var colorFilterConfigs: [ColorFilterConfig] = []
 
@@ -168,6 +171,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     self.shouldApplyOrientationCorrection = config.shouldApplyOrientationCorrection
     self.originalNaturalSize = config.originalNaturalSize
     self.sourceTrackID = config.sourceTrackID
+    self.outputResolution = config.outputResolution
 
     self.setOverlayImageLayers(from: config.imageLayerConfigs)
     self.colorFilterConfigs = config.colorFilterConfigs
@@ -770,6 +774,12 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     // so the entire composed frame (including overlays) dips uniformly.
     outputImage = applyFadeDip(to: outputImage, at: request.compositionTime)
 
+    // Letterbox into the exact output canvas when a custom resolution was
+    // requested: scale to fit (preserving aspect ratio), center, pad with black.
+    if let target = outputResolution {
+      outputImage = letterbox(outputImage, into: target)
+    }
+
     guard let outputBuffer = request.renderContext.newPixelBuffer() else {
       request.finish(with: NSError(domain: "VideoCompositor", code: -2, userInfo: nil))
       return
@@ -777,5 +787,28 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
     context.render(outputImage, to: outputBuffer)
     request.finish(withComposedVideoFrame: outputBuffer)
+  }
+
+  /// Scales [image] to fit inside [target] (preserving aspect ratio), centers
+  /// it, and composites it over an opaque black canvas of exactly [target] size.
+  private func letterbox(_ image: CIImage, into target: CGSize) -> CIImage {
+    let src = image.extent
+    guard src.width > 0, src.height > 0, target.width > 0, target.height > 0
+    else { return image }
+
+    let scale = min(target.width / src.width, target.height / src.height)
+    let scaledWidth = src.width * scale
+    let scaledHeight = src.height * scale
+    // Scale around the origin, then translate the scaled content's origin to the
+    // centered position within the target canvas.
+    let translateX = (target.width - scaledWidth) / 2 - src.origin.x * scale
+    let translateY = (target.height - scaledHeight) / 2 - src.origin.y * scale
+    let transform = CGAffineTransform(scaleX: scale, y: scale)
+      .concatenating(CGAffineTransform(translationX: translateX, y: translateY))
+
+    let scaled = image.transformed(by: transform)
+    let black = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 1))
+      .cropped(to: CGRect(origin: .zero, size: target))
+    return scaled.composited(over: black)
   }
 }

@@ -312,6 +312,20 @@ struct RenderConfig: Sendable {
   /// Vertical scale factor (nil = no scaling)
   let scaleY: Float?
 
+  /// Exact output canvas width in pixels (nil = derive from source/scale).
+  /// When set, the video is scaled to fit inside the canvas (preserving aspect
+  /// ratio), centered, and padded with black.
+  let outputWidth: Int?
+
+  /// Exact output canvas height in pixels (nil = derive from source/scale).
+  let outputHeight: Int?
+
+  /// The exact output canvas size, when both dimensions are provided.
+  var outputResolution: CGSize? {
+    guard let width = outputWidth, let height = outputHeight else { return nil }
+    return CGSize(width: width, height: height)
+  }
+
   /// Target bitrate in bits per second (nil = auto)
   let bitrate: Int?
 
@@ -368,6 +382,8 @@ struct RenderConfig: Sendable {
       cropY: self.cropY,
       scaleX: self.scaleX,
       scaleY: self.scaleY,
+      outputWidth: self.outputWidth,
+      outputHeight: self.outputHeight,
       bitrate: self.bitrate,
       maxFrameRate: self.maxFrameRate,
       enableAudio: self.enableAudio,
@@ -435,6 +451,8 @@ struct RenderConfig: Sendable {
       cropY: args["cropY"] as? Int,
       scaleX: (args["scaleX"] as? NSNumber)?.floatValue,
       scaleY: (args["scaleY"] as? NSNumber)?.floatValue,
+      outputWidth: (args["outputWidth"] as? NSNumber)?.intValue,
+      outputHeight: (args["outputHeight"] as? NSNumber)?.intValue,
       bitrate: args["bitrate"] as? Int,
       maxFrameRate: (args["maxFrameRate"] as? NSNumber)?.intValue,
       enableAudio: args["enableAudio"] as? Bool ?? true,

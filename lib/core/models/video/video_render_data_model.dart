@@ -286,22 +286,39 @@ class VideoRenderData {
     double? scaleX = transform.scaleX;
     double? scaleY = transform.scaleY;
 
+    // Exact output canvas size (with contain-fit letterboxing) requested via a
+    // custom quality resolution. Resolved natively, mutually exclusive with the
+    // scale path below.
+    int? outputWidth;
+    int? outputHeight;
+
     // Handle quality config
     if (qualityConfig != null && scaleX == null && scaleY == null) {
-      final targetVideo = (videoSegments != null && videoSegments!.isNotEmpty
-              ? videoSegments!.first.video
-              : null) ??
-          composition?.layers.first.clips.first.video;
-      if (targetVideo != null) {
-        final meta = await ProVideoEditor.instance.getMetadata(targetVideo);
-        final originalResolution = meta.resolution;
-        final targetResolution =
-            qualityConfig!.resolution ?? originalResolution;
-        final sx = targetResolution.width / originalResolution.width;
-        final sy = targetResolution.height / originalResolution.height;
-        final scale = sx < sy ? sx : sy;
-        scaleX = scale;
-        scaleY = scale;
+      final resolution = qualityConfig!.resolution;
+      if (videoSegments != null &&
+          qualityConfig!.preset == VideoQualityPreset.custom &&
+          resolution != null) {
+        // A custom resolution is treated as the literal output size: the video
+        // is scaled to fit inside it (preserving aspect ratio) and centered,
+        // with black padding filling the rest. Presets keep the aspect-
+        // preserving scale below so they don't force content onto their canvas.
+        outputWidth = resolution.width.round();
+        outputHeight = resolution.height.round();
+      } else {
+        final targetVideo = (videoSegments != null && videoSegments!.isNotEmpty
+                ? videoSegments!.first.video
+                : null) ??
+            composition?.layers.first.clips.first.video;
+        if (targetVideo != null) {
+          final meta = await ProVideoEditor.instance.getMetadata(targetVideo);
+          final originalResolution = meta.resolution;
+          final targetResolution = resolution ?? originalResolution;
+          final sx = targetResolution.width / originalResolution.width;
+          final sy = targetResolution.height / originalResolution.height;
+          final scale = sx < sy ? sx : sy;
+          scaleX = scale;
+          scaleY = scale;
+        }
       }
     }
 
@@ -368,10 +385,14 @@ class VideoRenderData {
       'enableAudio': enableAudio,
       'outputFormat': outputFormat.name,
       'blur': blur,
-      'bitrate': bitrate,
+      // Fall back to the quality config's bitrate when no explicit bitrate is
+      // set, so a `qualityConfig` used on its own is still applied.
+      'bitrate': bitrate ?? qualityConfig?.bitrate,
       'maxFrameRate': maxFrameRate,
       'scaleX': scaleX,
       'scaleY': scaleY,
+      'outputWidth': outputWidth,
+      'outputHeight': outputHeight,
       // Global trim across the whole timeline (for videoSegments and
       // compositions).
       'startUs': startTime?.inMicroseconds,

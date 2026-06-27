@@ -343,6 +343,13 @@ data class RenderConfig(
     val cropY: Int? = null,
     val scaleX: Float? = null,
     val scaleY: Float? = null,
+    /**
+     * Exact output canvas size. When set, the video is scaled to fit inside it
+     * (preserving aspect ratio), centered, and padded with black. Null = derive
+     * the size from the source/scale.
+     */
+    val outputWidth: Int? = null,
+    val outputHeight: Int? = null,
     val bitrate: Int? = null,
     /** Upper limit for the output frame rate (fps). Null = keep source fps. */
     val maxFrameRate: Int? = null,
@@ -463,6 +470,8 @@ data class RenderConfig(
                 cropY = call.argument<Number>("cropY")?.toInt(),
                 scaleX = call.argument<Number>("scaleX")?.toFloat(),
                 scaleY = call.argument<Number>("scaleY")?.toFloat(),
+                outputWidth = call.argument<Number>("outputWidth")?.toInt(),
+                outputHeight = call.argument<Number>("outputHeight")?.toInt(),
                 bitrate = call.argument<Number>("bitrate")?.toInt(),
                 maxFrameRate = call.argument<Number>("maxFrameRate")?.toInt(),
                 enableAudio = call.argument<Boolean>("enableAudio") ?: true,

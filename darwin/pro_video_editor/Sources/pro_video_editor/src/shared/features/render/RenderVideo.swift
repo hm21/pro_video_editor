@@ -276,6 +276,14 @@ class RenderVideo {
             )
           }
 
+          // A custom output resolution is the exact output canvas: the composed
+          // frame is letterboxed into it (scaled to fit + centered + black
+          // padding) by the compositor as its final step.
+          if let target = workingConfig.outputResolution {
+            finalRenderSize = target
+            effectsConfig.outputResolution = target
+          }
+
           // Cap the output frame rate when a maximum was requested. The
           // builders derive frameDuration from the source fps; lower the rate
           // only when it exceeds the cap, so a slower source is left untouched.
