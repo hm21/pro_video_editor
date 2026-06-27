@@ -13,6 +13,7 @@ import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.OverlayEffect
+import androidx.media3.effect.Presentation
 import androidx.media3.effect.SpeedChangeEffect
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
@@ -56,6 +57,8 @@ class VideoSequenceBuilder(
     private var hasCustomAudio: Boolean = false
     private var scaleX: Float? = null
     private var scaleY: Float? = null
+    private var outputWidth: Int? = null
+    private var outputHeight: Int? = null
     private val rotatedDimensionsCache = mutableMapOf<String, Triple<Int, Int, Int>>()
 
     data class CropConfig(
@@ -97,6 +100,16 @@ class VideoSequenceBuilder(
     fun setScale(scaleX: Float?, scaleY: Float?): VideoSequenceBuilder {
         this.scaleX = scaleX
         this.scaleY = scaleY
+        return this
+    }
+
+    /**
+     * Sets the exact output canvas size. When set, each clip is scaled to fit
+     * inside it (preserving aspect ratio), centered, and padded with black.
+     */
+    fun setOutputResolution(width: Int?, height: Int?): VideoSequenceBuilder {
+        this.outputWidth = width
+        this.outputHeight = height
         return this
     }
 
@@ -607,6 +620,17 @@ class VideoSequenceBuilder(
         // Apply scale AFTER overlay and crop to match the iOS/macOS pipeline.
         // This prevents the overlay from being distorted by a pre-applied scale.
         applyScale(clipVideoEffects, scaleX, scaleY)
+
+        // Letterbox to the exact output canvas (after scale/crop/overlay) when a
+        // custom resolution was requested. SCALE_TO_FIT preserves aspect ratio
+        // and pads the remaining space with black.
+        val outW = outputWidth
+        val outH = outputHeight
+        if (outW != null && outH != null) {
+            clipVideoEffects += Presentation.createForWidthAndHeight(
+                outW, outH, Presentation.LAYOUT_SCALE_TO_FIT
+            )
+        }
 
         // Per-clip volume control:
         // - Without custom audio: VolumeAudioProcessor per clip works (single sequence)

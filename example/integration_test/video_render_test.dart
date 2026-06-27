@@ -227,6 +227,27 @@ void main() {
     }
   });
 
+  testWidgets('custom quality resolution letterboxes to exact output',
+      (tester) async {
+    // A square target differs in aspect from the (landscape) source, so the
+    // output must be exactly the requested size with black padding — not the
+    // aspect-scaled size the old behavior produced.
+    const target = Size(1080, 1080);
+    final meta = await testRender(
+      description: 'Custom resolution 1080x1080 (letterbox)',
+      renderModel: VideoRenderData(
+        videoSegments: [VideoSegment(video: inputVideo)],
+        outputFormat: VideoOutputFormat.mp4,
+        qualityConfig: VideoQualityConfig.custom(
+          bitrate: 8000000,
+          resolution: target,
+        ),
+      ),
+    );
+
+    expect(meta.resolution, target);
+  });
+
   // Note: This test uses h264Video (demo.mp4, ~30s) since hevcVideo
   // is only ~2.5s
   testWidgets('trim video (7s - 20s)', (tester) async {

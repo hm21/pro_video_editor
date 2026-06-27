@@ -46,6 +46,13 @@ class VideoQualityConfig {
   /// Creates a custom configuration with specific bitrate and resolution.
   ///
   /// Useful when you need fine-grained control over quality settings.
+  ///
+  /// When [resolution] is set, it becomes the **exact output canvas size** for
+  /// the `videoSegments` export: the video is scaled to fit inside it
+  /// (preserving its aspect ratio), centered, and the remaining space is filled
+  /// with black padding (letterbox/pillarbox). For example, a 720x720 source
+  /// with `resolution: Size(1080, 1920)` exports a 1080x1920 video with the
+  /// content centered and black bars top and bottom.
   factory VideoQualityConfig.custom({required int bitrate, Size? resolution}) {
     return VideoQualityConfig(
       bitrate: bitrate,
