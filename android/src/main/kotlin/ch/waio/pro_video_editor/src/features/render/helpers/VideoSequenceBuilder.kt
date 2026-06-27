@@ -78,6 +78,8 @@ class VideoSequenceBuilder(
         val height: Double? = null,
         /** Clockwise rotation around the layer center, in radians. */
         val rotation: Double = 0.0,
+        /** Whether an animated image (GIF) repeats while the layer is visible. */
+        val loop: Boolean = true,
         val animations: List<LayerAnimationConfig> = emptyList()
     )
 

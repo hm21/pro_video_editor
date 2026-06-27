@@ -85,6 +85,8 @@ public struct ImageLayerConfig: Sendable {
   let height: Double?
   /// Clockwise rotation around the layer center, in radians.
   let rotation: Double
+  /// Whether an animated image (GIF) repeats while the layer is visible.
+  let loop: Bool
   /// Animations to apply to this layer.
   let animations: [LayerAnimationConfig]
 
@@ -114,6 +116,7 @@ public struct ImageLayerConfig: Sendable {
     let width = (args["width"] as? NSNumber)?.doubleValue
     let height = (args["height"] as? NSNumber)?.doubleValue
     let rotation = (args["rotation"] as? NSNumber)?.doubleValue ?? 0.0
+    let loop = (args["loop"] as? Bool) ?? true
 
     // Use -1 as sentinel value for "from start" when startUs is null
     // Use -1 for endUs to signify "until the end of the video"
@@ -126,6 +129,7 @@ public struct ImageLayerConfig: Sendable {
       width: width,
       height: height,
       rotation: rotation,
+      loop: loop,
       animations: animations
     )
   }

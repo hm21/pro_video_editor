@@ -281,6 +281,7 @@ data class LayerAnimationConfig(
  * @property width Target width in pixels (null = original width)
  * @property height Target height in pixels (null = original height)
  * @property rotation Clockwise rotation around the layer center, in radians
+ * @property loop Whether an animated image (GIF) repeats while visible
  * @property animations List of animations to apply to this layer
  */
 data class ImageLayer(
@@ -292,6 +293,7 @@ data class ImageLayer(
     val width: Double? = null,
     val height: Double? = null,
     val rotation: Double = 0.0,
+    val loop: Boolean = true,
     val animations: List<LayerAnimationConfig> = emptyList()
 ) {
     override fun equals(other: Any?): Boolean {
@@ -306,6 +308,7 @@ data class ImageLayer(
                 width == other.width &&
                 height == other.height &&
                 rotation == other.rotation &&
+                loop == other.loop &&
                 animations == other.animations
     }
 
@@ -318,6 +321,7 @@ data class ImageLayer(
         result = 31 * result + (width?.hashCode() ?: 0)
         result = 31 * result + (height?.hashCode() ?: 0)
         result = 31 * result + rotation.hashCode()
+        result = 31 * result + loop.hashCode()
         result = 31 * result + animations.hashCode()
         return result
     }
@@ -412,6 +416,7 @@ data class RenderConfig(
                 val width = (layerMap["width"] as? Number)?.toDouble()
                 val height = (layerMap["height"] as? Number)?.toDouble()
                 val rotation = (layerMap["rotation"] as? Number)?.toDouble() ?: 0.0
+                val loop = layerMap["loop"] as? Boolean ?: true
 
                 // Parse animations
                 @Suppress("UNCHECKED_CAST")
@@ -421,7 +426,10 @@ data class RenderConfig(
                 if (imageData == null || imageData.isEmpty()) {
                     null
                 } else {
-                    ImageLayer(imageData, startUs, endUs, x, y, width, height, rotation, animations)
+                    ImageLayer(
+                        imageData, startUs, endUs, x, y, width, height,
+                        rotation, loop, animations
+                    )
                 }
             } ?: emptyList()
 

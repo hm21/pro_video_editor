@@ -196,6 +196,45 @@ void main() {
       );
     });
 
+    testWidgets('animated GIF layer (looping)', (_) async {
+      final gifImage = EditorLayerImage.asset('assets/dev.gif');
+      await testRender(
+        description: 'Animated GIF layer',
+        renderModel: VideoRenderData(
+          videoSegments: [VideoSegment(video: inputVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            ImageLayer(
+              image: gifImage,
+              offset: const ui.Offset(60, 60),
+              size: const ui.Size(200, 200),
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 5),
+            ),
+          ],
+        ),
+      );
+    });
+
+    testWidgets('animated GIF layer (play once, no loop)', (_) async {
+      final gifImage = EditorLayerImage.asset('assets/dev.gif');
+      await testRender(
+        description: 'Animated GIF layer (loop=false)',
+        renderModel: VideoRenderData(
+          videoSegments: [VideoSegment(video: inputVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            ImageLayer(
+              image: gifImage,
+              offset: const ui.Offset(60, 60),
+              size: const ui.Size(200, 200),
+              loop: false,
+            ),
+          ],
+        ),
+      );
+    });
+
     testWidgets('image layer with flip', (_) async {
       await testRender(
         description: 'Image layer + flip',

@@ -57,6 +57,7 @@ fun applyComposition(
                 width = imageLayer.width,
                 height = imageLayer.height,
                 rotation = imageLayer.rotation,
+                loop = imageLayer.loop,
                 animations = imageLayer.animations
             )
         }

@@ -124,14 +124,21 @@ internal fun resolveAnchor(targetCenter: Float, halfNorm: Float): OverlayAnchors
 }
 
 /**
- * Custom BitmapOverlay that computes per-frame overlay settings for animations.
+ * Custom BitmapOverlay that computes per-frame overlay settings for animations
+ * and, for animated images (GIF), returns the correct frame for the current
+ * presentation time.
  *
  * Uses [getOverlaySettings] to dynamically compute alpha, position offsets,
  * and scale based on the current presentation time and animation configs.
+ *
+ * [frames] holds one bitmap for a static image, or several for an animated
+ * one; [frameDurationsUs] gives each frame's on-screen duration. All frames
+ * must share the same dimensions ([imageWidth] x [imageHeight]).
  */
 @UnstableApi
 internal class AnimatedBitmapOverlay(
-    private val bitmap: Bitmap,
+    private val frames: List<Bitmap>,
+    private val frameDurationsUs: List<Long>,
     private val baseNormX: Float,
     private val baseNormY: Float,
     private val imageWidth: Int,
@@ -140,10 +147,62 @@ internal class AnimatedBitmapOverlay(
     private val videoHeight: Int,
     private val layerStartUs: Long,
     private val layerEndUs: Long,
+    private val loop: Boolean,
     private val animations: List<LayerAnimationConfig>
 ) : BitmapOverlay() {
 
-    override fun getBitmap(presentationTimeUs: Long): Bitmap = bitmap
+    /** Convenience constructor for a single static frame. */
+    constructor(
+        bitmap: Bitmap,
+        baseNormX: Float,
+        baseNormY: Float,
+        imageWidth: Int,
+        imageHeight: Int,
+        videoWidth: Int,
+        videoHeight: Int,
+        layerStartUs: Long,
+        layerEndUs: Long,
+        animations: List<LayerAnimationConfig>
+    ) : this(
+        frames = listOf(bitmap),
+        frameDurationsUs = listOf(0L),
+        baseNormX = baseNormX,
+        baseNormY = baseNormY,
+        imageWidth = imageWidth,
+        imageHeight = imageHeight,
+        videoWidth = videoWidth,
+        videoHeight = videoHeight,
+        layerStartUs = layerStartUs,
+        layerEndUs = layerEndUs,
+        loop = false,
+        animations = animations
+    )
+
+    // Cumulative end time of each frame within one playthrough, plus the total.
+    private val frameEndsUs: LongArray = LongArray(frames.size).also { ends ->
+        var acc = 0L
+        for (i in frames.indices) {
+            acc += frameDurationsUs[i]
+            ends[i] = acc
+        }
+    }
+    private val totalDurationUs: Long = frameEndsUs.lastOrNull() ?: 0L
+
+    override fun getBitmap(presentationTimeUs: Long): Bitmap {
+        if (frames.size == 1 || totalDurationUs <= 0L) return frames[0]
+
+        val effectiveStartUs = if (layerStartUs == -1L) 0L else layerStartUs
+        var t = presentationTimeUs - effectiveStartUs
+        if (t < 0L) t = 0L
+        t = if (loop) t % totalDurationUs else t.coerceAtMost(totalDurationUs - 1)
+
+        // frameEndsUs is ascending, so the first end strictly greater than t
+        // identifies the active frame.
+        for (i in frames.indices) {
+            if (t < frameEndsUs[i]) return frames[i]
+        }
+        return frames.last()
+    }
 
     override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings {
         var alpha = 1.0f

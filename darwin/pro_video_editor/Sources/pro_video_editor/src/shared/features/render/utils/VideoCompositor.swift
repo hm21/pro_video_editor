@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreImage
 import Foundation
+import ImageIO
 
 #if os(iOS)
   import UIKit
@@ -9,7 +10,14 @@ import Foundation
 #endif
 
 struct ImageLayer {
-  let image: CIImage
+  /// Decoded frames: one for a static image, several for an animated GIF.
+  let frames: [CIImage]
+  /// Cumulative end time (µs) of each frame within one playthrough.
+  let frameEndsUs: [Int64]
+  /// Total duration (µs) of one playthrough; 0 for a static image.
+  let totalDurationUs: Int64
+  /// Whether an animated image repeats while the layer is visible.
+  let loop: Bool
   let startUs: Int64
   let endUs: Int64
   /// x position in pixels. When nil, the image is stretched to fill the video frame.
@@ -24,6 +32,61 @@ struct ImageLayer {
   let rotation: Double
   /// Animations applied to this layer.
   let animations: [LayerAnimationConfig]
+
+  /// The frame to display at composition time [currentTimeUs].
+  ///
+  /// Static layers always return their single frame. Animated layers map the
+  /// elapsed time (relative to the layer's start) onto the frame timeline,
+  /// looping or holding the last frame depending on [loop].
+  func currentFrame(atUs currentTimeUs: Int64) -> CIImage {
+    if frames.count <= 1 || totalDurationUs <= 0 { return frames[0] }
+    let effectiveStartUs = startUs == -1 ? 0 : startUs
+    var t = currentTimeUs - effectiveStartUs
+    if t < 0 { t = 0 }
+    t = loop ? t % totalDurationUs : min(t, totalDurationUs - 1)
+    for (index, end) in frameEndsUs.enumerated() where t < end {
+      return frames[index]
+    }
+    return frames[frames.count - 1]
+  }
+}
+
+/// Decodes an animated GIF into its frames and per-frame timeline.
+///
+/// Returns nil for non-animated sources (single frame / zero duration) so the
+/// caller can fall back to a plain static decode.
+private func decodeGifFrames(_ data: Data) -> (
+  frames: [CIImage], frameEndsUs: [Int64], totalUs: Int64
+)? {
+  guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+  let count = CGImageSourceGetCount(source)
+  if count <= 1 { return nil }
+
+  var frames: [CIImage] = []
+  var frameEndsUs: [Int64] = []
+  var accUs: Int64 = 0
+  for index in 0..<count {
+    guard let cgImage = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+    accUs += Int64(gifFrameDelaySeconds(source, index) * 1_000_000)
+    frames.append(CIImage(cgImage: cgImage))
+    frameEndsUs.append(accUs)
+  }
+  if frames.count <= 1 || accUs <= 0 { return nil }
+  return (frames, frameEndsUs, accUs)
+}
+
+/// Reads the on-screen delay (seconds) of GIF frame [index], clamping very
+/// small/zero values to 0.1s as browsers do.
+private func gifFrameDelaySeconds(_ source: CGImageSource, _ index: Int) -> Double {
+  let fallback = 0.1
+  guard
+    let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
+    let gif = props[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+  else { return fallback }
+  let unclamped = gif[kCGImagePropertyGIFUnclampedDelayTime] as? Double
+  let clamped = gif[kCGImagePropertyGIFDelayTime] as? Double
+  let delay = unclamped ?? clamped ?? fallback
+  return delay < 0.011 ? fallback : delay
 }
 
 /// Rotates [overlay] clockwise by [radians] around its own center.
@@ -147,23 +210,41 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   func setOverlayImageLayers(from layers: [ImageLayerConfig]) {
     overlayImageLayers = []
     for layer in layers {
-      #if os(iOS)
-        guard let uiImage = UIImage(data: layer.imageData),
-          let cgImage = uiImage.cgImage
-        else {
-          continue
-        }
-      #elseif os(macOS)
-        guard let nsImage = NSImage(data: layer.imageData),
-          let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
-        else {
-          continue
-        }
-      #endif
+      let frames: [CIImage]
+      let frameEndsUs: [Int64]
+      let totalDurationUs: Int64
+
+      if let gif = decodeGifFrames(layer.imageData) {
+        // Animated GIF: keep every frame and its timeline.
+        frames = gif.frames
+        frameEndsUs = gif.frameEndsUs
+        totalDurationUs = gif.totalUs
+      } else {
+        // Static image: decode the single frame.
+        #if os(iOS)
+          guard let uiImage = UIImage(data: layer.imageData),
+            let cgImage = uiImage.cgImage
+          else {
+            continue
+          }
+        #elseif os(macOS)
+          guard let nsImage = NSImage(data: layer.imageData),
+            let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+          else {
+            continue
+          }
+        #endif
+        frames = [CIImage(cgImage: cgImage)]
+        frameEndsUs = [0]
+        totalDurationUs = 0
+      }
 
       overlayImageLayers.append(
         ImageLayer(
-          image: CIImage(cgImage: cgImage),
+          frames: frames,
+          frameEndsUs: frameEndsUs,
+          totalDurationUs: totalDurationUs,
+          loop: layer.loop,
           startUs: layer.startUs,
           endUs: layer.endUs,
           x: layer.x,
@@ -535,7 +616,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
           && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
 
         if inTimeRange {
-          var img = layer.image
+          var img = layer.currentFrame(atUs: currentTimeUs)
 
           if let w = layer.width, let h = layer.height {
             let sx = CGFloat(w) / img.extent.width
@@ -650,7 +731,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
           (layer.startUs == -1 || currentTimeUs >= layer.startUs)
           && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
         if inTimeRange {
-          var img = layer.image
+          var img = layer.currentFrame(atUs: currentTimeUs)
 
           if let w = layer.width, let h = layer.height {
             let sx = CGFloat(w) / img.extent.width
