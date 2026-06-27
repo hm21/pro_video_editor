@@ -179,6 +179,82 @@ struct AudioTrackConfig {
   }
 }
 
+/// Placement and scaling of a video segment within the composition canvas.
+struct SegmentTransformConfig: Sendable {
+  /// Top-left x position in canvas pixels. `nil` = 0.
+  let offsetX: Double?
+  /// Top-left y position in canvas pixels. `nil` = 0.
+  let offsetY: Double?
+  /// Target width in canvas pixels. `nil` = source width.
+  let width: Double?
+  /// Target height in canvas pixels. `nil` = source height.
+  let height: Double?
+  /// How the source is scaled into the target size: "fill", "contain", "cover".
+  let fit: String
+
+  static func fromArguments(_ args: [String: Any]?) -> SegmentTransformConfig? {
+    guard let args = args else { return nil }
+    let offset = args["offset"] as? [String: Any]
+    let size = args["size"] as? [String: Any]
+    return SegmentTransformConfig(
+      offsetX: (offset?["dx"] as? NSNumber)?.doubleValue,
+      offsetY: (offset?["dy"] as? NSNumber)?.doubleValue,
+      width: (size?["width"] as? NSNumber)?.doubleValue,
+      height: (size?["height"] as? NSNumber)?.doubleValue,
+      fit: args["fit"] as? String ?? "cover"
+    )
+  }
+}
+
+/// A single layer (track) of a multi-layer composition.
+struct LayerConfig: Sendable {
+  /// Time-ordered clips on this layer.
+  let clips: [VideoClip]
+  /// Opacity of the whole layer (0...1).
+  let opacity: Float
+  /// Default placement for clips without their own transform.
+  let transform: SegmentTransformConfig?
+
+  static func fromArguments(_ args: [String: Any]?) -> LayerConfig? {
+    guard let args = args,
+      let clipsRaw = args["clips"] as? [[String: Any]]
+    else { return nil }
+    let clips = clipsRaw.compactMap { VideoClip.fromMap($0) }
+    guard !clips.isEmpty else { return nil }
+    return LayerConfig(
+      clips: clips,
+      opacity: (args["opacity"] as? NSNumber)?.floatValue ?? 1.0,
+      transform: SegmentTransformConfig.fromArguments(args["transform"] as? [String: Any])
+    )
+  }
+}
+
+/// A multi-layer composition that stacks several tracks on a fixed canvas.
+struct CompositionConfig: Sendable {
+  /// Layers ordered bottom-to-top (last layer drawn on top).
+  let layers: [LayerConfig]
+  /// Output canvas width in pixels. `nil` = derive from the first clip.
+  let canvasWidth: Double?
+  /// Output canvas height in pixels. `nil` = derive from the first clip.
+  let canvasHeight: Double?
+  /// Background ARGB color filling areas not covered by any layer.
+  let backgroundColor: Int64
+
+  static func fromArguments(_ args: [String: Any]?) -> CompositionConfig? {
+    guard let args = args,
+      let layersRaw = args["layers"] as? [[String: Any]]
+    else { return nil }
+    let layers = layersRaw.compactMap { LayerConfig.fromArguments($0) }
+    guard !layers.isEmpty else { return nil }
+    return CompositionConfig(
+      layers: layers,
+      canvasWidth: (args["canvasWidth"] as? NSNumber)?.doubleValue,
+      canvasHeight: (args["canvasHeight"] as? NSNumber)?.doubleValue,
+      backgroundColor: (args["backgroundColor"] as? NSNumber)?.int64Value ?? Int64(0xFF00_0000)
+    )
+  }
+}
+
 /// Configuration model for video rendering operations.
 ///
 /// This struct encapsulates all parameters required for rendering a video with
@@ -187,6 +263,10 @@ struct AudioTrackConfig {
 struct RenderConfig: Sendable {
   /// List of video clips to render (concatenated in order)
   let videoClips: [VideoClip]
+
+  /// Optional multi-layer composition. When set, [videoClips] is empty and the
+  /// layered render path is used instead of the single-track concatenation.
+  let composition: CompositionConfig?
 
   /// Optional list of image layers to overlay at specified time intervals.
   let imageLayers: [ImageLayerConfig]
@@ -264,6 +344,7 @@ struct RenderConfig: Sendable {
   ) -> RenderConfig {
     return RenderConfig(
       videoClips: videoClips ?? self.videoClips,
+      composition: self.composition,
       imageLayers: self.imageLayers,
       outputFormat: self.outputFormat,
       outputPath: self.outputPath,
@@ -294,26 +375,14 @@ struct RenderConfig: Sendable {
       return nil
     }
 
-    // Parse video clips (required for video rendering)
+    // Parse video clips (single-track path)
     var videoClips: [VideoClip] = []
     if let videoClipsRaw = args["videoClips"] as? [[String: Any]] {
-      videoClips = videoClipsRaw.compactMap { clipMap in
-        guard let inputPath = clipMap["inputPath"] as? String else {
-          return nil
-        }
-        return VideoClip(
-          inputPath: inputPath,
-          startUs: (clipMap["startUs"] as? NSNumber)?.int64Value,
-          endUs: (clipMap["endUs"] as? NSNumber)?.int64Value,
-          volume: (clipMap["volume"] as? NSNumber)?.floatValue,
-          playbackSpeed: (clipMap["playbackSpeed"] as? NSNumber)?.floatValue,
-          reverseVideo: clipMap["reverseVideo"] as? Bool ?? false,
-          transition: ClipTransitionConfig.fromArguments(
-            clipMap["transition"] as? [String: Any]
-          )
-        )
-      }
+      videoClips = videoClipsRaw.compactMap { VideoClip.fromMap($0) }
     }
+
+    // Parse multi-layer composition (layered path)
+    let composition = CompositionConfig.fromArguments(args["composition"] as? [String: Any])
 
     // Parse color filters
     var colorFilters: [ColorFilterConfig] = []
@@ -341,6 +410,7 @@ struct RenderConfig: Sendable {
 
     return RenderConfig(
       videoClips: videoClips,
+      composition: composition,
       imageLayers: imageLayers,
       outputFormat: args["outputFormat"] as? String ?? "mp4",
       outputPath: args["outputPath"] as? String,

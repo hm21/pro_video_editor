@@ -40,6 +40,41 @@ fun applyComposition(
     videoEffects: List<Effect>,
     audioEffects: List<AudioProcessor>
 ): CompositionResult? {
+    // Layered (multi-track) path: stack several video sequences on one canvas.
+    config.composition?.let { composition ->
+        // Global color filters / blur live in [videoEffects]; image overlays are
+        // converted here and applied at the composition level.
+        val imageLayerConfigs = config.imageLayers.map { imageLayer ->
+            VideoSequenceBuilder.ImageLayerConfig(
+                imageBytes = imageLayer.imageData,
+                scaleX = config.scaleX,
+                scaleY = config.scaleY,
+                withCropping = config.imageBytesWithCropping,
+                startUs = imageLayer.startUs,
+                endUs = imageLayer.endUs,
+                x = imageLayer.x,
+                y = imageLayer.y,
+                width = imageLayer.width,
+                height = imageLayer.height,
+                animations = imageLayer.animations
+            )
+        }
+        val layeredBuilder = LayeredCompositionBuilder(
+            context = context,
+            config = composition,
+            enableAudio = config.enableAudio,
+            globalVideoEffects = videoEffects,
+            imageLayers = imageLayerConfigs,
+            audioTracks = config.audioTracks,
+            globalStartUs = config.startUs,
+            globalEndUs = config.endUs
+        )
+        return CompositionResult(
+            layeredBuilder.build(),
+            layeredBuilder.temporaryFiles.toList()
+        )
+    }
+
     val builder = CompositionBuilder(context, config)
         .setVideoEffects(videoEffects)
         .setAudioEffects(audioEffects)

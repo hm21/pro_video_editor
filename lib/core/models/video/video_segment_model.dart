@@ -19,6 +19,8 @@ class VideoSegment {
     this.playbackSpeed,
     this.reverseVideo = false,
     this.transition,
+    this.timelineStart,
+    this.transform,
   })  : assert(
           startTime == null || endTime == null || startTime < endTime,
           'startTime must be before endTime',
@@ -62,6 +64,10 @@ class VideoSegment {
   /// For example, `0.5` for half speed, `2.0` for double speed.
   ///
   /// If null, the original speed is used.
+  ///
+  /// **Not supported inside a [VideoComposition]:** per-clip playback speed is
+  /// ignored for composition clips. Pre-render the speed change into the source
+  /// or use [videoSegments] instead.
   final double? playbackSpeed;
 
   /// Whether to render this segment backwards.
@@ -70,6 +76,10 @@ class VideoSegment {
   /// start. Other segments keep their own order and direction.
   ///
   /// **Default**: `false`
+  ///
+  /// **Not supported inside a [VideoComposition]:** reverse playback is ignored
+  /// for composition clips. Pre-render the reversed source or use
+  /// [videoSegments] instead.
   final bool reverseVideo;
 
   /// The transition played between this clip and the **next** clip.
@@ -80,7 +90,27 @@ class VideoSegment {
   ///
   /// Currently supported on Android and iOS/macOS only; other platforms
   /// ignore this field.
+  ///
+  /// **Not supported inside a [VideoComposition]:** transitions are ignored for
+  /// composition clips. Use [videoSegments] when you need clip transitions.
   final ClipTransition? transition;
+
+  /// Start position of this clip on its layer's timeline.
+  ///
+  /// Only used when the segment is part of a [VideoComposition]. It defines
+  /// when the clip begins relative to the start of the composition. Any gap
+  /// before it is filled with the composition's background.
+  ///
+  /// When `null`, the clip starts right after the previous clip on the same
+  /// layer (back-to-back concatenation).
+  final Duration? timelineStart;
+
+  /// Position and scale of this clip within the composition canvas.
+  ///
+  /// Only used when the segment is part of a [VideoComposition]. Overrides the
+  /// [VideoLayer.transform]. When `null`, the clip uses its layer's transform,
+  /// or fills the entire canvas if neither is set.
+  final SegmentTransform? transform;
 
   /// Converts this clip to a map for platform channel communication.
   Future<Map<String, dynamic>> toAsyncMap() async {
@@ -94,6 +124,8 @@ class VideoSegment {
       'playbackSpeed': playbackSpeed,
       'reverseVideo': reverseVideo,
       'transition': transition?.toMap(),
+      'timelineStartUs': timelineStart?.inMicroseconds,
+      'transform': transform?.toMap(),
     };
   }
 
@@ -106,6 +138,8 @@ class VideoSegment {
     double? playbackSpeed,
     bool? reverseVideo,
     ClipTransition? transition,
+    Duration? timelineStart,
+    SegmentTransform? transform,
   }) {
     return VideoSegment(
       video: video ?? this.video,
@@ -115,6 +149,8 @@ class VideoSegment {
       playbackSpeed: playbackSpeed ?? this.playbackSpeed,
       reverseVideo: reverseVideo ?? this.reverseVideo,
       transition: transition ?? this.transition,
+      timelineStart: timelineStart ?? this.timelineStart,
+      transform: transform ?? this.transform,
     );
   }
 
@@ -128,7 +164,9 @@ class VideoSegment {
         other.volume == volume &&
         other.playbackSpeed == playbackSpeed &&
         other.reverseVideo == reverseVideo &&
-        other.transition == transition;
+        other.transition == transition &&
+        other.timelineStart == timelineStart &&
+        other.transform == transform;
   }
 
   @override
@@ -139,7 +177,9 @@ class VideoSegment {
         volume.hashCode ^
         playbackSpeed.hashCode ^
         reverseVideo.hashCode ^
-        transition.hashCode;
+        transition.hashCode ^
+        timelineStart.hashCode ^
+        transform.hashCode;
   }
 
   @override
@@ -150,7 +190,9 @@ class VideoSegment {
         'volume: $volume, '
         'playbackSpeed: $playbackSpeed, '
         'reverseVideo: $reverseVideo, '
-        'transition: $transition)';
+        'transition: $transition, '
+        'timelineStart: $timelineStart, '
+        'transform: $transform)';
   }
 
   Map<String, dynamic> toMap() {
@@ -162,6 +204,8 @@ class VideoSegment {
       'playbackSpeed': playbackSpeed,
       'reverseVideo': reverseVideo,
       'transition': transition?.toMap(),
+      'timelineStart': timelineStart?.inMicroseconds,
+      'transform': transform?.toMap(),
     };
   }
 
@@ -179,6 +223,12 @@ class VideoSegment {
       reverseVideo: map['reverseVideo'] as bool? ?? false,
       transition: map['transition'] != null
           ? ClipTransition.fromMap(map['transition'] as Map<String, dynamic>)
+          : null,
+      timelineStart: map['timelineStart'] != null
+          ? Duration(microseconds: safeParseInt(map['timelineStart']))
+          : null,
+      transform: map['transform'] != null
+          ? SegmentTransform.fromMap(map['transform'] as Map<String, dynamic>)
           : null,
     );
   }

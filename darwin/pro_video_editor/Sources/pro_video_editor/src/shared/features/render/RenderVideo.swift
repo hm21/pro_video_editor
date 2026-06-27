@@ -33,7 +33,7 @@ class RenderVideo {
     let handle = RenderJobHandle()
     queue.async {
       let renderTask = Task {
-        guard !config.videoClips.isEmpty else {
+        guard !config.videoClips.isEmpty || config.composition != nil else {
           onError(
             NSError(
               domain: "RenderVideo",
@@ -159,17 +159,30 @@ class RenderVideo {
           // Create configuration for video effects
           var effectsConfig = VideoCompositorConfig()
 
-          // Use composition helper to merge multiple video clips
-          let (
-            composition, videoCompData, renderSize, audioMix, sourceTrackID, audioTempURLs,
-            fadeWindows
-          ) =
-            try await applyComposition(
+          // Build the composition: layered (multi-track) when a composition is
+          // provided, otherwise the single-track concatenation path.
+          let buildResult:
+            (
+              AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID,
+              [URL], [FadeWindow]
+            )
+          if let compositionConfig = workingConfig.composition {
+            buildResult = try await LayeredCompositionBuilder(composition: compositionConfig)
+              .setEnableAudio(workingConfig.enableAudio)
+              .setAudioTracks(workingConfig.audioTracks)
+              .build()
+          } else {
+            buildResult = try await applyComposition(
               videoClips: workingConfig.videoClips,
               videoEffects: effectsConfig,
               enableAudio: workingConfig.enableAudio,
               audioTracks: workingConfig.audioTracks
             )
+          }
+          let (
+            composition, videoCompData, renderSize, audioMix, sourceTrackID, audioTempURLs,
+            fadeWindows
+          ) = buildResult
           temporaryAudioURLs = audioTempURLs
           var videoCompConfig = videoCompData
 
@@ -184,22 +197,26 @@ class RenderVideo {
             composition: composition, instructions: videoCompConfig.instructions,
             speed: workingConfig.playbackSpeed)
 
-          // Get the first video track for orientation info
-          let firstClipURL = URL(fileURLWithPath: workingConfig.videoClips[0].inputPath)
-          let firstAsset = AVURLAsset(url: firstClipURL)
-          let videoTrack = try await loadVideoTrack(from: firstAsset)
+          // Get the first video track for orientation info. The layered path
+          // handles each layer's orientation itself, so global orientation
+          // correction is only needed for the single-track path.
+          if workingConfig.composition == nil {
+            let firstClipURL = URL(fileURLWithPath: workingConfig.videoClips[0].inputPath)
+            let firstAsset = AVURLAsset(url: firstClipURL)
+            let videoTrack = try await loadVideoTrack(from: firstAsset)
 
-          let preferredTransform: CGAffineTransform
-          if #available(iOS 15.0, macOS 13.0, *) {
-            preferredTransform = try await videoTrack.load(.preferredTransform)
-          } else {
-            preferredTransform = videoTrack.preferredTransform
+            let preferredTransform: CGAffineTransform
+            if #available(iOS 15.0, macOS 13.0, *) {
+              preferredTransform = try await videoTrack.load(.preferredTransform)
+            } else {
+              preferredTransform = videoTrack.preferredTransform
+            }
+
+            let videoRotationDegrees = extractRotationFromTransform(preferredTransform)
+            effectsConfig.videoRotationDegrees = videoRotationDegrees
+            effectsConfig.shouldApplyOrientationCorrection = abs(videoRotationDegrees) > 1.0
+            effectsConfig.originalNaturalSize = videoTrack.naturalSize
           }
-
-          let videoRotationDegrees = extractRotationFromTransform(preferredTransform)
-          effectsConfig.videoRotationDegrees = videoRotationDegrees
-          effectsConfig.shouldApplyOrientationCorrection = abs(videoRotationDegrees) > 1.0
-          effectsConfig.originalNaturalSize = videoTrack.naturalSize
 
           let croppedSize = applyCrop(
             config: &effectsConfig,

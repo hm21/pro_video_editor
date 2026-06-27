@@ -361,6 +361,52 @@ Uint8List result = await ProVideoEditor.instance.renderVideo(data);
 /// falls back to a hard cut.
 ```
 
+#### Composition (Layers) Example
+```dart
+/// While `videoSegments` concatenates clips into ONE track, a `VideoComposition`
+/// stacks several tracks (layers) on a fixed canvas so they overlap in time and
+/// space — picture-in-picture, side-by-side, grids, etc.
+///
+/// Layers are composited bottom-to-top (the last layer is drawn on top). Each
+/// layer is placed via `transform` (or per-clip `VideoSegment.transform`) and
+/// can have its own `opacity`. Uncovered areas show `backgroundColor`.
+var data = VideoRenderData(
+    composition: VideoComposition(
+        canvasSize: const Size(1080, 1920),
+        backgroundColor: const Color(0xFF000000),
+        layers: [
+            // Bottom layer: full-canvas background video.
+            VideoLayer(
+                clips: [VideoSegment(video: EditorVideo.asset('assets/main.mp4'))],
+            ),
+            // Top layer: a picture-in-picture overlay, muted, top-right.
+            VideoLayer(
+                opacity: 1.0,
+                transform: const SegmentTransform(
+                    offset: Offset(700, 60),
+                    size: Size(320, 568),
+                    fit: SegmentFit.cover,
+                ),
+                clips: [
+                    VideoSegment(
+                        video: EditorVideo.asset('assets/pip.mp4'),
+                        volume: 0,
+                        timelineStart: const Duration(seconds: 2), // appears at +2s
+                    ),
+                ],
+            ),
+        ],
+    ),
+    outputFormat: VideoOutputFormat.mp4,
+);
+
+Uint8List result = await ProVideoEditor.instance.renderVideo(data);
+
+/// Note: provide exactly one of `video`, `videoSegments` or `composition`.
+/// Per-clip `transition`, `playbackSpeed` and `reverseVideo` are not applied
+/// inside a composition — use `videoSegments` if you need those.
+```
+
 #### Extract Audio Example
 
 Extract audio track from a video.

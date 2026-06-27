@@ -229,125 +229,236 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     renderContext = newRenderContext
   }
 
+  /// Composites all layers of a layered instruction onto the composition canvas.
+  ///
+  /// Layers are drawn bottom-to-top over the instruction's background color.
+  /// Each layer's source frame is oriented, scaled into its destination rect
+  /// per its fit mode, clipped to that rect, and blended with its opacity.
+  private func composeLayered(
+    request: AVAsynchronousVideoCompositionRequest,
+    instruction: CustomVideoCompositionInstruction
+  ) -> CIImage? {
+    let renderSize = request.renderContext.size
+    let canvasHeight = renderSize.height
+
+    let bg = instruction.backgroundColor ?? CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+    var canvas = CIImage(color: CIColor(cgColor: bg))
+      .cropped(to: CGRect(origin: .zero, size: renderSize))
+
+    for placement in instruction.layerPlacements {
+      guard let buffer = request.sourceFrame(byTrackID: placement.trackID) else { continue }
+      var img = CIImage(cvPixelBuffer: buffer)
+
+      // 1. Orient using the source preferred transform (rotation + mirror
+      //    metadata), then normalize the extent back to the origin.
+      let preferred = placement.preferredTransform
+      if !preferred.isIdentity {
+        img = img.transformed(by: preferred)
+        img = img.transformed(
+          by: CGAffineTransform(translationX: -img.extent.origin.x, y: -img.extent.origin.y))
+      }
+
+      let srcSize = img.extent.size
+      guard srcSize.width > 0, srcSize.height > 0 else { continue }
+
+      // 2. Destination rect in canvas pixels (top-left origin); nil = full canvas.
+      let topLeftRect = placement.targetRect ?? CGRect(origin: .zero, size: renderSize)
+      // Convert to CoreImage's bottom-left origin.
+      let ciRect = CGRect(
+        x: topLeftRect.minX,
+        y: canvasHeight - topLeftRect.minY - topLeftRect.height,
+        width: topLeftRect.width,
+        height: topLeftRect.height)
+
+      // 3. Scale per fit mode.
+      let sxFill = ciRect.width / srcSize.width
+      let syFill = ciRect.height / srcSize.height
+      let sx: CGFloat
+      let sy: CGFloat
+      switch placement.fit {
+      case "contain":
+        let s = min(sxFill, syFill)
+        sx = s
+        sy = s
+      case "cover":
+        let s = max(sxFill, syFill)
+        sx = s
+        sy = s
+      default:  // "fill"
+        sx = sxFill
+        sy = syFill
+      }
+
+      let scaledW = srcSize.width * sx
+      let scaledH = srcSize.height * sy
+      let tx = ciRect.minX + (ciRect.width - scaledW) / 2
+      let ty = ciRect.minY + (ciRect.height - scaledH) / 2
+
+      img = img.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+      img = img.transformed(
+        by: CGAffineTransform(
+          translationX: tx - img.extent.origin.x, y: ty - img.extent.origin.y))
+
+      // 4. Clip to the destination rect so "cover" overflow doesn't bleed.
+      img = img.cropped(to: ciRect)
+
+      // 5. Apply opacity and composite over the canvas.
+      canvas = compositeOverlay(
+        img, over: canvas, opacity: Double(placement.opacity), transform: .identity)
+    }
+
+    return canvas.cropped(to: CGRect(origin: .zero, size: renderSize))
+  }
+
+  /// Emits an opaque black frame as a last resort for a layered window that
+  /// produced no image (e.g. a gap with no active layers).
+  private func finishWithBackground(_ request: AVAsynchronousVideoCompositionRequest) {
+    if let buffer = request.renderContext.newPixelBuffer() {
+      CVPixelBufferLockBaseAddress(buffer, [])
+      if let addr = CVPixelBufferGetBaseAddress(buffer) {
+        memset(addr, 0, CVPixelBufferGetDataSize(buffer))
+      }
+      CVPixelBufferUnlockBaseAddress(buffer, [])
+      request.finish(withComposedVideoFrame: buffer)
+    } else {
+      request.finish(with: NSError(domain: "VideoCompositor", code: -3, userInfo: nil))
+    }
+  }
+
   func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
-    // Try to get source buffer from the first available track
-    var sourceBuffer: CVPixelBuffer?
+    var outputImage: CIImage
 
-    if !request.sourceTrackIDs.isEmpty {
-      sourceBuffer = request.sourceFrame(byTrackID: request.sourceTrackIDs[0].int32Value)
-    }
-
-    // Fallback 1: Try to get track ID from layer instruction if sourceTrackIDs is empty
-    // This can happen on older iOS versions (iPhone 7, iOS 15)
-    if sourceBuffer == nil,
-      let instruction = request.videoCompositionInstruction as? CustomVideoCompositionInstruction,
-      let layerInstruction = instruction.layerInstructions.first
+    if let layeredInstruction = request.videoCompositionInstruction
+      as? CustomVideoCompositionInstruction, layeredInstruction.isLayered
     {
-      let trackID = layerInstruction.trackID
-      if trackID != kCMPersistentTrackID_Invalid {
-        sourceBuffer = request.sourceFrame(byTrackID: trackID)
+      // Layered (multi-track) compositing path.
+      guard let composed = composeLayered(request: request, instruction: layeredInstruction)
+      else {
+        finishWithBackground(request)
+        return
       }
-    }
+      outputImage = composed
+    } else {
+      // Single-track path: take one source frame and place it in the frame.
+      // Try to get source buffer from the first available track
+      var sourceBuffer: CVPixelBuffer?
 
-    // Fallback 2: Use the pre-configured sourceTrackID from VideoCompositorConfig
-    // This is set during composition building and guarantees we have the correct track ID
-    if sourceBuffer == nil && sourceTrackID != kCMPersistentTrackID_Invalid {
-      sourceBuffer = request.sourceFrame(byTrackID: sourceTrackID)
-    }
+      if !request.sourceTrackIDs.isEmpty {
+        sourceBuffer = request.sourceFrame(byTrackID: request.sourceTrackIDs[0].int32Value)
+      }
 
-    guard let sourceBuffer = sourceBuffer else {
-      // Last-resort fallback: output a black frame rather than aborting the entire render.
-      // This can happen for certain MP4 files where the container duration slightly exceeds
-      // the video track's actual decoded frames, causing AVFoundation to call the compositor
-      // for a time slot where no pixel buffer is available.
-      if let ctx = renderContext, let blackBuffer = ctx.newPixelBuffer() {
-        CVPixelBufferLockBaseAddress(blackBuffer, [])
-        if let addr = CVPixelBufferGetBaseAddress(blackBuffer) {
-          memset(addr, 0, CVPixelBufferGetDataSize(blackBuffer))
+      // Fallback 1: Try to get track ID from layer instruction if sourceTrackIDs is empty
+      // This can happen on older iOS versions (iPhone 7, iOS 15)
+      if sourceBuffer == nil,
+        let instruction = request.videoCompositionInstruction as? CustomVideoCompositionInstruction,
+        let layerInstruction = instruction.layerInstructions.first
+      {
+        let trackID = layerInstruction.trackID
+        if trackID != kCMPersistentTrackID_Invalid {
+          sourceBuffer = request.sourceFrame(byTrackID: trackID)
         }
-        CVPixelBufferUnlockBaseAddress(blackBuffer, [])
-        request.finish(withComposedVideoFrame: blackBuffer)
-      } else {
-        request.finish(
-          with: NSError(
-            domain: "VideoCompositor", code: 0,
-            userInfo: [
-              NSLocalizedDescriptionKey:
-                "No source tracks available for compositing (sourceTrackIDs: \(request.sourceTrackIDs.count), configTrackID: \(sourceTrackID))"
-            ]))
       }
-      return
-    }
 
-    var outputImage = CIImage(cvPixelBuffer: sourceBuffer)
+      // Fallback 2: Use the pre-configured sourceTrackID from VideoCompositorConfig
+      // This is set during composition building and guarantees we have the correct track ID
+      if sourceBuffer == nil && sourceTrackID != kCMPersistentTrackID_Invalid {
+        sourceBuffer = request.sourceFrame(byTrackID: sourceTrackID)
+      }
 
-    // Apply layer instruction transform first (video scaling/centering/rotation)
-    // This ensures all videos are properly sized and oriented before applying user effects.
-    // The layerInstruction contains the preferredTransform which already handles video rotation
-    // from portrait to landscape or vice versa, so no additional orientation correction is needed.
-    //
-    // IMPORTANT: AVFoundation uses a top-left origin coordinate system (Y points down),
-    // while CIImage uses a bottom-left origin (Y points up). We need to convert the transform
-    // to work correctly with CIImage's coordinate system.
+      guard let sourceBuffer = sourceBuffer else {
+        // Last-resort fallback: output a black frame rather than aborting the entire render.
+        // This can happen for certain MP4 files where the container duration slightly exceeds
+        // the video track's actual decoded frames, causing AVFoundation to call the compositor
+        // for a time slot where no pixel buffer is available.
+        if let ctx = renderContext, let blackBuffer = ctx.newPixelBuffer() {
+          CVPixelBufferLockBaseAddress(blackBuffer, [])
+          if let addr = CVPixelBufferGetBaseAddress(blackBuffer) {
+            memset(addr, 0, CVPixelBufferGetDataSize(blackBuffer))
+          }
+          CVPixelBufferUnlockBaseAddress(blackBuffer, [])
+          request.finish(withComposedVideoFrame: blackBuffer)
+        } else {
+          request.finish(
+            with: NSError(
+              domain: "VideoCompositor", code: 0,
+              userInfo: [
+                NSLocalizedDescriptionKey:
+                  "No source tracks available for compositing (sourceTrackIDs: \(request.sourceTrackIDs.count), configTrackID: \(sourceTrackID))"
+              ]))
+        }
+        return
+      }
 
-    // Extract layer instruction from CustomVideoCompositionInstruction
-    var layerInstruction: AVVideoCompositionLayerInstruction?
-    if let customInstruction = request.videoCompositionInstruction
-      as? CustomVideoCompositionInstruction,
-      let firstLayerInstruction = customInstruction.layerInstructions.first
-    {
-      layerInstruction = firstLayerInstruction
-    }
+      outputImage = CIImage(cvPixelBuffer: sourceBuffer)
 
-    if let layerInstruction = layerInstruction {
-      var startTransform = CGAffineTransform.identity
-      var endTransform = CGAffineTransform.identity
-      var timeRange = CMTimeRange.zero
+      // Apply layer instruction transform first (video scaling/centering/rotation)
+      // This ensures all videos are properly sized and oriented before applying user effects.
+      // The layerInstruction contains the preferredTransform which already handles video rotation
+      // from portrait to landscape or vice versa, so no additional orientation correction is needed.
+      //
+      // IMPORTANT: AVFoundation uses a top-left origin coordinate system (Y points down),
+      // while CIImage uses a bottom-left origin (Y points up). We need to convert the transform
+      // to work correctly with CIImage's coordinate system.
 
-      // Get the transform at the current composition time
-      let hasTransform = layerInstruction.getTransformRamp(
-        for: request.compositionTime,
-        start: &startTransform,
-        end: &endTransform,
-        timeRange: &timeRange
-      )
+      // Extract layer instruction from CustomVideoCompositionInstruction
+      var layerInstruction: AVVideoCompositionLayerInstruction?
+      if let customInstruction = request.videoCompositionInstruction
+        as? CustomVideoCompositionInstruction,
+        let firstLayerInstruction = customInstruction.layerInstructions.first
+      {
+        layerInstruction = firstLayerInstruction
+      }
 
-      if hasTransform && !startTransform.isIdentity {
-        // Convert AVFoundation transform to CIImage coordinate system:
-        // 1. Flip Y axis before transform (go from CIImage coords to AVFoundation coords)
-        // 2. Apply the AVFoundation transform
-        // 3. Flip Y axis after transform (go back to CIImage coords)
-        let imageHeight = outputImage.extent.height
+      if let layerInstruction = layerInstruction {
+        var startTransform = CGAffineTransform.identity
+        var endTransform = CGAffineTransform.identity
+        var timeRange = CMTimeRange.zero
 
-        // Flip Y: translate to top, scale Y by -1
-        let flipY = CGAffineTransform(scaleX: 1, y: -1)
-          .translatedBy(x: 0, y: -imageHeight)
+        // Get the transform at the current composition time
+        let hasTransform = layerInstruction.getTransformRamp(
+          for: request.compositionTime,
+          start: &startTransform,
+          end: &endTransform,
+          timeRange: &timeRange
+        )
 
-        // Convert transform: flipY * transform * flipY^-1
-        // But since flipY is its own inverse (when combined with translate), we use:
-        // result = flipY * transform * flipY (adjusted for new height after transform)
-        let convertedTransform =
-          flipY
-          .concatenating(startTransform)
+        if hasTransform && !startTransform.isIdentity {
+          // Convert AVFoundation transform to CIImage coordinate system:
+          // 1. Flip Y axis before transform (go from CIImage coords to AVFoundation coords)
+          // 2. Apply the AVFoundation transform
+          // 3. Flip Y axis after transform (go back to CIImage coords)
+          let imageHeight = outputImage.extent.height
 
-        outputImage = outputImage.transformed(by: convertedTransform)
+          // Flip Y: translate to top, scale Y by -1
+          let flipY = CGAffineTransform(scaleX: 1, y: -1)
+            .translatedBy(x: 0, y: -imageHeight)
 
-        // After transform, we need to flip back and normalize
-        let transformedExtent = outputImage.extent
-        let newHeight = transformedExtent.height
-        let flipBack = CGAffineTransform(scaleX: 1, y: -1)
-          .translatedBy(x: 0, y: -newHeight)
+          // Convert transform: flipY * transform * flipY^-1
+          // But since flipY is its own inverse (when combined with translate), we use:
+          // result = flipY * transform * flipY (adjusted for new height after transform)
+          let convertedTransform =
+            flipY
+            .concatenating(startTransform)
 
-        outputImage = outputImage.transformed(by: flipBack)
+          outputImage = outputImage.transformed(by: convertedTransform)
 
-        // Normalize position to origin
-        let finalExtent = outputImage.extent
-        if finalExtent.origin.x != 0 || finalExtent.origin.y != 0 {
-          let translation = CGAffineTransform(
-            translationX: -finalExtent.origin.x,
-            y: -finalExtent.origin.y
-          )
-          outputImage = outputImage.transformed(by: translation)
+          // After transform, we need to flip back and normalize
+          let transformedExtent = outputImage.extent
+          let newHeight = transformedExtent.height
+          let flipBack = CGAffineTransform(scaleX: 1, y: -1)
+            .translatedBy(x: 0, y: -newHeight)
+
+          outputImage = outputImage.transformed(by: flipBack)
+
+          // Normalize position to origin
+          let finalExtent = outputImage.extent
+          if finalExtent.origin.x != 0 || finalExtent.origin.y != 0 {
+            let translation = CGAffineTransform(
+              translationX: -finalExtent.origin.x,
+              y: -finalExtent.origin.y
+            )
+            outputImage = outputImage.transformed(by: translation)
+          }
         }
       }
     }

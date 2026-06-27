@@ -332,7 +332,12 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                     }
                 },
                 onError = { error ->
-                    Log.e("RenderVideo", "Error rendering video: ${error.message}")
+                    Log.e(
+                        "RenderVideo",
+                        "Error rendering video: ${error::class.java.name}: " +
+                            "${error.message}",
+                        error
+                    )
                     mainHandler.post {
                         val removedTask = activeRenderTasks.remove(id)
                         val code = when {
@@ -340,7 +345,9 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                             error is VideoEncoderConfigurationException -> "ENCODER_NOT_SUPPORTED"
                             else -> "RENDER_ERROR"
                         }
-                        removedTask?.sendError(code, error.message)
+                        val message = error.message
+                            ?: "${error::class.java.simpleName} (no message)"
+                        removedTask?.sendError(code, message)
                     }
                 }
             )
