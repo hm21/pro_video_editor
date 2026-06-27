@@ -15,17 +15,20 @@ import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 class VideoRenderData {
   /// Creates a [VideoRenderData] with the given parameters.
   ///
-  /// **Important:** You must provide either [video] OR [videoSegments], but not
-  /// both.
+  /// **Important:** You must provide exactly one of [video], [videoSegments],
+  /// or [composition].
   /// - Use [video] for a single video with optional [startTime] and [endTime]
-  /// - Use [videoSegments] for concatenating multiple videos, each with their
-  ///   own trim settings
+  /// - Use [videoSegments] for concatenating multiple videos into one track,
+  ///   each with their own trim settings
+  /// - Use [composition] for multiple layered tracks that overlap in time or
+  ///   space (picture-in-picture, side-by-side, grid)
   VideoRenderData({
     String? id,
     this.qualityConfig,
     this.outputFormat = VideoOutputFormat.mp4,
     @Deprecated('Use videoSegments instead.') this.video,
     this.videoSegments,
+    this.composition,
     @Deprecated('Use imageLayers instead.') this.imageBytes,
     this.imageLayers,
     this.transform,
@@ -47,8 +50,12 @@ class VideoRenderData {
     @Deprecated('Use audioTracks instead.') this.loopCustomAudio = true,
   })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
         assert(
-          (video != null) != (videoSegments != null),
-          'You must provide either video OR videoSegments, but not both',
+          (video != null ? 1 : 0) +
+                  (videoSegments != null ? 1 : 0) +
+                  (composition != null ? 1 : 0) ==
+              1,
+          'You must provide exactly one of video, videoSegments, '
+          'or composition',
         ),
         assert(
           videoSegments == null || videoSegments.isNotEmpty,
@@ -118,6 +125,7 @@ class VideoRenderData {
   factory VideoRenderData.withQualityPreset({
     @Deprecated('Use videoSegments instead.') EditorVideo? video,
     List<VideoSegment>? videoSegments,
+    VideoComposition? composition,
     required VideoQualityPreset qualityPreset,
     VideoOutputFormat outputFormat = VideoOutputFormat.mp4,
     @Deprecated('Use imageLayers instead.') Uint8List? imageBytes,
@@ -150,6 +158,7 @@ class VideoRenderData {
       outputFormat: outputFormat,
       video: video,
       videoSegments: videoSegments,
+      composition: composition,
       imageBytes: imageBytes,
       imageLayers: imageLayers,
       transform: transform,
@@ -228,6 +237,17 @@ class VideoRenderData {
   /// ]
   /// ```
   final List<VideoSegment>? videoSegments;
+
+  /// A multi-layer composition for spatially arranging several videos.
+  ///
+  /// Use this to place videos next to each other, in a grid, or as
+  /// picture-in-picture overlays. Each [VideoLayer] is a track with its own
+  /// time-ordered clips; layers are composited bottom-to-top.
+  ///
+  /// **Note:** Exactly one of [video], [videoSegments], or [composition] must
+  /// be provided. Use [videoSegments] for a single track of concatenated
+  /// clips, and [composition] when layers overlap in time or space.
+  final VideoComposition? composition;
 
   /// A transparent image which will overlay the video.
   @Deprecated('Use imageLayers instead.')
@@ -416,7 +436,8 @@ class VideoRenderData {
       final targetVideo = video ??
           (videoSegments != null && videoSegments!.isNotEmpty
               ? videoSegments!.first.video
-              : null);
+              : null) ??
+          composition?.layers.first.clips.first.video;
       if (targetVideo != null) {
         final meta = await ProVideoEditor.instance.getMetadata(targetVideo);
         final originalResolution = meta.resolution;
@@ -535,6 +556,8 @@ class VideoRenderData {
       ...transform.toMap(),
       'id': id,
       'videoClips': videoSegmentsMaps,
+      'composition':
+          composition != null ? await composition!.toAsyncMap() : null,
       'imageLayers': mergedImageLayers,
       'colorFilters': mergedColorFilters,
       'audioTracks': mergedAudioTracks,
@@ -545,11 +568,15 @@ class VideoRenderData {
       'bitrate': bitrate,
       'scaleX': scaleX,
       'scaleY': scaleY,
-      // Global trim for entire composition (only for videoSegments,
-      // not single video). For single video, startTime/endTime are already
-      // applied to the clip itself
-      'startUs': videoSegments != null ? startTime?.inMicroseconds : null,
-      'endUs': videoSegments != null ? endTime?.inMicroseconds : null,
+      // Global trim across the whole timeline (for videoSegments and
+      // compositions). For a single video, startTime/endTime are already
+      // applied to the clip itself.
+      'startUs': (videoSegments != null || composition != null)
+          ? startTime?.inMicroseconds
+          : null,
+      'endUs': (videoSegments != null || composition != null)
+          ? endTime?.inMicroseconds
+          : null,
       'shouldOptimizeForNetworkUse': shouldOptimizeForNetworkUse,
       'imageBytesWithCropping': imageBytesWithCropping,
     };
@@ -562,6 +589,7 @@ class VideoRenderData {
     VideoOutputFormat? outputFormat,
     EditorVideo? video,
     List<VideoSegment>? videoSegments,
+    VideoComposition? composition,
     Uint8List? imageBytes,
     List<ImageLayer>? imageLayers,
     ExportTransform? transform,
@@ -588,6 +616,7 @@ class VideoRenderData {
       outputFormat: outputFormat ?? this.outputFormat,
       video: video ?? this.video,
       videoSegments: videoSegments ?? this.videoSegments,
+      composition: composition ?? this.composition,
       imageBytes: imageBytes ?? this.imageBytes,
       imageLayers: imageLayers ?? this.imageLayers,
       transform: transform ?? this.transform,
@@ -619,6 +648,7 @@ class VideoRenderData {
       'outputFormat': outputFormat.name,
       'video': video?.toMap(),
       'videoSegments': videoSegments?.map((x) => x.toMap()).toList(),
+      'composition': composition?.toMap(),
       'imageBytes': imageBytes?.toList(),
       'imageLayers': imageLayers?.map((x) => x.toMap()).toList(),
       'transform': transform?.toMap(),
@@ -661,6 +691,9 @@ class VideoRenderData {
                 (x) => VideoSegment.fromMap(x as Map<String, dynamic>),
               ),
             )
+          : null,
+      composition: map['composition'] != null
+          ? VideoComposition.fromMap(map['composition'] as Map<String, dynamic>)
           : null,
       imageBytes: map['imageBytes'] != null
           ? Uint8List.fromList(List<int>.from(map['imageBytes'] as List))
@@ -725,6 +758,7 @@ class VideoRenderData {
         'qualityConfig: $qualityConfig, '
         'outputFormat: $outputFormat, video: $video, '
         'videoSegments: $videoSegments, '
+        'composition: $composition, '
         'imageBytes: $imageBytes, '
         'imageLayers: $imageLayers, '
         'transform: $transform, '
@@ -755,6 +789,7 @@ class VideoRenderData {
         other.outputFormat == outputFormat &&
         other.video == video &&
         listEquals(other.videoSegments, videoSegments) &&
+        other.composition == composition &&
         other.imageBytes == imageBytes &&
         listEquals(other.imageLayers, imageLayers) &&
         other.transform == transform &&
@@ -783,6 +818,7 @@ class VideoRenderData {
         outputFormat.hashCode ^
         video.hashCode ^
         videoSegments.hashCode ^
+        composition.hashCode ^
         imageBytes.hashCode ^
         imageLayers.hashCode ^
         transform.hashCode ^

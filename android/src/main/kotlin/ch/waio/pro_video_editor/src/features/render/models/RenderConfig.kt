@@ -55,8 +55,126 @@ data class VideoClip(
     val volume: Float? = null,
     val playbackSpeed: Float? = null,
     val reverseVideo: Boolean = false,
-    val transition: TransitionConfig? = null
-)
+    val transition: TransitionConfig? = null,
+    /** Start position on the layer timeline in microseconds (composition only). */
+    val timelineStartUs: Long? = null,
+    /** Placement within the composition canvas (composition only). */
+    val transform: SegmentTransformConfig? = null
+) {
+    companion object {
+        /** Parses a clip from a platform-channel map. */
+        fun fromMap(clipMap: Map<String, Any?>): VideoClip {
+            @Suppress("UNCHECKED_CAST")
+            val transitionRaw = clipMap["transition"] as? Map<String, Any?>
+            @Suppress("UNCHECKED_CAST")
+            val transformRaw = clipMap["transform"] as? Map<String, Any?>
+            return VideoClip(
+                inputPath = clipMap["inputPath"] as String,
+                startUs = (clipMap["startUs"] as? Number)?.toLong(),
+                endUs = (clipMap["endUs"] as? Number)?.toLong(),
+                volume = (clipMap["volume"] as? Number)?.toFloat(),
+                playbackSpeed = (clipMap["playbackSpeed"] as? Number)?.toFloat(),
+                reverseVideo = clipMap["reverseVideo"] as? Boolean ?: false,
+                transition = transitionRaw?.let { TransitionConfig.fromMap(it) },
+                timelineStartUs = (clipMap["timelineStartUs"] as? Number)?.toLong(),
+                transform = transformRaw?.let { SegmentTransformConfig.fromMap(it) }
+            )
+        }
+    }
+}
+
+/**
+ * Placement and scaling of a video segment within the composition canvas.
+ *
+ * @property offsetX Top-left x position in canvas pixels (null = 0)
+ * @property offsetY Top-left y position in canvas pixels (null = 0)
+ * @property width Target width in canvas pixels (null = source width)
+ * @property height Target height in canvas pixels (null = source height)
+ * @property fit Scale mode: "fill", "contain" or "cover"
+ */
+data class SegmentTransformConfig(
+    val offsetX: Double?,
+    val offsetY: Double?,
+    val width: Double?,
+    val height: Double?,
+    val fit: String
+) {
+    companion object {
+        fun fromMap(map: Map<String, Any?>): SegmentTransformConfig {
+            @Suppress("UNCHECKED_CAST")
+            val offset = map["offset"] as? Map<String, Any?>
+            @Suppress("UNCHECKED_CAST")
+            val size = map["size"] as? Map<String, Any?>
+            return SegmentTransformConfig(
+                offsetX = (offset?.get("dx") as? Number)?.toDouble(),
+                offsetY = (offset?.get("dy") as? Number)?.toDouble(),
+                width = (size?.get("width") as? Number)?.toDouble(),
+                height = (size?.get("height") as? Number)?.toDouble(),
+                fit = map["fit"] as? String ?: "cover"
+            )
+        }
+    }
+}
+
+/**
+ * A single layer (track) of a multi-layer composition.
+ *
+ * @property clips Time-ordered clips on this layer
+ * @property opacity Opacity of the whole layer (0..1)
+ * @property transform Default placement for clips without their own transform
+ */
+data class LayerConfig(
+    val clips: List<VideoClip>,
+    val opacity: Float,
+    val transform: SegmentTransformConfig?
+) {
+    companion object {
+        fun fromMap(map: Map<String, Any?>): LayerConfig? {
+            @Suppress("UNCHECKED_CAST")
+            val clipsRaw = map["clips"] as? List<Map<String, Any?>> ?: return null
+            val clips = clipsRaw.map { VideoClip.fromMap(it) }
+            if (clips.isEmpty()) return null
+            @Suppress("UNCHECKED_CAST")
+            val transformRaw = map["transform"] as? Map<String, Any?>
+            return LayerConfig(
+                clips = clips,
+                opacity = (map["opacity"] as? Number)?.toFloat() ?: 1.0f,
+                transform = transformRaw?.let { SegmentTransformConfig.fromMap(it) }
+            )
+        }
+    }
+}
+
+/**
+ * A multi-layer composition stacking several tracks on a fixed canvas.
+ *
+ * @property layers Layers ordered bottom-to-top (last layer drawn on top)
+ * @property canvasWidth Output canvas width (null = derive from first clip)
+ * @property canvasHeight Output canvas height (null = derive from first clip)
+ * @property backgroundColor Background ARGB color filling uncovered areas
+ */
+data class CompositionConfig(
+    val layers: List<LayerConfig>,
+    val canvasWidth: Double?,
+    val canvasHeight: Double?,
+    val backgroundColor: Long
+) {
+    companion object {
+        fun fromMap(map: Map<String, Any?>): CompositionConfig? {
+            @Suppress("UNCHECKED_CAST")
+            val layersRaw = map["layers"] as? List<Map<String, Any?>> ?: return null
+            val layers = layersRaw.mapNotNull { LayerConfig.fromMap(it) }
+            if (layers.isEmpty()) return null
+            return CompositionConfig(
+                layers = layers,
+                canvasWidth = (map["canvasWidth"] as? Number)?.toDouble(),
+                canvasHeight = (map["canvasHeight"] as? Number)?.toDouble(),
+                backgroundColor = (map["backgroundColor"] as? Number)?.toLong()
+                    ?: 0xFF000000L
+            )
+        }
+    }
+}
 
 /**
  * Represents a color filter with optional time range.
@@ -203,6 +321,8 @@ data class ImageLayer(
 
 data class RenderConfig(
     val videoClips: List<VideoClip>,
+    /** Optional multi-layer composition (layered render path). */
+    val composition: CompositionConfig? = null,
     val imageLayers: List<ImageLayer> = emptyList(),
     val outputFormat: String,
     val outputPath: String? = null,
@@ -256,33 +376,24 @@ data class RenderConfig(
          * @throws IllegalArgumentException if required videoClips are missing or invalid
          */
         fun fromMethodCall(call: MethodCall): RenderConfig {
-            // Parse video clips (required)
+            // Parse multi-layer composition (layered path).
+            @Suppress("UNCHECKED_CAST")
+            val compositionRaw = call.argument<Map<String, Any?>>("composition")
+            val composition = compositionRaw?.let { CompositionConfig.fromMap(it) }
+
+            // Parse video clips (single-track path).
             val videoClipsRaw = call.argument<List<Map<String, Any>>>("videoClips")
 
             Log.d(PACKAGE_TAG, "Received videoClipsRaw: ${videoClipsRaw?.size ?: 0} clips")
 
-            if (videoClipsRaw.isNullOrEmpty()) {
-                throw IllegalArgumentException("videoClips is required and cannot be empty")
+            if (videoClipsRaw.isNullOrEmpty() && composition == null) {
+                throw IllegalArgumentException(
+                    "Either videoClips or composition is required"
+                )
             }
 
-            val videoClips: List<VideoClip> = videoClipsRaw.mapIndexed { index, clipMap ->
-                @Suppress("UNCHECKED_CAST")
-                val transitionRaw = clipMap["transition"] as? Map<String, Any?>
-                val clip = VideoClip(
-                    inputPath = clipMap["inputPath"] as String,
-                    startUs = (clipMap["startUs"] as? Number)?.toLong(),
-                    endUs = (clipMap["endUs"] as? Number)?.toLong(),
-                    volume = (clipMap["volume"] as? Number)?.toFloat(),
-                    playbackSpeed = (clipMap["playbackSpeed"] as? Number)?.toFloat(),
-                    reverseVideo = clipMap["reverseVideo"] as? Boolean ?: false,
-                    transition = transitionRaw?.let { TransitionConfig.fromMap(it) }
-                )
-                Log.d(
-                    PACKAGE_TAG,
-                    "Clip $index: path=${clip.inputPath}, start=${clip.startUs}, end=${clip.endUs}, volume=${clip.volume}, speed=${clip.playbackSpeed}, reverse=${clip.reverseVideo}, transition=${clip.transition?.type}"
-                )
-                clip
-            }
+            val videoClips: List<VideoClip> =
+                videoClipsRaw?.map { VideoClip.fromMap(it) } ?: emptyList()
 
             // Parse image layers
             val imageLayersRaw = call.argument<List<Map<String, Any>>>("imageLayers")
@@ -324,6 +435,7 @@ data class RenderConfig(
             // Parse all other parameters
             return RenderConfig(
                 videoClips = videoClips,
+                composition = composition,
                 imageLayers = imageLayers,
                 outputFormat = call.argument<String>("outputFormat") ?: "mp4",
                 outputPath = call.argument<String>("outputPath"),

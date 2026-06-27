@@ -459,6 +459,26 @@ internal struct VideoCompositionData {
   var renderSize: CGSize
 }
 
+/// Placement of one video layer inside a layered composition window.
+///
+/// The compositor uses this to position, scale and blend a single track's frame
+/// onto the composition canvas. `targetRect` is in canvas pixels with a
+/// top-left origin; the compositor converts to CoreImage's bottom-left space.
+internal struct LayerPlacement: Sendable {
+  let trackID: CMPersistentTrackID
+  /// Layer opacity (0...1).
+  let opacity: Float
+  /// Destination rectangle in canvas pixels (top-left origin). When `nil`, the
+  /// layer fills the whole canvas.
+  let targetRect: CGRect?
+  /// Scale mode within `targetRect`: "fill", "contain" or "cover".
+  let fit: String
+  /// The source track's preferred transform (orientation metadata).
+  let preferredTransform: CGAffineTransform
+  /// The source display size after applying `preferredTransform`.
+  let displaySize: CGSize
+}
+
 /// Custom video composition instruction that explicitly provides source track IDs.
 /// This is required for older iOS versions (e.g., iPhone 7, iOS 15) where
 /// AVMutableVideoCompositionInstruction doesn't properly derive track IDs
@@ -471,6 +491,13 @@ internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionIn
   let containsTweening: Bool = false
   let backgroundColor: CGColor?
   let layerInstructions: [AVVideoCompositionLayerInstruction]
+
+  /// `true` when this instruction composites several overlapping video layers
+  /// rather than a single clip.
+  let isLayered: Bool
+
+  /// Per-layer placement for layered instructions, ordered bottom-to-top.
+  let layerPlacements: [LayerPlacement]
 
   private let _requiredSourceTrackIDs: [NSValue]
   var requiredSourceTrackIDs: [NSValue]? {
@@ -491,6 +518,25 @@ internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionIn
     self._requiredSourceTrackIDs = [NSNumber(value: sourceTrackID)]
     self.layerInstructions = layerInstructions
     self.backgroundColor = backgroundColor
+    self.isLayered = false
+    self.layerPlacements = []
+    super.init()
+  }
+
+  /// Layered initializer. `placements` lists every layer visible during
+  /// `timeRange`, ordered bottom-to-top; the compositor composites them in that
+  /// order over `backgroundColor`.
+  init(
+    timeRange: CMTimeRange,
+    layerPlacements: [LayerPlacement],
+    backgroundColor: CGColor? = nil
+  ) {
+    self.timeRange = timeRange
+    self._requiredSourceTrackIDs = layerPlacements.map { NSNumber(value: $0.trackID) }
+    self.layerInstructions = []
+    self.backgroundColor = backgroundColor
+    self.isLayered = true
+    self.layerPlacements = layerPlacements
     super.init()
   }
 }

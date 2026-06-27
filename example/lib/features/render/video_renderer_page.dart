@@ -157,6 +157,253 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Picture-in-picture: a small second video over a full-frame base.
+  Future<void> _compositionPip() async {
+    final meta = await _pve.getMetadata(_video);
+    var Size(width: width, height: height) = meta.resolution;
+
+    // Use a distinct source for the overlay (Android's Media3 compositor can
+    // misbehave when two layers stream from the exact same file).
+    final pipVideo = EditorVideo.asset(kVideoEditorExampleAssetWorldPath);
+
+    var data = VideoRenderData(
+      composition: VideoComposition(
+        canvasSize: meta.resolution,
+        layers: [
+          // Base layer fills the canvas.
+          VideoLayer(clips: [VideoSegment(video: _video)]),
+          // PiP layer: top-left, muted, starts two seconds in.
+          VideoLayer(
+            clips: [
+              VideoSegment(
+                video: pipVideo,
+                volume: 0,
+                timelineStart: const Duration(seconds: 2),
+              ),
+            ],
+            transform: SegmentTransform(
+              offset: const Offset(24, 24),
+              size: Size(width / 3, height / 3),
+              fit: SegmentFit.cover,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Two videos stacked vertically on one canvas.
+  Future<void> _compositionStack() async {
+    final meta1 = await _pve.getMetadata(_video);
+    final video2 = EditorVideo.asset(kVideoEditorExampleAssetWorldPath);
+    final meta2 = await _pve.getMetadata(video2);
+
+    final width = max(meta1.resolution.width, meta2.resolution.width);
+    final topHeight =
+        meta1.resolution.height * (width / meta1.resolution.width);
+    final bottomHeight =
+        meta2.resolution.height * (width / meta2.resolution.width);
+
+    var data = VideoRenderData(
+      composition: VideoComposition(
+        canvasSize: Size(width, topHeight + bottomHeight),
+        layers: [
+          VideoLayer(
+            clips: [
+              VideoSegment(video: _video, endTime: const Duration(seconds: 5)),
+            ],
+            transform: SegmentTransform(
+              offset: Offset.zero,
+              size: Size(width, topHeight),
+            ),
+          ),
+          VideoLayer(
+            clips: [
+              VideoSegment(
+                video: video2,
+                endTime: const Duration(seconds: 5),
+                volume: 0,
+              ),
+            ],
+            transform: SegmentTransform(
+              offset: Offset(0, topHeight),
+              size: Size(width, bottomHeight),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// 2x2 grid of the same video, each cell staggered in time.
+  Future<void> _compositionGrid() async {
+    final meta = await _pve.getMetadata(_video);
+    var Size(width: width, height: height) = meta.resolution;
+    final cell = Size(width / 2, height / 2);
+
+    VideoLayer quadrant(int index, Offset offset) => VideoLayer(
+      clips: [
+        VideoSegment(
+          video: _video,
+          timelineStart: Duration(seconds: index * 2),
+          volume: index == 0 ? 1.0 : 0,
+        ),
+      ],
+      transform: SegmentTransform(offset: offset, size: cell),
+    );
+
+    var data = VideoRenderData(
+      composition: VideoComposition(
+        canvasSize: meta.resolution,
+        layers: [
+          quadrant(0, Offset.zero),
+          quadrant(1, Offset(width / 2, 0)),
+          quadrant(2, Offset(0, height / 2)),
+          quadrant(3, Offset(width / 2, height / 2)),
+        ],
+      ),
+    );
+
+    await _renderVideo(data);
+  }
+
+  /// Kitchen-sink composition combined with many other operations at once.
+  ///
+  /// Exercises, in a single render:
+  /// - A 3-layer [VideoComposition] on an explicit canvas with a background.
+  /// - Base layer: two trimmed clips joined by an intra-layer dissolve
+  ///   transition, the second sped up and at reduced volume.
+  /// - A reversed, muted picture-in-picture layer that enters after 2s.
+  /// - A semi-transparent secondary video placed bottom-left.
+  /// - Image overlays: a timed sticker with fade in/out animations.
+  /// - A timed warm color filter over the first 6 seconds.
+  /// - A looping background audio track.
+  Future<void> _compositionKitchenSink() async {
+    final meta = await _pve.getMetadata(_video);
+    var Size(width: width, height: height) = meta.resolution;
+
+    final world = EditorVideo.asset(kVideoEditorExampleAssetWorldPath);
+    final stickerImage = EditorLayerImage.asset('assets/sticker.png');
+    final audioFile = await _writeAssetAudioToFile(
+      kVideoEditorExampleAudio1Path,
+    );
+
+    final pipSize = Size(width / 3, height / 3);
+
+    var data = VideoRenderData(
+      composition: VideoComposition(
+        canvasSize: meta.resolution,
+        backgroundColor: Colors.black,
+        layers: [
+          // Base layer: two trimmed clips, dissolve between them, the second
+          // sped up to 1.5x at half volume.
+          VideoLayer(
+            clips: [
+              VideoSegment(
+                video: _video,
+                startTime: Duration.zero,
+                endTime: const Duration(seconds: 5),
+                transition: const ClipTransition(
+                  type: ClipTransitionType.dissolve,
+                  duration: Duration(milliseconds: 800),
+                  curve: AnimationCurve.easeInOut,
+                ),
+              ),
+              VideoSegment(
+                video: _video,
+                startTime: const Duration(seconds: 10),
+                endTime: const Duration(seconds: 16),
+                playbackSpeed: 1.5,
+                volume: 0.5,
+              ),
+            ],
+          ),
+          // Reversed, muted picture-in-picture, top-right, enters at 2s.
+          VideoLayer(
+            clips: [
+              VideoSegment(
+                video: _video,
+                startTime: const Duration(seconds: 4),
+                endTime: const Duration(seconds: 9),
+                reverseVideo: true,
+                volume: 0,
+                timelineStart: const Duration(seconds: 2),
+              ),
+            ],
+            transform: SegmentTransform(
+              offset: Offset(width - pipSize.width - 24, 24),
+              size: pipSize,
+              fit: SegmentFit.cover,
+            ),
+          ),
+          // Semi-transparent secondary video, bottom-left.
+          VideoLayer(
+            opacity: 0.6,
+            clips: [
+              VideoSegment(
+                video: world,
+                endTime: const Duration(seconds: 8),
+                volume: 0,
+              ),
+            ],
+            transform: SegmentTransform(
+              offset: Offset(24, height - pipSize.height - 24),
+              size: pipSize,
+              fit: SegmentFit.contain,
+            ),
+          ),
+        ],
+      ),
+      // Timed sticker overlay with fade in/out.
+      imageLayers: [
+        ImageLayer(
+          image: stickerImage,
+          offset: const Offset(40, 40),
+          size: const Size(160, 160),
+          startTime: const Duration(seconds: 1),
+          endTime: const Duration(seconds: 7),
+          animations: const [
+            LayerAnimation(
+              type: LayerAnimationType.fade,
+              phase: AnimationPhase.animateIn,
+              duration: Duration(milliseconds: 500),
+              curve: AnimationCurve.easeIn,
+            ),
+            LayerAnimation(
+              type: LayerAnimationType.fade,
+              phase: AnimationPhase.animateOut,
+              duration: Duration(milliseconds: 500),
+              curve: AnimationCurve.easeOut,
+            ),
+          ],
+        ),
+      ],
+      // Warm color filter for the first 6 seconds.
+      colorFilters: [
+        ColorFilter(
+          matrix: const [
+            1.2, 0.0, 0.0, 0.0, 20.0, //
+            0.0, 1.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.8, 0.0, -10.0,
+            0.0, 0.0, 0.0, 1.0, 0.0,
+          ],
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 6),
+        ),
+      ],
+      // Looping background music.
+      audioTracks: [
+        VideoAudioTrack(path: audioFile.path, volume: 0.4, loop: true),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   Future<void> _changeSpeed() async {
     final customAudioFile = await _writeAssetAudioToFile(
       kVideoEditorExampleAudio1Path,
@@ -1701,6 +1948,33 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           onTap: _trim,
           leading: const Icon(Icons.content_cut_rounded),
           title: const Text('Trim'),
+        ),
+        ListTile(
+          onTap: _compositionPip,
+          leading: const Icon(Icons.picture_in_picture_alt),
+          title: const Text('Composition: picture-in-picture'),
+          subtitle: const Text('Small second video over a full-frame base'),
+        ),
+        ListTile(
+          onTap: _compositionStack,
+          leading: const Icon(Icons.stacked_bar_chart),
+          title: const Text('Composition: stack'),
+          subtitle: const Text('Two videos stacked vertically'),
+        ),
+        ListTile(
+          onTap: _compositionGrid,
+          leading: const Icon(Icons.grid_view),
+          title: const Text('Composition: grid'),
+          subtitle: const Text('2x2 grid, each cell staggered in time'),
+        ),
+        ListTile(
+          onTap: _compositionKitchenSink,
+          leading: const Icon(Icons.auto_awesome_motion),
+          title: const Text('Composition: kitchen sink'),
+          subtitle: const Text(
+            'Layers + trim, speed, reverse, transition, overlays, '
+            'color filter & audio',
+          ),
         ),
         ListTile(
           onTap: _changeSpeed,

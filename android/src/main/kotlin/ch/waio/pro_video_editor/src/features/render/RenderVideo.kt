@@ -500,8 +500,12 @@ class RenderVideo(private val context: Context) {
 
         // Determine if video audio will be present in the mix
         // Video audio is removed when audio is disabled or all clips have volume 0
-        val videoAudioPresent = config.enableAudio &&
-                config.videoClips.any { (it.volume ?: 1.0f) > 0.0f }
+        val videoAudioPresent = config.enableAudio && (
+                config.videoClips.any { (it.volume ?: 1.0f) > 0.0f } ||
+                        config.composition?.layers?.any { layer ->
+                            layer.clips.any { (it.volume ?: 1.0f) > 0.0f }
+                        } == true
+                )
 
         // Build transformer with callbacks
         val transformerBuilder = Transformer.Builder(context)
