@@ -578,18 +578,18 @@ var task = VideoRenderData(
         VideoSegment(
             video: EditorVideo.asset('assets/my-video.mp4'),
             volume: 0.7, // Original audio at 70%
+            playbackSpeed: 2, // Double speed
         ),
     ],
     imageLayers: [
       ImageLayer(
-        imageBytes: layerBytes,
+        image: EditorLayerImage.memory(layerBytes),
         offset: const Offset(100, 50),
         startTime: const Duration(seconds: 2),
         endTime: const Duration(seconds: 8),
       ),
     ],
     outputFormat: VideoOutputFormat.mp4,
-    playbackSpeed: 2,
     startTime: const Duration(seconds: 5),
     endTime: const Duration(seconds: 20),
     blur: 10,

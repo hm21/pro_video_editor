@@ -409,9 +409,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
       kVideoEditorExampleAudio1Path,
     );
     var data = VideoRenderData(
-      videoSegments: [VideoSegment(video: _video)],
-      // ignore: deprecated_member_use
-      playbackSpeed: 2,
+      videoSegments: [VideoSegment(video: _video, playbackSpeed: 2)],
       audioTracks: [
         VideoAudioTrack(
           path: customAudioFile.path,
@@ -851,7 +849,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   /// Play custom audio once without looping.
   ///
   /// By default, custom audio loops to match the video duration.
-  /// Setting `loopCustomAudio: false` plays the audio only once,
+  /// Setting `VideoAudioTrack.loop: false` plays the audio only once,
   /// with silence for the remaining video duration.
   Future<void> _customAudioNoLoop() async {
     final customAudioFile = await _writeAssetAudioToFile(
@@ -870,9 +868,9 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
 
   /// Start custom audio from a specific offset.
   ///
-  /// This example demonstrates how to use `customAudioStartTime` to start
-  /// playing the custom audio from a specific position instead of from the
-  /// beginning. This is useful for using a specific section of a longer
+  /// This example demonstrates how to use `VideoAudioTrack.audioStartTime` to
+  /// start playing the custom audio from a specific position instead of from
+  /// the beginning. This is useful for using a specific section of a longer
   /// audio file.
   Future<void> _customAudioStartOffset() async {
     final customAudioFile = await _writeAssetAudioToFile(
