@@ -350,6 +350,7 @@ class VideoRenderData {
                 'width': layer.size?.width,
                 'height': layer.size?.height,
                 'rotation': layer.rotation,
+                'loop': layer.loop,
                 'animations': layer.animations.map((a) => a.toMap()).toList(),
               },
             ),

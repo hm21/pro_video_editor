@@ -81,88 +81,9 @@ fun applyTimedImageLayers(
     for (layer in imageLayers) {
         try {
             val imageBytes = layer.imageBytes ?: continue
-            val options = BitmapFactory.Options().apply {
-                inPreferredConfig = Bitmap.Config.ARGB_8888
-            }
-            val layerBitmap = BitmapFactory.decodeByteArray(
-                imageBytes, 0, imageBytes.size, options
-            )
-
-            // Scale to target size if provided
-            val sizedBitmap = if (layer.width != null && layer.height != null) {
-                val scaled = layerBitmap.scale(layer.width.toInt(), layer.height.toInt())
-                // scale() may return the same object when dimensions already match
-                if (scaled !== layerBitmap) layerBitmap.recycle()
-                scaled
-            } else {
-                layerBitmap
-            }
-
-            // Determine if this layer should stretch or be positioned
-            val isStretched = layer.x == null && layer.y == null
-
-            val finalOverlay: Bitmap
-            val overlaySettings: StaticOverlaySettings
-            var baseNormX = 0f
-            var baseNormY = 0f
-
-            if (isStretched) {
-                // Stretch image to fill the entire video frame
-                val scaledOverlay = sizedBitmap.scale(videoWidth, videoHeight)
-                if (scaledOverlay !== sizedBitmap) sizedBitmap.recycle()
-
-                val unpremultiplied = unpremultiplyAlpha(scaledOverlay)
-                if (unpremultiplied !== scaledOverlay) scaledOverlay.recycle()
-                finalOverlay = unpremultiplied
-
-                overlaySettings = StaticOverlaySettings.Builder()
-                    .setOverlayFrameAnchor(0f, 0f)
-                    .setBackgroundFrameAnchor(0f, 0f)
-                    .build()
-
-                Log.d(RENDER_TAG, "Layer: stretched to ${videoWidth}x$videoHeight")
-            } else {
-                // Position image at specified x/y offset
-                val imageWidth = sizedBitmap.width
-                val imageHeight = sizedBitmap.height
-
-                val unpremultiplied = unpremultiplyAlpha(sizedBitmap)
-                if (unpremultiplied !== sizedBitmap) sizedBitmap.recycle()
-                finalOverlay = unpremultiplied
-
-                val x = layer.x ?: 0
-                val y = layer.y ?: 0
-
-                // Use OverlaySettings for positioning
-                // Media3 uses OpenGL coordinates: x[-1,1] left→right, y[-1,1] bottom→top.
-                // Input uses top-left origin, so y must be flipped.
-                val centerX = x.toFloat() + imageWidth / 2f
-                val centerY = y.toFloat() + imageHeight / 2f
-                baseNormX = (centerX / videoWidth) * 2f - 1f
-                baseNormY = 1f - (centerY / videoHeight) * 2f
-
-                overlaySettings = StaticOverlaySettings.Builder()
-                    .setBackgroundFrameAnchor(baseNormX, baseNormY)
-                    .setOverlayFrameAnchor(0f, 0f)
-                    .build()
-
-                Log.d(
-                    RENDER_TAG,
-                    "Layer: positioned at ($x, $y), size=${imageWidth}x${imageHeight}"
-                )
-            }
-
-            // Rotate the overlay around its center. baseNormX/baseNormY describe
-            // the (unrotated) layout center; rotating about the bitmap center
-            // keeps that point fixed, so the anchor stays correct while the
-            // bounding box grows symmetrically.
-            val rotatedOverlay = rotateBitmap(
-                finalOverlay, Math.toDegrees(layer.rotation).toFloat()
-            )
-
-            // Convert times from microseconds
             val startTimeUs = layer.startUs
             val endTimeUs = layer.endUs
+            val hasAnimations = layer.animations.isNotEmpty()
 
             Log.d(
                 RENDER_TAG,
@@ -170,30 +91,70 @@ fun applyTimedImageLayers(
                         " ${if (endTimeUs == -1L) "until end" else "end=${endTimeUs}us"}"
             )
 
-            val hasAnimations = layer.animations.isNotEmpty()
-            val bitmapOverlay: BitmapOverlay
+            // Animated GIFs decode to several frames; everything else (PNG/JPEG
+            // and static GIFs) decodes to a single bitmap.
+            val gifFrames = GifDecoder.decode(imageBytes)
 
-            if (hasAnimations) {
-                val imageWidth = rotatedOverlay.width
-                val imageHeight = rotatedOverlay.height
+            val bitmapOverlay: BitmapOverlay
+            if (gifFrames != null) {
+                // Prepare every frame identically so they share dimensions and
+                // anchor; the overlay swaps frames over time.
+                val prepared = gifFrames.map {
+                    prepareOverlay(it.bitmap, layer, videoWidth, videoHeight)
+                }
+                val first = prepared.first()
                 bitmapOverlay = AnimatedBitmapOverlay(
-                    bitmap = rotatedOverlay,
-                    baseNormX = baseNormX,
-                    baseNormY = baseNormY,
-                    imageWidth = imageWidth,
-                    imageHeight = imageHeight,
+                    frames = prepared.map { it.bitmap },
+                    frameDurationsUs = gifFrames.map { it.durationUs },
+                    baseNormX = first.baseNormX,
+                    baseNormY = first.baseNormY,
+                    imageWidth = first.bitmap.width,
+                    imageHeight = first.bitmap.height,
                     videoWidth = videoWidth,
                     videoHeight = videoHeight,
                     layerStartUs = startTimeUs,
                     layerEndUs = endTimeUs,
+                    loop = layer.loop,
                     animations = layer.animations
                 )
-                Log.d(RENDER_TAG, "Layer: using AnimatedBitmapOverlay with ${layer.animations.size} animation(s)")
-            } else {
-                bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(
-                    rotatedOverlay, overlaySettings
+                Log.d(
+                    RENDER_TAG,
+                    "Layer: animated GIF with ${gifFrames.size} frame(s), loop=${layer.loop}"
                 )
+            } else {
+                val options = BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+                val layerBitmap = BitmapFactory.decodeByteArray(
+                    imageBytes, 0, imageBytes.size, options
+                )
+                val prepared = prepareOverlay(layerBitmap, layer, videoWidth, videoHeight)
+
+                bitmapOverlay = if (hasAnimations) {
+                    Log.d(
+                        RENDER_TAG,
+                        "Layer: using AnimatedBitmapOverlay with " +
+                                "${layer.animations.size} animation(s)"
+                    )
+                    AnimatedBitmapOverlay(
+                        bitmap = prepared.bitmap,
+                        baseNormX = prepared.baseNormX,
+                        baseNormY = prepared.baseNormY,
+                        imageWidth = prepared.bitmap.width,
+                        imageHeight = prepared.bitmap.height,
+                        videoWidth = videoWidth,
+                        videoHeight = videoHeight,
+                        layerStartUs = startTimeUs,
+                        layerEndUs = endTimeUs,
+                        animations = layer.animations
+                    )
+                } else {
+                    BitmapOverlay.createStaticBitmapOverlay(
+                        prepared.bitmap, prepared.overlaySettings
+                    )
+                }
             }
+
             val overlayEffect = OverlayEffect(listOf(bitmapOverlay))
 
             if (startTimeUs == -1L && endTimeUs == -1L) {
@@ -211,6 +172,97 @@ fun applyTimedImageLayers(
             Log.e(RENDER_TAG, "Failed to decode image layer: ${e.message}")
         }
     }
+}
+
+/** A fully prepared overlay bitmap together with its placement settings. */
+private data class PreparedOverlay(
+    val bitmap: Bitmap,
+    val baseNormX: Float,
+    val baseNormY: Float,
+    val overlaySettings: StaticOverlaySettings,
+)
+
+/**
+ * Scales, positions, unpremultiplies and rotates a single overlay [rawBitmap]
+ * according to [layer], returning the final bitmap plus its anchor/settings.
+ *
+ * Intermediate bitmaps are recycled; the returned bitmap takes ownership of
+ * [rawBitmap]'s pixels. Used for both static images and each GIF frame, so all
+ * frames of one layer come out with identical dimensions and anchor.
+ */
+@UnstableApi
+private fun prepareOverlay(
+    rawBitmap: Bitmap,
+    layer: VideoSequenceBuilder.ImageLayerConfig,
+    videoWidth: Int,
+    videoHeight: Int,
+): PreparedOverlay {
+    // Scale to target size if provided
+    val sizedBitmap = if (layer.width != null && layer.height != null) {
+        val scaled = rawBitmap.scale(layer.width.toInt(), layer.height.toInt())
+        // scale() may return the same object when dimensions already match
+        if (scaled !== rawBitmap) rawBitmap.recycle()
+        scaled
+    } else {
+        rawBitmap
+    }
+
+    // Determine if this layer should stretch or be positioned
+    val isStretched = layer.x == null && layer.y == null
+
+    val finalOverlay: Bitmap
+    val overlaySettings: StaticOverlaySettings
+    var baseNormX = 0f
+    var baseNormY = 0f
+
+    if (isStretched) {
+        // Stretch image to fill the entire video frame
+        val scaledOverlay = sizedBitmap.scale(videoWidth, videoHeight)
+        if (scaledOverlay !== sizedBitmap) sizedBitmap.recycle()
+
+        val unpremultiplied = unpremultiplyAlpha(scaledOverlay)
+        if (unpremultiplied !== scaledOverlay) scaledOverlay.recycle()
+        finalOverlay = unpremultiplied
+
+        overlaySettings = StaticOverlaySettings.Builder()
+            .setOverlayFrameAnchor(0f, 0f)
+            .setBackgroundFrameAnchor(0f, 0f)
+            .build()
+    } else {
+        // Position image at specified x/y offset
+        val imageWidth = sizedBitmap.width
+        val imageHeight = sizedBitmap.height
+
+        val unpremultiplied = unpremultiplyAlpha(sizedBitmap)
+        if (unpremultiplied !== sizedBitmap) sizedBitmap.recycle()
+        finalOverlay = unpremultiplied
+
+        val x = layer.x ?: 0
+        val y = layer.y ?: 0
+
+        // Use OverlaySettings for positioning
+        // Media3 uses OpenGL coordinates: x[-1,1] left→right, y[-1,1] bottom→top.
+        // Input uses top-left origin, so y must be flipped.
+        val centerX = x.toFloat() + imageWidth / 2f
+        val centerY = y.toFloat() + imageHeight / 2f
+        baseNormX = (centerX / videoWidth) * 2f - 1f
+        baseNormY = 1f - (centerY / videoHeight) * 2f
+
+        overlaySettings = StaticOverlaySettings.Builder()
+            .setBackgroundFrameAnchor(baseNormX, baseNormY)
+            .setOverlayFrameAnchor(0f, 0f)
+            .build()
+    }
+
+    // Rotate the overlay around its center. baseNormX/baseNormY describe the
+    // (unrotated) layout center; rotating about the bitmap center keeps that
+    // point fixed, so the anchor stays correct while the bounding box grows
+    // symmetrically.
+    val rotatedOverlay = rotateBitmap(
+        finalOverlay, Math.toDegrees(layer.rotation).toFloat()
+    )
+
+    return PreparedOverlay(rotatedOverlay, baseNormX, baseNormY, overlaySettings)
 }
 
 /**

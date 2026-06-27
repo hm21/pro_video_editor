@@ -18,6 +18,7 @@ void main() {
           offset: const Offset(100, 200),
           size: const Size(300, 150),
           rotation: 1.5,
+          loop: false,
         );
         final map = layer.toMap();
 
@@ -27,6 +28,7 @@ void main() {
         expect(map['offset'], {'dx': 100.0, 'dy': 200.0});
         expect(map['size'], {'width': 300.0, 'height': 150.0});
         expect(map['rotation'], 1.5);
+        expect(map['loop'], false);
       });
 
       test('serializes null fields as null', () {
@@ -38,6 +40,7 @@ void main() {
         expect(map['offset'], isNull);
         expect(map['size'], isNull);
         expect(map['rotation'], 0.0);
+        expect(map['loop'], true);
       });
     });
 
@@ -50,6 +53,7 @@ void main() {
           offset: const Offset(100, 200),
           size: const Size(300, 150),
           rotation: 1.5,
+          loop: false,
         );
         final map = layer.toMap();
         final restored = ImageLayer.fromMap(map);
@@ -59,6 +63,7 @@ void main() {
         expect(restored.offset, const Offset(100, 200));
         expect(restored.size, const Size(300, 150));
         expect(restored.rotation, 1.5);
+        expect(restored.loop, false);
       });
 
       test('handles null optional fields', () {
@@ -71,6 +76,13 @@ void main() {
         expect(restored.offset, isNull);
         expect(restored.size, isNull);
         expect(restored.rotation, 0.0);
+        expect(restored.loop, true);
+      });
+
+      test('defaults loop to true when absent from map', () {
+        final restored = ImageLayer.fromMap({'image': image.toMap()});
+
+        expect(restored.loop, true);
       });
 
       test('defaults rotation to 0 when absent from map', () {
@@ -134,20 +146,23 @@ void main() {
           offset: const Offset(10, 20),
           size: const Size(640, 480),
           rotation: 0.5,
+          loop: false,
         );
 
         expect(copy.startTime, const Duration(seconds: 2));
         expect(copy.offset, const Offset(10, 20));
         expect(copy.size, const Size(640, 480));
         expect(copy.rotation, 0.5);
+        expect(copy.loop, false);
         expect(copy.endTime, isNull);
       });
 
-      test('keeps original rotation when not overridden', () {
-        final layer = ImageLayer(image: image, rotation: 1.2);
+      test('keeps original rotation/loop when not overridden', () {
+        final layer = ImageLayer(image: image, rotation: 1.2, loop: false);
         final copy = layer.copyWith(offset: const Offset(5, 5));
 
         expect(copy.rotation, 1.2);
+        expect(copy.loop, false);
       });
     });
 

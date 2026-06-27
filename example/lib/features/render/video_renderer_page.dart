@@ -1170,6 +1170,30 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Overlay an animated GIF.
+  ///
+  /// Animated formats are detected automatically — the GIF plays back frame by
+  /// frame and, with [ImageLayer.loop] (default `true`), repeats for the
+  /// layer's whole time range. All other layer properties (position, size,
+  /// rotation, timing, animations) apply just like a static image.
+  Future<void> _gifLayer() async {
+    final gifImage = EditorLayerImage.asset('assets/dev.gif');
+
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      imageLayers: [
+        ImageLayer(
+          image: gifImage,
+          offset: const Offset(60, 60),
+          size: const Size(240, 240),
+          // loop: true, // default — repeats while visible
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   Future<void> _colorMatrix() async {
     var data = VideoRenderData(
       videoSegments: [VideoSegment(video: _video)],
@@ -2061,6 +2085,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           leading: const Icon(Icons.rotate_right_outlined),
           title: const Text('Layers with rotation'),
           subtitle: const Text('Rotate layers around their own center'),
+        ),
+        ListTile(
+          onTap: _gifLayer,
+          leading: const Icon(Icons.gif_box_outlined),
+          title: const Text('Animated GIF layer'),
+          subtitle: const Text('Overlay a looping animated GIF'),
         ),
         ListTile(
           onTap: _colorMatrix,
