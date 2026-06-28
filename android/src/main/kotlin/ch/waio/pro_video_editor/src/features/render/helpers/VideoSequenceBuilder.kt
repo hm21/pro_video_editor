@@ -54,6 +54,7 @@ class VideoSequenceBuilder(
     private var forceRemoveAudio: Boolean = false
     private var globalStartUs: Long? = null
     private var globalEndUs: Long? = null
+    private var globalPlaybackSpeed: Float? = null
     private var hasCustomAudio: Boolean = false
     private var scaleX: Float? = null
     private var scaleY: Float? = null
@@ -207,6 +208,20 @@ class VideoSequenceBuilder(
     }
 
     /**
+     * Sets the composition-wide playback speed.
+     *
+     * The global trim window is expressed in OUTPUT time, so [applyGlobalTrim]
+     * needs the composition-wide speed (combined with each clip's own
+     * [VideoClip.playbackSpeed]) to map the trim onto the source timeline.
+     *
+     * @param speed Speed multiplier applied to the whole composition (null/<=0 = 1x)
+     */
+    fun setGlobalPlaybackSpeed(speed: Float?): VideoSequenceBuilder {
+        this.globalPlaybackSpeed = speed
+        return this
+    }
+
+    /**
      * Detects if audio normalization is needed across video clips.
      *
      * @return true if clips have different audio channel counts
@@ -243,10 +258,11 @@ class VideoSequenceBuilder(
      * Playback speed is included so parallel custom audio sequences are
      * constrained to the rendered video timeline, not the source timeline.
      *
-     * @param globalPlaybackSpeed Speed multiplier applied to the whole composition
+     * Uses the composition-wide speed set via [setGlobalPlaybackSpeed].
+     *
      * @return Total duration in microseconds
      */
-    fun calculateTotalDuration(globalPlaybackSpeed: Float? = null): Long {
+    fun calculateTotalDuration(): Long {
         // Apply global trim first to get accurate duration
         val trimmedClips = applyGlobalTrim(videoClips)
 
@@ -731,115 +747,44 @@ class VideoSequenceBuilder(
 
         Log.d(
             RENDER_TAG,
-            "Applying global trim: start=${globalStartUs?.div(1000)}ms, end=${globalEndUs?.div(1000)}ms"
+            "Applying global trim: start=${globalStartUs?.div(1000)}ms, " +
+                    "end=${globalEndUs?.div(1000)}ms, globalSpeed=$globalPlaybackSpeed"
+        )
+
+        // Resolve each clip's source range here (MediaInfoExtractor is Android-only)
+        // and hand pure values to the dependency-free calculator, which resolves the
+        // trim against the OUTPUT (post-speed) timeline and maps it back to source.
+        val inputs = clips.map { clip ->
+            VideoGlobalTrimCalculator.ClipInput(
+                sourceStartUs = clip.startUs ?: 0L,
+                sourceEndUs = clip.endUs ?: MediaInfoExtractor.getVideoDuration(clip.inputPath),
+                playbackSpeed = clip.playbackSpeed,
+                reverseVideo = clip.reverseVideo,
+            )
+        }
+
+        val trims = VideoGlobalTrimCalculator.applyGlobalTrim(
+            clips = inputs,
+            globalStartUs = globalStartUs,
+            globalEndUs = globalEndUs,
+            globalPlaybackSpeed = globalPlaybackSpeed,
         )
 
         val result = mutableListOf<VideoClip>()
-        var compositionTimeUs = 0L
-
-        for (clip in clips) {
-            // Calculate clip's duration in the composition
-            val clipStartInSource = clip.startUs ?: 0L
-            val clipEndInSource = clip.endUs ?: MediaInfoExtractor.getVideoDuration(clip.inputPath)
-            val clipDurationUs = clipEndInSource - clipStartInSource
-
-            // Calculate clip's position in the composition timeline
-            val clipStartInComposition = compositionTimeUs
-            val clipEndInComposition = compositionTimeUs + clipDurationUs
-
-            // Check if clip overlaps with global trim range
-            val globalStart = globalStartUs ?: 0L
-            val globalEnd = globalEndUs ?: Long.MAX_VALUE
-
-            if (clipEndInComposition <= globalStart || clipStartInComposition >= globalEnd) {
-                // Clip is completely outside the global trim range - skip it
+        clips.forEachIndexed { index, clip ->
+            val trim = trims[index]
+            if (trim == null) {
                 Log.d(RENDER_TAG, "Skipping clip (outside global trim range): ${clip.inputPath}")
             } else {
-                // Clip overlaps with global trim range - adjust boundaries
-                var newStartInSource = clipStartInSource
-                var newEndInSource = clipEndInSource
-                val startTrimOffsetUs = if (clipStartInComposition < globalStart) {
-                    globalStart - clipStartInComposition
-                } else {
-                    0L
-                }
-                val endTrimOffsetUs = if (clipEndInComposition > globalEnd) {
-                    clipEndInComposition - globalEnd
-                } else {
-                    0L
-                }
-                val frameCompensationUs = 33333L // ~33ms = 1 frame at 30fps
-
-                // Adjust start if global start cuts into this clip
-                if (startTrimOffsetUs > 0L) {
-                    if (clip.reverseVideo) {
-                        newEndInSource = clipEndInSource - startTrimOffsetUs
-                        Log.d(
-                            RENDER_TAG,
-                            "Adjusting reversed clip source end by ${startTrimOffsetUs / 1000}ms"
-                        )
-                    } else {
-                        newStartInSource = clipStartInSource + startTrimOffsetUs
-                        Log.d(RENDER_TAG, "Adjusting clip start by ${startTrimOffsetUs / 1000}ms")
-                    }
-                }
-
-                // Adjust end if global end cuts into this clip
-                if (endTrimOffsetUs > 0L) {
-                    // Subtract ~1 frame to ensure encoder doesn't overshoot. This compensates
-                    // for encoder rounding to next frame/audio sample boundary.
-                    if (clip.reverseVideo) {
-                        newStartInSource = minOf(
-                            newEndInSource,
-                            newStartInSource + endTrimOffsetUs + frameCompensationUs
-                        )
-                        Log.d(
-                            RENDER_TAG,
-                            "Adjusting reversed clip source start by ${endTrimOffsetUs / 1000}ms (with frame compensation)"
-                        )
-                    } else {
-                        newEndInSource = maxOf(
-                            newStartInSource,
-                            newEndInSource - endTrimOffsetUs - frameCompensationUs
-                        )
-                        Log.d(
-                            RENDER_TAG,
-                            "Adjusting clip end by ${endTrimOffsetUs / 1000}ms (with frame compensation)"
-                        )
-                    }
-                }
-
-                // Only add if there's still content left
-                if (newEndInSource > newStartInSource) {
-                    result.add(
-                        clip.copy(
-                            startUs = newStartInSource,
-                            endUs = newEndInSource
-                        )
-                    )
-                    val trimmedDuration = newEndInSource - newStartInSource
-                    Log.d(
-                        RENDER_TAG,
-                        "Added trimmed clip: start=${newStartInSource / 1000}ms, end=${newEndInSource / 1000}ms, duration=${trimmedDuration / 1000}ms"
-                    )
-                }
+                result.add(clip.copy(startUs = trim.sourceStartUs, endUs = trim.sourceEndUs))
+                Log.d(
+                    RENDER_TAG,
+                    "Added trimmed clip: start=${trim.sourceStartUs / 1000}ms, " +
+                            "end=${trim.sourceEndUs / 1000}ms, " +
+                            "duration=${(trim.sourceEndUs - trim.sourceStartUs) / 1000}ms"
+                )
             }
-
-            compositionTimeUs += clipDurationUs
         }
-
-        // Log total duration after global trim
-        val totalTrimmedDuration = result.sumOf { clip ->
-            val start = clip.startUs ?: 0L
-            val end = clip.endUs ?: 0L
-            end - start
-        }
-        Log.d(
-            RENDER_TAG,
-            "Total duration after global trim: ${totalTrimmedDuration / 1000}ms (target: ${
-                globalEndUs?.minus(globalStartUs ?: 0L)?.div(1000)
-            }ms)"
-        )
 
         return result
     }

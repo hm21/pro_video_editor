@@ -98,6 +98,7 @@ class CompositionBuilder(
             })
             .setEnableAudio(config.enableAudio)
             .setGlobalTrim(config.startUs, config.endUs)
+            .setGlobalPlaybackSpeed(config.playbackSpeed)
             .setHasCustomAudio(hasCustomAudio)
 
         // Detect if audio normalization is needed (check both video and custom audio)
@@ -127,7 +128,7 @@ class CompositionBuilder(
         // AudioPreRenderer to avoid encoder frame realignment artifacts (clicks/gaps)
         // at loop and silence boundaries.
         if (hasCustomAudio) {
-            val totalVideoDuration = videoBuilder.calculateTotalDuration(config.playbackSpeed)
+            val totalVideoDuration = videoBuilder.calculateTotalDuration()
 
             for ((index, track) in config.audioTracks.withIndex()) {
                 Log.d(
