@@ -85,4 +85,37 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(off.y, 0, accuracy: 1e-6)
   }
 
+  // MARK: - Engine-detach result delivery
+
+  // Before detach a captured FlutterResult delivers normally.
+  func testDeliverResultInvokesClosureBeforeDetach() {
+    let plugin = ProVideoEditorPlugin()
+
+    var deliveredCount = 0
+    var deliveredValue: Any?
+    plugin.deliverResult({ value in
+      deliveredCount += 1
+      deliveredValue = value
+    }, "payload")
+
+    XCTAssertEqual(deliveredCount, 1)
+    XCTAssertEqual(deliveredValue as? String, "payload")
+  }
+
+  // Regression guard for the `else`-after-detach hole: once the engine has been
+  // torn down, a late async delivery must be a terminal no-op so it never
+  // messages a no-longer-running FlutterEngine.
+  func testDeliverResultIsNoOpAfterDetach() {
+    let plugin = ProVideoEditorPlugin()
+
+    plugin.tearDownForEngineDetach()
+
+    var deliveredCount = 0
+    plugin.deliverResult({ _ in
+      deliveredCount += 1
+    }, "payload")
+
+    XCTAssertEqual(deliveredCount, 0)
+  }
+
 }
