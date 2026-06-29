@@ -54,6 +54,33 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     eventChannel.setStreamHandler(instance)
     waveformStreamChannel.setStreamHandler(WaveformStreamHandler(plugin: instance))
     logChannel.setStreamHandler(LogStreamHandler(plugin: instance))
+
+    // Publishing the instance keeps it alive for the registrar and ensures
+    // `detachFromEngine(for:)` is invoked when the FlutterEngine is torn down.
+    registrar.publish(instance)
+  }
+
+  /// Tears down all in-flight work when the FlutterEngine is detached.
+  ///
+  /// Invoked by the registrar on the platform/main thread during engine
+  /// teardown (e.g. app termination or surface recreation). Cancels every
+  /// active task and clears every event sink so already-dispatched callbacks
+  /// no-op instead of messaging a messenger whose engine is no longer running,
+  /// which would otherwise raise an
+  /// `NSInternalInconsistencyException: Sending a message before the
+  /// FlutterEngine has been run`.
+  public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
+    activeRenderTasks.values.forEach { $0.cancel() }
+    activeAudioTasks.values.forEach { $0.cancel() }
+    activeWaveformTasks.values.forEach { $0.cancel() }
+    activeRenderTasks.removeAll()
+    activeAudioTasks.removeAll()
+    activeWaveformTasks.removeAll()
+
+    eventSink = nil
+    waveformStreamSink = nil
+    logSink = nil
+    PluginLog.sink = nil
   }
 
   /// Routes incoming method calls to appropriate handlers.

@@ -1,3 +1,6 @@
+## 2.1.2
+- **FIX**(iOS, macOS): Cancel active tasks and clear event sinks when the FlutterEngine is torn down. In-flight render/audio/waveform callbacks no longer message a stopped engine, fixing `NSInternalInconsistencyException: Sending a message before the FlutterEngine has been run` crashes on app termination or surface recreation.
+
 ## 2.1.1
 - **FIX**(android): The global output trim now respects per-clip and global `playbackSpeed`. A sped-up composition capped by `endTime` was trimmed against the source timeline, cutting the output far shorter than the preview; the cap now limits the post-speed output length, matching iOS.
 
