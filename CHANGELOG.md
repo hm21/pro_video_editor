@@ -1,3 +1,6 @@
+## 2.1.3
+- **FIX**(iOS, macOS): Make FlutterEngine detach terminal for method-channel result delivery. After detach, a late render/audio/waveform/metadata/thumbnail callback no longer calls a captured `FlutterResult` against a torn-down engine, closing the remaining `NSInternalInconsistencyException: Sending a message before the FlutterEngine has been run` path from 2.1.2.
+
 ## 2.1.2
 - **FIX**(iOS, macOS): Cancel active tasks and clear event sinks when the FlutterEngine is torn down. In-flight render/audio/waveform callbacks no longer message a stopped engine, fixing `NSInternalInconsistencyException: Sending a message before the FlutterEngine has been run` crashes on app termination or surface recreation.
 

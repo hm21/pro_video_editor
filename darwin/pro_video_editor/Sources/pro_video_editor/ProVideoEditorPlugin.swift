@@ -33,6 +33,20 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
   private var activeAudioTasks: [String: AudioExtractTask] = [:]
   private var activeWaveformTasks: [String: WaveformTask] = [:]
 
+  /// Guards `engineDetached`. Metadata/thumbnail callbacks may complete off the
+  /// main thread, so the detach flag is read/written under a lock.
+  private let engineLock = NSLock()
+  private var engineDetached = false
+
+  /// Whether `tearDownForEngineDetach()` has run. Once true, every captured
+  /// `FlutterResult` would message a no-longer-running engine, so asynchronous
+  /// deliveries must become terminal no-ops.
+  private var isEngineDetached: Bool {
+    engineLock.lock()
+    defer { engineLock.unlock() }
+    return engineDetached
+  }
+
   public static func register(with registrar: FlutterPluginRegistrar) {
     #if os(iOS)
       let messenger = registrar.messenger()
@@ -70,6 +84,21 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
   /// `NSInternalInconsistencyException: Sending a message before the
   /// FlutterEngine has been run`.
   public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
+    tearDownForEngineDetach()
+  }
+
+  /// Performs the engine-detach teardown.
+  ///
+  /// Extracted from `detachFromEngine(for:)` so it can be exercised without a
+  /// `FlutterPluginRegistrar`. Sets `engineDetached` first so any callback that
+  /// races the teardown sees the flag and routes its delivery through
+  /// `deliverResult(_:_:)` as a no-op, then cancels every active task and
+  /// clears every event sink.
+  func tearDownForEngineDetach() {
+    engineLock.lock()
+    engineDetached = true
+    engineLock.unlock()
+
     activeRenderTasks.values.forEach { $0.cancel() }
     activeAudioTasks.values.forEach { $0.cancel() }
     activeWaveformTasks.values.forEach { $0.cancel() }
@@ -81,6 +110,17 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     waveformStreamSink = nil
     logSink = nil
     PluginLog.sink = nil
+  }
+
+  /// Delivers an asynchronous method-channel result.
+  ///
+  /// After engine detach the captured `FlutterResult` would message a
+  /// not-running engine, raising `NSInternalInconsistencyException: Sending a
+  /// message before the FlutterEngine has been run`. Delivery is a terminal
+  /// no-op once detached.
+  func deliverResult(_ result: FlutterResult, _ value: Any?) {
+    guard !isEngineDetached else { return }
+    result(value)
   }
 
   /// Routes incoming method calls to appropriate handlers.
@@ -175,9 +215,10 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
           inputPath: config.inputPath,
           ext: config.fileExtension,
           checkStreamingOptimization: config.checkStreamingOptimization)
-        result(meta)
+        self.deliverResult(result, meta)
       } catch {
-        result(
+        self.deliverResult(
+          result,
           FlutterError(code: "METADATA_ERROR", message: error.localizedDescription, details: nil))
       }
     }
@@ -198,9 +239,10 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     Task {
       do {
         let hasAudio = try await VideoMetadata.checkAudioTrack(inputPath: config.inputPath)
-        result(hasAudio)
+        self.deliverResult(result, hasAudio)
       } catch {
-        result(
+        self.deliverResult(
+          result,
           FlutterError(code: "AUDIO_CHECK_ERROR", message: error.localizedDescription, details: nil)
         )
       }
@@ -229,10 +271,11 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       },
       onComplete: { thumbnails in
         self.postProgress(id: config.id, progress: 1.0)
-        result(thumbnails)
+        self.deliverResult(result, thumbnails)
       },
       onError: { error in
-        result(
+        self.deliverResult(
+          result,
           FlutterError(
             code: "THUMBNAIL_ERROR", message: error.localizedDescription, details: nil))
       }
@@ -290,7 +333,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
           if let task = self.activeRenderTasks.removeValue(forKey: id) {
             task.sendSuccess(outputData)
           } else {
-            result(outputData)
+            self.deliverResult(result, outputData)
           }
         }
       },
@@ -307,7 +350,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
           if let task = task {
             task.sendError(flutterError)
           } else {
-            result(flutterError)
+            self.deliverResult(result, flutterError)
           }
         }
       }
@@ -367,7 +410,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
           if let task = self.activeRenderTasks.removeValue(forKey: id) {
             task.sendSuccess(outputData)
           } else {
-            result(outputData)
+            self.deliverResult(result, outputData)
           }
         }
       },
@@ -384,7 +427,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
           if let task = task {
             task.sendError(flutterError)
           } else {
-            result(flutterError)
+            self.deliverResult(result, flutterError)
           }
         }
       }
@@ -446,7 +489,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
           if let task = self.activeAudioTasks.removeValue(forKey: id) {
             task.sendSuccess(outputData)
           } else {
-            result(outputData)
+            self.deliverResult(result, outputData)
           }
         }
       },
@@ -470,7 +513,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
           if let task = task {
             task.sendError(flutterError)
           } else {
-            result(flutterError)
+            self.deliverResult(result, flutterError)
           }
         }
       }
@@ -529,7 +572,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
           if let task = self.activeWaveformTasks.removeValue(forKey: id) {
             task.sendSuccess(waveformData)
           } else {
-            result(waveformData)
+            self.deliverResult(result, waveformData)
           }
         }
       },
@@ -552,7 +595,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
           if let task = task {
             task.sendError(flutterError)
           } else {
-            result(flutterError)
+            self.deliverResult(result, flutterError)
           }
         }
       }
