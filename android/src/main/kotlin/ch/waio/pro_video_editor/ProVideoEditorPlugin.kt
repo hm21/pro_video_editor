@@ -12,6 +12,7 @@ import ch.waio.pro_video_editor.src.features.render.RenderVideo
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderTask
 import ch.waio.pro_video_editor.src.features.render.models.VideoEncoderConfigurationException
+import ch.waio.pro_video_editor.src.features.split.SplitVideo
 import ch.waio.pro_video_editor.src.features.stopmotion.StopMotionGenerator
 import ch.waio.pro_video_editor.src.features.stopmotion.models.StopMotionConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
@@ -56,6 +57,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
     private var logSink: EventChannel.EventSink? = null
 
     private lateinit var renderVideo: RenderVideo
+    private lateinit var splitVideo: SplitVideo
     private lateinit var stopMotionGenerator: StopMotionGenerator
     private lateinit var metadata: Metadata
     private lateinit var thumbnailGenerator: ThumbnailGenerator
@@ -124,6 +126,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         })
 
         renderVideo = RenderVideo(flutterPluginBinding.applicationContext)
+        splitVideo = SplitVideo(flutterPluginBinding.applicationContext)
         stopMotionGenerator = StopMotionGenerator(flutterPluginBinding.applicationContext)
         metadata = Metadata(flutterPluginBinding.applicationContext)
         thumbnailGenerator = ThumbnailGenerator(flutterPluginBinding.applicationContext)
@@ -171,6 +174,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             "getThumbnails" -> handleGetThumbnails(call, result)
             "renderVideo" -> handleRenderVideo(call, result)
             "renderStopMotion" -> handleRenderStopMotion(call, result)
+            "splitVideo" -> handleSplitVideo(call, result)
             "extractAudio" -> handleExtractAudio(call, result)
             "getWaveform" -> handleGetWaveform(call, result)
             "startWaveformStream" -> handleStartWaveformStream(call, result)
@@ -430,6 +434,100 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         } catch (e: Exception) {
             activeRenderTasks.remove(id)
             result.error("RENDER_ERROR", "Failed to start stop-motion render: ${e.message}", null)
+        }
+    }
+
+    /**
+     * Splits a single video into two files at a frame-accurate position.
+     *
+     * Re-encodes each half from the exact split frame (no compositor/effects).
+     * Tracked by unique ID via the same render-task map so [handleCancelTask]
+     * works unchanged. Returns the two output paths on success.
+     */
+    private fun handleSplitVideo(call: MethodCall, result: MethodChannel.Result) {
+        val id = call.argument<String>("id") ?: ""
+        if (id.isBlank()) {
+            result.error("INVALID_ARGUMENTS", "Task id is required and cannot be empty", null)
+            return
+        }
+
+        if (activeRenderTasks.containsKey(id)) {
+            result.error(
+                "TASK_ALREADY_EXISTS",
+                "A render task with id '$id' is already active",
+                null
+            )
+            return
+        }
+
+        val inputPath = call.argument<String>("inputPath")
+        val startOutputPath = call.argument<String>("startOutputPath")
+        val endOutputPath = call.argument<String>("endOutputPath")
+        val splitUs = (call.argument<Number>("splitUs"))?.toLong()
+        if (inputPath == null || startOutputPath == null ||
+            endOutputPath == null || splitUs == null
+        ) {
+            result.error("INVALID_ARGUMENTS", "Missing parameters", null)
+            return
+        }
+
+        val outputFormat = call.argument<String>("outputFormat") ?: "mp4"
+        val bitrate = call.argument<Number>("bitrate")?.toInt()
+        val enableAudio = call.argument<Boolean>("enableAudio") ?: true
+
+        postProgress(id, 0.0)
+
+        val task = RenderTask(job = null, result = result)
+        activeRenderTasks[id] = task
+
+        try {
+            val jobHandle = splitVideo.split(
+                inputPath = inputPath,
+                splitUs = splitUs,
+                startOutputPath = startOutputPath,
+                endOutputPath = endOutputPath,
+                outputFormat = outputFormat,
+                bitrate = bitrate,
+                enableAudio = enableAudio,
+                mainHandler = mainHandler,
+                onProgress = { progress -> postProgress(id, progress) },
+                onComplete = { outputPaths ->
+                    mainHandler.post {
+                        postProgress(id, 1.0)
+                        val removedTask = activeRenderTasks.remove(id)
+                        removedTask?.sendSuccess(outputPaths)
+                    }
+                },
+                onError = { error ->
+                    Log.e(
+                        "SplitVideo",
+                        "Error splitting video: ${error::class.java.name}: ${error.message}",
+                        error
+                    )
+                    mainHandler.post {
+                        val removedTask = activeRenderTasks.remove(id)
+                        val code = when {
+                            removedTask?.canceled?.get() == true -> "CANCELED"
+                            error is java.util.concurrent.CancellationException -> "CANCELED"
+                            else -> "SPLIT_ERROR"
+                        }
+                        val message = error.message
+                            ?: "${error::class.java.simpleName} (no message)"
+                        removedTask?.sendError(code, message)
+                    }
+                }
+            )
+
+            task.job = jobHandle
+            if (task.canceled.get()) {
+                jobHandle.cancel()
+            }
+        } catch (e: IllegalArgumentException) {
+            activeRenderTasks.remove(id)
+            result.error("INVALID_ARGUMENTS", e.message, null)
+        } catch (e: Exception) {
+            activeRenderTasks.remove(id)
+            result.error("SPLIT_ERROR", "Failed to start split: ${e.message}", null)
         }
     }
 

@@ -1,3 +1,6 @@
+## 2.2.0
+- **FEAT**(android, iOS, macOS): Add `ProVideoEditor.splitVideo` — a frame-accurate split that cuts one video into two files (`SplitVideoModel`). Each half is re-encoded from the exact cut frame without the render compositor/effects, making it far faster and more stall-resistant than splitting via `renderVideoToFile`; every export is guarded by a watchdog timeout. Cancellable and progress-reporting via the task `id`. Web/Windows/Linux throw `UnimplementedError`.
+
 ## 2.1.3
 - **FIX**(iOS, macOS): Make FlutterEngine detach terminal for method-channel result delivery. After detach, a late render/audio/waveform/metadata/thumbnail callback no longer calls a captured `FlutterResult` against a torn-down engine, closing the remaining `NSInternalInconsistencyException: Sending a message before the FlutterEngine has been run` path from 2.1.2.
 

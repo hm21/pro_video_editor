@@ -16,6 +16,7 @@ import '/core/models/thumbnail/key_frames_configs_model.dart';
 import '/core/models/thumbnail/single_thumbnail_configs_model.dart';
 import '/core/models/thumbnail/thumbnail_configs_model.dart';
 import '/core/models/video/editor_video_model.dart';
+import '/core/models/video/split_video_model.dart';
 import '/core/models/video/video_metadata_model.dart';
 import '/core/services/web/web_manager.dart';
 import '../models/video/stop_motion_render_data_model.dart';
@@ -184,6 +185,14 @@ class ProVideoEditorWeb extends ProVideoEditor {
     throw UnimplementedError(
       'renderStopMotionToFile() is not supported on web.',
     );
+  }
+
+  @override
+  Future<List<String>> splitVideo(
+    SplitVideoModel value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
+    throw UnimplementedError('splitVideo() is not supported on web.');
   }
 
   @override

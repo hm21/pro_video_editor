@@ -18,6 +18,7 @@ import '/core/models/thumbnail/thumbnail_base_abstract.dart';
 import '/core/models/thumbnail/thumbnail_configs_model.dart';
 import '/core/models/video/editor_video_model.dart';
 import '/core/models/video/progress_model.dart';
+import '/core/models/video/split_video_model.dart';
 import '/core/models/video/video_metadata_model.dart';
 import '/core/platform/io/io_helper.dart';
 import '../models/video/stop_motion_render_data_model.dart';
@@ -540,6 +541,43 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     } on PlatformException catch (error) {
       if (error.code == renderCanceledErrorCode) {
         throw const RenderCanceledException();
+      }
+      rethrow;
+    } finally {
+      _endDispatch(value.id);
+    }
+  }
+
+  @override
+  Future<List<String>> splitVideo(
+    SplitVideoModel value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
+    _beginDispatch(value.id);
+    try {
+      final inputPath = await value.video.safeFilePath();
+      _handoffToNative(value.id);
+
+      await methodChannel.invokeMethod<void>('splitVideo', {
+        'id': value.id,
+        'inputPath': inputPath,
+        'extension': _getFileExtension(inputPath),
+        'splitUs': value.splitPosition.inMicroseconds,
+        'startOutputPath': value.startOutputPath,
+        'endOutputPath': value.endOutputPath,
+        'outputFormat': value.outputFormat.name,
+        'bitrate': value.effectiveBitrate,
+        'enableAudio': value.enableAudio,
+        'nativeLogLevel': nativeLogLevel?.methodValue,
+      });
+
+      return [value.startOutputPath, value.endOutputPath];
+    } on PlatformException catch (error) {
+      if (error.code == renderCanceledErrorCode) {
+        throw const RenderCanceledException();
+      }
+      if (error.code == encoderNotSupportedErrorCode) {
+        throw RenderEncoderException(error.message);
       }
       rethrow;
     } finally {

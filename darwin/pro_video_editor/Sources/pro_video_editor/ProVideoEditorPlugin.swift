@@ -154,6 +154,9 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     case "renderStopMotion":
       handleRenderStopMotion(call: call, result: result)
 
+    case "splitVideo":
+      handleSplitVideo(call: call, result: result)
+
     case "extractAudio":
       handleExtractAudio(call: call, result: result)
 
@@ -419,6 +422,90 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
         DispatchQueue.main.async {
           let task = self.activeRenderTasks.removeValue(forKey: id)
           let code = (task?.isCanceled == true) ? "CANCELED" : "RENDER_ERROR"
+          let flutterError = FlutterError(
+            code: code,
+            message: error.localizedDescription,
+            details: nil
+          )
+          if let task = task {
+            task.sendError(flutterError)
+          } else {
+            self.deliverResult(result, flutterError)
+          }
+        }
+      }
+    )
+
+    task.attachHandle(handle)
+  }
+
+  /// Splits a single video into two files at a frame-accurate position.
+  ///
+  /// Re-encodes each half from the exact split frame (no compositor/effects).
+  /// Tracked by unique ID via the same render-task map so `cancelTask` works
+  /// unchanged. Returns the two output paths on success.
+  private func handleSplitVideo(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard let args = call.arguments as? [String: Any],
+      let id = args["id"] as? String,
+      let inputPath = args["inputPath"] as? String,
+      let startOutputPath = args["startOutputPath"] as? String,
+      let endOutputPath = args["endOutputPath"] as? String,
+      let splitUs = (args["splitUs"] as? NSNumber)?.int64Value
+    else {
+      result(
+        FlutterError(code: "INVALID_ARGUMENTS", message: "Missing parameters", details: nil))
+      return
+    }
+
+    guard !id.isEmpty else {
+      result(FlutterError(code: "INVALID_ARGUMENTS", message: "Missing task id", details: nil))
+      return
+    }
+
+    if activeRenderTasks[id] != nil {
+      result(
+        FlutterError(
+          code: "TASK_ALREADY_RUNNING", message: "Task with id \(id) is already running",
+          details: nil))
+      return
+    }
+
+    let outputFormat = (args["outputFormat"] as? String) ?? "mp4"
+    let bitrate = (args["bitrate"] as? NSNumber)?.intValue
+    let enableAudio = (args["enableAudio"] as? Bool) ?? true
+
+    postProgress(id: id, progress: 0.0)
+
+    let task = RenderTask(result: result)
+    activeRenderTasks[id] = task
+
+    let handle = SplitVideo.split(
+      inputPath: inputPath,
+      splitUs: splitUs,
+      startOutputPath: startOutputPath,
+      endOutputPath: endOutputPath,
+      outputFormat: outputFormat,
+      bitrate: bitrate,
+      enableAudio: enableAudio,
+      onProgress: { progress in
+        self.postProgress(id: id, progress: progress)
+      },
+      onComplete: { outputPaths in
+        DispatchQueue.main.async {
+          self.postProgress(id: id, progress: 1.0)
+          if let task = self.activeRenderTasks.removeValue(forKey: id) {
+            task.sendSuccess(outputPaths)
+          } else {
+            self.deliverResult(result, outputPaths)
+          }
+        }
+      },
+      onError: { error in
+        PluginLog.print("❌ Split failed: \(error.localizedDescription)")
+        DispatchQueue.main.async {
+          let task = self.activeRenderTasks.removeValue(forKey: id)
+          let code = (task?.isCanceled == true || error is CancellationError)
+            ? "CANCELED" : "SPLIT_ERROR"
           let flutterError = FlutterError(
             code: code,
             message: error.localizedDescription,

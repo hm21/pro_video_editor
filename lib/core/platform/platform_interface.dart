@@ -14,6 +14,7 @@ import '/core/models/thumbnail/single_thumbnail_configs_model.dart';
 import '/core/models/thumbnail/thumbnail_configs_model.dart';
 import '/core/models/video/editor_video_model.dart';
 import '/core/models/video/progress_model.dart';
+import '/core/models/video/split_video_model.dart';
 import '/core/models/video/video_metadata_model.dart';
 import '../models/video/stop_motion_render_data_model.dart';
 import '../models/video/video_render_data_model.dart';
@@ -604,6 +605,35 @@ abstract class ProVideoEditor extends PlatformInterface {
   /// ```
   Future<void> cancel(String taskId) {
     throw UnimplementedError('cancel() has not been implemented.');
+  }
+
+  /// Splits a single video into two files at a frame-accurate position.
+  ///
+  /// Cuts [SplitVideoModel.video] at [SplitVideoModel.splitPosition] and writes
+  /// the two halves to [SplitVideoModel.startOutputPath] and
+  /// [SplitVideoModel.endOutputPath].
+  ///
+  /// This is a dedicated, lightweight primitive: it re-encodes each half from
+  /// the exact split frame (so the cut is frame-accurate) but does **not** run
+  /// the full render pipeline (no compositor, effects, overlays or audio
+  /// mixing). That makes it considerably faster and far less likely to stall
+  /// than splitting via [renderVideoToFile].
+  ///
+  /// Returns the two output paths as `[startOutputPath, endOutputPath]`.
+  ///
+  /// Throws:
+  /// - [RenderCanceledException] if cancelled via [cancel]
+  /// - [ArgumentError] if the configuration is invalid
+  /// - [PlatformException] if splitting fails (including a timeout)
+  ///
+  /// Progress updates are emitted via [progressStreamById] using
+  /// [SplitVideoModel.id]; the first half maps to `0.0 → 0.5` and the second to
+  /// `0.5 → 1.0`.
+  Future<List<String>> splitVideo(
+    SplitVideoModel value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
+    throw UnimplementedError('splitVideo() has not been implemented.');
   }
 
   /// Stream of progress updates from native video tasks.
