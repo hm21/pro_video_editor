@@ -23,6 +23,7 @@ export 'core/models/video/segment_transform_model.dart';
 export 'core/models/video/video_layer_model.dart';
 export 'core/models/video/video_composition_model.dart';
 export 'core/models/video/clip_transition_model.dart';
+export 'core/models/video/split_video_model.dart';
 export 'core/models/video/stop_motion_render_data_model.dart';
 export 'core/models/video/video_metadata_model.dart';
 export 'core/models/video/video_quality_preset.dart';
