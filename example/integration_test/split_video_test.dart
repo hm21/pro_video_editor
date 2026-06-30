@@ -49,7 +49,8 @@ void main() {
     expect(
       diff <= tolerance,
       isTrue,
-      reason: '$reason (actual: ${actual.inMilliseconds}ms, '
+      reason:
+          '$reason (actual: ${actual.inMilliseconds}ms, '
           'expected: ${expected.inMilliseconds}ms, '
           'diff: ${diff.inMilliseconds}ms)',
     );
@@ -209,8 +210,10 @@ void main() {
     );
 
     final future = pve.splitVideo(model);
-    final captured =
-        future.then<Object?>((_) => null, onError: (Object e) => e);
+    final captured = future.then<Object?>(
+      (_) => null,
+      onError: (Object e) => e,
+    );
 
     await Future<void>.delayed(const Duration(milliseconds: 50));
 
