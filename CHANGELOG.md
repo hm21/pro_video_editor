@@ -1,3 +1,6 @@
+## 2.2.1
+- **FIX**(iOS, macOS): Fix a layer sliding in from an edge briefly shifting and shrinking the video (e.g. a black bar at the top) when a custom output resolution is set. Off-frame overlay content is now clipped to the video frame before letterboxing, so the frame no longer inflates during the animation.
+
 ## 2.2.0
 - **FEAT**(android, iOS, macOS): Add `ProVideoEditor.splitVideo` — a frame-accurate split that cuts one video into two files (`SplitVideoModel`). Each half is re-encoded from the exact cut frame without the render compositor/effects, making it far faster and more stall-resistant than splitting via `renderVideoToFile`; every export is guarded by a watchdog timeout. Cancellable and progress-reporting via the task `id`. Web/Windows/Linux throw `UnimplementedError`.
 
