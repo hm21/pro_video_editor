@@ -20,13 +20,46 @@ import Foundation
 public func applyImageLayer(
   config: inout VideoCompositorConfig,
   imageLayers: [ImageLayerConfig],
-  withCropping: Bool = false
+  withCropping: Bool = false,
+  totalDurationUs: Int64 = 0
 ) {
-  config.imageLayerConfigs = imageLayers
+  let resolved = resolveOpenEndedOutAnimations(imageLayers, totalDurationUs: totalDurationUs)
+  config.imageLayerConfigs = resolved
   config.imageBytesWithCropping = withCropping
 
-  if !imageLayers.isEmpty {
+  if !resolved.isEmpty {
     PluginLog.print(
-      "[\(Tags.render)] 🖼️ Applying \(imageLayers.count) image layer(s) with timing")
+      "[\(Tags.render)] 🖼️ Applying \(resolved.count) image layer(s) with timing")
+  }
+}
+
+/// Rewrites layers that run "until the end" (`endUs == -1`) **and** carry an
+/// `animateOut`/`animateInOut` animation so their end resolves to
+/// `totalDurationUs`, giving the out-phase a concrete point to animate toward.
+///
+/// Without this the compositor treats an open-ended layer's end as `Int64.max`,
+/// so the out-phase never triggers and the layer pops off at the last frame
+/// instead of animating out. Layers without an out-phase animation — and the
+/// whole list when `totalDurationUs <= 0` — are returned unchanged, so every
+/// untouched layer keeps its exact prior behavior.
+func resolveOpenEndedOutAnimations(
+  _ layers: [ImageLayerConfig], totalDurationUs: Int64
+) -> [ImageLayerConfig] {
+  guard totalDurationUs > 0 else { return layers }
+  return layers.map { layer in
+    let hasOutPhase =
+      layer.endUs == -1
+      && layer.animations.contains {
+        $0.phase == "animateOut" || $0.phase == "animateInOut"
+      }
+    guard hasOutPhase else { return layer }
+    return ImageLayerConfig(
+      imageData: layer.imageData,
+      startUs: layer.startUs,
+      endUs: totalDurationUs,
+      x: layer.x, y: layer.y,
+      width: layer.width, height: layer.height,
+      rotation: layer.rotation, loop: layer.loop,
+      animations: layer.animations)
   }
 }

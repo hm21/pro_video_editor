@@ -53,6 +53,32 @@ fun applyImageLayer(
 }
 
 /**
+ * Rewrites layers that run "until the end" ([ImageLayerConfig.endUs] == -1)
+ * **and** carry an `animateOut`/`animateInOut` animation so their end resolves
+ * to [totalDurationUs], giving the out-phase a concrete point to animate toward.
+ *
+ * Without this, an open-ended layer's [AnimatedBitmapOverlay] treats its end as
+ * `Long.MAX_VALUE`, so the out-phase never triggers and the layer pops off at
+ * the last frame instead of animating out.
+ *
+ * Layers without an out-phase animation — and the whole list when
+ * [totalDurationUs] is not positive — are returned unchanged, so every untouched
+ * layer keeps its exact prior effect pipeline.
+ */
+internal fun resolveOpenEndedOutAnimations(
+    layers: List<VideoSequenceBuilder.ImageLayerConfig>,
+    totalDurationUs: Long,
+): List<VideoSequenceBuilder.ImageLayerConfig> {
+    if (totalDurationUs <= 0L) return layers
+    return layers.map { layer ->
+        val hasOutPhase = layer.endUs == -1L && layer.animations.any {
+            it.phase == "animateOut" || it.phase == "animateInOut"
+        }
+        if (hasOutPhase) layer.copy(endUs = totalDurationUs) else layer
+    }
+}
+
+/**
  * Applies time-based image overlays on video.
  *
  * Each image layer has a start and end time, and will only be visible during that time range.

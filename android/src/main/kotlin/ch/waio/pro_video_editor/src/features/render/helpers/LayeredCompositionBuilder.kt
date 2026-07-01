@@ -272,7 +272,14 @@ class LayeredCompositionBuilder(
         // Composition-level video effects: global color/blur first, then image
         // overlays on top, then the canvas presentation last.
         val compositionEffects = globalVideoEffects.toMutableList()
-        applyTimedImageLayers(compositionEffects, imageLayers, canvasW, canvasH)
+        // Resolve "until end" layers with an out-phase animation to the full
+        // composition length so their animateOut can play (the composition has a
+        // single global timeline, so this is unambiguous here).
+        applyTimedImageLayers(
+            compositionEffects,
+            resolveOpenEndedOutAnimations(imageLayers, globalDurationUs),
+            canvasW, canvasH
+        )
         compositionEffects += Presentation.createForWidthAndHeight(
             canvasW, canvasH, Presentation.LAYOUT_SCALE_TO_FIT
         )
