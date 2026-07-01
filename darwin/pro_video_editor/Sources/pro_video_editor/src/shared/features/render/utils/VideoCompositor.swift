@@ -653,6 +653,11 @@ class VideoCompositor: NSObject, AVVideoCompositing {
             rotated, over: outputImage, opacity: opacity, transform: animTransform)
         }
       }
+
+      // Clip overlay content that animated beyond the frame back to the frame
+      // extent so a subsequent crop and the final render operate on the exact
+      // video frame, not an extent inflated by an off-frame overlay.
+      outputImage = outputImage.cropped(to: imageRect)
     }
 
     // Cropping
@@ -768,6 +773,13 @@ class VideoCompositor: NSObject, AVVideoCompositing {
             rotated, over: outputImage, opacity: opacity, transform: animTransform)
         }
       }
+
+      // Clip any overlay content that animated beyond the frame (e.g. a layer
+      // sliding in from an edge) back to the video frame, so the composed
+      // extent stays exactly the frame size. Otherwise the inflated extent
+      // shifts and shrinks the frame in `letterbox` when a custom output
+      // resolution is set — briefly showing a black bar at the frame edge.
+      outputImage = outputImage.cropped(to: imageRect)
     }
 
     // Apply dip-to-color (fade-to-black / fade-to-white) clip transitions last,
