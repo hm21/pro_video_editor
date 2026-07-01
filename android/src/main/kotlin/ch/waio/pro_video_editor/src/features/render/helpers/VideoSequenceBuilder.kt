@@ -301,6 +301,16 @@ class VideoSequenceBuilder(
         val timelineClips = expandReversedClips(trimmedClips)
         Log.d(RENDER_TAG, "After reverse expansion: ${timelineClips.size} timeline clips")
 
+        // Resolve layers that run "until the end" (endUs == -1) with an out-phase
+        // animation to a concrete end so their animateOut can play. Only for a
+        // single-clip sequence, where "until end" == that clip's output duration
+        // is unambiguous; multi-clip sequences keep their prior behavior.
+        if (timelineClips.size == 1) {
+            timedImageLayers = resolveOpenEndedOutAnimations(
+                timedImageLayers, clipOutputDurationUs(timelineClips[0])
+            )
+        }
+
         // Prepare normalized audio effects with channel mixing if needed
         val normalizedAudioEffects = if (needsAudioNormalization) {
             Log.d(RENDER_TAG, "Adding ChannelMixingAudioProcessor to normalize audio to stereo")

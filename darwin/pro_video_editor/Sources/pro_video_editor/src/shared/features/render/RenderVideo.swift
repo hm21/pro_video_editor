@@ -239,10 +239,15 @@ class RenderVideo {
             config: &effectsConfig,
             filters: workingConfig.colorFilters)
           applyBlur(config: &effectsConfig, sigma: workingConfig.blur)
+          // Total composition length, so layers that run "until the end"
+          // (endUs == -1) with an out-phase animation get a concrete end to
+          // animate toward instead of popping off at the last frame.
+          let compositionTotalUs = Int64(CMTimeGetSeconds(composition.duration) * 1_000_000)
           applyImageLayer(
             config: &effectsConfig,
             imageLayers: workingConfig.imageLayers,
-            withCropping: workingConfig.imageBytesWithCropping)
+            withCropping: workingConfig.imageBytesWithCropping,
+            totalDurationUs: compositionTotalUs)
 
           var finalRenderSize = videoCompConfig.renderSize
 

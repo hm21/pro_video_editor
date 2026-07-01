@@ -24,9 +24,23 @@ import Foundation
 /// caller can fall back to a hard cut.
 internal enum ClipTransitionRenderer {
 
-  /// Number of piecewise steps used to approximate an easing curve in the
-  /// linear AVFoundation ramps.
-  private static let easingSteps = 30
+  /// Lower bound on the piecewise steps used to approximate an easing curve in
+  /// the linear AVFoundation ramps.
+  private static let minEasingSteps = 30
+
+  /// Upper bound on easing steps, to cap the instruction count on long/high-fps
+  /// transitions.
+  private static let maxEasingSteps = 240
+
+  /// Piecewise easing-step count for a transition of `durationUs` sampled at
+  /// `fps`: roughly one linear segment per output frame, clamped to
+  /// `[minEasingSteps, maxEasingSteps]`. With one segment per frame the linear
+  /// ramps track the easing curve closely, so `slide`/`push` no longer show
+  /// velocity kinks between the old fixed 30 segments.
+  private static func easingStepCount(durationUs: Int64, fps: Int) -> Int {
+    let frames = Int((Double(durationUs) / 1_000_000.0 * Double(fps)).rounded())
+    return min(maxEasingSteps, max(minEasingSteps, frames))
+  }
 
   struct RenderResult {
     let outputURL: URL
@@ -99,6 +113,16 @@ internal enum ClipTransitionRenderer {
       let displayA = naturalA.applying(transformA)
       let renderSize = CGSize(width: abs(displayA.width), height: abs(displayA.height))
 
+      // Author the transition at the same cadence the main composition uses
+      // (max(30, source fps); see LayeredCompositionBuilder). Deriving it from
+      // only the outgoing clip's fps left the pre-rendered transition below the
+      // composition's frame rate (e.g. 25 vs 30 fps), so it was re-timed on
+      // insertion and stuttered at the two seams.
+      let outFps = try await loadFrameRate(outVideo)
+      let inFps = try await loadFrameRate(inVideo)
+      let targetFps = max(30, Int(max(outFps, inFps).rounded()))
+      let steps = easingStepCount(durationUs: dUs, fps: targetFps)
+
       // Optional cross-faded audio.
       var audioMix: AVMutableAudioMix?
       if includeAudio {
@@ -119,7 +143,7 @@ internal enum ClipTransitionRenderer {
         type: type, direction: direction, curve: curve,
         layerA: layerA, layerB: layerB,
         transformA: transformA, transformB: transformB,
-        renderSize: renderSize, naturalB: naturalB, duration: d)
+        renderSize: renderSize, naturalB: naturalB, duration: d, steps: steps)
 
       let instruction = AVMutableVideoCompositionInstruction()
       instruction.timeRange = CMTimeRange(start: .zero, duration: d)
@@ -129,9 +153,7 @@ internal enum ClipTransitionRenderer {
 
       let videoComposition = AVMutableVideoComposition()
       videoComposition.renderSize = renderSize
-      let fps = try await loadFrameRate(outVideo)
-      videoComposition.frameDuration = CMTime(
-        value: 1, timescale: CMTimeScale(max(1, Int(fps.rounded()))))
+      videoComposition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(targetFps))
       videoComposition.instructions = [instruction]
 
       // Export.
@@ -182,9 +204,8 @@ internal enum ClipTransitionRenderer {
     layerA: AVMutableVideoCompositionLayerInstruction,
     layerB: AVMutableVideoCompositionLayerInstruction,
     transformA: CGAffineTransform, transformB: CGAffineTransform,
-    renderSize: CGSize, naturalB: CGSize, duration d: CMTime
+    renderSize: CGSize, naturalB: CGSize, duration d: CMTime, steps: Int
   ) {
-    let steps = easingSteps
     for k in 0..<steps {
       let f0 = Double(k) / Double(steps)
       let f1 = Double(k + 1) / Double(steps)

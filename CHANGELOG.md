@@ -1,3 +1,7 @@
+## 2.2.2
+- **FIX**(android, iOS, macOS): Layer `animateOut` / `animateInOut` animations now play for layers that run until the end of the video (`endTime` unset). An open-ended layer's end previously resolved to "infinity", so the out-phase never triggered and the layer popped off at the last frame; it now resolves to the composition length, so the layer animates out. Only layers carrying an out-phase animation are affected.
+- **FIX**(iOS, macOS): Smoother clip transitions. The pre-rendered transition clip is now authored at the composition's frame rate (`max(30, source fps)`) instead of only the outgoing clip's, so a 25 fps source no longer stutters at the transition seams; directional `slide` / `push` transitions also use one easing ramp per output frame, removing velocity kinks with `bounce` / `elastic` curves.
+
 ## 2.2.1
 - **FIX**(iOS, macOS): Fix a layer sliding in from an edge briefly shifting and shrinking the video (e.g. a black bar at the top) when a custom output resolution is set. Off-frame overlay content is now clipped to the video frame before letterboxing, so the frame no longer inflates during the animation.
 
