@@ -48,56 +48,72 @@ void main() {
     }
   }
 
-  testWidgets('timeline benchmark 4k60 h264 32s', (tester) async {
-    await runBenchmark(
-      label: '4k60-32s',
-      video: EditorVideo.asset('assets/tests/test_4k_a.mp4'),
-      count: 20,
-    );
-  }, timeout: const Timeout(Duration(minutes: 15)));
+  testWidgets(
+    'timeline benchmark 4k60 h264 32s',
+    (tester) async {
+      await runBenchmark(
+        label: '4k60-32s',
+        video: EditorVideo.asset('assets/tests/test_4k_a.mp4'),
+        count: 20,
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 15)),
+  );
 
-  testWidgets('example page scenario h264 8 thumbs', (tester) async {
-    final video = EditorVideo.asset(kVideoEditorExampleH264Path);
-    final meta = await ProVideoEditor.instance.getMetadata(video);
-    final timestamps = List.generate(
-      8,
-      (i) => Duration(
-        milliseconds: (meta.duration.inMilliseconds / 8 * i).toInt(),
-      ),
-    );
-
-    for (var run = 1; run <= 2; run++) {
-      final sw = Stopwatch()..start();
-      final thumbs = await ProVideoEditor.instance.getThumbnails(
-        ThumbnailConfigs(
-          video: video,
-          outputFormat: ThumbnailFormat.jpeg,
-          timestamps: timestamps,
-          outputSize: const Size(170, 170),
-          boxFit: ThumbnailBoxFit.cover,
+  testWidgets(
+    'example page scenario h264 8 thumbs',
+    (tester) async {
+      final video = EditorVideo.asset(kVideoEditorExampleH264Path);
+      final meta = await ProVideoEditor.instance.getMetadata(video);
+      final timestamps = List.generate(
+        8,
+        (i) => Duration(
+          milliseconds: (meta.duration.inMilliseconds / 8 * i).toInt(),
         ),
       );
-      sw.stop();
-      debugPrint(
-        'BENCH[example-8] run$run: ${sw.elapsedMilliseconds} ms '
-        'for ${thumbs.length}/8 thumbnails',
+
+      for (var run = 1; run <= 2; run++) {
+        final sw = Stopwatch()..start();
+        final thumbs = await ProVideoEditor.instance.getThumbnails(
+          ThumbnailConfigs(
+            video: video,
+            outputFormat: ThumbnailFormat.jpeg,
+            timestamps: timestamps,
+            outputSize: const Size(170, 170),
+            boxFit: ThumbnailBoxFit.cover,
+          ),
+        );
+        sw.stop();
+        debugPrint(
+          'BENCH[example-8] run$run: ${sw.elapsedMilliseconds} ms '
+          'for ${thumbs.length}/8 thumbnails',
+        );
+      }
+    },
+    timeout: const Timeout(Duration(minutes: 15)),
+  );
+
+  testWidgets(
+    'timeline benchmark h264 720p 29s',
+    (tester) async {
+      await runBenchmark(
+        label: 'h264-720p-29s',
+        video: EditorVideo.asset(kVideoEditorExampleH264Path),
+        count: 20,
       );
-    }
-  }, timeout: const Timeout(Duration(minutes: 15)));
+    },
+    timeout: const Timeout(Duration(minutes: 15)),
+  );
 
-  testWidgets('timeline benchmark h264 720p 29s', (tester) async {
-    await runBenchmark(
-      label: 'h264-720p-29s',
-      video: EditorVideo.asset(kVideoEditorExampleH264Path),
-      count: 20,
-    );
-  }, timeout: const Timeout(Duration(minutes: 15)));
-
-  testWidgets('timeline benchmark hevc10bit 1080p 5s', (tester) async {
-    await runBenchmark(
-      label: 'hevc-1080p-5s',
-      video: EditorVideo.asset(kVideoEditorExampleHevcPath),
-      count: 10,
-    );
-  }, timeout: const Timeout(Duration(minutes: 15)));
+  testWidgets(
+    'timeline benchmark hevc10bit 1080p 5s',
+    (tester) async {
+      await runBenchmark(
+        label: 'hevc-1080p-5s',
+        video: EditorVideo.asset(kVideoEditorExampleHevcPath),
+        count: 10,
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 15)),
+  );
 }
