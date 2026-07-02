@@ -20,6 +20,11 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
   MemoryImage? _firstThumbnail;
   MemoryImage? _lastThumbnail;
 
+  Duration? _thumbnailsTime;
+  Duration? _keyFramesTime;
+  Duration? _firstThumbnailTime;
+  Duration? _lastThumbnailTime;
+
   final int _exampleImageCount = 8;
   final double _imageSize = 50;
   final ThumbnailFormat _thumbnailFormat = ThumbnailFormat.jpeg;
@@ -40,6 +45,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
 
     if (_informations == null) await _setMetadata();
 
+    var stopwatch = Stopwatch()..start();
     var raw = await ProVideoEditor.instance.getThumbnails(
       ThumbnailConfigs(
         id: _thumbnailTaskId,
@@ -59,6 +65,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
         boxFit: ThumbnailBoxFit.cover,
       ),
     );
+    _thumbnailsTime = stopwatch.elapsed;
 
     _thumbnails = raw.map(MemoryImage.new).toList();
     setState(() {});
@@ -67,6 +74,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
   void _generateKeyFrames() async {
     var outputSize = _imageSize * MediaQuery.devicePixelRatioOf(context);
 
+    var stopwatch = Stopwatch()..start();
     var raw = await ProVideoEditor.instance.getKeyFrames(
       KeyFramesConfigs(
         id: _keyFramesTaskId,
@@ -77,6 +85,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
         boxFit: ThumbnailBoxFit.cover,
       ),
     );
+    _keyFramesTime = stopwatch.elapsed;
 
     _keyFrames = raw.map(MemoryImage.new).toList();
     setState(() {});
@@ -85,6 +94,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
   void _generateFirstThumbnail() async {
     var outputSize = _imageSize * MediaQuery.devicePixelRatioOf(context);
 
+    var stopwatch = Stopwatch()..start();
     var raw = await ProVideoEditor.instance.getSingleThumbnail(
       SingleThumbnailConfigs(
         video: EditorVideo.asset(kVideoEditorExampleH264Path),
@@ -96,6 +106,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
     );
 
     if (raw != null) {
+      _firstThumbnailTime = stopwatch.elapsed;
       _firstThumbnail = MemoryImage(raw);
       setState(() {});
     }
@@ -106,6 +117,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
 
     if (_informations == null) await _setMetadata();
 
+    var stopwatch = Stopwatch()..start();
     var raw = await ProVideoEditor.instance.getSingleThumbnail(
       SingleThumbnailConfigs(
         video: EditorVideo.asset(kVideoEditorExampleH264Path),
@@ -119,6 +131,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
     );
 
     if (raw != null) {
+      _lastThumbnailTime = stopwatch.elapsed;
       _lastThumbnail = MemoryImage(raw);
       setState(() {});
     }
@@ -134,6 +147,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
             onTap: _generateThumbnails,
             leading: const Icon(Icons.image_outlined),
             title: const Text('Generate Thumbnails'),
+            subtitle: _buildExtractionTime(_thumbnailsTime),
             trailing: _buildProgress(_thumbnailTaskId),
           ),
           _buildThumbnails(_thumbnails),
@@ -141,6 +155,7 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
             onTap: _generateKeyFrames,
             leading: const Icon(Icons.animation_rounded),
             title: const Text('Generate Keyframes'),
+            subtitle: _buildExtractionTime(_keyFramesTime),
             trailing: _buildProgress(_keyFramesTaskId),
           ),
           _buildThumbnails(_keyFrames),
@@ -148,17 +163,24 @@ class _ThumbnailExamplePageState extends State<ThumbnailExamplePage> {
             onTap: _generateFirstThumbnail,
             leading: const Icon(Icons.first_page_rounded),
             title: const Text('First Frame'),
+            subtitle: _buildExtractionTime(_firstThumbnailTime),
           ),
           if (_firstThumbnail != null) _buildSingleThumbnail(_firstThumbnail!),
           ListTile(
             onTap: _generateLastThumbnail,
             leading: const Icon(Icons.last_page_rounded),
             title: const Text('Last Frame'),
+            subtitle: _buildExtractionTime(_lastThumbnailTime),
           ),
           if (_lastThumbnail != null) _buildSingleThumbnail(_lastThumbnail!),
         ],
       ),
     );
+  }
+
+  Widget? _buildExtractionTime(Duration? time) {
+    if (time == null) return null;
+    return Text('Extracted in ${time.inMilliseconds} ms');
   }
 
   Widget _buildThumbnails(List<MemoryImage> data) {
