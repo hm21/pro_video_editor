@@ -55,6 +55,7 @@ android {
         def media3_version = "1.10.1"
         implementation "androidx.media3:media3-common:$media3_version"
         implementation("androidx.media3:media3-transformer:$media3_version")
+        implementation("androidx.media3:media3-inspector-frame:$media3_version")
         implementation("androidx.media3:media3-effect:$media3_version")
         implementation("androidx.media3:media3-muxer:$media3_version")
         

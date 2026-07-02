@@ -6,6 +6,10 @@ import android.graphics.Bitmap
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
+import android.net.Uri
+import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.inspector.frame.FrameExtractor
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import kotlinx.coroutines.CoroutineScope
@@ -13,10 +17,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import androidx.core.graphics.scale
 
@@ -30,21 +36,27 @@ import androidx.core.graphics.scale
  *
  * All operations are performed asynchronously with progress reporting.
  */
+@UnstableApi
 class ThumbnailGenerator(private val context: Context) {
 
     // Create a dedicated coroutine scope for this service
     // SupervisorJob ensures that failures don't cancel sibling coroutines
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    private companion object {
+        /** Upper bound of concurrent hardware decoder sessions. */
+        const val MAX_PARALLEL_DECODERS = 3
+    }
+
     /**
      * Asynchronously generates thumbnails from a video file.
      *
      * This method determines the extraction mode based on the configuration:
      * - If timestampsUs is provided, extracts frames at specified timestamps
+     *   with a single reused hardware decoder session
      * - If maxOutputFrames is provided, extracts evenly distributed keyframes
+     *   in parallel
      * - Returns empty list if neither is specified
-     *
-     * All thumbnails are generated in parallel for optimal performance.
      *
      * @param config Configuration specifying extraction mode, dimensions, and format
      * @param onProgress Callback invoked with progress updates (0.0 to 1.0)
@@ -98,9 +110,13 @@ class ThumbnailGenerator(private val context: Context) {
     /**
      * Extracts frames from video at specific timestamp positions.
      *
-     * This method uses MediaMetadataRetriever with OPTION_CLOSEST to find the nearest
-     * frame to each specified timestamp. All frames are processed in parallel using
-     * coroutines for maximum throughput.
+     * Tries the fastest strategy first and falls back on failure:
+     * 1. [extractFramesSinglePass]: one hardware decoder decodes forward
+     *    through the stream once, collecting all requested frames (API 29+).
+     * 2. [extractFramesWithFrameExtractor]: Media3 FrameExtractor with one
+     *    reused hardware decoder session, one exact seek per frame. Also
+     *    covers HDR input via GL tone-mapping.
+     * 3. [getThumbnailsFromTimestampsLegacy]: MediaMetadataRetriever.
      *
      * @param inputPath Absolute path to the video file
      * @param outputFormat Image format (jpeg, png, webp)
@@ -112,6 +128,185 @@ class ThumbnailGenerator(private val context: Context) {
      * @return List of compressed image bytes, one per successful extraction
      */
     private suspend fun getThumbnailsFromTimestamps(
+        inputPath: String,
+        outputFormat: String,
+        jpegQuality: Int,
+        boxFit: String,
+        outputWidth: Int,
+        outputHeight: Int,
+        timestampsUs: List<Long>,
+        onProgress: (Double) -> Unit,
+    ): List<ByteArray> = withContext(Dispatchers.IO) {
+        try {
+            return@withContext extractFramesSinglePass(
+                inputPath, outputFormat, jpegQuality, boxFit,
+                outputWidth, outputHeight, timestampsUs, onProgress
+            )
+        } catch (e: Exception) {
+            Log.w(
+                THUMBNAIL_TAG,
+                "Single-pass decoder failed (${e.message}), trying FrameExtractor"
+            )
+        }
+        try {
+            extractFramesWithFrameExtractor(
+                inputPath, outputFormat, jpegQuality, boxFit,
+                outputWidth, outputHeight, timestampsUs, onProgress
+            )
+        } catch (e: Exception) {
+            Log.w(
+                THUMBNAIL_TAG,
+                "FrameExtractor failed (${e.message}), falling back to MediaMetadataRetriever"
+            )
+            getThumbnailsFromTimestampsLegacy(
+                inputPath, outputFormat, jpegQuality, boxFit,
+                outputWidth, outputHeight, timestampsUs, onProgress
+            )
+        }
+    }
+
+    /**
+     * Extracts all [timestampsUs] in forward decode passes with hardware
+     * decoders via [SequentialFrameDecoder].
+     *
+     * The time-sorted timestamps are split into up to [MAX_PARALLEL_DECODERS]
+     * contiguous chunks, each decoded by its own hardware session in
+     * parallel: contiguous ranges keep every session decoding forward
+     * without GOP re-decodes, while parallel sessions overlap decode work
+     * (important for dense 60 fps / 4K sources). The decoder delivers
+     * bitmaps already at the final thumbnail size, so no CPU resize is
+     * needed here.
+     *
+     * @throws Exception when the video cannot be decoded this way, so the
+     *   caller can fall back to another strategy.
+     */
+    private suspend fun extractFramesSinglePass(
+        inputPath: String,
+        outputFormat: String,
+        jpegQuality: Int,
+        boxFit: String,
+        outputWidth: Int,
+        outputHeight: Int,
+        timestampsUs: List<Long>,
+        onProgress: (Double) -> Unit,
+    ): List<ByteArray> = coroutineScope {
+        val thumbnails = MutableList<ByteArray?>(timestampsUs.size) { null }
+        val completed = AtomicInteger(0)
+
+        val chunkCount = minOf(MAX_PARALLEL_DECODERS, maxOf(1, (timestampsUs.size + 2) / 3))
+        val sortedIndices = timestampsUs.indices.sortedBy { timestampsUs[it] }
+        val chunks = List(chunkCount) { chunk ->
+            sortedIndices.subList(
+                chunk * sortedIndices.size / chunkCount,
+                (chunk + 1) * sortedIndices.size / chunkCount
+            )
+        }.filter { it.isNotEmpty() }
+
+        val jobs = chunks.map { chunkIndices ->
+            async(Dispatchers.IO) {
+                val chunkTimestamps = chunkIndices.map { timestampsUs[it] }
+                SequentialFrameDecoder(inputPath).decode(
+                    chunkTimestamps, outputWidth, outputHeight, boxFit
+                ) { localIndices, bitmap ->
+                    try {
+                        val bytes = compressBitmap(bitmap, outputFormat, jpegQuality)
+                        localIndices.forEach { thumbnails[chunkIndices[it]] = bytes }
+                        Log.d(
+                            THUMBNAIL_TAG,
+                            "✅ ${localIndices.map { chunkIndices[it] }} " +
+                                    "Generated (${bytes.size} bytes)"
+                        )
+                    } finally {
+                        bitmap.recycle()
+                    }
+                    val done = completed.addAndGet(localIndices.size)
+                    onProgress(done.toDouble() / timestampsUs.size)
+                }
+            }
+        }
+        jobs.awaitAll()
+
+        check(thumbnails.any { it != null } || timestampsUs.isEmpty()) {
+            "No frames could be decoded"
+        }
+        thumbnails.filterNotNull()
+    }
+
+    /**
+     * Extraction of all [timestampsUs] with Media3's [FrameExtractor]: one
+     * reused hardware decoder session, one exact seek per frame. Timestamps
+     * are processed in ascending order while results keep the order of
+     * [timestampsUs].
+     *
+     * @throws Exception when no frame could be extracted at all, so the
+     *   caller can retry with the legacy path.
+     */
+    private fun extractFramesWithFrameExtractor(
+        inputPath: String,
+        outputFormat: String,
+        jpegQuality: Int,
+        boxFit: String,
+        outputWidth: Int,
+        outputHeight: Int,
+        timestampsUs: List<Long>,
+        onProgress: (Double) -> Unit,
+    ): List<ByteArray> {
+        val mediaItem = MediaItem.fromUri(Uri.fromFile(File(inputPath)))
+        val thumbnails = MutableList<ByteArray?>(timestampsUs.size) { null }
+        val sortedIndices = timestampsUs.indices.sortedBy { timestampsUs[it] }
+
+        val extractor = FrameExtractor.Builder(context, mediaItem).build()
+        try {
+            var failures = 0
+            sortedIndices.forEachIndexed { completed, index ->
+                val timeUs = timestampsUs[index]
+                val startTime = System.currentTimeMillis()
+                try {
+                    val frame = extractor
+                        .getFrame((timeUs + 500) / 1000)
+                        .get(30, TimeUnit.SECONDS)
+                    val bitmap = frame.bitmap
+                    val resized =
+                        resizeBitmapKeepingAspect(bitmap, outputWidth, outputHeight, boxFit)
+                    try {
+                        val bytes = compressBitmap(resized, outputFormat, jpegQuality)
+                        thumbnails[index] = bytes
+                        val duration = System.currentTimeMillis() - startTime
+                        Log.d(
+                            THUMBNAIL_TAG,
+                            "✅ [$index]  Generated in $duration ms (${bytes.size} bytes)"
+                        )
+                    } finally {
+                        if (resized !== bitmap) bitmap.recycle()
+                        resized.recycle()
+                    }
+                } catch (e: Exception) {
+                    failures++
+                    Log.w(
+                        THUMBNAIL_TAG,
+                        "[$index] ❌ Frame failed at ${timeUs / 1000} ms: ${e.message}"
+                    )
+                }
+                onProgress((completed + 1).toDouble() / timestampsUs.size)
+            }
+            if (failures == timestampsUs.size && timestampsUs.isNotEmpty()) {
+                throw IllegalStateException("All ${timestampsUs.size} frames failed to extract")
+            }
+        } finally {
+            extractor.close()
+        }
+        return thumbnails.filterNotNull()
+    }
+
+    /**
+     * Legacy timestamp extraction via MediaMetadataRetriever.
+     *
+     * Uses OPTION_CLOSEST to find the nearest frame to each timestamp, one
+     * retriever per frame in parallel. Slower than [extractFramesSinglePass]
+     * (software decoding, no decoder reuse) but kept as a fallback for videos
+     * the Media3 pipeline cannot handle.
+     */
+    private suspend fun getThumbnailsFromTimestampsLegacy(
         inputPath: String,
         outputFormat: String,
         jpegQuality: Int,
