@@ -15,6 +15,7 @@ import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Process
 import android.view.Surface
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -40,6 +41,53 @@ import java.util.TreeSet
 class SequentialFrameDecoder(private val inputPath: String) {
 
     /**
+     * Decode-free scan of the video track: sample and sync timestamps plus
+     * the track properties needed to configure a decoder. Callers that run
+     * several decoders over the same file should scan once and share the
+     * result.
+     */
+    class MediaScan(
+        val trackIndex: Int,
+        val mime: String,
+        val width: Int,
+        val height: Int,
+        val rotation: Int,
+        val samplePts: LongArray,
+        val syncPts: TreeSet<Long>,
+    ) {
+        /** Returns the sample timestamp closest to [timeUs] (OPTION_CLOSEST). */
+        fun closestPts(timeUs: Long): Long {
+            var index = samplePts.binarySearch(timeUs)
+            if (index >= 0) return samplePts[index]
+            index = -index - 1
+            val after = samplePts.getOrNull(index)
+            val before = samplePts.getOrNull(index - 1)
+            return when {
+                before == null -> after!!
+                after == null -> before
+                after - timeUs < timeUs - before -> after
+                else -> before
+            }
+        }
+
+        /** The sync sample at or before [pts] (start of its GOP). */
+        fun syncBefore(pts: Long): Long = syncPts.floor(pts) ?: samplePts.first()
+
+        /** Number of frames a decoder processes to run from [fromPts] to [toPts]. */
+        fun frameCount(fromPts: Long, toPts: Long): Int {
+            val from = samplePts.binarySearch(fromPts).let { if (it < 0) -it - 1 else it }
+            val to = samplePts.binarySearch(toPts).let { if (it < 0) -it - 2 else it }
+            return (to - from + 1).coerceAtLeast(0)
+        }
+
+        private fun LongArray.getOrNull(index: Int): Long? =
+            if (index in indices) this[index] else null
+
+        private fun LongArray.binarySearch(value: Long): Int =
+            java.util.Arrays.binarySearch(this, value)
+    }
+
+    /**
      * Decodes the frames closest to [timestampsUs].
      *
      * Frames are rendered by the GPU directly at the aspect-preserving
@@ -61,54 +109,39 @@ class SequentialFrameDecoder(private val inputPath: String) {
         outputWidth: Int,
         outputHeight: Int,
         boxFit: String,
+        scan: MediaScan = scan(inputPath),
         onFrame: (indices: List<Int>, bitmap: Bitmap) -> Unit,
     ) {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         var frameReader: GlFrameReader? = null
 
+        // This thread pumps the codec: if it starves, the hardware decoder
+        // idles. Raise it to display priority for the duration of the
+        // extraction so touch-boosted UI rendering (e.g. 120 Hz progress
+        // animations) cannot stall it; restored in the finally block since
+        // dispatcher threads are pooled.
+        val previousPriority = Process.getThreadPriority(Process.myTid())
+        Process.setThreadPriority(Process.THREAD_PRIORITY_DISPLAY)
+
         try {
             extractor.setDataSource(inputPath)
-            val trackIndex = (0 until extractor.trackCount).first {
-                extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)
-                    ?.startsWith("video/") == true
-            }
+            val trackIndex = scan.trackIndex
             extractor.selectTrack(trackIndex)
             val format = extractor.getTrackFormat(trackIndex)
-            val mime = format.getString(MediaFormat.KEY_MIME)!!
-            val width = format.getInteger(MediaFormat.KEY_WIDTH)
-            val height = format.getInteger(MediaFormat.KEY_HEIGHT)
-            val rotation = if (format.containsKey(MediaFormat.KEY_ROTATION)) {
-                format.getInteger(MediaFormat.KEY_ROTATION)
-            } else {
-                0
-            }
+            val mime = scan.mime
+            val width = scan.width
+            val height = scan.height
+            val rotation = scan.rotation
             // Rotation is applied to the bitmap below; the decoder must
             // deliver unrotated frames so the GL surface dimensions match.
             if (rotation != 0) format.setInteger(MediaFormat.KEY_ROTATION, 0)
-
-            // Scan all sample timestamps without decoding to resolve each
-            // requested timestamp to the closest real frame, and remember
-            // sync samples for GOP skip-ahead.
-            val samplePts = ArrayList<Long>(1024)
-            val syncPts = TreeSet<Long>()
-            while (true) {
-                val time = extractor.sampleTime
-                if (time >= 0) {
-                    samplePts.add(time)
-                    if (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
-                        syncPts.add(time)
-                    }
-                }
-                if (!extractor.advance()) break
-            }
-            check(samplePts.isNotEmpty()) { "No video samples found" }
-            samplePts.sort()
+            val syncPts = scan.syncPts
 
             // pts -> indices of requested timestamps resolving to that frame
             val targets = HashMap<Long, MutableList<Int>>()
             timestampsUs.forEachIndexed { index, timeUs ->
-                targets.getOrPut(closestPts(samplePts, timeUs)) { mutableListOf() }.add(index)
+                targets.getOrPut(scan.closestPts(timeUs)) { mutableListOf() }.add(index)
             }
             val pendingPts = TreeSet(targets.keys)
 
@@ -131,72 +164,124 @@ class SequentialFrameDecoder(private val inputPath: String) {
 
             frameReader = GlFrameReader(renderWidth, renderHeight)
             codec = MediaCodec.createDecoderByType(mime)
-            codec.configure(format, frameReader.surface, null, 0)
+            try {
+                // Batch mode: without these hints the decoder runs as a
+                // realtime session, and its hardware block is clocked down
+                // to roughly content speed whenever the system is busy
+                // (e.g. touch-boosted UI rendering) — about 3x slower on a
+                // Galaxy S26. Best-effort priority plus a maxed operating
+                // rate tells the HAL to clock for throughput instead.
+                format.setInteger(MediaFormat.KEY_PRIORITY, 1)
+                format.setInteger(MediaFormat.KEY_OPERATING_RATE, Short.MAX_VALUE.toInt())
+                codec.configure(format, frameReader.surface, null, 0)
+            } catch (e: Exception) {
+                // Some decoders reject operating-rate hints; retry without.
+                codec.release()
+                val plainFormat = extractor.getTrackFormat(trackIndex)
+                if (rotation != 0) plainFormat.setInteger(MediaFormat.KEY_ROTATION, 0)
+                codec = MediaCodec.createDecoderByType(mime)
+                codec.configure(plainFormat, frameReader.surface, null, 0)
+            }
             codec.start()
 
             extractor.seekTo(pendingPts.first(), MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
 
+            val activeCodec = codec!!
+            val reader = frameReader!!
             val bufferInfo = MediaCodec.BufferInfo()
             var inputDone = false
+            var outputDone = false
             var lastProgressAt = System.currentTimeMillis()
 
-            while (pendingPts.isNotEmpty()) {
-                if (!inputDone) {
-                    val inIndex = codec.dequeueInputBuffer(DEQUEUE_TIMEOUT_US)
-                    if (inIndex >= 0) {
-                        val buffer = codec.getInputBuffer(inIndex)!!
-                        val size = extractor.readSampleData(buffer, 0)
-                        if (size < 0) {
-                            codec.queueInputBuffer(
-                                inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM
-                            )
-                            inputDone = true
-                        } else {
-                            codec.queueInputBuffer(inIndex, 0, size, extractor.sampleTime, 0)
-                            extractor.advance()
+            /**
+             * Handles one decoded output buffer. Returns true when the codec
+             * was flushed for a skip-ahead seek (queued buffer indices are
+             * invalid afterwards).
+             */
+            fun handleOutput(outIndex: Int): Boolean {
+                lastProgressAt = System.currentTimeMillis()
+                val pts = bufferInfo.presentationTimeUs
+                // Claim the exact target plus any pending target the decoder
+                // skipped past (e.g. frames dropped after an open-GOP seek);
+                // for those this frame is the closest one still producible.
+                val claimed = mutableListOf<Long>()
+                if (bufferInfo.size > 0) {
+                    if (pendingPts.remove(pts)) claimed.add(pts)
+                    val missed = pendingPts.headSet(pts).toList()
+                    if (missed.isNotEmpty()) {
+                        pendingPts.removeAll(missed.toSet())
+                        claimed.addAll(missed)
+                    }
+                }
+                val isTarget = claimed.isNotEmpty()
+                activeCodec.releaseOutputBuffer(outIndex, isTarget)
+                if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                    outputDone = true
+                }
+                if (isTarget) {
+                    val bitmap = reader.readFrame(rotation)
+                    onFrame(claimed.flatMap { targets.getValue(it) }, bitmap)
+
+                    // Skip ahead when the next target's GOP starts well
+                    // after the current position. For small gaps decoding
+                    // through is cheaper than a codec flush.
+                    val next = pendingPts.firstOrNull()
+                    if (next != null) {
+                        val nextSync = syncPts.floor(next)
+                        if (nextSync != null && nextSync - pts > MIN_SKIP_AHEAD_US) {
+                            extractor.seekTo(next, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                            activeCodec.flush()
+                            inputDone = false
+                            return true
                         }
                     }
                 }
+                return false
+            }
 
-                val outIndex = codec.dequeueOutputBuffer(bufferInfo, DEQUEUE_TIMEOUT_US)
-                if (outIndex >= 0) {
-                    lastProgressAt = System.currentTimeMillis()
-                    val pts = bufferInfo.presentationTimeUs
-                    // Claim the exact target plus any pending target the
-                    // decoder skipped past (e.g. frames dropped after an
-                    // open-GOP seek); for those this frame is the closest
-                    // one that can still be produced.
-                    val claimed = mutableListOf<Long>()
-                    if (bufferInfo.size > 0) {
-                        if (pendingPts.remove(pts)) claimed.add(pts)
-                        val missed = pendingPts.headSet(pts).toList()
-                        if (missed.isNotEmpty()) {
-                            pendingPts.removeAll(missed.toSet())
-                            claimed.addAll(missed)
-                        }
-                    }
-                    val isTarget = claimed.isNotEmpty()
-                    codec.releaseOutputBuffer(outIndex, isTarget)
-                    if (isTarget) {
-                        val bitmap = frameReader.readFrame(rotation)
-                        onFrame(claimed.flatMap { targets.getValue(it) }, bitmap)
+            /** Feeds one input buffer without blocking; false when none free. */
+            fun feedOneInput(): Boolean {
+                if (inputDone) return false
+                val inIndex = activeCodec.dequeueInputBuffer(0L)
+                if (inIndex < 0) return false
+                val buffer = activeCodec.getInputBuffer(inIndex)!!
+                val size = extractor.readSampleData(buffer, 0)
+                if (size < 0) {
+                    activeCodec.queueInputBuffer(
+                        inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                    )
+                    inputDone = true
+                } else {
+                    activeCodec.queueInputBuffer(inIndex, 0, size, extractor.sampleTime, 0)
+                    extractor.advance()
+                }
+                return true
+            }
 
-                        // Skip ahead when the next target's GOP starts well
-                        // after the current position. For small gaps decoding
-                        // through is cheaper than a codec flush.
-                        val next = pendingPts.firstOrNull()
-                        if (next != null) {
-                            val nextSync = syncPts.floor(next)
-                            if (nextSync != null && nextSync - pts > MIN_SKIP_AHEAD_US) {
-                                extractor.seekTo(next, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-                                codec.flush()
-                                inputDone = false
-                            }
-                        }
+            // Greedy pump: always drain ready outputs first and feed inputs
+            // without blocking, so a full input queue can never delay output
+            // handling. Only when neither side made progress block briefly on
+            // the output side.
+            while (pendingPts.isNotEmpty() && !outputDone) {
+                var progressed = false
+                while (true) {
+                    val outIndex = activeCodec.dequeueOutputBuffer(bufferInfo, 0L)
+                    if (outIndex < 0) break
+                    progressed = true
+                    val flushed = handleOutput(outIndex)
+                    if (flushed || outputDone || pendingPts.isEmpty()) break
+                }
+                if (pendingPts.isEmpty() || outputDone) break
+                while (feedOneInput()) progressed = true
+                if (!progressed) {
+                    val outIndex = activeCodec.dequeueOutputBuffer(bufferInfo, DEQUEUE_TIMEOUT_US)
+                    if (outIndex >= 0) {
+                        handleOutput(outIndex)
+                    } else if (System.currentTimeMillis() - lastProgressAt > STALL_TIMEOUT_MS) {
+                        throw IllegalStateException(
+                            "Decoder stalled, ${pendingPts.size} frames left"
+                        )
                     }
-                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
-                } else if (System.currentTimeMillis() - lastProgressAt > STALL_TIMEOUT_MS) {
-                    throw IllegalStateException("Decoder stalled, ${pendingPts.size} frames left")
                 }
             }
 
@@ -209,27 +294,62 @@ class SequentialFrameDecoder(private val inputPath: String) {
             codec?.release()
             frameReader?.release()
             extractor.release()
+            Process.setThreadPriority(previousPriority)
         }
     }
 
-    /** Returns the sample timestamp closest to [timeUs] (OPTION_CLOSEST). */
-    private fun closestPts(sortedPts: List<Long>, timeUs: Long): Long {
-        var index = sortedPts.binarySearch(timeUs)
-        if (index >= 0) return sortedPts[index]
-        index = -index - 1
-        val after = sortedPts.getOrNull(index)
-        val before = sortedPts.getOrNull(index - 1)
-        return when {
-            before == null -> after!!
-            after == null -> before
-            after - timeUs < timeUs - before -> after
-            else -> before
-        }
-    }
+    companion object {
+        /**
+         * Scans the video track of [inputPath] without decoding: collects
+         * every sample timestamp plus the sync (keyframe) timestamps and the
+         * track properties needed to configure a decoder.
+         */
+        fun scan(inputPath: String): MediaScan {
+            val extractor = MediaExtractor()
+            try {
+                extractor.setDataSource(inputPath)
+                val trackIndex = (0 until extractor.trackCount).first {
+                    extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)
+                        ?.startsWith("video/") == true
+                }
+                extractor.selectTrack(trackIndex)
+                val format = extractor.getTrackFormat(trackIndex)
 
-    private companion object {
-        const val DEQUEUE_TIMEOUT_US = 10_000L
-        const val STALL_TIMEOUT_MS = 10_000L
+                val samplePts = ArrayList<Long>(1024)
+                val syncPts = TreeSet<Long>()
+                while (true) {
+                    val time = extractor.sampleTime
+                    if (time >= 0) {
+                        samplePts.add(time)
+                        if (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
+                            syncPts.add(time)
+                        }
+                    }
+                    if (!extractor.advance()) break
+                }
+                check(samplePts.isNotEmpty()) { "No video samples found" }
+                samplePts.sort()
+
+                return MediaScan(
+                    trackIndex = trackIndex,
+                    mime = format.getString(MediaFormat.KEY_MIME)!!,
+                    width = format.getInteger(MediaFormat.KEY_WIDTH),
+                    height = format.getInteger(MediaFormat.KEY_HEIGHT),
+                    rotation = if (format.containsKey(MediaFormat.KEY_ROTATION)) {
+                        format.getInteger(MediaFormat.KEY_ROTATION)
+                    } else {
+                        0
+                    },
+                    samplePts = samplePts.toLongArray(),
+                    syncPts = syncPts,
+                )
+            } finally {
+                extractor.release()
+            }
+        }
+
+        private const val DEQUEUE_TIMEOUT_US = 10_000L
+        private const val STALL_TIMEOUT_MS = 10_000L
         const val FRAME_WAIT_TIMEOUT_MS = 2_500L
         const val MIN_SKIP_AHEAD_US = 2_000_000L
     }
@@ -248,7 +368,8 @@ class SequentialFrameDecoder(private val inputPath: String) {
         private val textureId: Int
         private val program: Int
         private val surfaceTexture: SurfaceTexture
-        private val listenerThread = HandlerThread("GlFrameReader").apply { start() }
+        private val listenerThread =
+            HandlerThread("GlFrameReader", Process.THREAD_PRIORITY_DISPLAY).apply { start() }
         private val frameLock = Object()
         private var frameAvailable = false
         private val stMatrix = FloatArray(16)

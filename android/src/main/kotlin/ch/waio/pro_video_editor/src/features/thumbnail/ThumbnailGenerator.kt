@@ -193,20 +193,35 @@ class ThumbnailGenerator(private val context: Context) {
         val thumbnails = MutableList<ByteArray?>(timestampsUs.size) { null }
         val completed = AtomicInteger(0)
 
-        val chunkCount = minOf(MAX_PARALLEL_DECODERS, maxOf(1, (timestampsUs.size + 2) / 3))
+        val scan = SequentialFrameDecoder.scan(inputPath)
         val sortedIndices = timestampsUs.indices.sortedBy { timestampsUs[it] }
-        val chunks = List(chunkCount) { chunk ->
-            sortedIndices.subList(
-                chunk * sortedIndices.size / chunkCount,
-                (chunk + 1) * sortedIndices.size / chunkCount
-            )
-        }.filter { it.isNotEmpty() }
+
+        // Group the time-sorted targets by the GOP their decode starts in.
+        // Chunks are split only at GOP boundaries so no two decoder sessions
+        // ever decode the same frames.
+        val gopGroups = mutableListOf<MutableList<Int>>()
+        var lastSync = Long.MIN_VALUE
+        for (index in sortedIndices) {
+            val sync = scan.syncBefore(scan.closestPts(timestampsUs[index]))
+            if (gopGroups.isEmpty() || sync != lastSync) {
+                gopGroups.add(mutableListOf())
+                lastSync = sync
+            }
+            gopGroups.last().add(index)
+        }
+
+        val chunkCount = minOf(
+            MAX_PARALLEL_DECODERS,
+            gopGroups.size,
+            maxOf(1, (timestampsUs.size + 2) / 3),
+        )
+        val chunks = partitionByDecodeCost(gopGroups, chunkCount, scan, timestampsUs)
 
         val jobs = chunks.map { chunkIndices ->
             async(Dispatchers.IO) {
                 val chunkTimestamps = chunkIndices.map { timestampsUs[it] }
                 SequentialFrameDecoder(inputPath).decode(
-                    chunkTimestamps, outputWidth, outputHeight, boxFit
+                    chunkTimestamps, outputWidth, outputHeight, boxFit, scan
                 ) { localIndices, bitmap ->
                     try {
                         val bytes = compressBitmap(bitmap, outputFormat, jpegQuality)
@@ -230,6 +245,54 @@ class ThumbnailGenerator(private val context: Context) {
             "No frames could be decoded"
         }
         thumbnails.filterNotNull()
+    }
+
+    /**
+     * Splits [gopGroups] (time-ordered target indices grouped per GOP) into
+     * [chunkCount] contiguous chunks minimizing the largest per-chunk decode
+     * cost, i.e. the frames decoded from the chunk's first GOP sync sample
+     * to its last target. Brute-force is fine for at most three chunks.
+     */
+    private fun partitionByDecodeCost(
+        gopGroups: List<List<Int>>,
+        chunkCount: Int,
+        scan: SequentialFrameDecoder.MediaScan,
+        timestampsUs: List<Long>,
+    ): List<List<Int>> {
+        fun cost(fromGroup: Int, toGroup: Int): Int {
+            val firstPts = scan.closestPts(timestampsUs[gopGroups[fromGroup].first()])
+            val lastPts = scan.closestPts(timestampsUs[gopGroups[toGroup].last()])
+            return scan.frameCount(scan.syncBefore(firstPts), lastPts)
+        }
+
+        val count = gopGroups.size
+        var bestSplits = emptyList<Int>()
+        var bestMax = Int.MAX_VALUE
+        when {
+            chunkCount <= 1 -> Unit
+            chunkCount == 2 -> for (s in 1 until count) {
+                val c = maxOf(cost(0, s - 1), cost(s, count - 1))
+                if (c < bestMax) {
+                    bestMax = c
+                    bestSplits = listOf(s)
+                }
+            }
+
+            else -> for (s1 in 1 until count) {
+                for (s2 in s1 + 1 until count) {
+                    val c = maxOf(cost(0, s1 - 1), cost(s1, s2 - 1), cost(s2, count - 1))
+                    if (c < bestMax) {
+                        bestMax = c
+                        bestSplits = listOf(s1, s2)
+                    }
+                }
+            }
+        }
+
+        val bounds = listOf(0) + bestSplits + listOf(count)
+        return (0 until bounds.size - 1).map { chunk ->
+            (bounds[chunk] until bounds[chunk + 1]).flatMap { gopGroups[it] }
+        }
     }
 
     /**
