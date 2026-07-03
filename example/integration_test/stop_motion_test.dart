@@ -200,6 +200,52 @@ void main() {
       );
     }, skip: !supportsStopMotion);
 
+    testWidgets('progress advances smoothly instead of jumping 0 → 100%',
+        (_) async {
+      // Enough frames at a real resolution so the encode takes long enough to
+      // emit several intermediate progress updates on every platform.
+      final frames = await buildFrames(60, width: 1280, height: 720);
+      final task = StopMotionRenderData(frames: frames, frameRate: 24);
+
+      final progressValues = <double>[];
+      final sub = task.progressStream.listen((p) {
+        progressValues.add(p.progress);
+      });
+
+      await ProVideoEditor.instance.renderStopMotion(task);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await sub.cancel();
+
+      expect(progressValues, isNotEmpty, reason: 'No progress updates');
+
+      // Progress never goes backwards.
+      for (var i = 1; i < progressValues.length; i++) {
+        expect(
+          progressValues[i],
+          greaterThanOrEqualTo(progressValues[i - 1]),
+          reason: 'Progress must never regress: $progressValues',
+        );
+      }
+
+      // Completion is reported.
+      expect(
+        progressValues.last,
+        equals(1.0),
+        reason: 'Final progress should be 100%',
+      );
+
+      // The actual fix: the encode phase must report intermediate progress
+      // rather than freezing low and snapping to 100%. Before the fix the
+      // highest value seen before completion was the ~0.2 frame-prep share on
+      // Android, so no value landed in the mid range.
+      expect(
+        progressValues.any((v) => v > 0.25 && v < 0.95),
+        isTrue,
+        reason: 'Progress jumped to 100% without meaningful mid-range updates: '
+            '$progressValues',
+      );
+    }, skip: !supportsStopMotion);
+
     testWidgets('cancel throws RenderCanceledException', (_) async {
       final taskId =
           'stop-motion-cancel-${DateTime.now().millisecondsSinceEpoch}';
