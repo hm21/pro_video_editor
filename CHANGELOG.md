@@ -1,3 +1,6 @@
+## 2.2.4
+- **FIX**(android, iOS, macOS): Stop-motion render progress now advances smoothly instead of sitting near 0% and snapping to 100% at the end. Media3's image-to-video export reports no intra-export progress on Android, so the encode phase is now driven by a smooth, monotonic time-based estimate (using the real value when available); Darwin reports 100% only after the writer finishes so the finalize step stays visible.
+
 ## 2.2.3
 - **PERF**(android): Timestamp thumbnails (`getThumbnails`) are now extracted with up to three parallel hardware decoders that each decode forward through a contiguous timeline chunk (every GOP decoded at most once), with frames GPU-scaled straight to the thumbnail size — instead of one software `MediaMetadataRetriever` per timestamp. Measured on a Galaxy S26: 20 timeline thumbnails from a 720p H.264 video 2.8s → 0.64s (~4x), 10 from a 1080p 10-bit HEVC video 6.2s → 0.3s (~20x), 14 from a 6s 4K60 HEVC clip 3.6s → 1.3s (~3x), with roughly 3-4x less CPU overall. Extraction keeps its speed while the UI is actively rendering (batch-mode decoder hints, non-blocking pump at display priority). Frame positions are unchanged (still the closest frame) and HDR10/rotation are handled by the GPU. Falls back to Media3 `FrameExtractor`, then to the previous retriever path when a video can't be decoded in hardware.
 

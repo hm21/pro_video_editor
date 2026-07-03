@@ -151,7 +151,9 @@ internal enum StopMotionGenerator {
 
         let durationUs = frame.durationUs ?? defaultDurationUs
         cursorUs += max(durationUs, 1)
-        onProgress(Double(index + 1) / Double(frameCount))
+        // Reserve 1.0 for after finishWriting so the finalize step stays
+        // visible and the last value before completion is < 100%.
+        onProgress(min(Double(index + 1) / Double(frameCount), 0.99))
       }
     } catch {
       input.markAsFinished()
@@ -175,6 +177,8 @@ internal enum StopMotionGenerator {
           userInfo: [NSLocalizedDescriptionKey: "Writer finished with status \(writer.status.rawValue)"]
         )
     }
+
+    onProgress(1.0)
 
     if config.outputPath != nil {
       return nil

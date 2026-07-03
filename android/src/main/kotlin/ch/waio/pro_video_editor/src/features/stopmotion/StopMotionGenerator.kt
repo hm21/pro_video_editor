@@ -9,6 +9,7 @@ import android.media.ExifInterface
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import androidx.media3.common.C
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
@@ -33,6 +34,7 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.exp
 import kotlin.math.roundToInt
 
 /**
@@ -249,18 +251,48 @@ class StopMotionGenerator(private val context: Context) {
 
         transformer.start(composition, outputFile.absolutePath)
 
+        // Media3's image-to-video export usually can't report intra-export
+        // progress (getProgress returns PROGRESS_STATE_UNAVAILABLE for image
+        // input), and the previous loop also stopped polling on the initial
+        // PROGRESS_STATE_NOT_STARTED. Together that froze the bar for the whole
+        // encode and then snapped it to 100% via onCompleted.
+        //
+        // Drive a smooth, monotonic time-based estimate that eases toward — but
+        // never reaches — 100% while polling, and prefer the real Media3 value
+        // whenever it becomes available. Completion (1.0) is owned by the
+        // listener's onCompleted.
         val progressHolder = ProgressHolder()
+        val encodeStartMs = SystemClock.elapsedRealtime()
+        // More frames → longer expected encode → slower easing, so the estimate
+        // stays roughly in step with the real work instead of racing ahead.
+        val easingTauMs = (config.frames.size * 50L).coerceIn(1_500L, 20_000L)
         mainHandler.post(object : Runnable {
+            private var lastReported = 0.0
+
             override fun run() {
                 if (shouldStopPolling.get()) return
+
                 val state = transformer.getProgress(progressHolder)
-                if (progressHolder.progress >= 0) {
-                    onProgress(progressHolder.progress / 100.0)
-                }
-                if (!shouldStopPolling.get() &&
-                    state != Transformer.PROGRESS_STATE_NOT_STARTED
-                ) {
-                    mainHandler.postDelayed(this, 200)
+                val realProgress =
+                    if (state == Transformer.PROGRESS_STATE_AVAILABLE &&
+                        progressHolder.progress >= 0
+                    ) {
+                        progressHolder.progress / 100.0
+                    } else {
+                        null
+                    }
+
+                val elapsedMs = (SystemClock.elapsedRealtime() - encodeStartMs).toDouble()
+                val estimated = 1.0 - exp(-elapsedMs / easingTauMs)
+
+                // Never regress and never claim completion — onCompleted owns 1.0.
+                val next = maxOf(lastReported, realProgress ?: estimated)
+                    .coerceAtMost(0.99)
+                lastReported = next
+                onProgress(next)
+
+                if (!shouldStopPolling.get()) {
+                    mainHandler.postDelayed(this, 100)
                 }
             }
         })
