@@ -24,9 +24,9 @@ class ImageLayer with TimeRangeMixin {
     this.loop = true,
     this.animations = const [],
   }) : assert(
-          startTime == null || endTime == null || startTime < endTime,
-          'startTime must be before endTime',
-        );
+         startTime == null || endTime == null || startTime < endTime,
+         'startTime must be before endTime',
+       );
 
   /// The image to overlay on the video.
   ///
@@ -114,8 +114,9 @@ class ImageLayer with TimeRangeMixin {
       'startTime': startTime?.inMicroseconds,
       'endTime': endTime?.inMicroseconds,
       'offset': offset != null ? {'dx': offset!.dx, 'dy': offset!.dy} : null,
-      'size':
-          size != null ? {'width': size!.width, 'height': size!.height} : null,
+      'size': size != null
+          ? {'width': size!.width, 'height': size!.height}
+          : null,
       'rotation': rotation,
       'loop': loop,
       'animations': animations.map((a) => a.toMap()).toList(),
@@ -143,10 +144,12 @@ class ImageLayer with TimeRangeMixin {
               safeParseDouble((map['size'] as Map<String, dynamic>)['height']),
             )
           : null,
-      rotation:
-          map['rotation'] != null ? safeParseDouble(map['rotation']) : 0.0,
+      rotation: map['rotation'] != null
+          ? safeParseDouble(map['rotation'])
+          : 0.0,
       loop: map['loop'] as bool? ?? true,
-      animations: (map['animations'] as List<dynamic>?)
+      animations:
+          (map['animations'] as List<dynamic>?)
               ?.map((a) => LayerAnimation.fromMap(a as Map<String, dynamic>))
               .toList() ??
           const [],

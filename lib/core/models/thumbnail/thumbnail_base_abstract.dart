@@ -18,11 +18,11 @@ abstract class ThumbnailBase {
     this.outputFormat = ThumbnailFormat.jpeg,
     this.boxFit = ThumbnailBoxFit.cover,
     String? id,
-  })  : assert(
-          jpegQuality >= 0 && jpegQuality <= 100,
-          'jpegQuality must be between 0 and 100',
-        ),
-        id = id ?? DateTime.now().microsecondsSinceEpoch.toString();
+  }) : assert(
+         jpegQuality >= 0 && jpegQuality <= 100,
+         'jpegQuality must be between 0 and 100',
+       ),
+       id = id ?? DateTime.now().microsecondsSinceEpoch.toString();
 
   /// Unique ID for the task, useful when running multiple tasks at once.
   final String id;

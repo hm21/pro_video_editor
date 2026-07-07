@@ -86,19 +86,14 @@ void main() {
       });
 
       test('defaults rotation to 0 when absent from map', () {
-        final map = {
-          'image': image.toMap(),
-        };
+        final map = {'image': image.toMap()};
         final restored = ImageLayer.fromMap(map);
 
         expect(restored.rotation, 0.0);
       });
 
       test('parses numeric string for rotation safely', () {
-        final map = {
-          'image': image.toMap(),
-          'rotation': '0.75',
-        };
+        final map = {'image': image.toMap(), 'rotation': '0.75'};
         final restored = ImageLayer.fromMap(map);
 
         expect(restored.rotation, 0.75);

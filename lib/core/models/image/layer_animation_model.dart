@@ -124,9 +124,9 @@ class LayerAnimation {
     this.slideDirection,
     this.scaleFrom,
   }) : assert(
-          type != LayerAnimationType.slide || slideDirection != null,
-          'slideDirection is required for slide animations',
-        );
+         type != LayerAnimationType.slide || slideDirection != null,
+         'slideDirection is required for slide animations',
+       );
 
   /// The kind of animation (fade, slide, scale).
   final LayerAnimationType type;

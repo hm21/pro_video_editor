@@ -1,6 +1,6 @@
 name: pro_video_editor
 description: "A Flutter video editor: Seamlessly enhance your videos with user-friendly editing features."
-version: 2.2.4
+version: 2.3.0
 homepage: https://github.com/hm21/pro_video_editor/
 repository: https://github.com/hm21/pro_video_editor/
 documentation: https://github.com/hm21/pro_video_editor/
@@ -21,8 +21,8 @@ screenshots:
     path: assets/showcase1.jpg
 
 environment:
-  sdk: '>=3.4.0 <4.0.0'
-  flutter: ">=3.35.0"
+  sdk: '>=3.12.0 <4.0.0'
+  flutter: ">=3.44.0"
 
 dependencies:
   flutter:

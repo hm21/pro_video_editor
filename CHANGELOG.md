@@ -1,3 +1,6 @@
+## 2.3.0
+- **CHORE**(android): Migrate the Android module to Flutter's built-in Kotlin (drop the manual Kotlin Gradle Plugin apply) so the plugin no longer triggers the KGP deprecation warning and stays AGP 9+ compatible. Now requires Flutter 3.44+.
+
 ## 2.2.4
 - **FIX**(android, iOS, macOS): Stop-motion render progress now advances smoothly instead of sitting near 0% and snapping to 100% at the end. Media3's image-to-video export reports no intra-export progress on Android, so the encode phase is now driven by a smooth, monotonic time-based estimate (using the real value when available); Darwin reports 100% only after the writer finishes so the finalize step stays visible.
 

@@ -117,7 +117,8 @@ class VideoComposition {
       VideoComposition.fromMap(json.decode(source) as Map<String, dynamic>);
 
   @override
-  String toString() => 'VideoComposition(layers: $layers, '
+  String toString() =>
+      'VideoComposition(layers: $layers, '
       'canvasSize: $canvasSize, backgroundColor: $backgroundColor)';
 
   @override

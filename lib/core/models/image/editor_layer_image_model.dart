@@ -36,13 +36,13 @@ class EditorLayerImage {
     this.assetPath,
     this.file,
   }) : assert(
-          byteArray != null ||
-              file != null ||
-              networkUrl != null ||
-              assetPath != null,
-          'At least one of bytes, file, networkUrl, or assetPath must not '
-          'be null.',
-        );
+         byteArray != null ||
+             file != null ||
+             networkUrl != null ||
+             assetPath != null,
+         'At least one of bytes, file, networkUrl, or assetPath must not '
+         'be null.',
+       );
 
   /// Creates an [EditorLayerImage] from in-memory bytes.
   ///

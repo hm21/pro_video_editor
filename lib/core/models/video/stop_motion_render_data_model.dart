@@ -31,10 +31,10 @@ class StopMotionFrame {
   /// Creates a [StopMotionFrame] from the given [image] and optional
   /// [duration].
   const StopMotionFrame({required this.image, this.duration})
-      : assert(
-          duration == null || duration > Duration.zero,
-          '[duration] must be greater than zero',
-        );
+    : assert(
+        duration == null || duration > Duration.zero,
+        '[duration] must be greater than zero',
+      );
 
   /// The image source for this frame.
   ///
@@ -118,13 +118,13 @@ class StopMotionRenderData {
     this.outputFormat = VideoOutputFormat.mp4,
     this.qualityConfig,
     this.bitrate,
-  })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
-        assert(frames.isNotEmpty, 'frames must not be empty'),
-        assert(frameRate > 0, '[frameRate] must be greater than 0'),
-        assert(
-          bitrate == null || bitrate > 0,
-          '[bitrate] must be greater than 0',
-        );
+  }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+       assert(frames.isNotEmpty, 'frames must not be empty'),
+       assert(frameRate > 0, '[frameRate] must be greater than 0'),
+       assert(
+         bitrate == null || bitrate > 0,
+         '[bitrate] must be greater than 0',
+       );
 
   /// Creates a [StopMotionRenderData] with a predefined quality preset.
   ///

@@ -116,10 +116,11 @@ class _StreamingWaveformState extends State<StreamingWaveform> {
 
     // Calculate expected total samples from duration and samplesPerSecond
     if (_expectedTotalSamples == 0 && lastChunk.totalDuration > Duration.zero) {
-      _expectedTotalSamples = (lastChunk.totalDuration.inMilliseconds /
-              1000 *
-              lastChunk.samplesPerSecond)
-          .round();
+      _expectedTotalSamples =
+          (lastChunk.totalDuration.inMilliseconds /
+                  1000 *
+                  lastChunk.samplesPerSecond)
+              .round();
     }
 
     // Report duration when it becomes available
@@ -162,8 +163,9 @@ class _StreamingWaveformState extends State<StreamingWaveform> {
     }
 
     final samplesPerBar = effectiveTotalSamples / barsCount;
-    final maxAmplitude =
-        _isStereo ? widget.style.height / 4 - 2 : widget.style.height / 2 - 2;
+    final maxAmplitude = _isStereo
+        ? widget.style.height / 4 - 2
+        : widget.style.height / 2 - 2;
 
     // Pre-calculate all bar heights (including zeros for bars without data yet)
     final heights = <double>[];
@@ -209,8 +211,9 @@ class _StreamingWaveformState extends State<StreamingWaveform> {
                   key: ValueKey('pro_image_editor_bar_${_id}_$i'),
                   height: i < _barHeights.length ? _barHeights[i] : 0.0,
                   style: widget.style,
-                  spacing:
-                      i < _totalBarsCount - 1 ? widget.style.barSpacing : 0,
+                  spacing: i < _totalBarsCount - 1
+                      ? widget.style.barSpacing
+                      : 0,
                 ),
             ],
           ),
