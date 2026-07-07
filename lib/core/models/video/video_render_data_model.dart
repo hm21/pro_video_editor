@@ -208,11 +208,12 @@ class VideoRenderData {
 
   /// The maximum bitrate of the video in bits per second.
   ///
-  /// This is an upper limit, not a target: a source whose video bitrate
-  /// already fits the cap (within a small tolerance) is exported losslessly
-  /// over the fast path (Android transmux / Apple passthrough) and keeps its
-  /// own lower bitrate. A source above the cap is re-encoded so the output
-  /// honors it.
+  /// This is an upper limit, not a target: when a simple export (a single
+  /// clip with no edits) already fits the cap (within a small tolerance) it
+  /// is copied losslessly over the fast path (Android transmux / Apple
+  /// passthrough) and keeps its own lower bitrate. Anything above the cap —
+  /// or any edited/multi-clip export — is re-encoded so the output honors
+  /// the cap.
   ///
   /// When `null` (default), no cap is applied and the fast path or platform
   /// preset decides the output bitrate.
