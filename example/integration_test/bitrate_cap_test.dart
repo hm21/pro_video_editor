@@ -44,7 +44,8 @@ void main() {
     expect(
       meta.bitrate,
       lessThanOrEqualTo(maxAllowed),
-      reason: 'Over-cap source must be re-encoded down to the cap '
+      reason:
+          'Over-cap source must be re-encoded down to the cap '
           '(got ${meta.bitrate} bps)',
     );
     expect(
