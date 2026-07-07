@@ -23,11 +23,11 @@ class VideoAudioTrack with TimeRangeMixin {
     this.audioEndTime,
     this.startTime,
     this.endTime,
-  })  : assert(volume >= 0, '[volume] must be greater than or equal to 0'),
-        assert(
-          startTime == null || endTime == null || startTime < endTime,
-          'startTime must be before endTime',
-        );
+  }) : assert(volume >= 0, '[volume] must be greater than or equal to 0'),
+       assert(
+         startTime == null || endTime == null || startTime < endTime,
+         'startTime must be before endTime',
+       );
 
   /// Path to the audio file.
   final String path;

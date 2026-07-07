@@ -18,15 +18,9 @@ import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 /// clip provides its own [VideoSegment.transform], placed using [transform].
 class VideoLayer {
   /// Creates a [VideoLayer] from a list of [clips].
-  const VideoLayer({
-    required this.clips,
-    this.opacity = 1.0,
-    this.transform,
-  })  : assert(clips.length > 0, 'A layer must contain at least one clip'),
-        assert(
-          opacity >= 0 && opacity <= 1,
-          '[opacity] must be between 0 and 1',
-        );
+  const VideoLayer({required this.clips, this.opacity = 1.0, this.transform})
+    : assert(clips.length > 0, 'A layer must contain at least one clip'),
+      assert(opacity >= 0 && opacity <= 1, '[opacity] must be between 0 and 1');
 
   /// The time-ordered sequence of clips on this layer.
   final List<VideoSegment> clips;

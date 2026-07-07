@@ -151,12 +151,12 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
 
     final response =
         await methodChannel.invokeMethod<Map<dynamic, dynamic>>('getMetadata', {
-              'inputPath': inputPath,
-              'extension': extension,
-              'checkStreamingOptimization': checkStreamingOptimization,
-              'nativeLogLevel': nativeLogLevel?.methodValue,
-            }) ??
-            {};
+          'inputPath': inputPath,
+          'extension': extension,
+          'checkStreamingOptimization': checkStreamingOptimization,
+          'nativeLogLevel': nativeLogLevel?.methodValue,
+        }) ??
+        {};
 
     return VideoMetadata.fromMap(response, extension);
   }
@@ -183,13 +183,13 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   }) async {
     var inputPath = await value.video.safeFilePath();
 
-    final response =
-        await methodChannel.invokeMethod<List<dynamic>>('getThumbnails', {
-      'inputPath': inputPath,
-      'extension': _getFileExtension(inputPath),
-      'nativeLogLevel': nativeLogLevel?.methodValue,
-      ...value.toMap(),
-    });
+    final response = await methodChannel
+        .invokeMethod<List<dynamic>>('getThumbnails', {
+          'inputPath': inputPath,
+          'extension': _getFileExtension(inputPath),
+          'nativeLogLevel': nativeLogLevel?.methodValue,
+          ...value.toMap(),
+        });
     final List<Uint8List> result = response?.cast<Uint8List>() ?? [];
 
     return result;
@@ -219,12 +219,12 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     final bool isLastFrame = value.position == ThumbnailPosition.last;
     Duration timestamp;
     if (isLastFrame) {
-      final duration = value.videoDuration ??
+      final duration =
+          value.videoDuration ??
           (await getMetadata(
             value.video,
             nativeLogLevel: nativeLogLevel,
-          ))
-              .duration;
+          )).duration;
       timestamp = duration;
     } else {
       timestamp = Duration.zero;
@@ -255,13 +255,13 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     try {
       var inputPath = await value.video.safeFilePath();
 
-      final Uint8List? result =
-          await methodChannel.invokeMethod<Uint8List>('extractAudio', {
-        'inputPath': inputPath,
-        'extension': _getFileExtension(inputPath),
-        'nativeLogLevel': nativeLogLevel?.methodValue,
-        ...value.toMap(),
-      });
+      final Uint8List? result = await methodChannel
+          .invokeMethod<Uint8List>('extractAudio', {
+            'inputPath': inputPath,
+            'extension': _getFileExtension(inputPath),
+            'nativeLogLevel': nativeLogLevel?.methodValue,
+            ...value.toMap(),
+          });
 
       if (result == null) {
         throw ArgumentError('Failed to extract audio from video');
@@ -316,11 +316,11 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
 
       final response = await methodChannel
           .invokeMethod<Map<dynamic, dynamic>>('getWaveform', {
-        'inputPath': inputPath,
-        'extension': _getFileExtension(inputPath),
-        'nativeLogLevel': nativeLogLevel?.methodValue,
-        ...value.toMap(),
-      });
+            'inputPath': inputPath,
+            'extension': _getFileExtension(inputPath),
+            'nativeLogLevel': nativeLogLevel?.methodValue,
+            ...value.toMap(),
+          });
 
       if (response == null) {
         throw ArgumentError('Failed to generate waveform data');
@@ -610,15 +610,18 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     if (!kIsWeb && (Platform.isWindows || Platform.isLinux)) return;
 
     // Subscribe to native progress events
-    _progressChannel.receiveBroadcastStream().map((event) {
-      try {
-        return ProgressModel.fromMap(event);
-      } catch (e, stack) {
-        // Log parsing errors but don't crash - return error progress
-        debugPrint('Error parsing progress event: $e\n$stack');
-        return const ProgressModel(id: 'error', progress: 0);
-      }
-    }).listen(progressCtrl.add);
+    _progressChannel
+        .receiveBroadcastStream()
+        .map((event) {
+          try {
+            return ProgressModel.fromMap(event);
+          } catch (e, stack) {
+            // Log parsing errors but don't crash - return error progress
+            debugPrint('Error parsing progress event: $e\n$stack');
+            return const ProgressModel(id: 'error', progress: 0);
+          }
+        })
+        .listen(progressCtrl.add);
 
     // Subscribe to native log events
     _logChannel.receiveBroadcastStream().listen(

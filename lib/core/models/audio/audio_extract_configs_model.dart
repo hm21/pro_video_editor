@@ -26,8 +26,8 @@ class AudioExtractConfigs {
     this.endTime,
     this.speed = 1.0,
     String? id,
-  })  : assert(speed > 0, '[speed] must be greater than 0'),
-        id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
+  }) : assert(speed > 0, '[speed] must be greater than 0'),
+       id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
 
   /// The source video to extract audio from.
   final EditorVideo video;

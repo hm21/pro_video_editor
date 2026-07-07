@@ -28,31 +28,31 @@ void main() {
 
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-      switch (methodCall.method) {
-        case 'getPlatformVersion':
-          return '42';
-        case 'getMetadata':
-          // Native platforms now return display dimensions (after rotation)
-          // For a 90° rotated video, width and height are already swapped
-          return {
-            'duration': 1200,
-            'width': 1080, // Display width (after 90° rotation)
-            'height': 1920, // Display height (after 90° rotation)
-            'rotation': 90,
-            'extension': 'mp4',
-          };
-        case 'getThumbnails':
-          return [mockBytes, mockBytes];
-        case 'renderVideo':
-          return Uint8List(10);
-        case 'renderStopMotion':
-          return Uint8List(10);
-        case 'cancelTask':
-          return null;
-        default:
-          return null;
-      }
-    });
+          switch (methodCall.method) {
+            case 'getPlatformVersion':
+              return '42';
+            case 'getMetadata':
+              // Native platforms now return display dimensions (after rotation)
+              // For a 90° rotated video, width and height are already swapped
+              return {
+                'duration': 1200,
+                'width': 1080, // Display width (after 90° rotation)
+                'height': 1920, // Display height (after 90° rotation)
+                'rotation': 90,
+                'extension': 'mp4',
+              };
+            case 'getThumbnails':
+              return [mockBytes, mockBytes];
+            case 'renderVideo':
+              return Uint8List(10);
+            case 'renderStopMotion':
+              return Uint8List(10);
+            case 'cancelTask':
+              return null;
+            default:
+              return null;
+          }
+        });
   });
 
   tearDown(() {
@@ -117,8 +117,8 @@ void main() {
   test('renderVideo throws if result is null', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-      return null;
-    });
+          return null;
+        });
 
     final mockModel = MockVideoRenderData();
 
@@ -150,9 +150,9 @@ void main() {
       MethodCall? capturedCall;
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-        capturedCall = methodCall;
-        return null;
-      });
+            capturedCall = methodCall;
+            return null;
+          });
 
       final data = StopMotionRenderData(
         frames: [StopMotionFrame(image: EditorLayerImage.memory(mockBytes))],
@@ -174,9 +174,9 @@ void main() {
 
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-      capturedCall = methodCall;
-      return null;
-    });
+          capturedCall = methodCall;
+          return null;
+        });
 
     const taskId = 'task-123';
     await platform.cancel(taskId);
@@ -234,21 +234,21 @@ void main() {
     test('returns null when native returns empty list', () async {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-        switch (methodCall.method) {
-          case 'getThumbnails':
-            return <Uint8List>[];
-          case 'getMetadata':
-            return {
-              'duration': 1200,
-              'width': 1080,
-              'height': 1920,
-              'rotation': 0,
-              'extension': 'mp4',
-            };
-          default:
-            return null;
-        }
-      });
+            switch (methodCall.method) {
+              case 'getThumbnails':
+                return <Uint8List>[];
+              case 'getMetadata':
+                return {
+                  'duration': 1200,
+                  'width': 1080,
+                  'height': 1920,
+                  'rotation': 0,
+                  'extension': 'mp4',
+                };
+              default:
+                return null;
+            }
+          });
 
       final result = await platform.getSingleThumbnail(
         SingleThumbnailConfigs(
@@ -266,12 +266,12 @@ void main() {
 
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-        if (methodCall.method == 'getThumbnails') {
-          capturedArgs = methodCall.arguments as Map<dynamic, dynamic>;
-          return [mockBytes];
-        }
-        return null;
-      });
+            if (methodCall.method == 'getThumbnails') {
+              capturedArgs = methodCall.arguments as Map<dynamic, dynamic>;
+              return [mockBytes];
+            }
+            return null;
+          });
 
       await platform.getSingleThumbnail(
         SingleThumbnailConfigs(
@@ -291,12 +291,12 @@ void main() {
 
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-        if (methodCall.method == 'getThumbnails') {
-          capturedArgs = methodCall.arguments as Map<dynamic, dynamic>;
-          return [mockBytes];
-        }
-        return null;
-      });
+            if (methodCall.method == 'getThumbnails') {
+              capturedArgs = methodCall.arguments as Map<dynamic, dynamic>;
+              return [mockBytes];
+            }
+            return null;
+          });
 
       await platform.getSingleThumbnail(
         SingleThumbnailConfigs(

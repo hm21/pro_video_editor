@@ -31,11 +31,7 @@ enum SegmentFit {
 /// it is stretched to fill the entire canvas.
 class SegmentTransform {
   /// Creates a [SegmentTransform].
-  const SegmentTransform({
-    this.offset,
-    this.size,
-    this.fit = SegmentFit.cover,
-  });
+  const SegmentTransform({this.offset, this.size, this.fit = SegmentFit.cover});
 
   /// Position of the segment's top-left corner within the canvas, in pixels.
   ///
@@ -55,11 +51,7 @@ class SegmentTransform {
   final SegmentFit fit;
 
   /// Creates a copy with updated values.
-  SegmentTransform copyWith({
-    Offset? offset,
-    Size? size,
-    SegmentFit? fit,
-  }) {
+  SegmentTransform copyWith({Offset? offset, Size? size, SegmentFit? fit}) {
     return SegmentTransform(
       offset: offset ?? this.offset,
       size: size ?? this.size,
@@ -70,8 +62,9 @@ class SegmentTransform {
   Map<String, dynamic> toMap() {
     return <String, dynamic>{
       'offset': offset != null ? {'dx': offset!.dx, 'dy': offset!.dy} : null,
-      'size':
-          size != null ? {'width': size!.width, 'height': size!.height} : null,
+      'size': size != null
+          ? {'width': size!.width, 'height': size!.height}
+          : null,
       'fit': fit.name,
     };
   }

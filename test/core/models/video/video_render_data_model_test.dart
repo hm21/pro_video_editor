@@ -22,14 +22,8 @@ void main() {
     });
 
     test('asserts a positive value', () {
-      expect(
-        () => buildData(maxFrameRate: 0),
-        throwsA(isA<AssertionError>()),
-      );
-      expect(
-        () => buildData(maxFrameRate: -5),
-        throwsA(isA<AssertionError>()),
-      );
+      expect(() => buildData(maxFrameRate: 0), throwsA(isA<AssertionError>()));
+      expect(() => buildData(maxFrameRate: -5), throwsA(isA<AssertionError>()));
     });
 
     test('toMap serializes the value', () {
@@ -38,8 +32,9 @@ void main() {
     });
 
     test('toMap / fromMap roundtrip preserves the value', () {
-      final restored =
-          VideoRenderData.fromMap(buildData(maxFrameRate: 24).toMap());
+      final restored = VideoRenderData.fromMap(
+        buildData(maxFrameRate: 24).toMap(),
+      );
       expect(restored.maxFrameRate, 24);
 
       final restoredNull = VideoRenderData.fromMap(buildData().toMap());
@@ -76,21 +71,23 @@ void main() {
       );
     }
 
-    test('custom resolution maps to an exact output canvas (no scale)',
-        () async {
-      final map = await buildData(
-        VideoQualityConfig.custom(
-          bitrate: 8000000,
-          resolution: const Size(1080, 1920),
-        ),
-      ).toAsyncMap();
+    test(
+      'custom resolution maps to an exact output canvas (no scale)',
+      () async {
+        final map = await buildData(
+          VideoQualityConfig.custom(
+            bitrate: 8000000,
+            resolution: const Size(1080, 1920),
+          ),
+        ).toAsyncMap();
 
-      // Exact output canvas → letterboxed natively, not a uniform scale.
-      expect(map['outputWidth'], 1080);
-      expect(map['outputHeight'], 1920);
-      expect(map['scaleX'], isNull);
-      expect(map['scaleY'], isNull);
-    });
+        // Exact output canvas → letterboxed natively, not a uniform scale.
+        expect(map['outputWidth'], 1080);
+        expect(map['outputHeight'], 1920);
+        expect(map['scaleX'], isNull);
+        expect(map['scaleY'], isNull);
+      },
+    );
 
     test('falls back to the quality config bitrate when none is set', () async {
       final map = await buildData(

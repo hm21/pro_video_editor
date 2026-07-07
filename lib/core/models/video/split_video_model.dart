@@ -29,19 +29,19 @@ class SplitVideoModel {
     this.qualityConfig,
     this.bitrate,
     this.enableAudio = true,
-  })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
-        assert(
-          splitPosition > Duration.zero,
-          'splitPosition must be greater than zero',
-        ),
-        assert(
-          startOutputPath != endOutputPath,
-          'startOutputPath and endOutputPath must differ',
-        ),
-        assert(
-          bitrate == null || bitrate > 0,
-          '[bitrate] must be greater than 0',
-        );
+  }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+       assert(
+         splitPosition > Duration.zero,
+         'splitPosition must be greater than zero',
+       ),
+       assert(
+         startOutputPath != endOutputPath,
+         'startOutputPath and endOutputPath must differ',
+       ),
+       assert(
+         bitrate == null || bitrate > 0,
+         '[bitrate] must be greater than 0',
+       );
 
   /// Unique ID for the task, used for progress updates and cancellation.
   final String id;

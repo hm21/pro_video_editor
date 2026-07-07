@@ -39,31 +39,31 @@ class VideoRenderData {
     this.maxFrameRate,
     this.shouldOptimizeForNetworkUse = false,
     this.imageBytesWithCropping = false,
-  })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
-        assert(
-          (videoSegments != null ? 1 : 0) + (composition != null ? 1 : 0) == 1,
-          'You must provide exactly one of videoSegments or composition',
-        ),
-        assert(
-          videoSegments == null || videoSegments.isNotEmpty,
-          'videoSegments must not be empty if provided',
-        ),
-        assert(
-          startTime == null || endTime == null || startTime < endTime,
-          'startTime must be before endTime',
-        ),
-        assert(
-          blur == null || blur >= 0,
-          '[blur] must be greater than or equal to 0',
-        ),
-        assert(
-          bitrate == null || bitrate > 0,
-          '[bitrate] must be greater than 0',
-        ),
-        assert(
-          maxFrameRate == null || maxFrameRate > 0,
-          '[maxFrameRate] must be greater than 0',
-        );
+  }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+       assert(
+         (videoSegments != null ? 1 : 0) + (composition != null ? 1 : 0) == 1,
+         'You must provide exactly one of videoSegments or composition',
+       ),
+       assert(
+         videoSegments == null || videoSegments.isNotEmpty,
+         'videoSegments must not be empty if provided',
+       ),
+       assert(
+         startTime == null || endTime == null || startTime < endTime,
+         'startTime must be before endTime',
+       ),
+       assert(
+         blur == null || blur >= 0,
+         '[blur] must be greater than or equal to 0',
+       ),
+       assert(
+         bitrate == null || bitrate > 0,
+         '[bitrate] must be greater than 0',
+       ),
+       assert(
+         maxFrameRate == null || maxFrameRate > 0,
+         '[maxFrameRate] must be greater than 0',
+       );
 
   /// Creates a [VideoRenderData] with a predefined quality preset.
   ///
@@ -305,7 +305,8 @@ class VideoRenderData {
         outputWidth = resolution.width.round();
         outputHeight = resolution.height.round();
       } else {
-        final targetVideo = (videoSegments != null && videoSegments!.isNotEmpty
+        final targetVideo =
+            (videoSegments != null && videoSegments!.isNotEmpty
                 ? videoSegments!.first.video
                 : null) ??
             composition?.layers.first.clips.first.video;
@@ -377,8 +378,9 @@ class VideoRenderData {
       ...transform.toMap(),
       'id': id,
       'videoClips': videoSegmentsMaps,
-      'composition':
-          composition != null ? await composition!.toAsyncMap() : null,
+      'composition': composition != null
+          ? await composition!.toAsyncMap()
+          : null,
       'imageLayers': imageLayerMaps,
       'colorFilters': colorFilterMaps,
       'audioTracks': audioTrackMaps,

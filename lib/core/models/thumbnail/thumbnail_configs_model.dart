@@ -30,8 +30,9 @@ class ThumbnailConfigs extends ThumbnailBase {
       'outputFormat': outputFormat.name,
       'outputWidth': outputSize.width.round(),
       'outputHeight': outputSize.height.round(),
-      'timestamps':
-          timestamps.map((timestamp) => timestamp.inMicroseconds).toList(),
+      'timestamps': timestamps
+          .map((timestamp) => timestamp.inMicroseconds)
+          .toList(),
     };
   }
 }

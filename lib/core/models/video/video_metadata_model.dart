@@ -100,8 +100,9 @@ class VideoMetadata {
       author: value['author'] ?? '',
       album: value['album'] ?? '',
       albumArtist: value['albumArtist'] ?? '',
-      date:
-          (value['date'] ?? '') != '' ? DateTime.tryParse(value['date']) : null,
+      date: (value['date'] ?? '') != ''
+          ? DateTime.tryParse(value['date'])
+          : null,
       isOptimizedForStreaming: value['isOptimizedForStreaming'] as bool?,
       gpsCoordinates: value['latitude'] != null && value['longitude'] != null
           ? GpsCoordinates(
