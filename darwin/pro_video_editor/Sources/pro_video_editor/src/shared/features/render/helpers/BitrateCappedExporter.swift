@@ -89,19 +89,6 @@ internal enum BitrateCappedExporter {
     }
     reader.add(videoOutput)
 
-    var audioOutput: AVAssetReaderAudioMixOutput?
-    if !audioTracks.isEmpty {
-      let output = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: nil)
-      output.audioMix = audioMix
-      output.alwaysCopiesSampleData = false
-      if reader.canAdd(output) {
-        reader.add(output)
-        audioOutput = output
-      } else {
-        PluginLog.print("⚠️ Cannot add audio mix output to reader - exporting video only")
-      }
-    }
-
     // Writer: H.264 at the requested bitrate, AAC audio.
     let writer = try AVAssetWriter(outputURL: outputURL, fileType: fileType)
     writer.shouldOptimizeForNetworkUse = optimizeForNetworkUse
@@ -123,17 +110,29 @@ internal enum BitrateCappedExporter {
     }
     writer.add(videoInput)
 
+    // Audio: read the mixed tracks as interleaved LPCM downmixed to at most
+    // stereo (an explicit channel layout makes the reader downmix >2-channel
+    // surround sources deterministically), then re-encode to AAC. The reader
+    // output and writer input are only added once BOTH are confirmed, so a
+    // rejected writer input never leaves an undrained output on the reader.
+    var audioOutput: AVAssetReaderAudioMixOutput?
     var audioInput: AVAssetWriterInput?
-    if audioOutput != nil {
-      let settings = await audioSettings(for: audioTracks.first)
-      let input = AVAssetWriterInput(mediaType: .audio, outputSettings: settings)
+    if !audioTracks.isEmpty {
+      let format = await audioFormat(for: audioTracks.first)
+      let output = AVAssetReaderAudioMixOutput(
+        audioTracks: audioTracks, audioSettings: readerLPCMSettings(format))
+      output.audioMix = audioMix
+      output.alwaysCopiesSampleData = false
+      let input = AVAssetWriterInput(
+        mediaType: .audio, outputSettings: writerAACSettings(format))
       input.expectsMediaDataInRealTime = false
-      if writer.canAdd(input) {
+      if reader.canAdd(output) && writer.canAdd(input) {
+        reader.add(output)
         writer.add(input)
+        audioOutput = output
         audioInput = input
       } else {
-        PluginLog.print("⚠️ Cannot add audio input to writer - exporting video only")
-        audioOutput = nil
+        PluginLog.print("⚠️ Cannot wire audio reader/writer - exporting video only")
       }
     }
 
@@ -275,8 +274,20 @@ internal enum BitrateCappedExporter {
     }
   }
 
-  /// AAC output settings derived from the source track where possible.
-  private static func audioSettings(for track: AVAssetTrack?) async -> [String: Any] {
+  /// The decoded audio format the reader delivers and the writer encodes.
+  ///
+  /// [channels] is clamped to at most stereo and [sampleRate] to what AAC
+  /// accepts. A mono source stays mono; stereo and any surround layout
+  /// (5.1, 7.1, …) resolve to stereo, and the reader is given an explicit
+  /// channel layout ([readerLPCMSettings]) so it performs the downmix
+  /// deterministically instead of leaving multichannel reduction to the AAC
+  /// encoder (whose implicit behavior varies by OS version).
+  private struct AudioFormat {
+    let sampleRate: Double
+    let channels: Int
+  }
+
+  private static func audioFormat(for track: AVAssetTrack?) async -> AudioFormat {
     var sampleRate = 44_100.0
     var channels = 2
 
@@ -301,17 +312,46 @@ internal enum BitrateCappedExporter {
       }
     }
 
-    // Clamp to what the AAC encoder accepts; stereo is enough for this
-    // pipeline (matching the mixed output of the export-session path).
-    let aacSampleRate = sampleRate > 48_000 ? 48_000.0 : sampleRate
-    let aacChannels = min(max(channels, 1), 2)
+    return AudioFormat(
+      sampleRate: sampleRate > 48_000 ? 48_000 : sampleRate,
+      channels: min(max(channels, 1), 2))
+  }
 
+  /// Interleaved 16-bit LPCM reader settings at [format]. The explicit
+  /// channel count plus [channelLayoutData] make `AVAssetReaderAudioMixOutput`
+  /// downmix a >2-channel source to the target layout up front, rather than
+  /// vending the source channel count and leaving the downmix to the AAC
+  /// encoder.
+  private static func readerLPCMSettings(_ format: AudioFormat) -> [String: Any] {
+    return [
+      AVFormatIDKey: kAudioFormatLinearPCM,
+      AVSampleRateKey: format.sampleRate,
+      AVNumberOfChannelsKey: format.channels,
+      AVChannelLayoutKey: channelLayoutData(channels: format.channels),
+      AVLinearPCMBitDepthKey: 16,
+      AVLinearPCMIsFloatKey: false,
+      AVLinearPCMIsBigEndianKey: false,
+      AVLinearPCMIsNonInterleaved: false,
+    ]
+  }
+
+  /// AAC writer settings matching the reader's LPCM channel count/sample rate.
+  private static func writerAACSettings(_ format: AudioFormat) -> [String: Any] {
     return [
       AVFormatIDKey: kAudioFormatMPEG4AAC,
-      AVSampleRateKey: aacSampleRate,
-      AVNumberOfChannelsKey: aacChannels,
+      AVSampleRateKey: format.sampleRate,
+      AVNumberOfChannelsKey: format.channels,
       AVEncoderBitRateKey: 128_000,
     ]
+  }
+
+  /// Encodes a mono or stereo `AudioChannelLayout` as `Data` for
+  /// `AVChannelLayoutKey`.
+  private static func channelLayoutData(channels: Int) -> Data {
+    var layout = AudioChannelLayout()
+    layout.mChannelLayoutTag =
+      channels == 1 ? kAudioChannelLayoutTag_Mono : kAudioChannelLayoutTag_Stereo
+    return Data(bytes: &layout, count: MemoryLayout<AudioChannelLayout>.size)
   }
 
   /// Rounds a render dimension to the nearest even integer (H.264
