@@ -155,8 +155,9 @@ void main() {
     // platform. On Darwin the capped AVAssetWriter path downmixes it to
     // stereo; a regression there previously risked a failed export.
 
-    testWidgets('renders through the capped re-encode path (with effect)',
-        (_) async {
+    testWidgets('renders through the capped re-encode path (with effect)', (
+      _,
+    ) async {
       // A color filter defeats the passthrough/transmux fast path, so the
       // render always goes through the capped encoder (where the audio
       // downmix happens on Darwin).
