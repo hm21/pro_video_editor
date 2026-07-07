@@ -43,6 +43,46 @@ class RenderVideo {
           return
         }
 
+        // Bitrate-cap fast path: a no-edit export whose source already fits
+        // the cap (× tolerance) is remuxed losslessly (passthrough) instead
+        // of re-encoded — the Darwin equivalent of Android's transmux fast
+        // path. Over-cap or unprobeable sources fall through to the full
+        // pipeline, where the cap is enforced by the AVAssetWriter path.
+        // HEVC 10-bit/HDR sources are excluded so they keep their usual
+        // H.264 8-bit SDR pre-transcode instead of being copied verbatim.
+        if config.bitrate != nil, BitrateCapPolicy.isPassthroughEligible(config),
+          await !MediaInfoExtractor.getVideoFormatInfo(config.videoClips[0].inputPath)
+            .needsTranscodingForEffects()
+        {
+          let sourceBitrate = await MediaInfoExtractor.getVideoBitrate(
+            config.videoClips[0].inputPath)
+          if !BitrateCapPolicy.shouldForceEncode(
+            requestedBitrate: config.bitrate, sourceBitrates: [sourceBitrate])
+          {
+            PluginLog.print(
+              "🚀 Bitrate cap: source (\((sourceBitrate ?? 0) / 1000) kbps) within cap — "
+                + "lossless passthrough export")
+            do {
+              let data = try await passthroughExport(
+                config: config, handle: handle, onProgress: onProgress)
+              onComplete(data)
+              return
+            } catch {
+              if Task.isCancelled || error is CancellationError {
+                onError(error)
+                return
+              }
+              PluginLog.print(
+                "⚠️ Passthrough export failed (\(error.localizedDescription)) — "
+                  + "falling back to full render")
+            }
+          } else {
+            PluginLog.print(
+              "📊 Bitrate cap: source (\((sourceBitrate ?? 0) / 1000) kbps) exceeds cap — "
+                + "video will be re-encoded")
+          }
+        }
+
         var transcodedFiles: [String] = []
         var workingConfig = config
 
@@ -123,27 +163,8 @@ class RenderVideo {
         }
 
         do {
-          if let outputPath = workingConfig.outputPath {
-            // Ensure file extension matches the requested format
-            let url = URL(fileURLWithPath: outputPath)
-            let pathExtension = url.pathExtension.lowercased()
-            let requestedFormat = workingConfig.outputFormat.lowercased()
-
-            if pathExtension != requestedFormat {
-              PluginLog.print(
-                "⚠️ WARNING: Output path extension '.\(pathExtension)' doesn't match requested format '.\(requestedFormat)'"
-              )
-              PluginLog.print("⚠️ Correcting file extension to match format...")
-
-              // Replace extension with correct format
-              let pathWithoutExtension = url.deletingPathExtension()
-              outputURL = pathWithoutExtension.appendingPathExtension(requestedFormat)
-            } else {
-              outputURL = url
-            }
-          } else {
-            outputURL = temporaryURL(for: workingConfig.outputFormat)
-          }
+          outputURL = resolveOutputURL(
+            outputPath: workingConfig.outputPath, format: workingConfig.outputFormat)
 
           PluginLog.print("")
           PluginLog.print("🎬 ===== RENDER CONFIG =====")
@@ -312,23 +333,47 @@ class RenderVideo {
           videoComposition.customVideoCompositorClass = makeVideoCompositorSubclass(
             with: effectsConfig)
 
-          let preset = applyBitrate(requestedBitrate: workingConfig.bitrate)
+          if let cap = workingConfig.bitrate {
+            // A bitrate cap can only be honored by writing the video track
+            // ourselves: AVAssetExportSession presets pick their own bitrate
+            // and overshoot the request (a 1080p preset encodes 10-16 Mbit/s).
+            PluginLog.print(
+              "📊 Bitrate cap \(cap / 1000) kbps: rendering via AVAssetWriter "
+                + "(AVVideoAverageBitRateKey)")
+            let timeRange = try await resolveTrimTimeRange(
+              composition: composition,
+              startUs: workingConfig.startUs,
+              endUs: workingConfig.endUs)
+            let hasAudioTracks = !composition.tracks(withMediaType: .audio).isEmpty
+            try await BitrateCappedExporter.export(
+              asset: composition,
+              videoComposition: videoComposition,
+              audioMix: hasAudioTracks ? audioMix : nil,
+              outputURL: outputURL,
+              fileType: mapFormatToMimeType(format: workingConfig.outputFormat),
+              videoBitrate: cap,
+              timeRange: timeRange,
+              optimizeForNetworkUse: workingConfig.shouldOptimizeForNetworkUse,
+              onProgress: onProgress)
+          } else {
+            let preset = applyBitrate(requestedBitrate: workingConfig.bitrate)
 
-          let export = try await prepareExportSession(
-            composition: composition,
-            videoComposition: videoComposition,
-            audioMix: audioMix,
-            outputURL: outputURL,
-            outputFormat: workingConfig.outputFormat,
-            preset: preset,
-            startUs: workingConfig.startUs,
-            endUs: workingConfig.endUs,
-            shouldOptimizeForNetworkUse: workingConfig.shouldOptimizeForNetworkUse
-          )
+            let export = try await prepareExportSession(
+              composition: composition,
+              videoComposition: videoComposition,
+              audioMix: audioMix,
+              outputURL: outputURL,
+              outputFormat: workingConfig.outputFormat,
+              preset: preset,
+              startUs: workingConfig.startUs,
+              endUs: workingConfig.endUs,
+              shouldOptimizeForNetworkUse: workingConfig.shouldOptimizeForNetworkUse
+            )
 
-          handle.attach(export: export)
+            handle.attach(export: export)
 
-          try await monitorExportProgress(export, onProgress: onProgress)
+            try await monitorExportProgress(export, onProgress: onProgress)
+          }
 
           if workingConfig.outputPath != nil {
             handleCompletion(.success(nil))
@@ -376,6 +421,100 @@ class RenderVideo {
   private static func temporaryURL(for format: String) -> URL {
     let filename = uniqueFilename(prefix: "output", extension: format)
     return FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+  }
+
+  /// Resolves the destination URL, correcting a mismatched file extension, or
+  /// creates a temporary URL when no output path was requested.
+  private static func resolveOutputURL(outputPath: String?, format: String) -> URL {
+    guard let outputPath = outputPath else {
+      return temporaryURL(for: format)
+    }
+    let url = URL(fileURLWithPath: outputPath)
+    let pathExtension = url.pathExtension.lowercased()
+    let requestedFormat = format.lowercased()
+
+    if pathExtension != requestedFormat {
+      PluginLog.print(
+        "⚠️ WARNING: Output path extension '.\(pathExtension)' doesn't match requested format '.\(requestedFormat)'"
+      )
+      PluginLog.print("⚠️ Correcting file extension to match format...")
+      return url.deletingPathExtension().appendingPathExtension(requestedFormat)
+    }
+    return url
+  }
+
+  // MARK: - Bitrate-cap passthrough export
+
+  /// Losslessly remuxes a single no-edit clip with
+  /// `AVAssetExportPresetPassthrough` (no re-encode), preserving
+  /// `shouldOptimizeForNetworkUse`. Throws when the source cannot be written
+  /// into the requested container — the caller falls back to the full render
+  /// pipeline in that case.
+  private static func passthroughExport(
+    config: RenderConfig,
+    handle: RenderJobHandle,
+    onProgress: @escaping (Double) -> Void
+  ) async throws -> Data? {
+    let outputURL = resolveOutputURL(
+      outputPath: config.outputPath, format: config.outputFormat)
+    let asset = AVURLAsset(url: URL(fileURLWithPath: config.videoClips[0].inputPath))
+    guard
+      let export = AVAssetExportSession(
+        asset: asset, presetName: AVAssetExportPresetPassthrough)
+    else {
+      throw NSError(
+        domain: "RenderVideo", code: 5,
+        userInfo: [NSLocalizedDescriptionKey: "Passthrough session creation failed"])
+    }
+
+    try? FileManager.default.removeItem(at: outputURL)
+    export.outputURL = outputURL
+    export.outputFileType = mapFormatToMimeType(format: config.outputFormat)
+    export.shouldOptimizeForNetworkUse = config.shouldOptimizeForNetworkUse
+    handle.attach(export: export)
+
+    do {
+      try await monitorExportProgress(export, onProgress: onProgress)
+    } catch {
+      // Never leave a partial file behind; the fallback re-creates it.
+      try? FileManager.default.removeItem(at: outputURL)
+      throw error
+    }
+
+    if config.outputPath != nil {
+      return nil
+    }
+    let data = try Data(contentsOf: outputURL)
+    try? FileManager.default.removeItem(at: outputURL)
+    return data
+  }
+
+  /// Resolves the global trim (startUs/endUs) into a clamped time range, or
+  /// nil when no trim was requested or the range is empty.
+  private static func resolveTrimTimeRange(
+    composition: AVAsset,
+    startUs: Int64?,
+    endUs: Int64?
+  ) async throws -> CMTimeRange? {
+    guard startUs != nil || endUs != nil else { return nil }
+
+    let compositionDuration: CMTime
+    if #available(iOS 16.0, macOS 13.0, *) {
+      compositionDuration = try await composition.load(.duration)
+    } else {
+      compositionDuration = composition.duration
+    }
+    let startTime = startUs.map { CMTime(value: $0, timescale: 1_000_000) } ?? .zero
+    let endTime =
+      endUs.map { CMTime(value: $0, timescale: 1_000_000) } ?? compositionDuration
+    let duration = CMTimeSubtract(endTime, startTime)
+
+    // Ensure we don't exceed composition bounds
+    let clampedDuration = CMTimeMinimum(
+      duration, CMTimeSubtract(compositionDuration, startTime))
+
+    guard CMTimeGetSeconds(clampedDuration) > 0 else { return nil }
+    return CMTimeRange(start: startTime, duration: clampedDuration)
   }
 
   // MARK: - Overlap transition pre-render
@@ -564,28 +703,13 @@ class RenderVideo {
     export.videoComposition = videoComposition
 
     // Apply global trim (timeRange) if startUs or endUs is provided
-    if startUs != nil || endUs != nil {
-      let compositionDuration: CMTime
-      if #available(iOS 16.0, macOS 13.0, *) {
-        compositionDuration = try await composition.load(.duration)
-      } else {
-        compositionDuration = composition.duration
-      }
-      let startTime = startUs.map { CMTime(value: $0, timescale: 1_000_000) } ?? .zero
-      let endTime =
-        endUs.map { CMTime(value: $0, timescale: 1_000_000) } ?? compositionDuration
-      let duration = CMTimeSubtract(endTime, startTime)
-
-      // Ensure we don't exceed composition bounds
-      let clampedDuration = CMTimeMinimum(
-        duration, CMTimeSubtract(compositionDuration, startTime))
-
-      if CMTimeGetSeconds(clampedDuration) > 0 {
-        export.timeRange = CMTimeRange(start: startTime, duration: clampedDuration)
-        PluginLog.print(
-          "   - TimeRange applied: \(String(format: "%.2f", CMTimeGetSeconds(startTime)))s - \(String(format: "%.2f", CMTimeGetSeconds(CMTimeAdd(startTime, clampedDuration))))s"
-        )
-      }
+    if let timeRange = try await resolveTrimTimeRange(
+      composition: composition, startUs: startUs, endUs: endUs)
+    {
+      export.timeRange = timeRange
+      PluginLog.print(
+        "   - TimeRange applied: \(String(format: "%.2f", CMTimeGetSeconds(timeRange.start)))s - \(String(format: "%.2f", CMTimeGetSeconds(CMTimeRangeGetEnd(timeRange))))s"
+      )
     }
 
     // Check if composition has audio tracks

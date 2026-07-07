@@ -1,3 +1,6 @@
+## 2.4.0
+- **FIX**(android, iOS, macOS): The render `bitrate` is now enforced as a real maximum instead of being silently ignored (Android transmuxed the source untouched; iOS/macOS picked an `AVAssetExportSession` preset with its own bitrate). A source above the cap is re-encoded down to it, a source already within it keeps a lossless fast path (transmux / passthrough), and a `null` bitrate is unchanged. Note: an over-cap source that used to export losslessly is now re-encoded.
+
 ## 2.3.0
 - **CHORE**(android): Migrate the Android module to Flutter's built-in Kotlin (drop the manual Kotlin Gradle Plugin apply) so the plugin no longer triggers the KGP deprecation warning and stays AGP 9+ compatible. Now requires Flutter 3.44+.
 

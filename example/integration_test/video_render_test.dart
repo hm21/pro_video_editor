@@ -505,30 +505,30 @@ void main() {
     );
   });
 
-  testWidgets('Bitrate is applied correctly (2.5 Mbps)', (tester) async {
-    const expectedBitrate = 2500000; // 2.5 Mbps
+  testWidgets('Bitrate cap is not exceeded (2.5 Mbps)', (tester) async {
+    // The bitrate is a maximum, not a target: a source already below the cap
+    // keeps its own (lower) bitrate via the lossless fast path, so only the
+    // upper bound is asserted. bitrate_cap_test.dart covers the over-cap
+    // re-encode cases.
+    const bitrateCap = 2500000; // 2.5 Mbps
     const tolerance = 0.42; // ±42% Important if CBR isn't supported
 
     var meta = await testRender(
-      description: 'Bitrate set to 2.5 Mbps',
+      description: 'Bitrate capped at 2.5 Mbps',
       renderModel: VideoRenderData(
         videoSegments: [VideoSegment(video: inputVideo)],
         outputFormat: VideoOutputFormat.mp4,
-        bitrate: expectedBitrate,
+        bitrate: bitrateCap,
       ),
     );
 
     final actualBitrate = meta.bitrate; // in bits per second
-    const minBitrate = expectedBitrate * (1 - tolerance);
-    const maxBitrate = expectedBitrate * (1 + tolerance);
-
-    final bitrateValid =
-        actualBitrate >= minBitrate && actualBitrate <= maxBitrate;
+    const maxBitrate = bitrateCap * (1 + tolerance);
 
     expect(
-      bitrateValid,
-      isTrue,
-      reason: 'Bitrate validation failed. The Bitrate is $actualBitrate.',
+      actualBitrate,
+      lessThanOrEqualTo(maxBitrate),
+      reason: 'Bitrate cap exceeded. The Bitrate is $actualBitrate.',
     );
   });
 
