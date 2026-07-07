@@ -1,3 +1,6 @@
+## 2.4.0
+- **BREAKING BEHAVIOR**(android, iOS, macOS): The render `bitrate` is now a guaranteed **maximum** instead of a hint that could be ignored. Previously a no-edit Android export transmuxed the source untouched (keeping e.g. an 18 Mbit/s camera bitrate despite an 8 Mbit/s request), and iOS/macOS mapped the bitrate to an `AVAssetExportSession` preset that picks its own bitrate. Sources above cap × 1.2 are now re-encoded down to the cap (Darwin via a new AVAssetWriter pipeline with `AVVideoAverageBitRateKey`); sources already within it keep a lossless fast path (Android transmux / Darwin passthrough). A `null` bitrate keeps the previous behavior.
+
 ## 2.3.0
 - **CHORE**(android): Migrate the Android module to Flutter's built-in Kotlin (drop the manual Kotlin Gradle Plugin apply) so the plugin no longer triggers the KGP deprecation warning and stays AGP 9+ compatible. Now requires Flutter 3.44+.
 

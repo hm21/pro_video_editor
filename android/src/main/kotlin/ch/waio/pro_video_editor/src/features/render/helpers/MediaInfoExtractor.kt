@@ -45,6 +45,73 @@ object MediaInfoExtractor {
     }
 
     /**
+     * Probes the bitrate of a video file for the bitrate-cap decision
+     * ([BitrateCapPolicy]).
+     *
+     * Tries, in order:
+     * 1. The video track's own `KEY_BIT_RATE` from the container (exact).
+     * 2. The overall container bitrate from [MediaMetadataRetriever]
+     *    (includes audio, so it slightly overestimates the video track).
+     * 3. File size divided by duration (same overestimate).
+     *
+     * @param videoPath Absolute path to video file
+     * @return Bitrate in bits per second, or null when it cannot be determined
+     */
+    fun getVideoBitrate(videoPath: String): Long? {
+        try {
+            val extractor = MediaExtractor()
+            try {
+                extractor.setDataSource(videoPath)
+                for (i in 0 until extractor.trackCount) {
+                    val format = extractor.getTrackFormat(i)
+                    val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                    if (mime.startsWith("video/")) {
+                        if (format.containsKey(MediaFormat.KEY_BIT_RATE)) {
+                            val rate = format.getInteger(MediaFormat.KEY_BIT_RATE).toLong()
+                            if (rate > 0) return rate
+                        }
+                        break
+                    }
+                }
+            } finally {
+                extractor.release()
+            }
+        } catch (e: Exception) {
+            Log.w(RENDER_TAG, "Track bitrate probe failed for $videoPath: ${e.message}")
+        }
+
+        try {
+            val retriever = android.media.MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(videoPath)
+                val rate = retriever
+                    .extractMetadata(
+                        android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE
+                    )
+                    ?.toLongOrNull()
+                if (rate != null && rate > 0) return rate
+            } finally {
+                retriever.release()
+            }
+        } catch (e: Exception) {
+            Log.w(RENDER_TAG, "Container bitrate probe failed for $videoPath: ${e.message}")
+        }
+
+        try {
+            val durationUs = getVideoDuration(videoPath)
+            val sizeBytes = java.io.File(videoPath).length()
+            if (durationUs > 0 && sizeBytes > 0) {
+                return sizeBytes * 8L * 1_000_000L / durationUs
+            }
+        } catch (e: Exception) {
+            Log.w(RENDER_TAG, "File-size bitrate estimate failed for $videoPath: ${e.message}")
+        }
+
+        Log.w(RENDER_TAG, "Could not determine video bitrate for $videoPath")
+        return null
+    }
+
+    /**
      * Retrieves video frame rate from file.
      *
      * @param videoPath Absolute path to video file

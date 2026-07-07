@@ -77,6 +77,50 @@ internal class MediaInfoExtractor {
     }
   }
 
+  // MARK: - Video Bitrate Probing
+
+  /// Probes the bitrate of a video file for the bitrate-cap decision
+  /// (`BitrateCapPolicy`).
+  ///
+  /// Uses the video track's `estimatedDataRate` (exact for local files) and
+  /// falls back to file size divided by duration (includes audio, so it
+  /// slightly overestimates the video track).
+  ///
+  /// - Parameter videoPath: Absolute path to video file
+  /// - Returns: Bitrate in bits per second, or nil when it cannot be determined
+  static func getVideoBitrate(_ videoPath: String) async -> Int64? {
+    let url = URL(fileURLWithPath: videoPath)
+    guard FileManager.default.fileExists(atPath: url.path) else {
+      PluginLog.print("❌ Video file does not exist: \(videoPath)")
+      return nil
+    }
+
+    let asset = AVURLAsset(url: url)
+
+    if let videoTrack = try? await loadVideoTrack(from: asset) {
+      let dataRate: Float
+      if #available(iOS 15.0, macOS 13.0, *) {
+        dataRate = (try? await videoTrack.load(.estimatedDataRate)) ?? 0
+      } else {
+        dataRate = videoTrack.estimatedDataRate
+      }
+      if dataRate.isFinite && dataRate > 0 {
+        return Int64(dataRate)
+      }
+    }
+
+    // Fallback: overall file bitrate from size / duration.
+    let durationUs = await getVideoDuration(videoPath)
+    let sizeBytes =
+      (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64 ?? 0) ?? 0
+    if durationUs > 0 && sizeBytes > 0 {
+      return sizeBytes * 8 * 1_000_000 / durationUs
+    }
+
+    PluginLog.print("⚠️ Could not determine video bitrate for \(videoPath)")
+    return nil
+  }
+
   // MARK: - Audio Channel Detection
 
   /// Detects the number of audio channels in a video file.

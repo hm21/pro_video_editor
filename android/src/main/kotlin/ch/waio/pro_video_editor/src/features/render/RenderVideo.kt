@@ -15,6 +15,7 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import mapFormatToMimeType
+import ch.waio.pro_video_editor.src.features.render.helpers.BitrateCapPolicy
 import ch.waio.pro_video_editor.src.features.render.helpers.ResilientVideoEncoderFactory
 import ch.waio.pro_video_editor.src.features.render.helpers.applyComposition
 import ch.waio.pro_video_editor.src.features.render.helpers.VolumeControlAudioMixerFactory
@@ -493,6 +494,7 @@ class RenderVideo(private val context: Context) {
             context = context,
             mimeType = outputMimeType,
             bitrate = config.bitrate,
+            forceVideoEncoding = shouldForceVideoEncodeForBitrateCap(config),
         )
 
         // Declare transformer before listener to make it accessible
@@ -632,6 +634,41 @@ class RenderVideo(private val context: Context) {
                 }
             }
         }.start()
+    }
+
+    /**
+     * Decides whether the requested bitrate cap forces the video track through
+     * the encoder (see [BitrateCapPolicy]).
+     *
+     * Called with the final (post pre-transcode/reverse/transition) config, so
+     * the probed files are exactly what the transformer will read. Sources
+     * already within cap × tolerance keep Media3's lossless transmux fast
+     * path; anything over budget — or unprobeable — is re-encoded so
+     * [ResilientVideoEncoderFactory] actually applies the bitrate.
+     */
+    private fun shouldForceVideoEncodeForBitrateCap(config: RenderConfig): Boolean {
+        val cap = config.bitrate ?: return false
+        val clipPaths = buildList {
+            config.videoClips.forEach { add(it.inputPath) }
+            config.composition?.layers?.forEach { layer ->
+                layer.clips.forEach { add(it.inputPath) }
+            }
+        }.distinct()
+        if (clipPaths.isEmpty()) return false
+
+        val sourceBitrates = clipPaths.map { MediaInfoExtractor.getVideoBitrate(it) }
+        val forceEncode = BitrateCapPolicy.shouldForceEncode(cap, sourceBitrates)
+        Log.i(
+            RENDER_TAG,
+            "Bitrate cap ${cap / 1000} kbps: source bitrate(s) " +
+                    sourceBitrates.joinToString { "${(it ?: -1) / 1000} kbps" } +
+                    if (forceEncode) {
+                        " exceed cap × ${BitrateCapPolicy.TOLERANCE} — forcing video re-encode"
+                    } else {
+                        " within cap × ${BitrateCapPolicy.TOLERANCE} — transmux fast path allowed"
+                    }
+        )
+        return forceEncode
     }
 
     /**

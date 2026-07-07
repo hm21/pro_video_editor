@@ -47,12 +47,18 @@ import com.google.common.collect.ImmutableList
  * @param mimeType Target video MIME type (e.g. `video/avc`).
  * @param bitrate Requested bitrate in bits per second, or null for the encoder
  *  default.
+ * @param forceVideoEncoding When true, [videoNeedsEncoding] reports that the
+ *  video track must be encoded, disabling Media3's transmux fast path. Used to
+ *  enforce the bitrate cap on sources whose bitrate exceeds it (see
+ *  [BitrateCapPolicy]); a transmux would copy the source samples verbatim and
+ *  ignore [bitrate] entirely.
  */
 @UnstableApi
 class ResilientVideoEncoderFactory(
     private val context: Context,
     private val mimeType: String?,
     bitrate: Int?,
+    private val forceVideoEncoding: Boolean = false,
 ) : Codec.EncoderFactory {
 
     private val isAvc = mimeType == MimeTypes.VIDEO_H264
@@ -60,29 +66,21 @@ class ResilientVideoEncoderFactory(
     /** Encoder-safe bitrate (clamped + mode), or null when none was requested. */
     private val bitrateChoice: BitrateChoice? = resolveBitrateSettings(mimeType, bitrate)
 
-    /**
-     * Plain factory used for audio and to preserve the original
-     * remux-vs-encode decision. It carries only the bitrate settings (no
-     * operating-rate override) so [videoNeedsEncoding] keeps returning what it
-     * did before this factory existed.
-     */
+    /** Plain factory used for audio encoding. */
     private val baseFactory: DefaultEncoderFactory = DefaultEncoderFactory.Builder(context)
         .setEnableFallback(true)
-        .apply {
-            bitrateChoice?.let {
-                setRequestedVideoEncoderSettings(
-                    VideoEncoderSettings.Builder()
-                        .setBitrate(it.bitrate)
-                        .setBitrateMode(it.bitrateMode)
-                        .build()
-                )
-            }
-        }
         .build()
 
     override fun audioNeedsEncoding(): Boolean = baseFactory.audioNeedsEncoding()
 
-    override fun videoNeedsEncoding(): Boolean = baseFactory.videoNeedsEncoding()
+    /**
+     * Explicit remux-vs-encode decision. Media3 consults this in
+     * `TransformerUtil.shouldTranscodeVideo`; everything else being equal
+     * (single clip, no effects, matching MIME type), returning false keeps the
+     * lossless transmux fast path and returning true forces the video track
+     * through [createForVideoEncoding], where [bitrateChoice] is applied.
+     */
+    override fun videoNeedsEncoding(): Boolean = forceVideoEncoding
 
     override fun createForAudioEncoding(format: Format, logSessionId: LogSessionId?): Codec =
         baseFactory.createForAudioEncoding(format, logSessionId)

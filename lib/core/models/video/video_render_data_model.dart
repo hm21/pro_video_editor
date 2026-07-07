@@ -206,18 +206,21 @@ class VideoRenderData {
   /// Higher values result in a stronger blur effect.
   final double? blur;
 
-  /// The bitrate of the video in bits per second.
+  /// The maximum bitrate of the video in bits per second.
   ///
-  /// This value is optional and may be `null` if the bitrate is not specified.
+  /// This is an upper limit, not a target: a source whose video bitrate
+  /// already fits the cap (within a small tolerance) is exported losslessly
+  /// over the fast path (Android transmux / Apple passthrough) and keeps its
+  /// own lower bitrate. A source above the cap is re-encoded so the output
+  /// honors it.
+  ///
+  /// When `null` (default), no cap is applied and the fast path or platform
+  /// preset decides the output bitrate.
   ///
   /// **WARNING Android:** Not all devices support CBR (Constant Bitrate) mode.
   /// If unsupported, the encoder may silently fall back to VBR
   /// (Variable Bitrate), and the actual bitrate may be constrained by
   /// device-specific minimum and maximum limits.
-  ///
-  /// **WARNING macOS iOS** It's not supported to directly set a specific
-  /// bitrate, instant it will choose a preset which is the most near to the
-  /// applied bitrate.
   final int? bitrate;
 
   /// Caps the frame rate (frames per second) of the exported video.

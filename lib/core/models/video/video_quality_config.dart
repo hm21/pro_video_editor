@@ -61,9 +61,13 @@ class VideoQualityConfig {
     );
   }
 
-  /// The target bitrate in bits per second.
+  /// The maximum bitrate in bits per second.
   ///
-  /// Higher bitrates generally result in better quality but larger file sizes.
+  /// This is an upper limit, not a target: a source already within the cap
+  /// (plus a small tolerance) is exported losslessly over the fast path and
+  /// keeps its own lower bitrate; a source above it is re-encoded down to
+  /// the cap. Higher caps generally result in better quality but larger
+  /// file sizes.
   final int bitrate;
 
   /// The target resolution (width x height) for the video.
