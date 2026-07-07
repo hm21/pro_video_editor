@@ -68,3 +68,20 @@ ffprobe -v trace <output.mp4> 2>&1 | grep -o "type:'[a-z]*'" | head -5
 
 Expected order: `ftyp`, `moov`, `mdat` (with the flag off: `ftyp`,
 `mdat`, `moov`).
+
+## 5. Multichannel (5.1) audio
+
+`assets/surround_5_1.mp4` is a committed 5.1 source; the two "5.1 surround
+source" cases in `bitrate_cap_test.dart` assert it renders under a cap on
+every platform. On Darwin the capped `AVAssetWriter` path downmixes it to
+stereo — confirm the encoded audio track:
+
+```sh
+ffprobe -v error -select_streams a:0 \
+  -show_entries stream=codec_name,channels,channel_layout \
+  -of default=noprint_wrappers=1 <capped-output.mp4>
+```
+
+Expected: `channels=2`, `channel_layout=stereo`. (AVFoundation also
+downmixes implicitly, but the reader is given an explicit stereo channel
+layout so the behavior is deterministic across OS versions.)

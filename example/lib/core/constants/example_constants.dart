@@ -16,6 +16,11 @@ const String kVideoEditorExampleAssetWorldPath = 'assets/demo_world.mp4';
 const String kVideoEditorExampleDivinePath =
     'assets/tests/divine_transcribed.mp4';
 
+/// A local path to a short H.264 clip with a 5.1 surround audio track. Used to
+/// verify that multichannel sources survive a bitrate-capped export (the
+/// Darwin AVAssetWriter path downmixes them to stereo).
+const String kVideoEditorExampleSurround51Path = 'assets/surround_5_1.mp4';
+
 /// A local path to the first example audio track used in video editor demos.
 const String kVideoEditorExampleAudio1Path = 'assets/audio1.mp3';
 

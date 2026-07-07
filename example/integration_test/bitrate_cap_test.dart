@@ -18,6 +18,9 @@ void main() {
   /// ~12.5 Mbit/s HEVC 1080p — well above the 8 Mbit/s cap.
   final highBitrateVideo = EditorVideo.asset(kVideoEditorExampleHevcPath);
 
+  /// Short H.264 clip with a 5.1 surround audio track.
+  final surroundVideo = EditorVideo.asset(kVideoEditorExampleSurround51Path);
+
   const cap = 8000000; // 8 Mbit/s
   const capTolerance = 1.2; // Must match the native BitrateCapPolicy.
   const maxAllowed = cap * capTolerance; // 9.6 Mbit/s
@@ -145,6 +148,54 @@ void main() {
     expect(result.lengthInBytes, greaterThan(50000));
     final meta = await pve.getMetadata(EditorVideo.memory(result));
     expect(meta.bitrate, lessThanOrEqualTo(maxAllowed));
+  });
+
+  group('5.1 surround source', () {
+    // A multichannel source must survive a bitrate-capped export on every
+    // platform. On Darwin the capped AVAssetWriter path downmixes it to
+    // stereo; a regression there previously risked a failed export.
+
+    testWidgets('renders through the capped re-encode path (with effect)',
+        (_) async {
+      // A color filter defeats the passthrough/transmux fast path, so the
+      // render always goes through the capped encoder (where the audio
+      // downmix happens on Darwin).
+      final result = await pve.renderVideo(
+        VideoRenderData(
+          videoSegments: [VideoSegment(video: surroundVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+          bitrate: cap,
+          colorFilters: kBasicFilterMatrix,
+        ),
+      );
+
+      expect(result.lengthInBytes, greaterThan(20000));
+      final meta = await pve.getMetadata(EditorVideo.memory(result));
+      expect(
+        meta.audioDuration,
+        isNotNull,
+        reason: 'Audio must survive the downmix/re-encode',
+      );
+      expect(meta.duration.inMilliseconds, closeTo(2000, 400));
+      expect(meta.bitrate, lessThanOrEqualTo(maxAllowed));
+    });
+
+    testWidgets('renders on the no-edit fast path', (_) async {
+      // No edits + a low-bitrate source: Darwin passthrough / Android
+      // transmux. The 5.1 audio must not break the fast path either.
+      final result = await pve.renderVideo(
+        VideoRenderData(
+          videoSegments: [VideoSegment(video: surroundVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+          bitrate: cap,
+        ),
+      );
+
+      expect(result.lengthInBytes, greaterThan(20000));
+      final meta = await pve.getMetadata(EditorVideo.memory(result));
+      expect(meta.audioDuration, isNotNull);
+      expect(meta.duration.inMilliseconds, closeTo(2000, 400));
+    });
   });
 
   testWidgets('null bitrate keeps previous behavior', (_) async {
