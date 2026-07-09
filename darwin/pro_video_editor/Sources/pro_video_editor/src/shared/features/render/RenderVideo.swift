@@ -647,12 +647,6 @@ class RenderVideo {
 
       let firstStart = first.startUs ?? 0
       let lastStart = last.startUs ?? 0
-      let firstEnd: Int64
-      if let e = first.endUs {
-        firstEnd = e
-      } else {
-        firstEnd = await clipDurationUs(first.inputPath)
-      }
       let lastEnd: Int64
       if let e = last.endUs {
         lastEnd = e
@@ -663,18 +657,26 @@ class RenderVideo {
       // Single-clip loops carve head and tail from the same source, so they need
       // the stricter head+tail<L guard; multi-clip loops keep two independent
       // sources and reuse the ordinary overlap geometry.
-      let plan: ClipTransitionGeometry.OverlapPlan? =
-        singleClip
-        ? ClipTransitionGeometry.planWrap(
+      let plan: ClipTransitionGeometry.OverlapPlan?
+      if singleClip {
+        plan = ClipTransitionGeometry.planWrap(
           sourceDurationUs: lastEnd - lastStart,
           transitionDurationUs: wrap.durationUs,
           speed: last.playbackSpeed)
-        : ClipTransitionGeometry.planOverlap(
+      } else {
+        let firstEnd: Int64
+        if let e = first.endUs {
+          firstEnd = e
+        } else {
+          firstEnd = await clipDurationUs(first.inputPath)
+        }
+        plan = ClipTransitionGeometry.planOverlap(
           outgoingSourceDurationUs: lastEnd - lastStart,
           incomingSourceDurationUs: firstEnd - firstStart,
           transitionDurationUs: wrap.durationUs,
           outgoingSpeed: last.playbackSpeed,
           incomingSpeed: first.playbackSpeed)
+      }
 
       if let plan = plan {
         let tailSrc = plan.outgoingTailSourceUs

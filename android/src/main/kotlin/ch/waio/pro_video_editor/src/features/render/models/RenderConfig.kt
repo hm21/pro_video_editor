@@ -25,10 +25,6 @@ data class TransitionConfig(
         get() = type == "dissolve" || type == "slide" || type == "push" ||
                 type == "wipe"
 
-    /** True when this transition dips through a solid color (no overlap). */
-    val isDip: Boolean
-        get() = type == "fadeToBlack" || type == "fadeToWhite"
-
     companion object {
         fun fromMap(map: Map<String, Any?>): TransitionConfig {
             return TransitionConfig(
