@@ -244,7 +244,11 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       },
     );
     final List<Uint8List> result = response?.cast<Uint8List>() ?? [];
-    return result.isNotEmpty ? result.first : null;
+    if (result.isEmpty) return null;
+    // A frame that failed or fell out of range comes back as an empty entry;
+    // surface that as "no thumbnail" rather than a zero-byte, broken image.
+    final Uint8List first = result.first;
+    return first.isNotEmpty ? first : null;
   }
 
   @override

@@ -77,65 +77,221 @@ class ThumbnailGenerator {
         return
       }
 
-      let results = await withCheckedContinuation { continuation in
-        var resultData = [Data?](repeating: nil, count: times.count)
-
-        let totalCount = times.count
-        var completed = 0
-        let start = Date().timeIntervalSince1970
-
-        generator.generateCGImagesAsynchronously(forTimes: times) {
-          requestedTime, cgImage, actualTime, result, error in
-
-          let index = completed
-
-          if let cgImage = cgImage {
-            let resized = resizeCGImageKeepingAspect(
-              cgImage: cgImage,
-              targetWidth: config.outputWidth,
-              targetHeight: config.outputHeight,
-              boxFit: config.boxFit
-            )
-
-            let data = compressCGImage(
-              resized,
-              format: config.outputFormat,
-              jpegQuality: config.jpegQuality
-            )
-
-            resultData[index] = data
-
-            let elapsed = Int((Date().timeIntervalSince1970 - start) * 1000)
-
-            PluginLog.print(
-              "[\(index)] ✅ frame in \(elapsed) ms (\(data.count) bytes)"
-            )
-          } else {
-            let message = error?.localizedDescription ?? "Unknown error"
-            PluginLog.print("[\(index)] ❌ frame failed: \(message)")
-
-            let reportableError =
-              error
-              ?? NSError(
-                domain: "ThumbnailGenerator",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Frame generation failed at index \(index)"]
-              )
-            onError(reportableError)
-          }
-
-          completed += 1
-
-          onProgress(Double(completed) / Double(totalCount))
-
-          if completed == totalCount {
-            continuation.resume(returning: resultData.compactMap { $0 })
-          }
-        }
-      }
+      // The output maps 1:1 to `times`: `result[i]` is the thumbnail for
+      // `times[i]` (and therefore for the caller's `timestamps[i]`). A frame that
+      // fails or is cancelled is represented positionally as an empty `Data()`
+      // rather than being compacted out — dropping it would shift every later
+      // frame onto the wrong timestamp. Callers must treat an empty entry as
+      // "no thumbnail for this timestamp".
+      let results = await generateThumbnailData(
+        generator: generator,
+        times: times,
+        config: config,
+        onProgress: onProgress
+      )
 
       onComplete(results)
     }
+  }
+
+  // MARK: - Frame extraction
+
+  /// Decodes every requested frame and returns the compressed thumbnails aligned
+  /// index-for-index with `times`.
+  ///
+  /// The returned array is always `times.count` long. Each slot holds the
+  /// compressed image for the timestamp at the same index, or an empty `Data()`
+  /// when that frame failed or was cancelled. This positional, stable
+  /// representation lets the caller map `result[i]` to `timestamps[i]` without
+  /// any reordering or compaction.
+  private static func generateThumbnailData(
+    generator: AVAssetImageGenerator,
+    times: [NSValue],
+    config: ThumbnailConfig,
+    onProgress: @escaping (Double) -> Void
+  ) async -> [Data] {
+    // An empty request must resolve immediately; feeding an empty array to the
+    // generator would never invoke a completion handler and hang the caller.
+    guard !times.isEmpty else { return [] }
+
+    if #available(iOS 16.0, macOS 13.0, *) {
+      return await generateThumbnailDataOrdered(
+        generator: generator, times: times, config: config, onProgress: onProgress)
+    }
+
+    return await generateThumbnailDataConcurrent(
+      generator: generator, times: times, config: config, onProgress: onProgress)
+  }
+
+  /// Modern path (iOS 16+/macOS 13+): consume the ordered
+  /// `AVAssetImageGenerator.images(for:)` async sequence.
+  ///
+  /// Elements arrive serially, so no locking is needed, but the write index is
+  /// still derived from each element's `requestedTime` — never from a running
+  /// counter — so the alignment guarantee holds regardless of delivery order.
+  @available(iOS 16.0, macOS 13.0, *)
+  private static func generateThumbnailDataOrdered(
+    generator: AVAssetImageGenerator,
+    times: [NSValue],
+    config: ThumbnailConfig,
+    onProgress: @escaping (Double) -> Void
+  ) async -> [Data] {
+    let (distinct, indicesByKey) = distinctTimesAndIndexMap(times)
+    var resultData = [Data?](repeating: nil, count: times.count)
+    var completed = 0
+    let start = Date().timeIntervalSince1970
+
+    for await frame in generator.images(for: distinct.map { $0.timeValue }) {
+      let indices = indicesByKey[timeKey(frame.requestedTime)] ?? []
+
+      var data: Data?
+      do {
+        let cgImage = try frame.image
+        let rendered = makeThumbnailData(cgImage, config: config)
+        data = rendered
+        let elapsed = Int((Date().timeIntervalSince1970 - start) * 1000)
+        PluginLog.print("[\(indices.first ?? -1)] ✅ frame in \(elapsed) ms (\(rendered.count) bytes)")
+      } catch {
+        PluginLog.print("[\(indices.first ?? -1)] ❌ frame failed: \(error.localizedDescription)")
+      }
+
+      // Fan the single decoded frame out to every index that requested this
+      // timestamp, so duplicate timestamps all stay aligned.
+      for index in indices {
+        resultData[index] = data
+      }
+
+      completed += 1
+      onProgress(Double(completed) / Double(distinct.count))
+    }
+
+    return resultData.map { $0 ?? Data() }
+  }
+
+  /// Legacy path (pre-iOS 16 / macOS 13): `generateCGImagesAsynchronously(forTimes:)`
+  /// guarantees neither ordered nor serial delivery — on modern OS builds the
+  /// completion handler can fire concurrently and out of order (observed on
+  /// iOS 26.5).
+  ///
+  /// Every shared value (`resultData`, `completed`, `resumed`) is therefore
+  /// mutated under a single lock, the write indices are resolved from
+  /// `requestedTime`, and the continuation is resumed exactly once even when
+  /// frames fail or cancel.
+  ///
+  /// The generator is handed only the *distinct* requested times, so it invokes
+  /// its callback exactly once per key — the completion count can always reach
+  /// `distinctCount` and resume the continuation, rather than wedging when the
+  /// same timestamp is requested more than once.
+  ///
+  /// Left at module-internal (not `private`) so the RunnerTests can exercise this
+  /// legacy path directly on modern OS versions, which otherwise always take the
+  /// ordered async path above.
+  static func generateThumbnailDataConcurrent(
+    generator: AVAssetImageGenerator,
+    times: [NSValue],
+    config: ThumbnailConfig,
+    onProgress: @escaping (Double) -> Void
+  ) async -> [Data] {
+    let (distinct, indicesByKey) = distinctTimesAndIndexMap(times)
+    let distinctCount = distinct.count
+
+    return await withCheckedContinuation { continuation in
+      let lock = NSLock()
+      var resultData = [Data?](repeating: nil, count: times.count)
+      var completed = 0
+      var resumed = false
+      let start = Date().timeIntervalSince1970
+
+      generator.generateCGImagesAsynchronously(forTimes: distinct) {
+        requestedTime, cgImage, _, _, error in
+
+        // Resize + compress happen off the lock; only shared-state mutation is
+        // guarded so heavy decoding still runs concurrently.
+        var data: Data?
+        if let cgImage = cgImage {
+          data = makeThumbnailData(cgImage, config: config)
+        }
+
+        lock.lock()
+        let indices = indicesByKey[timeKey(requestedTime)] ?? []
+        // Fan the single decoded frame out to every index that requested this
+        // timestamp, so duplicate timestamps all stay aligned.
+        for index in indices {
+          resultData[index] = data
+        }
+        completed += 1
+        let progress = Double(completed) / Double(distinctCount)
+        let shouldResume = completed == distinctCount && !resumed
+        if shouldResume { resumed = true }
+        let payload = shouldResume ? resultData.map { $0 ?? Data() } : nil
+        lock.unlock()
+
+        if let data = data {
+          let elapsed = Int((Date().timeIntervalSince1970 - start) * 1000)
+          PluginLog.print("[\(indices.first ?? -1)] ✅ frame in \(elapsed) ms (\(data.count) bytes)")
+        } else {
+          let message = error?.localizedDescription ?? "Unknown error"
+          PluginLog.print("[\(indices.first ?? -1)] ❌ frame failed: \(message)")
+        }
+
+        onProgress(progress)
+
+        if let payload = payload {
+          continuation.resume(returning: payload)
+        }
+      }
+    }
+  }
+
+  /// Splits the requested `times` into the *distinct* times to hand the generator
+  /// and a map from each time's stable key to every result index that requested
+  /// it.
+  ///
+  /// The generator is called with distinct times only, so it invokes its callback
+  /// exactly once per key; that single frame is then fanned out to every index in
+  /// the key's bucket. This keeps `result[i]` aligned to `times[i]` even when the
+  /// same timestamp is requested more than once, and guarantees the completion
+  /// count can always reach the number of distinct times — so the continuation
+  /// resumes instead of wedging.
+  private static func distinctTimesAndIndexMap(
+    _ times: [NSValue]
+  ) -> (distinct: [NSValue], indicesByKey: [String: [Int]]) {
+    var indicesByKey: [String: [Int]] = [:]
+    var distinct: [NSValue] = []
+    for (i, value) in times.enumerated() {
+      let key = timeKey(value.timeValue)
+      if indicesByKey[key] == nil {
+        distinct.append(value)
+      }
+      indicesByKey[key, default: []].append(i)
+    }
+    return (distinct, indicesByKey)
+  }
+
+  /// Stable dictionary key for a requested `CMTime`.
+  ///
+  /// Every requested time is built with timescale `1_000_000` and the generators
+  /// return the requested time unchanged, so an exact `(value, timescale)` key
+  /// matches reliably without any floating-point comparison.
+  private static func timeKey(_ time: CMTime) -> String {
+    "\(time.value)/\(time.timescale)"
+  }
+
+  /// Resizes a decoded frame to the configured bounds and compresses it into the
+  /// configured output format.
+  private static func makeThumbnailData(_ cgImage: CGImage, config: ThumbnailConfig) -> Data {
+    let resized = resizeCGImageKeepingAspect(
+      cgImage: cgImage,
+      targetWidth: config.outputWidth,
+      targetHeight: config.outputHeight,
+      boxFit: config.boxFit
+    )
+
+    return compressCGImage(
+      resized,
+      format: config.outputFormat,
+      jpegQuality: config.jpegQuality
+    )
   }
 
   // MARK: - Keyframe timestamps

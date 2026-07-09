@@ -1,3 +1,6 @@
+## 2.5.1
+- **FIX**(iOS, macOS): Loading many clips no longer freezes the editor. A thumbnail decoder race (out-of-order callbacks seen on iOS 26.5) could hang `getThumbnails` forever or map frames to the wrong timestamps; frames now stay index-aligned with their requested timestamps and the call always completes.
+
 ## 2.5.0
 - **FEAT**(android, iOS, macOS): A `ClipTransition` on the **last (or only)** `VideoSegment` now wraps back into the first segment, so a single-track render loops seamlessly — e.g. a `dissolve` on one segment cross-dissolves on restart. Overlap types (dissolve/slide/push/wipe) shorten the output by the transition duration and require a single clip longer than 2× the duration (otherwise the wrap is skipped); dip types (fadeToBlack/fadeToWhite) keep the length and dip through the color at the seam. Previously a transition on the last segment was silently ignored.
 
