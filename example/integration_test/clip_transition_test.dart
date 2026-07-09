@@ -338,12 +338,12 @@ void main() {
   });
 
   // ───────────────────────────────────────────────────────────
-  // A transition on the last/only segment is a no-op
+  // Loop wrap — a transition on the last/only segment wraps into the first
   // ───────────────────────────────────────────────────────────
-  group('Clip transitions — edge cases', () {
-    testWidgets('transition on the only segment is ignored', (_) async {
+  group('Clip transitions — loop wrap', () {
+    testWidgets('overlap on the only segment shortens like a wrap', (_) async {
       final meta = await render(
-        'last-segment-ignored',
+        'single-segment-loop-wrap',
         VideoRenderData(
           outputFormat: VideoOutputFormat.mp4,
           videoSegments: [
@@ -359,11 +359,65 @@ void main() {
           ],
         ),
       );
-      // No following clip → transition ignored → full clip duration.
+      // The end cross-dissolves into the start → output shortened by the
+      // overlap duration, exactly like an overlap between two clips.
+      expectDuration(
+        meta,
+        clipDuration - overlapDuration,
+        'a dissolve on the only segment must wrap and shorten the output',
+      );
+    });
+
+    testWidgets('dip on the only segment keeps the duration', (_) async {
+      final meta = await render(
+        'single-segment-dip-wrap',
+        VideoRenderData(
+          outputFormat: VideoOutputFormat.mp4,
+          videoSegments: [
+            VideoSegment(
+              video: inputVideo,
+              startTime: Duration.zero,
+              endTime: clipDuration,
+              transition: const ClipTransition(
+                type: ClipTransitionType.fadeToBlack,
+                duration: dipDuration,
+              ),
+            ),
+          ],
+        ),
+      );
+      // Dip wrap fades out at the end and in at the start → length unchanged.
       expectDuration(
         meta,
         clipDuration,
-        'transition on the last segment must not change the duration',
+        'a dip wrap must not change the duration',
+      );
+    });
+
+    testWidgets('wrap is skipped when the clip is too short', (_) async {
+      // A 1s clip with an 800ms wrap: head + tail (1.6s) exceed the source, so
+      // no middle body remains → wrap skipped → full clip duration.
+      final meta = await render(
+        'single-segment-wrap-too-short',
+        VideoRenderData(
+          outputFormat: VideoOutputFormat.mp4,
+          videoSegments: [
+            VideoSegment(
+              video: inputVideo,
+              startTime: Duration.zero,
+              endTime: const Duration(seconds: 1),
+              transition: const ClipTransition(
+                type: ClipTransitionType.dissolve,
+                duration: overlapDuration,
+              ),
+            ),
+          ],
+        ),
+      );
+      expectDuration(
+        meta,
+        const Duration(seconds: 1),
+        'too-short clip must fall back to no wrap (full duration)',
       );
     });
   });

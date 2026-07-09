@@ -143,6 +143,10 @@ class VideoRenderData {
   /// provided. Use this field for a single track of concatenated clips, and
   /// [composition] when layers overlap in time or space.
   ///
+  /// A [ClipTransition] on the **last (or only)** segment wraps back into the
+  /// first segment, making the track loop seamlessly (e.g. a dissolve on a
+  /// single segment cross-dissolves on restart). See [VideoSegment.transition].
+  ///
   /// **Example:**
   /// ```dart
   /// videoSegments: [

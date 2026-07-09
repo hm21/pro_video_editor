@@ -89,6 +89,46 @@ internal object ClipTransitionGeometry {
     }
 
     /**
+     * Resolves the overlap geometry for a **seamless loop wrap** where the
+     * outgoing tail and incoming head are carved from the *same* single clip
+     * (its whole start-to-end range).
+     *
+     * Unlike [planOverlap] the two sides share one source, so the head
+     * `[0, head)` and tail `[L - tail, L)` must not overlap — a positive middle
+     * body must remain (`head + tail < sourceDuration`). Because both sides are
+     * the same clip they also share its playback [speed], so `head == tail`.
+     * Returns `null` when no body would remain (caller falls back to no wrap).
+     *
+     * Multi-clip loops (last clip ≠ first clip) use [planOverlap] instead, since
+     * each side then keeps its own independent source.
+     *
+     * @param sourceDurationUs Trimmed source duration of the single looping clip.
+     * @param transitionDurationUs Requested wrap duration in output time.
+     * @param speed The clip's playback speed (null/<=0 → 1×).
+     */
+    fun planWrap(
+        sourceDurationUs: Long,
+        transitionDurationUs: Long,
+        speed: Float?,
+    ): OverlapPlan? {
+        if (sourceDurationUs <= 0L) return null
+        val s = validSpeedOrOne(speed)
+        val outputDur = sourceDurationUs / s
+        // Both sides consume `dOut * speed` of the same source; head + tail must
+        // leave a positive middle body, so dOut is capped just below outputDur/2.
+        val dOut = minOf(transitionDurationUs.toDouble(), outputDur / 2.0)
+        if (dOut <= 0.0) return null
+        val outputDurationUs = dOut.roundToLong()
+        val sideSourceUs = (dOut * s).roundToLong()
+        if (outputDurationUs <= 0L || sourceDurationUs - 2L * sideSourceUs <= 0L) return null
+        return OverlapPlan(
+            outputDurationUs = outputDurationUs,
+            outgoingTailSourceUs = sideSourceUs,
+            incomingHeadSourceUs = sideSourceUs,
+        )
+    }
+
+    /**
      * Number of OUTPUT frames the blended clip should emit so the decoded
      * outgoing tail ([decodedTailFrames] frames covering [tailSourceDurationUs]
      * of source) is replayed across [outputDurationUs] of output. When the

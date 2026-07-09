@@ -8,7 +8,9 @@ internal struct VideoClip: Sendable {
   let volume: Float?
   let playbackSpeed: Float?
   let reverseVideo: Bool
-  /// Transition into the next clip (nil = hard cut). Ignored on the last clip.
+  /// Transition into the next clip (nil = hard cut). On the **last** clip it
+  /// wraps into the first clip, making the track loop seamlessly (handled by the
+  /// wrap pass in RenderVideo / the dip windows in CompositionBuilder).
   let transition: ClipTransitionConfig?
   /// Start position on the layer timeline in microseconds (composition only).
   /// `nil` = right after the previous clip on the same layer.

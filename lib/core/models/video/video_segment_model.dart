@@ -85,8 +85,18 @@ class VideoSegment {
   /// The transition played between this clip and the **next** clip.
   ///
   /// Describes how this segment transitions into the following segment (e.g. a
-  /// dissolve or fade-to-black). The transition is ignored on the last segment
-  /// because there is no following clip.
+  /// dissolve or fade-to-black).
+  ///
+  /// **On the last (or only) segment** there is no following clip, so the
+  /// transition instead **wraps back into the first segment**, turning the
+  /// whole track into a seamless loop: the end dissolves (or dips) into the
+  /// beginning, so a looping player restarts without a visible cut. For overlap
+  /// transitions (dissolve/slide/push/wipe) the output is shortened by the
+  /// transition duration — exactly like an overlap transition between two clips
+  /// — and for a single segment the clip must be longer than twice the
+  /// transition duration (otherwise the wrap is skipped and the loop restarts
+  /// hard). Dip transitions (fadeToBlack/fadeToWhite) keep the duration and dip
+  /// through the color at the restart seam.
   ///
   /// Currently supported on Android and iOS/macOS only; other platforms
   /// ignore this field.

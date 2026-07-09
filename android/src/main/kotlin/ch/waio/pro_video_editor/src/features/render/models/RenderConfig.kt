@@ -25,6 +25,10 @@ data class TransitionConfig(
         get() = type == "dissolve" || type == "slide" || type == "push" ||
                 type == "wipe"
 
+    /** True when this transition dips through a solid color (no overlap). */
+    val isDip: Boolean
+        get() = type == "fadeToBlack" || type == "fadeToWhite"
+
     companion object {
         fun fromMap(map: Map<String, Any?>): TransitionConfig {
             return TransitionConfig(
@@ -46,7 +50,9 @@ data class TransitionConfig(
  * @property volume Volume multiplier for this clip (null = unchanged, 0.0=mute, 1.0=original)
  * @property playbackSpeed Speed multiplier for this clip (null = unchanged, 0.5=half, 2.0=double)
  * @property reverseVideo Whether to render this clip backwards
- * @property transition Transition into the next clip (null = hard cut). Ignored on the last clip.
+ * @property transition Transition into the next clip (null = hard cut). On the
+ *  **last** clip it wraps into the first clip, making the track loop seamlessly
+ *  (see the wrap handling in RenderVideo/VideoSequenceBuilder).
  */
 data class VideoClip(
     val inputPath: String,

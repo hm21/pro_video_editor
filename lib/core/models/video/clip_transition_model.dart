@@ -68,8 +68,14 @@ enum ClipTransitionDirection {
 ///
 /// Assign this to [VideoSegment.transition] to describe how that clip
 /// transitions **into the following clip** (dissolve, fade-to-black, wipe,
-/// etc.). The transition is ignored on the last segment (there is no following
-/// clip).
+/// etc.).
+///
+/// On the **last (or only)** segment there is no following clip, so the
+/// transition **wraps back into the first segment** and the track loops
+/// seamlessly — e.g. a [ClipTransitionType.dissolve] on a single segment makes
+/// a looping player cross-dissolve on restart. See [VideoSegment.transition]
+/// for the exact wrap behavior (overlap types shorten the output; dip types dip
+/// through the color at the seam).
 ///
 /// Clip transitions are currently supported on **Android** and
 /// **iOS/macOS** only. Other platforms ignore the field.
