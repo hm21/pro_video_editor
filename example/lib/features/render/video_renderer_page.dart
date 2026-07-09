@@ -498,6 +498,30 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Seamless loop: a single clip whose end cross-dissolves into its start.
+  ///
+  /// The transition on the last (here: only) segment wraps back into the first
+  /// segment, so a looping player restarts without a visible cut. The output is
+  /// shortened by the 800ms overlap.
+  Future<void> _clipLoopWrap() async {
+    var data = VideoRenderData(
+      videoSegments: [
+        VideoSegment(
+          video: _video,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 5),
+          transition: const ClipTransition(
+            type: ClipTransitionType.dissolve,
+            duration: Duration(milliseconds: 800),
+            curve: AnimationCurve.easeInOut,
+          ),
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   /// Fade-to-black (dip-to-black) transition between two split clips.
   ///
   /// The outgoing clip dips to black and the incoming rises from black at the
@@ -2188,6 +2212,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           leading: const Icon(Icons.gradient_outlined),
           title: const Text('Dissolve'),
           subtitle: const Text('800ms cross-dissolve between two clips'),
+        ),
+        ListTile(
+          onTap: _clipLoopWrap,
+          leading: const Icon(Icons.loop_outlined),
+          title: const Text('Loop wrap (dissolve)'),
+          subtitle: const Text('One clip: end cross-dissolves into the start'),
         ),
         ListTile(
           onTap: _clipFadeToBlack,

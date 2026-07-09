@@ -150,10 +150,10 @@ class RenderVideo {
 
         // Pre-render overlap clip transitions (dissolve/slide/push/wipe) into
         // short blended clips spliced between the neighbours, so the main
-        // composition still sees plain forward clips.
-        if workingConfig.videoClips.count > 1,
-          workingConfig.videoClips.contains(where: { $0.transition?.isOverlap == true })
-        {
+        // composition still sees plain forward clips. An overlap transition on
+        // the last/only clip wraps into the first clip for a seamless loop and
+        // is baked the same way, so a single clip can also need this stage.
+        if workingConfig.videoClips.contains(where: { $0.transition?.isOverlap == true }) {
           let (newClips, urls) = await preRenderTransitions(
             clips: workingConfig.videoClips,
             enableAudio: workingConfig.enableAudio,
@@ -534,6 +534,15 @@ class RenderVideo {
   private static func preRenderTransitions(
     clips: [VideoClip], enableAudio: Bool, outputFormat: String
   ) async -> ([VideoClip], [URL]) {
+    // An overlap transition on the last/only clip loops back into the first clip
+    // (seamless loop). Captured before the between-clip pass clears it.
+    let wrapTransition: ClipTransitionConfig? = {
+      guard let t = clips.last?.transition, t.isOverlap,
+        !(clips.last?.reverseVideo ?? false), !(clips.first?.reverseVideo ?? false)
+      else { return nil }
+      return t
+    }()
+
     var work = clips
     var result: [VideoClip] = []
     var urls: [URL] = []
@@ -624,6 +633,94 @@ class RenderVideo {
         result.append(clearedOverlap(current))
       }
       i += 1
+    }
+
+    // Wrap pass: render the last clip's tail dissolving into the first clip's
+    // head and append it, so any looping player restarts seamlessly. The
+    // between-clip pass only inserts blends *between* clips, so result's first
+    // and last entries are still the original first/last clips.
+    if let wrap = wrapTransition, !result.isEmpty {
+      let lastIdx = result.count - 1
+      let first = result[0]
+      let last = result[lastIdx]
+      let singleClip = lastIdx == 0
+
+      let firstStart = first.startUs ?? 0
+      let lastStart = last.startUs ?? 0
+      let lastEnd: Int64
+      if let e = last.endUs {
+        lastEnd = e
+      } else {
+        lastEnd = await clipDurationUs(last.inputPath)
+      }
+
+      // Single-clip loops carve head and tail from the same source, so they need
+      // the stricter head+tail<L guard; multi-clip loops keep two independent
+      // sources and reuse the ordinary overlap geometry.
+      let plan: ClipTransitionGeometry.OverlapPlan?
+      if singleClip {
+        plan = ClipTransitionGeometry.planWrap(
+          sourceDurationUs: lastEnd - lastStart,
+          transitionDurationUs: wrap.durationUs,
+          speed: last.playbackSpeed)
+      } else {
+        let firstEnd: Int64
+        if let e = first.endUs {
+          firstEnd = e
+        } else {
+          firstEnd = await clipDurationUs(first.inputPath)
+        }
+        plan = ClipTransitionGeometry.planOverlap(
+          outgoingSourceDurationUs: lastEnd - lastStart,
+          incomingSourceDurationUs: firstEnd - firstStart,
+          transitionDurationUs: wrap.durationUs,
+          outgoingSpeed: last.playbackSpeed,
+          incomingSpeed: first.playbackSpeed)
+      }
+
+      if let plan = plan {
+        let tailSrc = plan.outgoingTailSourceUs
+        let headSrc = plan.incomingHeadSourceUs
+        let includeAudio =
+          enableAudio && (last.volume ?? 1.0) > 0 && (first.volume ?? 1.0) > 0
+        let rendered = await ClipTransitionRenderer.render(
+          outgoingPath: last.inputPath,
+          outTailStartUs: lastEnd - tailSrc, outTailEndUs: lastEnd,
+          incomingPath: first.inputPath,
+          inHeadStartUs: firstStart, inHeadEndUs: firstStart + headSrc,
+          outputDurationUs: plan.outputDurationUs,
+          type: wrap.type, direction: wrap.direction, curve: wrap.curve,
+          includeAudio: includeAudio, outputFormat: outputFormat)
+
+        if let rendered = rendered {
+          urls.append(rendered.outputURL)
+          if singleClip {
+            // Trim both ends of the one clip; the carved head/tail moved into
+            // the appended blend.
+            result[0] = VideoClip(
+              inputPath: first.inputPath, startUs: firstStart + headSrc,
+              endUs: lastEnd - tailSrc, volume: first.volume,
+              playbackSpeed: first.playbackSpeed, reverseVideo: false, transition: nil)
+          } else {
+            result[0] = VideoClip(
+              inputPath: first.inputPath, startUs: firstStart + headSrc,
+              endUs: first.endUs, volume: first.volume,
+              playbackSpeed: first.playbackSpeed, reverseVideo: false,
+              transition: first.transition)
+            result[lastIdx] = VideoClip(
+              inputPath: last.inputPath, startUs: last.startUs, endUs: lastEnd - tailSrc,
+              volume: last.volume, playbackSpeed: last.playbackSpeed,
+              reverseVideo: false, transition: nil)
+          }
+          result.append(
+            VideoClip(
+              inputPath: rendered.outputURL.path, startUs: 0, endUs: rendered.durationUs))
+        } else {
+          PluginLog.print("⚠️ Loop wrap render failed; seamless loop skipped")
+        }
+      } else {
+        PluginLog.print("⚠️ Loop wrap: not enough content; seamless loop skipped")
+      }
     }
 
     return (result, urls)

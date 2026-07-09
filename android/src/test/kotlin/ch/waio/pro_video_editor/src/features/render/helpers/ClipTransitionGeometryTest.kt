@@ -119,6 +119,79 @@ internal class ClipTransitionGeometryTest {
     }
 
     @Test
+    fun planWrap_carvesEqualHeadAndTailAtOneX() {
+        // A 4s clip with a 500ms wrap: head and tail each consume 500ms of the
+        // same source, leaving a 3s middle body.
+        val plan = ClipTransitionGeometry.planWrap(
+            sourceDurationUs = 4_000_000L,
+            transitionDurationUs = 500_000L,
+            speed = null,
+        )
+        assertEquals(
+            ClipTransitionGeometry.OverlapPlan(500_000L, 500_000L, 500_000L),
+            plan,
+        )
+    }
+
+    @Test
+    fun planWrap_consumesDoubleSourceAtDoubleSpeed() {
+        // 300ms of OUTPUT at 2× consumes 600ms of source on each side; a 4s clip
+        // keeps a 2.8s middle body.
+        val plan = ClipTransitionGeometry.planWrap(
+            sourceDurationUs = 4_000_000L,
+            transitionDurationUs = 300_000L,
+            speed = 2.0f,
+        )
+        assertEquals(
+            ClipTransitionGeometry.OverlapPlan(300_000L, 600_000L, 600_000L),
+            plan,
+        )
+    }
+
+    @Test
+    fun planWrap_returnsNullWhenHeadAndTailWouldOverlap() {
+        // A 1s clip with a 600ms wrap: head + tail (1200ms) exceed the source,
+        // so no middle body remains → null (no wrap, hard restart).
+        assertNull(
+            ClipTransitionGeometry.planWrap(
+                sourceDurationUs = 1_000_000L,
+                transitionDurationUs = 600_000L,
+                speed = null,
+            )
+        )
+    }
+
+    @Test
+    fun planWrap_returnsNullAtExactlyHalf() {
+        // A wrap of exactly half the clip leaves a zero-length body → null.
+        assertNull(
+            ClipTransitionGeometry.planWrap(
+                sourceDurationUs = 1_000_000L,
+                transitionDurationUs = 500_000L,
+                speed = null,
+            )
+        )
+    }
+
+    @Test
+    fun planWrap_returnsNullForInvalidDurations() {
+        assertNull(
+            ClipTransitionGeometry.planWrap(
+                sourceDurationUs = 0L,
+                transitionDurationUs = 100_000L,
+                speed = null,
+            )
+        )
+        assertNull(
+            ClipTransitionGeometry.planWrap(
+                sourceDurationUs = 1_000_000L,
+                transitionDurationUs = 0L,
+                speed = null,
+            )
+        )
+    }
+
+    @Test
     fun outputFrameCount_keepsFramesAtOneX() {
         // 333ms tail at 1× → same frame count, played at the same rate.
         assertEquals(

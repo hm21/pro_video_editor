@@ -119,7 +119,10 @@ class RenderVideo(private val context: Context) {
 
         val needsPreTranscode = needsPreTranscoding(config)
         val needsPreReverse = config.videoClips.any { it.reverseVideo }
-        val needsPreTransitions = config.videoClips.size > 1 &&
+        // An overlap transition on a non-last clip blends into the next clip; on
+        // the last (or only) clip it wraps into the first for a seamless loop.
+        // Both are baked by [preRenderTransitions], so either needs the stage.
+        val needsPreTransitions =
                 config.videoClips.any { it.transition?.isOverlap == true }
 
         // Progress split across the slow pre-render stages and the transformer.
@@ -350,9 +353,15 @@ class RenderVideo(private val context: Context) {
         collectPath: (String) -> Unit,
         onProgress: (Float) -> Unit,
     ): List<VideoClip> {
-        if (clips.size < 2) return clips
-        val total = (0 until clips.size - 1)
-            .count { clips[it].transition?.isOverlap == true }
+        // An overlap transition on the last/only clip loops back into the first
+        // clip (seamless loop). Captured before the between-clip pass clears it.
+        val wrapTransition = clips.lastOrNull()?.transition?.takeIf {
+            it.isOverlap && !clips.last().reverseVideo && !clips.first().reverseVideo
+        }
+        val betweenCount = if (clips.size >= 2) {
+            (0 until clips.size - 1).count { clips[it].transition?.isOverlap == true }
+        } else 0
+        val total = betweenCount + (if (wrapTransition != null) 1 else 0)
         if (total == 0) return clips
 
         val work = clips.toMutableList()
@@ -446,6 +455,92 @@ class RenderVideo(private val context: Context) {
             doneCount++
             onProgress((doneCount.toFloat() / total).coerceIn(0f, 1f))
             i++
+        }
+
+        // Wrap pass: render the last clip's tail dissolving into the first
+        // clip's head and append it, so any looping player restarts seamlessly.
+        // Overlap transitions between clips already rewrote `result`, so its
+        // first/last entries are the original first/last clips (blends only ever
+        // sit between them).
+        if (wrapTransition != null && !shouldStop.get() && result.isNotEmpty()) {
+            val lastIdx = result.size - 1
+            val first = result[0]
+            val last = result[lastIdx]
+            val singleClip = lastIdx == 0
+
+            val firstStart = first.startUs ?: 0L
+            val firstEnd = first.endUs ?: MediaInfoExtractor.getVideoDuration(first.inputPath)
+            val lastStart = last.startUs ?: 0L
+            val lastEnd = last.endUs ?: MediaInfoExtractor.getVideoDuration(last.inputPath)
+
+            // Single-clip loops carve the head and tail from the same source, so
+            // they need the stricter head+tail<L guard; multi-clip loops keep two
+            // independent sources and reuse the ordinary overlap geometry.
+            val plan = if (singleClip) {
+                ClipTransitionGeometry.planWrap(
+                    sourceDurationUs = lastEnd - lastStart,
+                    transitionDurationUs = wrapTransition.durationUs,
+                    speed = last.playbackSpeed,
+                )
+            } else {
+                ClipTransitionGeometry.planOverlap(
+                    outgoingSourceDurationUs = lastEnd - lastStart,
+                    incomingSourceDurationUs = firstEnd - firstStart,
+                    transitionDurationUs = wrapTransition.durationUs,
+                    outgoingSpeed = last.playbackSpeed,
+                    incomingSpeed = first.playbackSpeed,
+                )
+            }
+
+            if (plan == null) {
+                Log.w(RENDER_TAG, "Loop wrap: not enough content, seamless loop skipped")
+            } else {
+                val tailSrc = plan.outgoingTailSourceUs
+                val headSrc = plan.incomingHeadSourceUs
+                val rendered = ClipTransitionRenderer.renderSync(
+                    context = context,
+                    outgoingPath = last.inputPath,
+                    outTailStartUs = lastEnd - tailSrc,
+                    outTailEndUs = lastEnd,
+                    incomingPath = first.inputPath,
+                    inHeadStartUs = firstStart,
+                    inHeadEndUs = firstStart + headSrc,
+                    outputDurationUs = plan.outputDurationUs,
+                    type = wrapTransition.type,
+                    direction = wrapTransition.direction,
+                    curve = wrapTransition.curve,
+                    includeAudio = enableAudio &&
+                            (last.volume ?: 1.0f) > 0f && (first.volume ?: 1.0f) > 0f,
+                    onProgress = { f ->
+                        onProgress(((doneCount + f) / total).coerceIn(0f, 1f))
+                    },
+                )
+                if (rendered != null) {
+                    collectPath(rendered.outputPath)
+                    if (singleClip) {
+                        // Trim both ends of the one clip; the carved head/tail
+                        // moved into the appended blend.
+                        result[0] = first.copy(
+                            startUs = firstStart + headSrc,
+                            endUs = lastEnd - tailSrc,
+                        )
+                    } else {
+                        result[0] = first.copy(startUs = firstStart + headSrc)
+                        result[lastIdx] = last.copy(endUs = lastEnd - tailSrc)
+                    }
+                    result.add(
+                        VideoClip(
+                            inputPath = rendered.outputPath,
+                            startUs = 0L,
+                            endUs = rendered.durationUs.takeIf { it > 0 },
+                        )
+                    )
+                } else {
+                    Log.w(RENDER_TAG, "Loop wrap render failed, seamless loop skipped")
+                }
+            }
+            doneCount++
+            onProgress((doneCount.toFloat() / total).coerceIn(0f, 1f))
         }
 
         return result

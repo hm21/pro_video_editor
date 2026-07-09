@@ -56,6 +56,11 @@ struct ClipTransitionConfig {
     type == "dissolve" || type == "slide" || type == "push" || type == "wipe"
   }
 
+  /// True when this transition dips through a solid color (no overlap).
+  var isDip: Bool {
+    type == "fadeToBlack" || type == "fadeToWhite"
+  }
+
   static func fromArguments(_ args: [String: Any]?) -> ClipTransitionConfig? {
     guard let args = args,
       let type = args["type"] as? String,

@@ -234,6 +234,41 @@ internal class CompositionBuilder {
           toWhite: toWhite
         ))
     }
+
+    // Loop wrap: a dip transition on the LAST clip dips the restart seam — fade
+    // the last clip out to the color at the very end and the first clip in from
+    // the color at the very start, so a looping player dips through the color on
+    // restart. (Overlap wraps are baked into an appended blend clip, so the last
+    // clip here carries no dip transition for them.)
+    if let wrap = videoClips.last?.transition, wrap.isDip,
+      let lastInstr = clipInstructions.last, let firstInstr = clipInstructions.first
+    {
+      let toWhite = wrap.type == "fadeToWhite"
+      let dHalfUs = wrap.durationUs / 2
+      let lastStartUs = Int64(CMTimeGetSeconds(lastInstr.timeRange.start) * 1_000_000)
+      let lastEndUs = Int64(CMTimeGetSeconds(CMTimeRangeGetEnd(lastInstr.timeRange)) * 1_000_000)
+      let firstStartUs = Int64(CMTimeGetSeconds(firstInstr.timeRange.start) * 1_000_000)
+      let firstEndUs = Int64(CMTimeGetSeconds(CMTimeRangeGetEnd(firstInstr.timeRange)) * 1_000_000)
+
+      // Fade the last clip out to the color at the very end.
+      windows.append(
+        FadeWindow(
+          startUs: max(lastStartUs, lastEndUs - dHalfUs),
+          endUs: lastEndUs,
+          fadeIn: false,
+          curve: wrap.curve,
+          toWhite: toWhite
+        ))
+      // Fade the first clip in from the color at the very start.
+      windows.append(
+        FadeWindow(
+          startUs: firstStartUs,
+          endUs: min(firstEndUs, firstStartUs + dHalfUs),
+          fadeIn: true,
+          curve: wrap.curve,
+          toWhite: toWhite
+        ))
+    }
     return windows
   }
 

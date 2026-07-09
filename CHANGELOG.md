@@ -1,3 +1,6 @@
+## 2.5.0
+- **FEAT**(android, iOS, macOS): A `ClipTransition` on the **last (or only)** `VideoSegment` now wraps back into the first segment, so a single-track render loops seamlessly — e.g. a `dissolve` on one segment cross-dissolves on restart. Overlap types (dissolve/slide/push/wipe) shorten the output by the transition duration and require a single clip longer than 2× the duration (otherwise the wrap is skipped); dip types (fadeToBlack/fadeToWhite) keep the length and dip through the color at the seam. Previously a transition on the last segment was silently ignored.
+
 ## 2.4.0
 - **FIX**(android, iOS, macOS): The render `bitrate` is now enforced as a real maximum instead of being silently ignored (Android transmuxed the source untouched; iOS/macOS picked an `AVAssetExportSession` preset with its own bitrate). A source above the cap is re-encoded down to it, a source already within it keeps a lossless fast path (transmux / passthrough), and a `null` bitrate is unchanged. Note: an over-cap source that used to export losslessly is now re-encoded.
 

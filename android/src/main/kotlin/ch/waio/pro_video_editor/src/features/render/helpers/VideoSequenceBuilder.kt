@@ -497,17 +497,28 @@ class VideoSequenceBuilder(
      * `duration/2`, and clip *i+1* fades in from the color over its first
      * `duration/2`. Overlap transitions (dissolve/slide/push/wipe) are handled
      * separately by [ClipTransitionRenderer] and never reach this method.
+     *
+     * A dip transition on the **last** clip is the loop wrap: it fades that clip
+     * out to the color at the very end AND fades the **first** clip in from the
+     * color at the very start, so a looping player dips through the color at the
+     * restart seam. (Overlap wraps are baked into an appended blend clip by
+     * [ClipTransitionRenderer], so by the time they reach here the last entry is
+     * that blend and carries no transition.)
      */
     private fun computeFadeInfos(clips: List<VideoClip>): List<ClipFadeInfo?> {
         return clips.indices.map { i ->
             val clip = clips[i]
             val prev = clips.getOrNull(i - 1)
+            // The first clip has no previous clip; its fade-in is seeded by the
+            // loop wrap (the last clip's dip transition) instead.
+            val incomingTransition =
+                prev?.transition ?: if (i == 0) clips.lastOrNull()?.transition else null
 
             val outgoingColor = dipColorFor(clip.transition)
-            val incomingColor = dipColorFor(prev?.transition)
+            val incomingColor = dipColorFor(incomingTransition)
 
             val outgoingUs = if (outgoingColor != null) clip.transition!!.durationUs else 0L
-            val incomingUs = if (incomingColor != null) prev!!.transition!!.durationUs else 0L
+            val incomingUs = if (incomingColor != null) incomingTransition!!.durationUs else 0L
 
             if (outgoingColor == null && incomingColor == null) {
                 null
@@ -518,7 +529,7 @@ class VideoSequenceBuilder(
                 val curve = if (outgoingColor != null) {
                     clip.transition!!.curve
                 } else {
-                    prev!!.transition!!.curve
+                    incomingTransition!!.curve
                 }
                 ClipFadeInfo(
                     clipDurationUs = outDur,

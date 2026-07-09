@@ -67,6 +67,40 @@ internal enum ClipTransitionGeometry {
     )
   }
 
+  /// Resolves the overlap geometry for a **seamless loop wrap** where the
+  /// outgoing tail and incoming head are carved from the *same* single clip
+  /// (its whole start-to-end range).
+  ///
+  /// Unlike `planOverlap` the two sides share one source, so the head
+  /// `[0, head)` and tail `[L - tail, L)` must not overlap — a positive middle
+  /// body must remain (`head + tail < sourceDuration`). Because both sides are
+  /// the same clip they also share its playback speed, so `head == tail`.
+  /// Returns `nil` when no body would remain (caller falls back to no wrap).
+  ///
+  /// Multi-clip loops (last clip != first clip) use `planOverlap` instead, since
+  /// each side then keeps its own independent source.
+  static func planWrap(
+    sourceDurationUs: Int64,
+    transitionDurationUs: Int64,
+    speed: Float?
+  ) -> OverlapPlan? {
+    guard sourceDurationUs > 0 else { return nil }
+    let s = validSpeedOrOne(speed)
+    let outputDur = Double(sourceDurationUs) / s
+    // Both sides consume `dOut * speed` of the same source; head + tail must
+    // leave a positive middle body, so dOut is capped just below outputDur/2.
+    let dOut = min(Double(transitionDurationUs), outputDur / 2.0)
+    guard dOut > 0 else { return nil }
+    let outputDurationUs = Int64(dOut.rounded())
+    let sideSourceUs = Int64((dOut * s).rounded())
+    guard outputDurationUs > 0, sourceDurationUs - 2 * sideSourceUs > 0 else { return nil }
+    return OverlapPlan(
+      outputDurationUs: outputDurationUs,
+      outgoingTailSourceUs: sideSourceUs,
+      incomingHeadSourceUs: sideSourceUs
+    )
+  }
+
   private static func validSpeedOrOne(_ speed: Float?) -> Double {
     if let speed = speed, speed > 0 { return Double(speed) }
     return 1.0
