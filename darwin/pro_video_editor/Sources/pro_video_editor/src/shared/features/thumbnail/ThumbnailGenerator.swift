@@ -136,14 +136,13 @@ class ThumbnailGenerator {
     config: ThumbnailConfig,
     onProgress: @escaping (Double) -> Void
   ) async -> [Data] {
-    let totalCount = times.count
-    var indices = indexMap(times: times)
-    var resultData = [Data?](repeating: nil, count: totalCount)
+    let (distinct, indicesByKey) = distinctTimesAndIndexMap(times)
+    var resultData = [Data?](repeating: nil, count: times.count)
     var completed = 0
     let start = Date().timeIntervalSince1970
 
-    for await frame in generator.images(for: times.map { $0.timeValue }) {
-      let index = indices[timeKey(frame.requestedTime)]?.popLast() ?? -1
+    for await frame in generator.images(for: distinct.map { $0.timeValue }) {
+      let indices = indicesByKey[timeKey(frame.requestedTime)] ?? []
 
       var data: Data?
       do {
@@ -151,17 +150,19 @@ class ThumbnailGenerator {
         let rendered = makeThumbnailData(cgImage, config: config)
         data = rendered
         let elapsed = Int((Date().timeIntervalSince1970 - start) * 1000)
-        PluginLog.print("[\(index)] ✅ frame in \(elapsed) ms (\(rendered.count) bytes)")
+        PluginLog.print("[\(indices.first ?? -1)] ✅ frame in \(elapsed) ms (\(rendered.count) bytes)")
       } catch {
-        PluginLog.print("[\(index)] ❌ frame failed: \(error.localizedDescription)")
+        PluginLog.print("[\(indices.first ?? -1)] ❌ frame failed: \(error.localizedDescription)")
       }
 
-      if index >= 0, index < totalCount {
+      // Fan the single decoded frame out to every index that requested this
+      // timestamp, so duplicate timestamps all stay aligned.
+      for index in indices {
         resultData[index] = data
       }
 
       completed += 1
-      onProgress(Double(completed) / Double(totalCount))
+      onProgress(Double(completed) / Double(distinct.count))
     }
 
     return resultData.map { $0 ?? Data() }
@@ -172,10 +173,15 @@ class ThumbnailGenerator {
   /// completion handler can fire concurrently and out of order (observed on
   /// iOS 26.5).
   ///
-  /// Every shared value (`resultData`, `completed`, `resumed`, and the
-  /// time → index map) is therefore mutated under a single lock, the write index
-  /// is resolved from `requestedTime`, and the continuation is resumed exactly
-  /// once even when frames fail or cancel.
+  /// Every shared value (`resultData`, `completed`, `resumed`) is therefore
+  /// mutated under a single lock, the write indices are resolved from
+  /// `requestedTime`, and the continuation is resumed exactly once even when
+  /// frames fail or cancel.
+  ///
+  /// The generator is handed only the *distinct* requested times, so it invokes
+  /// its callback exactly once per key — the completion count can always reach
+  /// `distinctCount` and resume the continuation, rather than wedging when the
+  /// same timestamp is requested more than once.
   ///
   /// Left at module-internal (not `private`) so the RunnerTests can exercise this
   /// legacy path directly on modern OS versions, which otherwise always take the
@@ -186,17 +192,17 @@ class ThumbnailGenerator {
     config: ThumbnailConfig,
     onProgress: @escaping (Double) -> Void
   ) async -> [Data] {
-    let totalCount = times.count
+    let (distinct, indicesByKey) = distinctTimesAndIndexMap(times)
+    let distinctCount = distinct.count
 
     return await withCheckedContinuation { continuation in
       let lock = NSLock()
-      var indices = indexMap(times: times)
-      var resultData = [Data?](repeating: nil, count: totalCount)
+      var resultData = [Data?](repeating: nil, count: times.count)
       var completed = 0
       var resumed = false
       let start = Date().timeIntervalSince1970
 
-      generator.generateCGImagesAsynchronously(forTimes: times) {
+      generator.generateCGImagesAsynchronously(forTimes: distinct) {
         requestedTime, cgImage, _, _, error in
 
         // Resize + compress happen off the lock; only shared-state mutation is
@@ -207,23 +213,25 @@ class ThumbnailGenerator {
         }
 
         lock.lock()
-        let index = indices[timeKey(requestedTime)]?.popLast() ?? -1
-        if index >= 0, index < totalCount {
+        let indices = indicesByKey[timeKey(requestedTime)] ?? []
+        // Fan the single decoded frame out to every index that requested this
+        // timestamp, so duplicate timestamps all stay aligned.
+        for index in indices {
           resultData[index] = data
         }
         completed += 1
-        let progress = Double(completed) / Double(totalCount)
-        let shouldResume = completed == totalCount && !resumed
+        let progress = Double(completed) / Double(distinctCount)
+        let shouldResume = completed == distinctCount && !resumed
         if shouldResume { resumed = true }
         let payload = shouldResume ? resultData.map { $0 ?? Data() } : nil
         lock.unlock()
 
         if let data = data {
           let elapsed = Int((Date().timeIntervalSince1970 - start) * 1000)
-          PluginLog.print("[\(index)] ✅ frame in \(elapsed) ms (\(data.count) bytes)")
+          PluginLog.print("[\(indices.first ?? -1)] ✅ frame in \(elapsed) ms (\(data.count) bytes)")
         } else {
           let message = error?.localizedDescription ?? "Unknown error"
-          PluginLog.print("[\(index)] ❌ frame failed: \(message)")
+          PluginLog.print("[\(indices.first ?? -1)] ❌ frame failed: \(message)")
         }
 
         onProgress(progress)
@@ -235,19 +243,29 @@ class ThumbnailGenerator {
     }
   }
 
-  /// Builds a map from each requested time's stable key to the result indices
-  /// that requested it, so a completion callback can resolve its output slot from
-  /// `requestedTime` alone. Buckets are reversed so `popLast()` (O(1)) hands out
-  /// ascending indices when the same timestamp is requested more than once.
-  private static func indexMap(times: [NSValue]) -> [String: [Int]] {
-    var map: [String: [Int]] = [:]
+  /// Splits the requested `times` into the *distinct* times to hand the generator
+  /// and a map from each time's stable key to every result index that requested
+  /// it.
+  ///
+  /// The generator is called with distinct times only, so it invokes its callback
+  /// exactly once per key; that single frame is then fanned out to every index in
+  /// the key's bucket. This keeps `result[i]` aligned to `times[i]` even when the
+  /// same timestamp is requested more than once, and guarantees the completion
+  /// count can always reach the number of distinct times — so the continuation
+  /// resumes instead of wedging.
+  private static func distinctTimesAndIndexMap(
+    _ times: [NSValue]
+  ) -> (distinct: [NSValue], indicesByKey: [String: [Int]]) {
+    var indicesByKey: [String: [Int]] = [:]
+    var distinct: [NSValue] = []
     for (i, value) in times.enumerated() {
-      map[timeKey(value.timeValue), default: []].append(i)
+      let key = timeKey(value.timeValue)
+      if indicesByKey[key] == nil {
+        distinct.append(value)
+      }
+      indicesByKey[key, default: []].append(i)
     }
-    for key in map.keys {
-      map[key]?.reverse()
-    }
-    return map
+    return (distinct, indicesByKey)
   }
 
   /// Stable dictionary key for a requested `CMTime`.
