@@ -474,6 +474,10 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         val outputFormat = call.argument<String>("outputFormat") ?: "mp4"
         val bitrate = call.argument<Number>("bitrate")?.toInt()
         val enableAudio = call.argument<Boolean>("enableAudio") ?: true
+        val exportTimeoutMs = call.argument<Number>("exportTimeoutMs")?.toLong()
+            ?: SplitVideo.DEFAULT_EXPORT_TIMEOUT_MS
+        val stallTimeoutMs = call.argument<Number>("stallTimeoutMs")?.toLong()
+            ?: SplitVideo.DEFAULT_STALL_TIMEOUT_MS
 
         postProgress(id, 0.0)
 
@@ -490,6 +494,8 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                 bitrate = bitrate,
                 enableAudio = enableAudio,
                 mainHandler = mainHandler,
+                exportTimeoutMs = exportTimeoutMs,
+                stallTimeoutMs = stallTimeoutMs,
                 onProgress = { progress -> postProgress(id, progress) },
                 onComplete = { outputPaths ->
                     mainHandler.post {

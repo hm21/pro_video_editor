@@ -473,6 +473,10 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     let outputFormat = (args["outputFormat"] as? String) ?? "mp4"
     let bitrate = (args["bitrate"] as? NSNumber)?.intValue
     let enableAudio = (args["enableAudio"] as? Bool) ?? true
+    let exportTimeout = (args["exportTimeoutMs"] as? NSNumber)
+      .map { $0.doubleValue / 1000 } ?? SplitVideo.defaultExportTimeout
+    let stallTimeout = (args["stallTimeoutMs"] as? NSNumber)
+      .map { $0.doubleValue / 1000 } ?? SplitVideo.defaultStallTimeout
 
     postProgress(id: id, progress: 0.0)
 
@@ -487,6 +491,8 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       outputFormat: outputFormat,
       bitrate: bitrate,
       enableAudio: enableAudio,
+      exportTimeout: exportTimeout,
+      stallTimeout: stallTimeout,
       onProgress: { progress in
         self.postProgress(id: id, progress: progress)
       },

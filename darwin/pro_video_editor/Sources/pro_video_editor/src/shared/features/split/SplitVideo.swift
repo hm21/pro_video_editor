@@ -10,17 +10,31 @@ import Foundation
 /// `AVAssetExportSession` re-encodes, which keeps it fast and predictable.
 ///
 /// The two halves are exported sequentially so only one decoder/encoder is
-/// active at a time, and every export is guarded by a watchdog
-/// (``exportTimeout``) that force-cancels a stalled session. The job therefore
-/// always terminates — success, failure, cancellation or timeout — and never
-/// leaves the method-channel result pending forever.
+/// active at a time, and every export is guarded by two watchdogs: an inner
+/// stall bound (``defaultStallTimeout`` — no forward progress for N seconds) and
+/// an outer hard bound (``defaultExportTimeout``). Either one force-cancels the
+/// session and fails with a diagnostic context describing *why* it stalled
+/// (which half, last progress, segment/total durations, preset, audio). The job
+/// therefore always terminates — success, failure, cancellation, stall or
+/// timeout — and never leaves the method-channel result pending forever.
+///
+/// Note on stalls: a genuine hang here is almost always contention for the
+/// shared VideoToolbox encode/decode session pool — the split runs on its own
+/// `SplitVideoQueue` while speed renders run concurrently on `RenderVideoQueue`,
+/// with no global cap on live `AVAssetExportSession`s. An exhausted pool leaves
+/// a session at `progress == 0` indefinitely, which the stall bound now catches.
 class SplitVideo {
   static let queue = DispatchQueue(label: "SplitVideoQueue")
 
-  /// Maximum time a single half may export before it is force-cancelled and
-  /// reported as a failure. Prevents a stalled `AVAssetExportSession` from
-  /// hanging the method-channel result indefinitely.
-  static let exportTimeout: TimeInterval = 120
+  /// Default hard upper bound: the outer safety net. A single half may export
+  /// this long before it is force-cancelled, even while still reporting
+  /// progress. Overridable per-call via ``SplitVideoModel.exportTimeout``.
+  static let defaultExportTimeout: TimeInterval = 120
+
+  /// Default stall bound: if a half makes no forward progress for this long it
+  /// is treated as stalled and force-cancelled. Overridable per-call via
+  /// ``SplitVideoModel.stallTimeout``.
+  static let defaultStallTimeout: TimeInterval = 12
 
   /// Starts an asynchronous frame-accurate split job.
   ///
@@ -35,6 +49,8 @@ class SplitVideo {
     outputFormat: String,
     bitrate: Int?,
     enableAudio: Bool,
+    exportTimeout: TimeInterval = defaultExportTimeout,
+    stallTimeout: TimeInterval = defaultStallTimeout,
     onProgress: @escaping (Double) -> Void,
     onComplete: @escaping ([String]) -> Void,
     onError: @escaping (Error) -> Void
@@ -74,6 +90,10 @@ class SplitVideo {
             "✂️ Splitting at \(String(format: "%.3f", CMTimeGetSeconds(splitTime)))s "
               + "(\(outputFormat), preset \(preset), audio: \(enableAudio))")
 
+          let totalSeconds = CMTimeGetSeconds(duration)
+          let splitSeconds = CMTimeGetSeconds(splitTime)
+          let endDuration = CMTimeSubtract(duration, splitTime)
+
           // First half: 0 → split.
           try await exportSegment(
             asset: exportAsset,
@@ -81,6 +101,11 @@ class SplitVideo {
             outputPath: startOutputPath,
             fileType: fileType,
             preset: preset,
+            diagnostics: SplitExportDiagnostics(
+              half: .start, segmentSeconds: splitSeconds, splitSeconds: splitSeconds,
+              totalSeconds: totalSeconds, preset: preset, enableAudio: enableAudio),
+            exportTimeout: exportTimeout,
+            stallTimeout: stallTimeout,
             handle: handle,
             onProgress: { onProgress($0 * 0.5) })
 
@@ -89,11 +114,16 @@ class SplitVideo {
           // Second half: split → end.
           try await exportSegment(
             asset: exportAsset,
-            timeRange: CMTimeRange(
-              start: splitTime, duration: CMTimeSubtract(duration, splitTime)),
+            timeRange: CMTimeRange(start: splitTime, duration: endDuration),
             outputPath: endOutputPath,
             fileType: fileType,
             preset: preset,
+            diagnostics: SplitExportDiagnostics(
+              half: .end, segmentSeconds: CMTimeGetSeconds(endDuration),
+              splitSeconds: splitSeconds, totalSeconds: totalSeconds, preset: preset,
+              enableAudio: enableAudio),
+            exportTimeout: exportTimeout,
+            stallTimeout: stallTimeout,
             handle: handle,
             onProgress: { onProgress(0.5 + $0 * 0.5) })
 
@@ -110,13 +140,16 @@ class SplitVideo {
   // MARK: - Helpers
 
   /// Re-encodes a single time range of `asset` to `outputPath`, frame-accurate
-  /// at the range start, guarded by ``exportTimeout``.
+  /// at the range start, guarded by the stall and hard-timeout bounds.
   private static func exportSegment(
     asset: AVAsset,
     timeRange: CMTimeRange,
     outputPath: String,
     fileType: AVFileType,
     preset: String,
+    diagnostics: SplitExportDiagnostics,
+    exportTimeout: TimeInterval,
+    stallTimeout: TimeInterval,
     handle: RenderJobHandle,
     onProgress: @escaping (Double) -> Void
   ) async throws {
@@ -142,33 +175,94 @@ class SplitVideo {
 
     handle.attach(export: export)
 
-    try await runExportWithTimeout(export, onProgress: onProgress)
+    // Serialize against other encodes (split halves + concurrent renders) so
+    // they don't starve each other on the hardware encoder. The wait is outside
+    // the watchdog below, so queueing never counts as a stall.
+    try await withExportSlot {
+      try await runExportWithTimeout(
+        export, diagnostics: diagnostics, exportTimeout: exportTimeout,
+        stallTimeout: stallTimeout, onProgress: onProgress)
+    }
   }
 
-  /// Runs the export and races it against the watchdog timeout. On timeout the
-  /// session is cancelled and a timeout error is thrown.
+  /// Runs the export and races it against the stall/timeout monitor. Whichever
+  /// finishes first wins; if the monitor fires it cancels the session and throws
+  /// a diagnostic stall/timeout error, otherwise the monitor is cancelled.
   private static func runExportWithTimeout(
     _ export: AVAssetExportSession,
+    diagnostics: SplitExportDiagnostics,
+    exportTimeout: TimeInterval,
+    stallTimeout: TimeInterval,
     onProgress: @escaping (Double) -> Void
   ) async throws {
+    // The monitor reads progress through this box, fed by the same callbacks
+    // that drive `onProgress`, so "stuck at X%" reflects the last real value.
+    let progress = ProgressBox()
     try await withThrowingTaskGroup(of: Void.self) { group in
       group.addTask {
-        try await runExport(export, onProgress: onProgress)
+        try await runExport(export) { value in
+          progress.update(value)
+          onProgress(value)
+        }
       }
       group.addTask {
-        try await Task.sleep(nanoseconds: UInt64(exportTimeout * 1_000_000_000))
+        try await monitorForStall(
+          export, progress: progress, diagnostics: diagnostics,
+          exportTimeout: exportTimeout, stallTimeout: stallTimeout)
+      }
+      // Surface whichever finishes first (success, error, stall or timeout),
+      // then cancel the loser.
+      try await group.next()
+      group.cancelAll()
+    }
+  }
+
+  /// Polls export progress and enforces two bounds: an inner stall bound (no
+  /// forward progress for `stallTimeout`) and an outer hard bound
+  /// (`exportTimeout` total). On either bound it cancels the session and throws
+  /// a diagnostic error; the running export loses the race and is torn down.
+  private static func monitorForStall(
+    _ export: AVAssetExportSession,
+    progress: ProgressBox,
+    diagnostics: SplitExportDiagnostics,
+    exportTimeout: TimeInterval,
+    stallTimeout: TimeInterval
+  ) async throws {
+    let pollInterval: TimeInterval = 0.25
+    let start = Date()
+    var lastProgress = progress.value
+    var lastAdvance = start
+
+    while true {
+      try await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
+      let now = Date()
+      let current = progress.value
+      if current > lastProgress {
+        lastProgress = current
+        lastAdvance = now
+      }
+
+      // Inner bound: no forward progress for `stallTimeout`.
+      if stallTimeout > 0, now.timeIntervalSince(lastAdvance) >= stallTimeout {
+        let message = diagnostics.stallMessage(
+          seconds: Int(stallTimeout.rounded()), progress: current)
+        PluginLog.print("⏱️ \(message)")
         export.cancelExport()
         throw NSError(
           domain: "SplitVideo", code: 408,
-          userInfo: [
-            NSLocalizedDescriptionKey:
-              "Split export timed out after \(Int(exportTimeout))s"
-          ])
+          userInfo: [NSLocalizedDescriptionKey: message])
       }
-      // Surface whichever finishes first (success, error or timeout), then
-      // cancel the loser.
-      try await group.next()
-      group.cancelAll()
+
+      // Outer bound: absolute wall-clock cap even while still reporting progress.
+      if now.timeIntervalSince(start) >= exportTimeout {
+        let message = diagnostics.timeoutMessage(
+          seconds: Int(exportTimeout.rounded()), progress: current)
+        PluginLog.print("⏱️ \(message)")
+        export.cancelExport()
+        throw NSError(
+          domain: "SplitVideo", code: 408,
+          userInfo: [NSLocalizedDescriptionKey: message])
+      }
     }
   }
 
@@ -262,5 +356,61 @@ class SplitVideo {
       }
       return track
     }
+  }
+}
+
+/// Immutable context for one exported half, used to enrich a stall/timeout
+/// failure with actionable diagnostics. The bracketed suffix is intentionally
+/// identical in structure to the Android side (`preset` here vs `mime` there).
+struct SplitExportDiagnostics {
+  enum Half: String { case start, end }
+
+  let half: Half
+  /// Duration of *this* segment in seconds.
+  let segmentSeconds: Double
+  /// Absolute split position in seconds.
+  let splitSeconds: Double
+  /// Total source duration in seconds.
+  let totalSeconds: Double
+  let preset: String
+  let enableAudio: Bool
+
+  /// e.g. `[half=end progress=0.00 segment=0.52s split=0.53s total=1.05s
+  /// preset=AVAssetExportPresetHighestQuality audio=false]`
+  func context(progress: Double) -> String {
+    String(
+      format:
+        "[half=%@ progress=%.2f segment=%.2fs split=%.2fs total=%.2fs preset=%@ audio=%@]",
+      half.rawValue, progress, segmentSeconds, splitSeconds, totalSeconds, preset,
+      enableAudio ? "true" : "false")
+  }
+
+  func timeoutMessage(seconds: Int, progress: Double) -> String {
+    "Split export timed out after \(seconds)s \(context(progress: progress))"
+  }
+
+  func stallMessage(seconds: Int, progress: Double) -> String {
+    "Split export stalled after \(seconds)s with no progress \(context(progress: progress))"
+  }
+}
+
+/// Thread-safe, monotonically-increasing progress holder shared between the
+/// export task (writer) and the stall monitor (reader).
+final class ProgressBox {
+  private let lock = NSLock()
+  private var stored: Double = 0
+
+  /// Records `value` if it exceeds the current maximum. Export progress only
+  /// moves forward, so clamping to the max ignores any spurious lower reports.
+  func update(_ value: Double) {
+    lock.lock()
+    if value > stored { stored = value }
+    lock.unlock()
+  }
+
+  var value: Double {
+    lock.lock()
+    defer { lock.unlock() }
+    return stored
   }
 }

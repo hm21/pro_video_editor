@@ -572,6 +572,8 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
         'outputFormat': value.outputFormat.name,
         'bitrate': value.effectiveBitrate,
         'enableAudio': value.enableAudio,
+        'exportTimeoutMs': value.exportTimeout.inMilliseconds,
+        'stallTimeoutMs': value.stallTimeout.inMilliseconds,
         'nativeLogLevel': nativeLogLevel?.methodValue,
       });
 

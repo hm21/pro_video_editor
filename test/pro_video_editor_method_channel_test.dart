@@ -190,6 +190,78 @@ void main() {
     expect(() => platform.cancel(''), throwsArgumentError);
   });
 
+  group('splitVideo', () {
+    SplitVideoModel model({Duration? exportTimeout, Duration? stallTimeout}) {
+      return SplitVideoModel(
+        id: 'split-id',
+        video: mockVideo,
+        splitPosition: const Duration(seconds: 1),
+        startOutputPath: '/tmp/start.mp4',
+        endOutputPath: '/tmp/end.mp4',
+        exportTimeout: exportTimeout ?? const Duration(seconds: 120),
+        stallTimeout: stallTimeout ?? const Duration(seconds: 12),
+      );
+    }
+
+    test('sends default export/stall timeouts to native', () async {
+      MethodCall? capturedCall;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+            capturedCall = methodCall;
+            return null;
+          });
+
+      final paths = await platform.splitVideo(
+        SplitVideoModel(
+          id: 'split-id',
+          video: mockVideo,
+          splitPosition: const Duration(seconds: 1),
+          startOutputPath: '/tmp/start.mp4',
+          endOutputPath: '/tmp/end.mp4',
+        ),
+      );
+
+      expect(paths, ['/tmp/start.mp4', '/tmp/end.mp4']);
+      expect(capturedCall?.method, 'splitVideo');
+      final args = capturedCall?.arguments as Map;
+      expect(args['exportTimeoutMs'], 120000);
+      expect(args['stallTimeoutMs'], 12000);
+    });
+
+    test('forwards custom export/stall timeouts to native', () async {
+      MethodCall? capturedCall;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+            capturedCall = methodCall;
+            return null;
+          });
+
+      await platform.splitVideo(
+        model(
+          exportTimeout: const Duration(seconds: 30),
+          stallTimeout: const Duration(milliseconds: 4500),
+        ),
+      );
+
+      final args = capturedCall?.arguments as Map;
+      expect(args['exportTimeoutMs'], 30000);
+      expect(args['stallTimeoutMs'], 4500);
+    });
+
+    test('SplitVideoModel rejects non-positive timeouts', () {
+      expect(
+        () => SplitVideoModel(
+          video: mockVideo,
+          splitPosition: const Duration(seconds: 1),
+          startOutputPath: '/tmp/start.mp4',
+          endOutputPath: '/tmp/end.mp4',
+          stallTimeout: Duration.zero,
+        ),
+        throwsA(isA<AssertionError>()),
+      );
+    });
+  });
+
   group('getSingleThumbnail', () {
     test('first position returns thumbnail', () async {
       final result = await platform.getSingleThumbnail(
