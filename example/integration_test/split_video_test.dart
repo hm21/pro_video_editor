@@ -217,69 +217,71 @@ void main() {
   // for the 120s watchdog. If this stays green on the affected device the
   // hypothesis is wrong; if it throws, the message pinpoints which
   // half/progress stalled.
-  testWidgets('stacked re-encode splits stay responsive (regression #166)', (
-    tester,
-  ) async {
-    final meta = await pve.getMetadata(source);
+  testWidgets(
+    'stacked re-encode splits stay responsive (regression #166)',
+    (tester) async {
+      final meta = await pve.getMetadata(source);
 
-    EditorVideo current = source;
-    Duration currentDuration = meta.duration;
-    final created = <String>[];
-    var generations = 0;
+      EditorVideo current = source;
+      Duration currentDuration = meta.duration;
+      final created = <String>[];
+      var generations = 0;
 
-    try {
-      for (var gen = 0; gen < 6; gen++) {
-        // Stop once a half is too short to split meaningfully.
-        if (currentDuration < const Duration(milliseconds: 400)) break;
+      try {
+        for (var gen = 0; gen < 6; gen++) {
+          // Stop once a half is too short to split meaningfully.
+          if (currentDuration < const Duration(milliseconds: 400)) break;
 
-        final startPath = await tempPath('stack_${gen}_start');
-        final endPath = await tempPath('stack_${gen}_end');
-        created
-          ..add(startPath)
-          ..add(endPath);
+          final startPath = await tempPath('stack_${gen}_start');
+          final endPath = await tempPath('stack_${gen}_end');
+          created
+            ..add(startPath)
+            ..add(endPath);
 
-        final sw = Stopwatch()..start();
-        final paths = await pve.splitVideo(
-          SplitVideoModel(
-            video: current,
-            splitPosition: currentDuration ~/ 2,
-            startOutputPath: startPath,
-            endOutputPath: endPath,
-            // Tight inner bound: turn a true hang into a fast failure.
-            stallTimeout: const Duration(seconds: 8),
-          ),
-        );
-        sw.stop();
-        generations = gen + 1;
+          final sw = Stopwatch()..start();
+          final paths = await pve.splitVideo(
+            SplitVideoModel(
+              video: current,
+              splitPosition: currentDuration ~/ 2,
+              startOutputPath: startPath,
+              endOutputPath: endPath,
+              // Tight inner bound: turn a true hang into a fast failure.
+              stallTimeout: const Duration(seconds: 8),
+            ),
+          );
+          sw.stop();
+          generations = gen + 1;
 
-        expect(await File(paths[0]).exists(), isTrue);
-        expect(await File(paths[1]).exists(), isTrue);
+          expect(await File(paths[0]).exists(), isTrue);
+          expect(await File(paths[1]).exists(), isTrue);
 
-        debugPrint(
-          'split gen $gen: ${currentDuration.inMilliseconds}ms clip '
-          'in ${sw.elapsedMilliseconds}ms',
-        );
+          debugPrint(
+            'split gen $gen: ${currentDuration.inMilliseconds}ms clip '
+            'in ${sw.elapsedMilliseconds}ms',
+          );
 
-        // A ≤2s clip must split well under the watchdog; a stall throws above.
-        expect(
-          sw.elapsed,
-          lessThan(const Duration(seconds: 30)),
-          reason: 'gen $gen split took ${sw.elapsedMilliseconds}ms',
-        );
+          // A ≤2s clip must split well under the watchdog; a stall throws above.
+          expect(
+            sw.elapsed,
+            lessThan(const Duration(seconds: 30)),
+            reason: 'gen $gen split took ${sw.elapsedMilliseconds}ms',
+          );
 
-        // Feed the SECOND half back in — the suspect non-zero-start re-encode.
-        current = EditorVideo.file(endPath);
-        currentDuration = (await pve.getMetadata(current)).duration;
+          // Feed the SECOND half back in — the suspect non-zero-start re-encode.
+          current = EditorVideo.file(endPath);
+          currentDuration = (await pve.getMetadata(current)).duration;
+        }
+      } finally {
+        debugPrint('stacked split reached $generations generation(s)');
+        await cleanUp(created);
       }
-    } finally {
-      debugPrint('stacked split reached $generations generation(s)');
-      await cleanUp(created);
-    }
 
-    // At least a couple of stacked generations must succeed. A throw above (the
-    // stall diagnostic) fails the test and localizes the freeze.
-    expect(generations, greaterThanOrEqualTo(2));
-  }, skip: skipPlatform);
+      // At least a couple of stacked generations must succeed. A throw above (the
+      // stall diagnostic) fails the test and localizes the freeze.
+      expect(generations, greaterThanOrEqualTo(2));
+    },
+    skip: skipPlatform,
+  );
 
   testWidgets('throws when the split position is out of range', (tester) async {
     final meta = await pve.getMetadata(source);

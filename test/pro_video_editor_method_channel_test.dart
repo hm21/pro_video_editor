@@ -211,13 +211,15 @@ void main() {
             return null;
           });
 
-      final paths = await platform.splitVideo(SplitVideoModel(
-        id: 'split-id',
-        video: mockVideo,
-        splitPosition: const Duration(seconds: 1),
-        startOutputPath: '/tmp/start.mp4',
-        endOutputPath: '/tmp/end.mp4',
-      ));
+      final paths = await platform.splitVideo(
+        SplitVideoModel(
+          id: 'split-id',
+          video: mockVideo,
+          splitPosition: const Duration(seconds: 1),
+          startOutputPath: '/tmp/start.mp4',
+          endOutputPath: '/tmp/end.mp4',
+        ),
+      );
 
       expect(paths, ['/tmp/start.mp4', '/tmp/end.mp4']);
       expect(capturedCall?.method, 'splitVideo');
@@ -234,10 +236,12 @@ void main() {
             return null;
           });
 
-      await platform.splitVideo(model(
-        exportTimeout: const Duration(seconds: 30),
-        stallTimeout: const Duration(milliseconds: 4500),
-      ));
+      await platform.splitVideo(
+        model(
+          exportTimeout: const Duration(seconds: 30),
+          stallTimeout: const Duration(milliseconds: 4500),
+        ),
+      );
 
       final args = capturedCall?.arguments as Map;
       expect(args['exportTimeoutMs'], 30000);
