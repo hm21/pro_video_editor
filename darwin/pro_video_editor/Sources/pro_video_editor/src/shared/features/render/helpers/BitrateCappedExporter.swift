@@ -35,6 +35,55 @@ internal enum BitrateCappedExporter {
     }
   }
 
+  /// Completes a `CheckedContinuation` exactly once, from whichever of the
+  /// normal completion path (`group.notify`) or the cancellation handler fires
+  /// first.
+  ///
+  /// The cancellation handler needs this because a writer-input pump parked on a
+  /// wedged encoder never calls `group.leave()`, so `group.notify` would never
+  /// fire and the task would hang forever — holding the process-wide export
+  /// gate. Resuming from `onCancel` unwinds it instead.
+  private final class ContinuationTerminator {
+    private let lock = NSLock()
+    private var cont: CheckedContinuation<Void, Error>?
+    private var pending: Result<Void, Error>?
+    private var finished = false
+
+    /// Registers the continuation. If [finish] already ran (the task was
+    /// cancelled before the continuation body executed), resumes it at once.
+    func attach(_ continuation: CheckedContinuation<Void, Error>) {
+      lock.lock()
+      if finished, let pending = pending {
+        self.pending = nil
+        lock.unlock()
+        continuation.resume(with: pending)
+      } else {
+        cont = continuation
+        lock.unlock()
+      }
+    }
+
+    /// Resumes the continuation once; later calls are ignored. Returns `true`
+    /// only for the call that actually completed it, so the winner can own any
+    /// side effects (e.g. deleting the partial output) without a late cancel
+    /// clobbering an already-succeeded export.
+    @discardableResult
+    func finish(_ result: Result<Void, Error>) -> Bool {
+      lock.lock()
+      if finished {
+        lock.unlock()
+        return false
+      }
+      finished = true
+      let continuation = cont
+      cont = nil
+      if continuation == nil { pending = result }
+      lock.unlock()
+      continuation?.resume(with: result)
+      return true
+    }
+  }
+
   /// Exports [asset] to [outputURL], encoding video as H.264 with
   /// `AVVideoAverageBitRateKey` set to [videoBitrate] and audio as AAC.
   ///
@@ -156,9 +205,11 @@ internal enum BitrateCappedExporter {
     writer.startSession(atSourceTime: exportStart)
 
     let cancelState = CancelState()
+    let terminator = ContinuationTerminator()
 
     try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+        terminator.attach(cont)
         let group = DispatchGroup()
 
         pump(
@@ -186,37 +237,48 @@ internal enum BitrateCappedExporter {
             reader.cancelReading()
             writer.cancelWriting()
             try? FileManager.default.removeItem(at: outputURL)
-            cont.resume(throwing: CancellationError())
+            terminator.finish(.failure(CancellationError()))
             return
           }
           if reader.status == .failed {
             writer.cancelWriting()
             try? FileManager.default.removeItem(at: outputURL)
-            cont.resume(throwing: reader.error ?? error(6, "Reading composed frames failed"))
+            terminator.finish(.failure(reader.error ?? error(6, "Reading composed frames failed")))
             return
           }
           if writer.status == .failed {
             reader.cancelReading()
             try? FileManager.default.removeItem(at: outputURL)
-            cont.resume(throwing: writer.error ?? error(7, "Writing encoded samples failed"))
+            terminator.finish(.failure(writer.error ?? error(7, "Writing encoded samples failed")))
             return
           }
           writer.finishWriting {
             if writer.status == .completed {
-              cont.resume()
+              terminator.finish(.success(()))
             } else {
               try? FileManager.default.removeItem(at: outputURL)
-              cont.resume(
-                throwing: writer.error
-                  ?? error(8, "Writer finished with status \(writer.status.rawValue)"))
+              terminator.finish(
+                .failure(
+                  writer.error
+                    ?? error(8, "Writer finished with status \(writer.status.rawValue)")))
             }
           }
         }
       }
     } onCancel: {
       cancelState.cancel()
-      // Unblocks the pumps: copyNextSampleBuffer returns nil after cancel.
+      // Unblocks the pumps: copyNextSampleBuffer returns nil after cancel. Also
+      // tear down the writer and complete the continuation directly — a pump
+      // parked on a wedged encoder (isReadyForMoreMediaData stuck false) is
+      // never re-invoked to observe the cancel, so group.notify would never
+      // fire and the task would hang holding the export gate. Only delete the
+      // output if this cancel actually won the race (the export hadn't already
+      // finished successfully).
       reader.cancelReading()
+      writer.cancelWriting()
+      if terminator.finish(.failure(CancellationError())) {
+        try? FileManager.default.removeItem(at: outputURL)
+      }
     }
   }
 

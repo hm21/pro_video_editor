@@ -260,6 +260,20 @@ void main() {
         throwsA(isA<AssertionError>()),
       );
     });
+
+    test('SplitVideoModel rejects stallTimeout >= exportTimeout', () {
+      expect(
+        () => SplitVideoModel(
+          video: mockVideo,
+          splitPosition: const Duration(seconds: 1),
+          startOutputPath: '/tmp/start.mp4',
+          endOutputPath: '/tmp/end.mp4',
+          exportTimeout: const Duration(seconds: 10),
+          stallTimeout: const Duration(seconds: 10),
+        ),
+        throwsA(isA<AssertionError>()),
+      );
+    });
   });
 
   group('getSingleThumbnail', () {

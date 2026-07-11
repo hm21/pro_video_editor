@@ -29,6 +29,9 @@ import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderJobHandle
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.features.render.models.VideoEncoderConfigurationException
+import ch.waio.pro_video_editor.src.shared.concurrency.ExportGate
+import ch.waio.pro_video_editor.src.shared.concurrency.ExportGateGuard
+import android.os.SystemClock
 
 /**
  * Service for rendering video with applied effects and transformations.
@@ -42,6 +45,22 @@ import ch.waio.pro_video_editor.src.features.render.models.VideoEncoderConfigura
  */
 @UnstableApi
 class RenderVideo(private val context: Context) {
+
+    companion object {
+        /**
+         * Stall bound for a render encode. A gated render that makes no forward
+         * progress for this long (a wedged [android.media.MediaCodec] session at
+         * `progress == 0`) is force-cancelled so it releases its [ExportGate]
+         * slot instead of holding it forever and deadlocking every later export.
+         * Renders have no fixed upper length, so only the stall bound applies —
+         * a slow-but-progressing long render is never killed. More generous than
+         * the split's default because a heavy composited frame can legitimately
+         * take longer between progress ticks.
+         */
+        private const val RENDER_STALL_TIMEOUT_MS = 20_000L
+
+        private const val RENDER_POLL_INTERVAL_MS = 200L
+    }
 
     private val effectsProcessor = EffectsProcessor()
 
@@ -116,6 +135,12 @@ class RenderVideo(private val context: Context) {
         var transitionFiles: List<String> = emptyList()
         val transformerRef = AtomicReference<Transformer?>(null)
         val outputFileRef = AtomicReference<File?>(null)
+        // Holds the process-wide encoder slot for this render's transformer
+        // phase; released on every terminal path (success, error, stall, cancel).
+        val exportGate = ExportGateGuard()
+        // Pre-rendered audio WAV temps for the active composition, exposed so the
+        // external-cancel terminal (which is listener-silent) can delete them too.
+        val audioTempFilesRef = AtomicReference<List<File>>(emptyList())
 
         val needsPreTranscode = needsPreTranscoding(config)
         val needsPreReverse = config.videoClips.any { it.reverseVideo }
@@ -159,7 +184,9 @@ class RenderVideo(private val context: Context) {
                 shouldStopPolling = shouldStopPolling,
                 mainHandler = mainHandler,
                 transformerRef = transformerRef,
-                outputFileRef = outputFileRef
+                outputFileRef = outputFileRef,
+                exportGate = exportGate,
+                audioTempFilesRef = audioTempFilesRef
             )
         } else {
             Thread {
@@ -249,7 +276,9 @@ class RenderVideo(private val context: Context) {
                             shouldStopPolling = shouldStopPolling,
                             mainHandler = mainHandler,
                             transformerRef = transformerRef,
-                            outputFileRef = outputFileRef
+                            outputFileRef = outputFileRef,
+                            exportGate = exportGate,
+                            audioTempFilesRef = audioTempFilesRef
                         )
                     }
                 } catch (e: Exception) {
@@ -266,6 +295,12 @@ class RenderVideo(private val context: Context) {
             shouldStopPolling.set(true)
             mainHandler.removeCallbacksAndMessages(null)
             transformerRef.get()?.cancel()
+            // Transformer.cancel() is listener-silent, so no terminal callback
+            // will run — release the encoder slot and clean up here so a
+            // cancelled render neither leaves the gate held nor leaks its
+            // pre-rendered audio WAV temps.
+            exportGate.release()
+            cleanupAudioTempFiles(audioTempFilesRef.get())
             VideoTranscoder.cleanupTranscodedFiles(transcodedFiles)
             VideoReverser.cleanupReversedFiles(reversedFiles)
             ClipTransitionRenderer.cleanupFiles(transitionFiles)
@@ -557,7 +592,9 @@ class RenderVideo(private val context: Context) {
         shouldStopPolling: AtomicBoolean,
         mainHandler: Handler,
         transformerRef: AtomicReference<Transformer?>,
-        outputFileRef: AtomicReference<File?>
+        outputFileRef: AtomicReference<File?>,
+        exportGate: ExportGateGuard,
+        audioTempFilesRef: AtomicReference<List<File>>
     ) {
         // Determine output file location
         val outputFile =
@@ -594,6 +631,11 @@ class RenderVideo(private val context: Context) {
 
         // Declare transformer before listener to make it accessible
         lateinit var transformer: Transformer
+
+        // Single terminal guard for the transformer phase: whichever of
+        // completion, error or the stall watchdog fires first wins, releases the
+        // encoder slot and delivers the result exactly once.
+        val renderFinished = AtomicBoolean(false)
 
         // Check if we need custom audio mixing with volume control
         val hasCustomAudio = config.audioTracks.isNotEmpty()
@@ -635,7 +677,9 @@ class RenderVideo(private val context: Context) {
         transformer = transformerBuilder
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, result: ExportResult) {
+                    if (!renderFinished.compareAndSet(false, true)) return
                     shouldStopPolling.set(true)
+                    exportGate.release()
                     // Ensure 100% progress is always reported before completion
                     onProgress(1.0)
                     try {
@@ -660,13 +704,42 @@ class RenderVideo(private val context: Context) {
                     result: ExportResult,
                     exception: ExportException
                 ) {
+                    if (!renderFinished.compareAndSet(false, true)) return
                     shouldStopPolling.set(true)
+                    exportGate.release()
                     onError(mapExportException(exception))
                     if (config.outputPath == null) outputFile.delete()
                 }
             })
             .build()
         transformerRef.set(transformer)
+
+        // Watchdog terminal: a render whose encoder wedges (no forward progress
+        // for the stall bound) is force-cancelled so it releases its gate slot
+        // instead of deadlocking every later export.
+        fun failRenderStalled(progressFraction: Double) {
+            if (!renderFinished.compareAndSet(false, true)) return
+            shouldStopPolling.set(true)
+            try {
+                transformer.cancel()
+            } catch (_: Exception) {
+            }
+            exportGate.release()
+            // transformer.cancel() is listener-silent, so the audio-temp cleanup
+            // listener never runs — clean up here instead.
+            cleanupAudioTempFiles(audioTempFilesRef.get())
+            if (config.outputPath == null) outputFile.delete()
+            val seconds = RENDER_STALL_TIMEOUT_MS / 1000
+            val message = String.format(
+                java.util.Locale.US,
+                "Render export stalled after %ds with no progress " +
+                    "[progress=%.2f format=%s bitrate=%s]",
+                seconds, progressFraction, config.outputFormat,
+                config.bitrate?.let { "${it / 1000}kbps" } ?: "preset"
+            )
+            Log.e(RENDER_TAG, message)
+            onError(IllegalStateException(message))
+        }
 
         // Create composition (now fast - no manual audio mixing needed, Media3 handles it natively)
         Thread {
@@ -700,25 +773,96 @@ class RenderVideo(private val context: Context) {
                             }
                         })
 
-                        transformer.start(composition, outputFile.absolutePath)
-
-                        // Start progress tracking loop
-                        val progressHolder = ProgressHolder()
-                        mainHandler.post(object : Runnable {
-                            override fun run() {
-                                if (shouldStopPolling.get()) return
-
-                                val progressState = transformer.getProgress(progressHolder)
-                                if (progressHolder.progress >= 0) {
-                                    onProgress(progressHolder.progress / 100.0)
-                                }
-
-                                // Continue polling if transformation is active
-                                if (!shouldStopPolling.get() && progressState != Transformer.PROGRESS_STATE_NOT_STARTED) {
-                                    mainHandler.postDelayed(this, 200)
-                                }
+                        // Serialize against other encodes (concurrent splits/
+                        // renders). The wait is before the transformer starts and
+                        // before the stall watchdog arms, so queueing never counts
+                        // as a stall.
+                        audioTempFilesRef.set(audioTempFiles)
+                        ExportGate.acquire {
+                            exportGate.markHeld()
+                            if (shouldStopPolling.get() || renderFinished.get()) {
+                                // Cancelled/finished while queued: hand the slot back.
+                                exportGate.release()
+                                cleanupAudioTempFiles(audioTempFiles)
+                                return@acquire
                             }
-                        })
+
+                            // Transformer.start() can throw synchronously (illegal
+                            // output/encoder config); on that path no listener fires,
+                            // so release the slot and surface the error here or the
+                            // gate would leak and deadlock every later export.
+                            try {
+                                transformer.start(composition, outputFile.absolutePath)
+                            } catch (e: Exception) {
+                                if (renderFinished.compareAndSet(false, true)) {
+                                    shouldStopPolling.set(true)
+                                    exportGate.release()
+                                    cleanupAudioTempFiles(audioTempFiles)
+                                    if (config.outputPath == null) outputFile.delete()
+                                    onError(e)
+                                }
+                                return@acquire
+                            }
+
+                            // Progress tracking loop + stall watchdog. `lastAdvanceAt`
+                            // marks the last whole-percent advance; if progress
+                            // never moves for the stall bound (a wedged encoder at
+                            // 0%) the render is failed and the slot released.
+                            val progressHolder = ProgressHolder()
+                            mainHandler.post(object : Runnable {
+                                private var lastProgress = -1
+                                private val startedAt = SystemClock.uptimeMillis()
+                                private var lastAdvanceAt = startedAt
+
+                                override fun run() {
+                                    if (shouldStopPolling.get()) return
+
+                                    val progressState =
+                                        transformer.getProgress(progressHolder)
+                                    val now = SystemClock.uptimeMillis()
+                                    val percent = progressHolder.progress
+                                    if (percent >= 0) {
+                                        onProgress(percent / 100.0)
+                                        if (percent > lastProgress) {
+                                            lastProgress = percent
+                                            lastAdvanceAt = now
+                                        }
+                                    }
+
+                                    // Progress can't be determined for some exports
+                                    // (e.g. image inputs report UNAVAILABLE); don't
+                                    // count those as a stall.
+                                    val trackable = progressState !=
+                                        Transformer.PROGRESS_STATE_UNAVAILABLE
+                                    if (!trackable) lastAdvanceAt = now
+
+                                    // Adaptive stall bound. Media3 reports whole-
+                                    // percent progress, so a fixed bound would
+                                    // false-kill any render slower than 1% per bound
+                                    // (a ~34-min render at the 20s floor). Tolerate
+                                    // 3× the average time-per-percent seen so far —
+                                    // a legitimately slow long render is never killed
+                                    // — but at least RENDER_STALL_TIMEOUT_MS so a
+                                    // stuck-at-0 wedge is still caught quickly and
+                                    // releases the gate.
+                                    val bound =
+                                        if (lastProgress > 0) {
+                                            maxOf(
+                                                RENDER_STALL_TIMEOUT_MS,
+                                                3 * (now - startedAt) / lastProgress,
+                                            )
+                                        } else {
+                                            RENDER_STALL_TIMEOUT_MS
+                                        }
+                                    if (trackable && now - lastAdvanceAt >= bound) {
+                                        failRenderStalled(lastProgress.coerceAtLeast(0) / 100.0)
+                                        return
+                                    }
+
+                                    mainHandler.postDelayed(this, RENDER_POLL_INTERVAL_MS)
+                                }
+                            })
+                        }
                     } else {
                         onError(IllegalStateException("Failed to create composition"))
                     }

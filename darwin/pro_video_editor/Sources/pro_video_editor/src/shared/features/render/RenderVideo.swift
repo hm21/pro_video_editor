@@ -20,6 +20,14 @@ import Foundation
 class RenderVideo {
   static let queue = DispatchQueue(label: "RenderVideoQueue")
 
+  /// Stall bound for a render encode. A gated encode that makes no forward
+  /// progress for this long (a wedged VideoToolbox session sitting at
+  /// `progress == 0`) is force-cancelled so it releases its ``ExportGate`` slot
+  /// instead of holding it forever and deadlocking every later export. Renders
+  /// have no fixed upper length, so only the stall bound applies (no hard
+  /// timeout) — a slow-but-progressing long render is never killed.
+  static let renderStallTimeout: TimeInterval = 20
+
   // MARK: - Public Methods
 
   /// Starts an asynchronous video render job using RenderConfig.
@@ -346,18 +354,28 @@ class RenderVideo {
               endUs: workingConfig.endUs)
             let hasAudioTracks = !composition.tracks(withMediaType: .audio).isEmpty
             // Serialize against other encodes (concurrent renders/splits) so
-            // they don't starve each other on the hardware encoder.
+            // they don't starve each other on the hardware encoder, and guard
+            // the encode with a stall watchdog so a wedged session releases the
+            // gate slot instead of deadlocking every later export.
             try await withExportSlot {
-              try await BitrateCappedExporter.export(
-                asset: composition,
-                videoComposition: videoComposition,
-                audioMix: hasAudioTracks ? audioMix : nil,
-                outputURL: outputURL,
-                fileType: mapFormatToMimeType(format: workingConfig.outputFormat),
-                videoBitrate: cap,
-                timeRange: timeRange,
-                optimizeForNetworkUse: workingConfig.shouldOptimizeForNetworkUse,
-                onProgress: onProgress)
+              try await ExportWatchdog.run(
+                diagnostics: RenderExportDiagnostics(mode: "bitrate-capped", bitrate: cap),
+                exportTimeout: 0,
+                stallTimeout: renderStallTimeout,
+                onProgress: onProgress,
+                cancel: {},  // BitrateCappedExporter unwinds via task cancellation
+                body: { progress in
+                  try await BitrateCappedExporter.export(
+                    asset: composition,
+                    videoComposition: videoComposition,
+                    audioMix: hasAudioTracks ? audioMix : nil,
+                    outputURL: outputURL,
+                    fileType: mapFormatToMimeType(format: workingConfig.outputFormat),
+                    videoBitrate: cap,
+                    timeRange: timeRange,
+                    optimizeForNetworkUse: workingConfig.shouldOptimizeForNetworkUse,
+                    onProgress: progress)
+                })
             }
           } else {
             let preset = applyBitrate(requestedBitrate: workingConfig.bitrate)
@@ -377,9 +395,19 @@ class RenderVideo {
             handle.attach(export: export)
 
             // Serialize against other encodes (concurrent renders/splits) so
-            // they don't starve each other on the hardware encoder.
+            // they don't starve each other on the hardware encoder, and guard
+            // the encode with a stall watchdog so a wedged session releases the
+            // gate slot instead of deadlocking every later export.
             try await withExportSlot {
-              try await monitorExportProgress(export, onProgress: onProgress)
+              try await ExportWatchdog.run(
+                diagnostics: RenderExportDiagnostics(mode: preset, bitrate: nil),
+                exportTimeout: 0,
+                stallTimeout: renderStallTimeout,
+                onProgress: onProgress,
+                cancel: { export.cancelExport() },
+                body: { progress in
+                  try await monitorExportProgress(export, onProgress: progress)
+                })
             }
           }
 
@@ -921,5 +949,30 @@ final class RenderJobHandle {
 
     task?.cancel()
     session?.cancelExport()
+  }
+}
+
+/// Diagnostic context for a render encode, mirroring ``SplitExportDiagnostics``
+/// so a stall/timeout surfaces the same shape of message on the render path.
+struct RenderExportDiagnostics: ExportDiagnostics {
+  /// What is being encoded — `"bitrate-capped"` for the AVAssetWriter path or
+  /// the export-session preset name.
+  let mode: String
+  /// Requested video bitrate in bits/s, or nil for a preset export.
+  let bitrate: Int?
+
+  /// e.g. `[progress=0.00 mode=bitrate-capped bitrate=4000kbps]`
+  func context(progress: Double) -> String {
+    let bitrateText = bitrate.map { "\($0 / 1000)kbps" } ?? "preset"
+    return String(
+      format: "[progress=%.2f mode=%@ bitrate=%@]", progress, mode, bitrateText)
+  }
+
+  func timeoutMessage(seconds: Int, progress: Double) -> String {
+    "Render export timed out after \(seconds)s \(context(progress: progress))"
+  }
+
+  func stallMessage(seconds: Int, progress: Double) -> String {
+    "Render export stalled after \(seconds)s with no progress \(context(progress: progress))"
   }
 }

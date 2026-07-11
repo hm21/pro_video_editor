@@ -51,6 +51,11 @@ class SplitVideoModel {
        assert(
          stallTimeout > Duration.zero,
          'stallTimeout must be greater than zero',
+       ),
+       assert(
+         stallTimeout < exportTimeout,
+         'stallTimeout must be less than exportTimeout, otherwise the hard '
+         'bound always fires first and stall detection has no effect',
        );
 
   /// Unique ID for the task, used for progress updates and cancellation.
