@@ -260,14 +260,14 @@ void main() {
             'in ${sw.elapsedMilliseconds}ms',
           );
 
-          // A ≤2s clip must split well under the watchdog; a stall throws above.
+          // A ≤2s clip splits well under the watchdog; a stall throws above.
           expect(
             sw.elapsed,
             lessThan(const Duration(seconds: 30)),
             reason: 'gen $gen split took ${sw.elapsedMilliseconds}ms',
           );
 
-          // Feed the SECOND half back in — the suspect non-zero-start re-encode.
+          // Feed the SECOND half back in — the mid-asset re-encode suspect.
           current = EditorVideo.file(endPath);
           currentDuration = (await pve.getMetadata(current)).duration;
         }
@@ -276,8 +276,8 @@ void main() {
         await cleanUp(created);
       }
 
-      // At least a couple of stacked generations must succeed. A throw above (the
-      // stall diagnostic) fails the test and localizes the freeze.
+      // At least two stacked generations must succeed; a throw above
+      // (the stall diagnostic) fails the test and localizes the freeze.
       expect(generations, greaterThanOrEqualTo(2));
     },
     skip: skipPlatform,
