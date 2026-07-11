@@ -202,6 +202,46 @@ void main() {
     await cleanUp([startPath, endPath]);
   }, skip: skipPlatform);
 
+  // Failure-path coverage for the watchdog itself: the previous suite only
+  // exercised healthy splits, so a broken watchdog (never fires, or fires
+  // without the diagnostic context) would have shipped green.
+  //
+  // An absurdly tight hard bound fires deterministically because it is measured
+  // as wall-clock from export start, independent of progress. The split must
+  // fail fast with a catchable, diagnostic error — not hang or complete.
+  testWidgets('watchdog fails fast with a diagnostic error', (tester) async {
+    final meta = await pve.getMetadata(source);
+
+    final startPath = await tempPath('watchdog_start');
+    final endPath = await tempPath('watchdog_end');
+
+    Object? caught;
+    try {
+      await pve.splitVideo(
+        SplitVideoModel(
+          video: source,
+          splitPosition: meta.duration ~/ 2,
+          startOutputPath: startPath,
+          endOutputPath: endPath,
+          // 1ms hard bound, sub-ms stall bound: the watchdog cancels the export
+          // long before any real encode could finish.
+          exportTimeout: const Duration(milliseconds: 1),
+          stallTimeout: const Duration(microseconds: 500),
+        ),
+      );
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught, isNotNull, reason: 'the watchdog must fail the split');
+    final message = caught.toString().toLowerCase();
+    // The diagnostic message and its bracketed context must both be present.
+    expect(message, contains('split export'));
+    expect(message, contains('progress='));
+
+    await cleanUp([startPath, endPath]);
+  }, skip: skipPlatform);
+
   // Regression probe for #166 (iOS 26.5 split freeze).
   //
   // Hypothesis: the freeze is NOT concurrency — it is the split's *second half*

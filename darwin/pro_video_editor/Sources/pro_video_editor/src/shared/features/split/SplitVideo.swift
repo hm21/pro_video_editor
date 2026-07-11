@@ -185,9 +185,10 @@ class SplitVideo {
     }
   }
 
-  /// Runs the export and races it against the stall/timeout monitor. Whichever
-  /// finishes first wins; if the monitor fires it cancels the session and throws
-  /// a diagnostic stall/timeout error, otherwise the monitor is cancelled.
+  /// Runs the export guarded by the shared ``ExportWatchdog`` (inner stall bound
+  /// + outer hard bound). If a bound fires the session is force-cancelled and a
+  /// diagnostic error is thrown; otherwise the monitor is torn down when the
+  /// export finishes.
   private static func runExportWithTimeout(
     _ export: AVAssetExportSession,
     diagnostics: SplitExportDiagnostics,
@@ -195,75 +196,13 @@ class SplitVideo {
     stallTimeout: TimeInterval,
     onProgress: @escaping (Double) -> Void
   ) async throws {
-    // The monitor reads progress through this box, fed by the same callbacks
-    // that drive `onProgress`, so "stuck at X%" reflects the last real value.
-    let progress = ProgressBox()
-    try await withThrowingTaskGroup(of: Void.self) { group in
-      group.addTask {
-        try await runExport(export) { value in
-          progress.update(value)
-          onProgress(value)
-        }
-      }
-      group.addTask {
-        try await monitorForStall(
-          export, progress: progress, diagnostics: diagnostics,
-          exportTimeout: exportTimeout, stallTimeout: stallTimeout)
-      }
-      // Surface whichever finishes first (success, error, stall or timeout),
-      // then cancel the loser.
-      try await group.next()
-      group.cancelAll()
-    }
-  }
-
-  /// Polls export progress and enforces two bounds: an inner stall bound (no
-  /// forward progress for `stallTimeout`) and an outer hard bound
-  /// (`exportTimeout` total). On either bound it cancels the session and throws
-  /// a diagnostic error; the running export loses the race and is torn down.
-  private static func monitorForStall(
-    _ export: AVAssetExportSession,
-    progress: ProgressBox,
-    diagnostics: SplitExportDiagnostics,
-    exportTimeout: TimeInterval,
-    stallTimeout: TimeInterval
-  ) async throws {
-    let pollInterval: TimeInterval = 0.25
-    let start = Date()
-    var lastProgress = progress.value
-    var lastAdvance = start
-
-    while true {
-      try await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
-      let now = Date()
-      let current = progress.value
-      if current > lastProgress {
-        lastProgress = current
-        lastAdvance = now
-      }
-
-      // Inner bound: no forward progress for `stallTimeout`.
-      if stallTimeout > 0, now.timeIntervalSince(lastAdvance) >= stallTimeout {
-        let message = diagnostics.stallMessage(
-          seconds: Int(stallTimeout.rounded()), progress: current)
-        PluginLog.print("⏱️ \(message)")
-        export.cancelExport()
-        throw NSError(
-          domain: "SplitVideo", code: 408,
-          userInfo: [NSLocalizedDescriptionKey: message])
-      }
-
-      // Outer bound: absolute wall-clock cap even while still reporting progress.
-      if now.timeIntervalSince(start) >= exportTimeout {
-        let message = diagnostics.timeoutMessage(
-          seconds: Int(exportTimeout.rounded()), progress: current)
-        PluginLog.print("⏱️ \(message)")
-        export.cancelExport()
-        throw NSError(
-          domain: "SplitVideo", code: 408,
-          userInfo: [NSLocalizedDescriptionKey: message])
-      }
-    }
+    try await ExportWatchdog.run(
+      diagnostics: diagnostics,
+      exportTimeout: exportTimeout,
+      stallTimeout: stallTimeout,
+      onProgress: onProgress,
+      cancel: { export.cancelExport() },
+      body: { progress in try await runExport(export, onProgress: progress) })
   }
 
   /// Drives the export to completion, reporting fractional progress.
@@ -362,7 +301,7 @@ class SplitVideo {
 /// Immutable context for one exported half, used to enrich a stall/timeout
 /// failure with actionable diagnostics. The bracketed suffix is intentionally
 /// identical in structure to the Android side (`preset` here vs `mime` there).
-struct SplitExportDiagnostics {
+struct SplitExportDiagnostics: ExportDiagnostics {
   enum Half: String { case start, end }
 
   let half: Half
@@ -391,26 +330,5 @@ struct SplitExportDiagnostics {
 
   func stallMessage(seconds: Int, progress: Double) -> String {
     "Split export stalled after \(seconds)s with no progress \(context(progress: progress))"
-  }
-}
-
-/// Thread-safe, monotonically-increasing progress holder shared between the
-/// export task (writer) and the stall monitor (reader).
-final class ProgressBox {
-  private let lock = NSLock()
-  private var stored: Double = 0
-
-  /// Records `value` if it exceeds the current maximum. Export progress only
-  /// moves forward, so clamping to the max ignores any spurious lower reports.
-  func update(_ value: Double) {
-    lock.lock()
-    if value > stored { stored = value }
-    lock.unlock()
-  }
-
-  var value: Double {
-    lock.lock()
-    defer { lock.unlock() }
-    return stored
   }
 }
