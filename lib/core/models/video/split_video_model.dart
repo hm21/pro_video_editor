@@ -29,6 +29,8 @@ class SplitVideoModel {
     this.qualityConfig,
     this.bitrate,
     this.enableAudio = true,
+    this.exportTimeout = const Duration(seconds: 120),
+    this.stallTimeout = const Duration(seconds: 12),
   }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
        assert(
          splitPosition > Duration.zero,
@@ -41,6 +43,14 @@ class SplitVideoModel {
        assert(
          bitrate == null || bitrate > 0,
          '[bitrate] must be greater than 0',
+       ),
+       assert(
+         exportTimeout > Duration.zero,
+         'exportTimeout must be greater than zero',
+       ),
+       assert(
+         stallTimeout > Duration.zero,
+         'stallTimeout must be greater than zero',
        );
 
   /// Unique ID for the task, used for progress updates and cancellation.
@@ -78,6 +88,28 @@ class SplitVideoModel {
   ///
   /// **Default**: `true`
   final bool enableAudio;
+
+  /// Hard upper bound on how long a single half may export before the native
+  /// watchdog force-cancels it and fails with a diagnostic timeout error.
+  ///
+  /// This is the outer safety net. In practice a stalled export is caught much
+  /// sooner by [stallTimeout]; this only fires for an export that keeps
+  /// reporting progress yet never finishes.
+  ///
+  /// **Default**: 120 seconds (the previous fixed behavior).
+  final Duration exportTimeout;
+
+  /// Inner bound: if the export makes no forward progress for this long, it is
+  /// treated as stalled, force-cancelled and failed with a diagnostic error
+  /// (which half, last progress, segment/total durations, preset/mime, audio).
+  ///
+  /// A stalled export — e.g. an encoder session waiting on an exhausted
+  /// hardware pool — reports "stuck at 0%" and would otherwise sit idle until
+  /// [exportTimeout]. A successful split always advances, so this never fires
+  /// for a healthy export. Must be less than [exportTimeout] to have effect.
+  ///
+  /// **Default**: 12 seconds.
+  final Duration stallTimeout;
 
   /// A [Stream] of [ProgressModel] updates for this split, keyed by [id].
   ///

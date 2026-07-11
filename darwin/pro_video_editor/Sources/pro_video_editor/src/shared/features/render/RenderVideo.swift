@@ -345,16 +345,20 @@ class RenderVideo {
               startUs: workingConfig.startUs,
               endUs: workingConfig.endUs)
             let hasAudioTracks = !composition.tracks(withMediaType: .audio).isEmpty
-            try await BitrateCappedExporter.export(
-              asset: composition,
-              videoComposition: videoComposition,
-              audioMix: hasAudioTracks ? audioMix : nil,
-              outputURL: outputURL,
-              fileType: mapFormatToMimeType(format: workingConfig.outputFormat),
-              videoBitrate: cap,
-              timeRange: timeRange,
-              optimizeForNetworkUse: workingConfig.shouldOptimizeForNetworkUse,
-              onProgress: onProgress)
+            // Serialize against other encodes (concurrent renders/splits) so
+            // they don't starve each other on the hardware encoder.
+            try await withExportSlot {
+              try await BitrateCappedExporter.export(
+                asset: composition,
+                videoComposition: videoComposition,
+                audioMix: hasAudioTracks ? audioMix : nil,
+                outputURL: outputURL,
+                fileType: mapFormatToMimeType(format: workingConfig.outputFormat),
+                videoBitrate: cap,
+                timeRange: timeRange,
+                optimizeForNetworkUse: workingConfig.shouldOptimizeForNetworkUse,
+                onProgress: onProgress)
+            }
           } else {
             let preset = applyBitrate(requestedBitrate: workingConfig.bitrate)
 
@@ -372,7 +376,11 @@ class RenderVideo {
 
             handle.attach(export: export)
 
-            try await monitorExportProgress(export, onProgress: onProgress)
+            // Serialize against other encodes (concurrent renders/splits) so
+            // they don't starve each other on the hardware encoder.
+            try await withExportSlot {
+              try await monitorExportProgress(export, onProgress: onProgress)
+            }
           }
 
           if workingConfig.outputPath != nil {

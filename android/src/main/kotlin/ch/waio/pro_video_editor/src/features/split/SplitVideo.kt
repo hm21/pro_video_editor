@@ -2,8 +2,10 @@ package ch.waio.pro_video_editor.src.features.split
 
 import mapFormatToMimeType
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Handler
+import android.os.SystemClock
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.Composition
@@ -29,19 +31,31 @@ import java.util.concurrent.atomic.AtomicReference
  * frame-accurate — unlike a transmux, which would snap to a keyframe.
  *
  * The two halves run sequentially (one encoder at a time) and every half is
- * guarded by a watchdog ([EXPORT_TIMEOUT_MS]). Crucially, [Transformer.cancel]
- * does not invoke the listener, so cancellation and timeout deliver the terminal
- * result explicitly through a single job-level guard. The job therefore always
- * terminates — success, error, cancellation or timeout — and never leaves the
- * method-channel result pending.
+ * guarded by two watchdogs: an inner stall bound (no forward progress for
+ * `stallTimeoutMs`) and an outer hard bound (`exportTimeoutMs`). Either one
+ * force-cancels the [Transformer] and fails with a diagnostic context (which
+ * half, last progress, segment/total durations, mime, audio). Crucially,
+ * [Transformer.cancel] does not invoke the listener, so cancellation, stall and
+ * timeout deliver the terminal result explicitly through a single job-level
+ * guard. The job therefore always terminates — success, error, cancellation,
+ * stall or timeout — and never leaves the method-channel result pending.
+ *
+ * Note on stalls: a genuine hang here is almost always contention for the
+ * device's limited hardware [android.media.MediaCodec] encoder pool — split and
+ * concurrent speed renders both drive their [Transformer] on the main [Looper]
+ * with no global cap on live encoder sessions. A second concurrent encoder can
+ * block at `progress == 0`, which the stall bound now catches.
  */
 @UnstableApi
 class SplitVideo(private val context: Context) {
     companion object {
         private const val TAG = "SplitVideo"
 
-        /** Max time a single half may export before it is force-cancelled. */
-        private const val EXPORT_TIMEOUT_MS = 120_000L
+        /** Default hard upper bound before a half is force-cancelled. */
+        const val DEFAULT_EXPORT_TIMEOUT_MS = 120_000L
+
+        /** Default stall bound: no forward progress for this long → stalled. */
+        const val DEFAULT_STALL_TIMEOUT_MS = 12_000L
 
         private const val POLL_INTERVAL_MS = 200L
     }
@@ -60,6 +74,8 @@ class SplitVideo(private val context: Context) {
         bitrate: Int?,
         enableAudio: Boolean,
         mainHandler: Handler,
+        exportTimeoutMs: Long = DEFAULT_EXPORT_TIMEOUT_MS,
+        stallTimeoutMs: Long = DEFAULT_STALL_TIMEOUT_MS,
         onProgress: (Double) -> Unit,
         onComplete: (List<String>) -> Unit,
         onError: (Throwable) -> Unit
@@ -110,13 +126,17 @@ class SplitVideo(private val context: Context) {
             if (finished.get()) return@post
             exportHalf(
                 inputPath = inputPath,
+                half = "start",
                 startUs = 0L,
                 endUs = splitUs,
+                splitUs = splitUs,
                 outputPath = startOutputPath,
                 outputFormat = outputFormat,
                 bitrate = bitrate,
                 enableAudio = enableAudio,
                 mainHandler = mainHandler,
+                exportTimeoutMs = exportTimeoutMs,
+                stallTimeoutMs = stallTimeoutMs,
                 pollStop = pollStop,
                 transformerRef = transformerRef,
                 timeoutRef = timeoutRef,
@@ -126,13 +146,17 @@ class SplitVideo(private val context: Context) {
                         pollStop.set(false)
                         exportHalf(
                             inputPath = inputPath,
+                            half = "end",
                             startUs = splitUs,
                             endUs = null,
+                            splitUs = splitUs,
                             outputPath = endOutputPath,
                             outputFormat = outputFormat,
                             bitrate = bitrate,
                             enableAudio = enableAudio,
                             mainHandler = mainHandler,
+                            exportTimeoutMs = exportTimeoutMs,
+                            stallTimeoutMs = stallTimeoutMs,
                             pollStop = pollStop,
                             transformerRef = transformerRef,
                             timeoutRef = timeoutRef,
@@ -154,16 +178,25 @@ class SplitVideo(private val context: Context) {
     /**
      * Re-encodes a single clipped range to [outputPath]. Must be called on the
      * [mainHandler] thread (Media3 [Transformer] requires a Looper).
+     *
+     * [half] is `"start"` or `"end"` and [splitUs] the absolute split position;
+     * both are used only to build the diagnostic context of a stall/timeout
+     * failure. The source duration is probed lazily on the failure path so a
+     * successful split incurs no extra work.
      */
     private fun exportHalf(
         inputPath: String,
+        half: String,
         startUs: Long,
         endUs: Long?,
+        splitUs: Long,
         outputPath: String,
         outputFormat: String,
         bitrate: Int?,
         enableAudio: Boolean,
         mainHandler: Handler,
+        exportTimeoutMs: Long,
+        stallTimeoutMs: Long,
         pollStop: AtomicBoolean,
         transformerRef: AtomicReference<Transformer?>,
         timeoutRef: AtomicReference<Runnable?>,
@@ -197,6 +230,9 @@ class SplitVideo(private val context: Context) {
             .build()
 
         val halfDone = AtomicBoolean(false)
+        // Last progress percentage (0..100) reported by the encoder, or -1 if
+        // none yet. Read by the watchdogs to enrich the failure message.
+        val lastPercent = java.util.concurrent.atomic.AtomicInteger(-1)
 
         val transformer = Transformer.Builder(context)
             .setEncoderFactory(encoderFactory)
@@ -225,47 +261,114 @@ class SplitVideo(private val context: Context) {
             .build()
         transformerRef.set(transformer)
 
-        // Watchdog: a stalled export is force-cancelled and surfaced as an error
-        // instead of hanging (Transformer.cancel does not call the listener).
-        val timeout = Runnable {
-            if (!halfDone.compareAndSet(false, true)) return@Runnable
+        // Diagnostics are built only when a watchdog fires, so the source
+        // duration probe never runs on a successful split.
+        fun diagnostics(): SplitExportDiagnostics {
+            val totalUs = probeDurationUs(inputPath)
+            val segmentUs = when {
+                endUs != null -> endUs - startUs
+                totalUs > 0 -> totalUs - startUs
+                else -> -1L
+            }
+            return SplitExportDiagnostics(
+                half = half,
+                segmentUs = segmentUs,
+                splitUs = splitUs,
+                totalUs = totalUs,
+                mimeType = mimeType,
+                enableAudio = enableAudio,
+            )
+        }
+
+        fun lastFraction(): Double = lastPercent.get().coerceAtLeast(0) / 100.0
+
+        // Single terminal path for every watchdog: force-cancel the (listener-
+        // silent) transformer, clean up and surface [cause] exactly once.
+        fun failHalf(cause: Throwable) {
+            if (!halfDone.compareAndSet(false, true)) return
             pollStop.set(true)
-            Log.e(TAG, "Split half timed out after ${EXPORT_TIMEOUT_MS}ms")
+            timeoutRef.getAndSet(null)?.let { mainHandler.removeCallbacks(it) }
             try {
                 transformer.cancel()
             } catch (_: Exception) {
             }
             outputFile.delete()
-            onHalfError(
-                IllegalStateException("Split export timed out after ${EXPORT_TIMEOUT_MS}ms")
+            onHalfError(cause)
+        }
+
+        // Outer hard watchdog: a still-progressing but never-finishing export is
+        // force-cancelled and surfaced as an error instead of hanging.
+        val timeout = Runnable {
+            if (halfDone.get()) return@Runnable
+            val message = diagnostics().timeoutMessage(
+                seconds = Math.round(exportTimeoutMs / 1000.0),
+                progress = lastFraction(),
             )
+            Log.e(TAG, message)
+            failHalf(IllegalStateException(message))
         }
         timeoutRef.set(timeout)
-        mainHandler.postDelayed(timeout, EXPORT_TIMEOUT_MS)
+        mainHandler.postDelayed(timeout, exportTimeoutMs)
 
         try {
             transformer.start(editedMediaItem, outputPath)
         } catch (e: Exception) {
-            if (halfDone.compareAndSet(false, true)) {
-                pollStop.set(true)
-                timeoutRef.getAndSet(null)?.let { mainHandler.removeCallbacks(it) }
-                outputFile.delete()
-                onHalfError(e)
-            }
+            failHalf(e)
             return
         }
 
-        // Progress polling.
+        // Progress polling + inner stall watchdog. `lastAdvanceAt` marks the
+        // last time progress moved forward; if it never does for stallTimeoutMs
+        // (the reported "stuck at 0%" case) the half is failed early.
         val progressHolder = ProgressHolder()
         mainHandler.post(object : Runnable {
+            private var lastProgress = -1
+            private var lastAdvanceAt = SystemClock.uptimeMillis()
+
             override fun run() {
                 if (pollStop.get() || halfDone.get()) return
                 transformer.getProgress(progressHolder)
-                if (progressHolder.progress >= 0) {
-                    onProgress(progressHolder.progress / 100.0)
+                val now = SystemClock.uptimeMillis()
+                val percent = progressHolder.progress
+                if (percent >= 0) {
+                    lastPercent.set(percent)
+                    onProgress(percent / 100.0)
+                    if (percent > lastProgress) {
+                        lastProgress = percent
+                        lastAdvanceAt = now
+                    }
+                }
+                if (stallTimeoutMs > 0 && now - lastAdvanceAt >= stallTimeoutMs) {
+                    val message = diagnostics().stallMessage(
+                        seconds = Math.round(stallTimeoutMs / 1000.0),
+                        progress = lastFraction(),
+                    )
+                    Log.e(TAG, message)
+                    failHalf(IllegalStateException(message))
+                    return
                 }
                 mainHandler.postDelayed(this, POLL_INTERVAL_MS)
             }
         })
+    }
+
+    /** Best-effort source duration in microseconds, or -1 if it cannot be read. */
+    private fun probeDurationUs(path: String): Long {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(path)
+            val ms = retriever
+                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            if (ms > 0L) ms * 1000L else -1L
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to probe duration for split diagnostics: ${e.message}")
+            -1L
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+            }
+        }
     }
 }
