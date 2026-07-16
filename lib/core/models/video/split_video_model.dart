@@ -4,10 +4,20 @@ import 'package:pro_video_editor/pro_video_editor.dart';
 /// Configuration for a frame-accurate video split.
 ///
 /// Cuts a single source video at [splitPosition] into two separate files
-/// ([startOutputPath] and [endOutputPath]). The cut is frame-accurate: unlike a
-/// stream-copy (passthrough) split, which can only cut on keyframe boundaries,
-/// this re-encodes from the exact split frame so both halves start and end
-/// precisely where requested.
+/// ([startOutputPath] and [endOutputPath]). The cut is frame-accurate: both
+/// halves start and end precisely where requested.
+///
+/// Without an explicit [bitrate]/[qualityConfig] both halves are
+/// **stream-copied** instead of re-encoded (iOS/macOS: passthrough export;
+/// Android: transmux with edit-list trim). The half that starts mid-GOP keeps
+/// the samples from the preceding keyframe and gates playback start with a
+/// container edit list, so the cut stays frame-accurate on edit-list-honoring
+/// players (AVPlayer, ExoPlayer, ffmpeg — and this plugin's own thumbnail and
+/// metadata pipelines, verified pixel-exact). The source codec, frame rate,
+/// bit depth and HDR metadata survive, and splitting is bounded by I/O rather
+/// than encoder throughput. With a bitrate set — or when a source cannot be
+/// stream-copied — the affected halves are re-encoded from the exact split
+/// frame instead.
 ///
 /// This is a dedicated, lightweight operation — it does not run the full
 /// rendering pipeline (no compositor, effects, overlays or audio mixing), which
@@ -84,6 +94,9 @@ class SplitVideoModel {
   final VideoQualityConfig? qualityConfig;
 
   /// Optional bitrate in bits per second for the re-encoded output.
+  ///
+  /// Setting a bitrate (directly or via [qualityConfig]) disables the lossless
+  /// stream-copy fast path and forces a full re-encode of both halves.
   ///
   /// **WARNING macOS/iOS:** A specific bitrate cannot be set directly; the
   /// closest export preset is chosen instead.

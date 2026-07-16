@@ -51,6 +51,10 @@ final class ProgressBox {
 /// Timing uses the monotonic uptime clock (immune to wall-clock/NTP steps),
 /// matching the Android side's `SystemClock.uptimeMillis()`.
 enum ExportWatchdog {
+  /// Domain of the diagnostic stall/timeout errors thrown by the monitor,
+  /// used by callers to tell a watchdog failure apart from other errors.
+  static let errorDomain = "ExportWatchdog"
+
   private static let pollInterval: TimeInterval = 0.25
 
   /// Progress fraction past which the encode is effectively done and only the
@@ -96,8 +100,30 @@ enum ExportWatchdog {
       // Surface whichever finishes first (success, error, stall or timeout),
       // then cancel the loser. If `group.next()` throws (the monitor fired) the
       // group implicitly cancels and awaits the still-running body on scope exit.
-      try await group.next()
-      group.cancelAll()
+      do {
+        try await group.next()
+        group.cancelAll()
+      } catch {
+        group.cancelAll()
+        // The monitor force-cancels the session *before* it throws its
+        // diagnostic error, so the body can surface its CancellationError
+        // first — a race that would misreport a stall/timeout as a user
+        // cancellation (likely with a fast export and a tight bound). Drain
+        // the remaining child and let a fired watchdog override the
+        // cancellation with its diagnostic error. A genuine user cancel
+        // instead unwinds the still-sleeping monitor as a CancellationError,
+        // which keeps the original error.
+        if error is CancellationError {
+          do {
+            try await group.next()
+          } catch let watchdogError as NSError
+            where watchdogError.domain == errorDomain
+          {
+            throw watchdogError
+          } catch {}
+        }
+        throw error
+      }
     }
   }
 
@@ -113,7 +139,21 @@ enum ExportWatchdog {
     var lastAdvance = start
 
     while true {
-      try await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
+      // Sleep until the next poll, but never past an armed bound: a bound
+      // tighter than the poll interval must still fire on time. A passthrough
+      // split can finish in ~10ms, so a millisecond-scale bound that is only
+      // checked at the first 250ms poll would lose the race against the export
+      // and never fire. Real-world bounds (seconds) keep the 250ms cadence.
+      var sleepSeconds = pollInterval
+      if stallTimeout > 0 {
+        let bound =
+          progress.value >= finalizeWatermark ? max(stallTimeout, finalizeGrace) : stallTimeout
+        sleepSeconds = min(sleepSeconds, max(0, bound - elapsed(since: lastAdvance)))
+      }
+      if exportTimeout > 0 {
+        sleepSeconds = min(sleepSeconds, max(0, exportTimeout - elapsed(since: start)))
+      }
+      try await Task.sleep(nanoseconds: UInt64(sleepSeconds * 1_000_000_000))
       let current = progress.value
       if current > lastProgress {
         lastProgress = current
@@ -133,7 +173,7 @@ enum ExportWatchdog {
           PluginLog.print("⏱️ \(message)")
           cancel()
           throw NSError(
-            domain: "ExportWatchdog", code: 408,
+            domain: errorDomain, code: 408,
             userInfo: [NSLocalizedDescriptionKey: message])
         }
       }
@@ -145,7 +185,7 @@ enum ExportWatchdog {
         PluginLog.print("⏱️ \(message)")
         cancel()
         throw NSError(
-          domain: "ExportWatchdog", code: 408,
+          domain: errorDomain, code: 408,
           userInfo: [NSLocalizedDescriptionKey: message])
       }
     }

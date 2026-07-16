@@ -3,11 +3,20 @@ import Foundation
 
 /// Service for frame-accurate splitting of a single video into two files.
 ///
-/// Unlike a passthrough (stream-copy) split — which can only cut on keyframe
-/// boundaries — this re-encodes each half from the exact split frame, so the
-/// cut is frame-accurate. It deliberately does **not** use the rendering
-/// compositor or any effects pipeline; it is just two trimmed
-/// `AVAssetExportSession` re-encodes, which keeps it fast and predictable.
+/// Without an explicit bitrate each half is **stream-copied**
+/// (`AVAssetExportPresetPassthrough`): no re-encode, so the source codec, frame
+/// rate, bit depth and HDR metadata survive and the export is bounded by I/O
+/// instead of encoder throughput. The cut stays frame-accurate because
+/// AVFoundation copies from the preceding keyframe and gates playback start
+/// with a container edit list — players that honor edit lists (AVPlayer,
+/// ExoPlayer, ffmpeg) start exactly at the requested frame. A source that
+/// cannot be stream-copied falls back to the re-encoding preset below.
+///
+/// With an explicit bitrate (or as that fallback) the half is re-encoded from
+/// the exact split frame via the closest export preset. Either way this
+/// deliberately does **not** use the rendering compositor or any effects
+/// pipeline; it is just two trimmed `AVAssetExportSession` passes, which keeps
+/// it fast and predictable.
 ///
 /// The two halves are exported sequentially so only one decoder/encoder is
 /// active at a time, and every export is guarded by two watchdogs: an inner
@@ -78,7 +87,7 @@ class SplitVideo {
               ])
           }
 
-          let preset = applyBitrate(requestedBitrate: bitrate)
+          let reencodePreset = applyBitrate(requestedBitrate: bitrate)
           let fileType = mapFormatToMimeType(format: outputFormat)
 
           // Source for export: the original asset keeps audio + orientation;
@@ -88,44 +97,75 @@ class SplitVideo {
 
           PluginLog.print(
             "✂️ Splitting at \(String(format: "%.3f", CMTimeGetSeconds(splitTime)))s "
-              + "(\(outputFormat), preset \(preset), audio: \(enableAudio))")
+              + "(\(outputFormat), \(bitrate == nil ? "passthrough" : "preset \(reencodePreset)"), "
+              + "audio: \(enableAudio))")
 
           let totalSeconds = CMTimeGetSeconds(duration)
           let splitSeconds = CMTimeGetSeconds(splitTime)
           let endDuration = CMTimeSubtract(duration, splitTime)
 
+          /// Exports one half, preferring the lossless passthrough fast path.
+          ///
+          /// Without an explicit bitrate the half is stream-copied first. A
+          /// genuine export failure (e.g. a container/codec combination that
+          /// cannot be copied) falls back to the re-encoding preset.
+          /// Cancellations and watchdog stall/timeout errors propagate
+          /// unchanged — retrying those would break cancel semantics and the
+          /// wall-clock bounds the watchdog exists to enforce.
+          func exportHalf(
+            _ half: SplitExportDiagnostics.Half,
+            timeRange: CMTimeRange,
+            outputPath: String,
+            progressBase: Double
+          ) async throws {
+            func attempt(_ preset: String) async throws {
+              try await exportSegment(
+                asset: exportAsset,
+                timeRange: timeRange,
+                outputPath: outputPath,
+                fileType: fileType,
+                preset: preset,
+                diagnostics: SplitExportDiagnostics(
+                  half: half, segmentSeconds: CMTimeGetSeconds(timeRange.duration),
+                  splitSeconds: splitSeconds, totalSeconds: totalSeconds, preset: preset,
+                  enableAudio: enableAudio),
+                exportTimeout: exportTimeout,
+                stallTimeout: stallTimeout,
+                handle: handle,
+                onProgress: { onProgress(progressBase + $0 * 0.5) })
+            }
+
+            guard bitrate == nil else { return try await attempt(reencodePreset) }
+            do {
+              try await attempt(AVAssetExportPresetPassthrough)
+            } catch is CancellationError {
+              throw CancellationError()
+            } catch let error as NSError where error.domain == ExportWatchdog.errorDomain {
+              throw error
+            } catch {
+              PluginLog.print(
+                "✂️ Passthrough split (\(half.rawValue)) failed — falling back to "
+                  + "\(reencodePreset): \(error.localizedDescription)")
+              try Task.checkCancellation()
+              try await attempt(reencodePreset)
+            }
+          }
+
           // First half: 0 → split.
-          try await exportSegment(
-            asset: exportAsset,
+          try await exportHalf(
+            .start,
             timeRange: CMTimeRange(start: .zero, duration: splitTime),
             outputPath: startOutputPath,
-            fileType: fileType,
-            preset: preset,
-            diagnostics: SplitExportDiagnostics(
-              half: .start, segmentSeconds: splitSeconds, splitSeconds: splitSeconds,
-              totalSeconds: totalSeconds, preset: preset, enableAudio: enableAudio),
-            exportTimeout: exportTimeout,
-            stallTimeout: stallTimeout,
-            handle: handle,
-            onProgress: { onProgress($0 * 0.5) })
+            progressBase: 0)
 
           try Task.checkCancellation()
 
           // Second half: split → end.
-          try await exportSegment(
-            asset: exportAsset,
+          try await exportHalf(
+            .end,
             timeRange: CMTimeRange(start: splitTime, duration: endDuration),
             outputPath: endOutputPath,
-            fileType: fileType,
-            preset: preset,
-            diagnostics: SplitExportDiagnostics(
-              half: .end, segmentSeconds: CMTimeGetSeconds(endDuration),
-              splitSeconds: splitSeconds, totalSeconds: totalSeconds, preset: preset,
-              enableAudio: enableAudio),
-            exportTimeout: exportTimeout,
-            stallTimeout: stallTimeout,
-            handle: handle,
-            onProgress: { onProgress(0.5 + $0 * 0.5) })
+            progressBase: 0.5)
 
           onComplete([startOutputPath, endOutputPath])
         } catch {
@@ -139,8 +179,8 @@ class SplitVideo {
 
   // MARK: - Helpers
 
-  /// Re-encodes a single time range of `asset` to `outputPath`, frame-accurate
-  /// at the range start, guarded by the stall and hard-timeout bounds.
+  /// Exports a single time range of `asset` to `outputPath`, frame-accurate at
+  /// the range start, guarded by the stall and hard-timeout bounds.
   private static func exportSegment(
     asset: AVAsset,
     timeRange: CMTimeRange,
@@ -167,9 +207,11 @@ class SplitVideo {
 
     export.outputURL = outputURL
     export.outputFileType = fileType
-    // A re-encoding preset honours `timeRange` sample-accurately (decodes from
-    // the preceding keyframe and re-encodes from the exact start), which is what
-    // makes the cut frame-accurate. Passthrough would snap to a keyframe.
+    // Both preset families honour `timeRange` frame-accurately: a re-encoding
+    // preset decodes from the preceding keyframe and re-encodes from the exact
+    // start; passthrough copies from the preceding keyframe and gates playback
+    // start with a container edit list (verified: container duration is exact
+    // to the microsecond even for a cut mid-way through an 8.4s GOP).
     export.timeRange = timeRange
     export.shouldOptimizeForNetworkUse = true
 
