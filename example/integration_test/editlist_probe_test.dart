@@ -128,7 +128,8 @@ void main() {
       expect(
         diffSplit,
         lessThan(diffKeyframe),
-        reason: 'end half must start at the split frame, '
+        reason:
+            'end half must start at the split frame, '
             'not the preceding keyframe',
       );
 
