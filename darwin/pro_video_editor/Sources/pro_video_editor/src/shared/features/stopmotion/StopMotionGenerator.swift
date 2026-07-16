@@ -79,7 +79,15 @@ internal enum StopMotionGenerator {
       AVVideoWidthKey: targetWidth,
       AVVideoHeightKey: targetHeight,
       AVVideoCompressionPropertiesKey: [
-        AVVideoAverageBitRateKey: bitrate
+        AVVideoAverageBitRateKey: bitrate,
+        // Disable B-frames: stop-motion stills gain almost nothing from frame
+        // reordering, and the composition-time offset it introduces (ctts /
+        // an edit list) plus the decoder reorder buffer are what make the
+        // encoded clip stall at loop boundaries during playback. An all-P
+        // stream decodes linearly and loops cleanly.
+        AVVideoAllowFrameReorderingKey: false,
+        // Frequent keyframes so a loop seek to zero lands on an IDR.
+        AVVideoMaxKeyFrameIntervalDurationKey: 1.0,
       ],
     ]
 
