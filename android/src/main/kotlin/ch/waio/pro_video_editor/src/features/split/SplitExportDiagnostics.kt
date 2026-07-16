@@ -18,7 +18,8 @@ import java.util.Locale
  * @property segmentUs Duration of *this* segment in microseconds, or -1 if unknown.
  * @property splitUs Absolute split position in microseconds.
  * @property totalUs Total source duration in microseconds, or -1 if unknown.
- * @property mimeType The output video MIME type (e.g. `video/avc`).
+ * @property mimeType The output video MIME type (e.g. `video/avc`), or
+ *   `source` when the source codec is preserved (trim-optimized fast path).
  * @property enableAudio Whether the source audio track is kept.
  */
 data class SplitExportDiagnostics(

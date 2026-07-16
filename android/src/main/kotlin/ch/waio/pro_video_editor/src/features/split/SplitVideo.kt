@@ -26,10 +26,18 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * Frame-accurate splitting of a single video into two files.
  *
- * Each half is re-encoded from the exact split frame using a Media3
- * [Transformer] with a [MediaItem.ClippingConfiguration]. Because clipping at an
- * arbitrary (non-keyframe) position forces a transcode, the cut is
- * frame-accurate — unlike a transmux, which would snap to a keyframe.
+ * Each half is exported with a Media3 [Transformer] and a
+ * [MediaItem.ClippingConfiguration]. Without an explicit bitrate both halves
+ * are **transmuxed** (no re-encode): the start half begins on a sync sample,
+ * and the end half — which starts mid-GOP — keeps the samples from the
+ * preceding sync sample with an MP4 edit list gating playback start at the
+ * exact cut. The split is therefore lossless (codec, frame rate, bit depth
+ * and HDR survive), frame-accurate on edit-list-honoring players (ExoPlayer,
+ * AVPlayer, ffmpeg — verified pixel-exact for this plugin's own pipelines by
+ * `editlist_probe_test.dart`), and bounded by I/O instead of encoder
+ * throughput. With an explicit bitrate both halves are fully re-encoded to
+ * the container's codec, which is equally frame-accurate because clipping at
+ * an arbitrary (non-keyframe) position forces a transcode.
  *
  * The two halves run sequentially (one encoder at a time) and every half is
  * guarded by two watchdogs: an inner stall bound (no forward progress for
@@ -137,70 +145,92 @@ class SplitVideo(private val context: Context) {
             return handle
         }
 
-        mainHandler.post {
-            if (finished.get()) return@post
-            // Serialize against other encodes (concurrent renders/splits) so
-            // they don't starve each other on the hardware encoder. The wait is
-            // *before* exportHalf arms its stall watchdog, so queueing never
-            // counts as a stall — a split behind a running render waits instead
-            // of failing fast. onGranted always runs on the main Looper (either
-            // synchronously here, or from another job's release()).
-            ExportGate.acquire {
-                gateHeld.set(true)
-                // Cancelled/failed while queued: hand the slot straight back.
-                if (finished.get()) {
-                    releaseGateIfHeld()
-                    return@acquire
+        // Validate the split position against the real source duration up
+        // front (probed off the main thread — MediaMetadataRetriever is
+        // blocking I/O). The transcode path used to reject an out-of-range
+        // clip implicitly by failing the export; a transmuxed half instead
+        // "succeeds" with bogus output, so Media3 can no longer be relied on
+        // for this. Mirrors the equivalent guard on the Darwin side. An
+        // unreadable duration (-1) skips the check and lets the export decide.
+        Thread {
+            val totalUs = probeDurationUs(inputPath)
+            mainHandler.post {
+                if (finished.get()) return@post
+                if (totalUs > 0 && splitUs >= totalUs) {
+                    finishError(
+                        IllegalArgumentException(
+                            "Split position ${splitUs}us is outside the video " +
+                                    "duration (${totalUs}us)"
+                        )
+                    )
+                    return@post
                 }
-                // Half 1: 0 → split. On success, chain Half 2: split → end.
-                exportHalf(
-                    inputPath = inputPath,
-                    half = "start",
-                    startUs = 0L,
-                    endUs = splitUs,
-                    splitUs = splitUs,
-                    outputPath = startOutputPath,
-                    outputFormat = outputFormat,
-                    bitrate = bitrate,
-                    enableAudio = enableAudio,
-                    mainHandler = mainHandler,
-                    exportTimeoutMs = exportTimeoutMs,
-                    stallTimeoutMs = stallTimeoutMs,
-                    pollStop = pollStop,
-                    transformerRef = transformerRef,
-                    timeoutRef = timeoutRef,
-                    onProgress = { onProgress(it * 0.5) },
-                    onHalfComplete = {
-                        if (!finished.get()) {
-                            pollStop.set(false)
-                            exportHalf(
-                                inputPath = inputPath,
-                                half = "end",
-                                startUs = splitUs,
-                                endUs = null,
-                                splitUs = splitUs,
-                                outputPath = endOutputPath,
-                                outputFormat = outputFormat,
-                                bitrate = bitrate,
-                                enableAudio = enableAudio,
-                                mainHandler = mainHandler,
-                                exportTimeoutMs = exportTimeoutMs,
-                                stallTimeoutMs = stallTimeoutMs,
-                                pollStop = pollStop,
-                                transformerRef = transformerRef,
-                                timeoutRef = timeoutRef,
-                                onProgress = { onProgress(0.5 + it * 0.5) },
-                                onHalfComplete = {
-                                    finishSuccess(listOf(startOutputPath, endOutputPath))
-                                },
-                                onHalfError = { finishError(it) }
-                            )
-                        }
-                    },
-                    onHalfError = { finishError(it) }
-                )
+                // Serialize against other encodes (concurrent renders/splits)
+                // so they don't starve each other on the hardware encoder.
+                // The wait is *before* exportHalf arms its stall watchdog, so
+                // queueing never counts as a stall — a split behind a running
+                // render waits instead of failing fast. onGranted always runs
+                // on the main Looper (either synchronously here, or from
+                // another job's release()).
+                ExportGate.acquire {
+                    gateHeld.set(true)
+                    // Cancelled/failed while queued: hand the slot straight back.
+                    if (finished.get()) {
+                        releaseGateIfHeld()
+                        return@acquire
+                    }
+                    // Half 1: 0 → split. On success, chain Half 2: split → end.
+                    exportHalf(
+                        inputPath = inputPath,
+                        half = "start",
+                        startUs = 0L,
+                        endUs = splitUs,
+                        splitUs = splitUs,
+                        outputPath = startOutputPath,
+                        outputFormat = outputFormat,
+                        bitrate = bitrate,
+                        enableAudio = enableAudio,
+                        mainHandler = mainHandler,
+                        exportTimeoutMs = exportTimeoutMs,
+                        stallTimeoutMs = stallTimeoutMs,
+                        pollStop = pollStop,
+                        transformerRef = transformerRef,
+                        timeoutRef = timeoutRef,
+                        onProgress = { onProgress(it * 0.5) },
+                        onHalfComplete = {
+                            if (!finished.get()) {
+                                pollStop.set(false)
+                                exportHalf(
+                                    inputPath = inputPath,
+                                    half = "end",
+                                    startUs = splitUs,
+                                    endUs = null,
+                                    splitUs = splitUs,
+                                    outputPath = endOutputPath,
+                                    outputFormat = outputFormat,
+                                    bitrate = bitrate,
+                                    enableAudio = enableAudio,
+                                    mainHandler = mainHandler,
+                                    exportTimeoutMs = exportTimeoutMs,
+                                    stallTimeoutMs = stallTimeoutMs,
+                                    pollStop = pollStop,
+                                    transformerRef = transformerRef,
+                                    timeoutRef = timeoutRef,
+                                    onProgress = { onProgress(0.5 + it * 0.5) },
+                                    onHalfComplete = {
+                                        finishSuccess(
+                                            listOf(startOutputPath, endOutputPath)
+                                        )
+                                    },
+                                    onHalfError = { finishError(it) }
+                                )
+                            }
+                        },
+                        onHalfError = { finishError(it) }
+                    )
+                }
             }
-        }
+        }.start()
 
         return handle
     }
@@ -238,10 +268,15 @@ class SplitVideo(private val context: Context) {
         outputFile.parentFile?.mkdirs()
         if (outputFile.exists()) outputFile.delete()
 
-        val mimeType = mapFormatToMimeType(outputFormat)
+        // Fast path (no explicit bitrate): keep the source video codec so a
+        // half that needs no processing is transmuxed instead of transcoded —
+        // codec, frame rate and bit depth (HDR) of the source survive the
+        // split. An explicit bitrate keeps the previous behavior: force the
+        // container's codec and fully re-encode both halves to the target.
+        val targetMimeType = if (bitrate == null) null else mapFormatToMimeType(outputFormat)
         val encoderFactory = ResilientVideoEncoderFactory(
             context = context,
-            mimeType = mimeType,
+            mimeType = targetMimeType,
             bitrate = bitrate,
         )
 
@@ -266,12 +301,37 @@ class SplitVideo(private val context: Context) {
 
         val transformer = Transformer.Builder(context)
             .setEncoderFactory(encoderFactory)
-            .setVideoMimeType(mimeType)
+            // Only an explicit bitrate forces a video MIME type (and with it a
+            // full re-encode). Without one both halves are transmuxed: the
+            // start half begins on a sync sample anyway, and the edit-list
+            // trim lets the mid-GOP end half stream-copy too — samples are
+            // kept from the preceding sync sample and an MP4 edit list gates
+            // playback start at the exact cut (the same mechanism as the
+            // Darwin passthrough path). Verified frame-accurate down to the
+            // pixel by `editlist_probe_test.dart`.
+            //
+            // Deliberately NOT experimentalSetTrimOptimizationEnabled (which
+            // re-encodes the boundary GOP instead): measured on a Galaxy S26,
+            // its stitched GOP failed with a format mismatch on every
+            // foreign-encoded source and the abandoned attempts made splits
+            // *slower* than a plain export.
+            .apply {
+                if (targetMimeType != null) {
+                    setVideoMimeType(targetMimeType)
+                } else {
+                    experimentalSetMp4EditListTrimEnabled(true)
+                }
+            }
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, result: ExportResult) {
                     if (!halfDone.compareAndSet(false, true)) return
                     pollStop.set(true)
                     timeoutRef.getAndSet(null)?.let { mainHandler.removeCallbacks(it) }
+                    Log.d(
+                        TAG,
+                        "[$half] split export completed " +
+                                "(video: ${conversionName(result.videoConversionProcess)})"
+                    )
                     onProgress(1.0)
                     onHalfComplete()
                 }
@@ -305,7 +365,7 @@ class SplitVideo(private val context: Context) {
                 segmentUs = segmentUs,
                 splitUs = splitUs,
                 totalUs = totalUs,
-                mimeType = mimeType,
+                mimeType = targetMimeType ?: "source",
                 enableAudio = enableAudio,
             )
         }
@@ -409,6 +469,15 @@ class SplitVideo(private val context: Context) {
                 mainHandler.postDelayed(this, POLL_INTERVAL_MS)
             }
         })
+    }
+
+    /** Human-readable name of an [ExportResult.videoConversionProcess] value. */
+    private fun conversionName(process: Int): String = when (process) {
+        ExportResult.CONVERSION_PROCESS_TRANSMUXED -> "transmuxed"
+        ExportResult.CONVERSION_PROCESS_TRANSCODED -> "transcoded"
+        ExportResult.CONVERSION_PROCESS_TRANSMUXED_AND_TRANSCODED -> "transmuxed+transcoded"
+        ExportResult.CONVERSION_PROCESS_NA -> "n/a"
+        else -> "unknown ($process)"
     }
 
     /** Best-effort source duration in microseconds, or -1 if it cannot be read. */

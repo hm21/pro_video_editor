@@ -149,7 +149,17 @@ internal enum BitrateCappedExporter {
       AVVideoWidthKey: width,
       AVVideoHeightKey: height,
       AVVideoCompressionPropertiesKey: [
-        AVVideoAverageBitRateKey: videoBitrate
+        AVVideoAverageBitRateKey: videoBitrate,
+        // Disable B-frames. Frame reordering forces a composition-time offset
+        // (ctts / an edit list) and a decoder reorder buffer that must be
+        // flushed and refilled at every loop restart. On short looped clips
+        // that refill intermittently starves AVPlayerItemVideoOutput — the
+        // player delivers no frame for a whole loop while audio keeps playing.
+        // An all-P-frame stream decodes linearly and loops cleanly.
+        AVVideoAllowFrameReorderingKey: false,
+        // Keep keyframes frequent so a loop seek to zero (and any scrub) lands
+        // on or near an IDR instead of decoding a long GOP first.
+        AVVideoMaxKeyFrameIntervalDurationKey: 1.0,
       ],
     ]
     let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
