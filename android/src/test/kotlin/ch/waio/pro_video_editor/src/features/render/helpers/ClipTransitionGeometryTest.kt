@@ -81,17 +81,21 @@ internal class ClipTransitionGeometryTest {
             outgoingSpeed = 2.0f,
             incomingSpeed = null,
         )
-        // Clamped to the outgoing output duration (500ms) minus the body guard.
-        // 500ms output is the full outgoing clip, so it must clamp below that.
-        // min(2000ms, 500ms, 4000ms) = 500ms → tail 1000ms == source → null.
-        assertNull(plan)
+        // Clamped to the shorter output side (500ms): min(2000ms, 500ms, 4000ms).
+        // That fully consumes the outgoing clip (tail 1000ms == source); the
+        // caller drops it and keeps the blend, so a plan is produced.
+        assertEquals(
+            ClipTransitionGeometry.OverlapPlan(500_000L, 1_000_000L, 500_000L),
+            plan,
+        )
     }
 
     @Test
-    fun planOverlap_returnsNullWhenTransitionConsumesWholeClip() {
-        // The reproduction case: two 550ms clips at 2× (275ms output each) with a
-        // 500ms transition. The blend would consume an entire clip, so it must
-        // degrade to a hard cut rather than leave a zero-length body.
+    fun planOverlap_rendersWhenTransitionConsumesWholeClip() {
+        // Two 550ms clips at 2× (275ms output each) with a 500ms transition. The
+        // blend consumes an entire clip (body == 0); the caller drops the
+        // fully-consumed side and keeps the blend, so a plan is produced rather
+        // than a hard cut.
         val plan = ClipTransitionGeometry.planOverlap(
             outgoingSourceDurationUs = 550_000L,
             incomingSourceDurationUs = 550_000L,
@@ -99,7 +103,28 @@ internal class ClipTransitionGeometryTest {
             outgoingSpeed = 2.0f,
             incomingSpeed = 2.0f,
         )
-        assertNull(plan)
+        assertEquals(
+            ClipTransitionGeometry.OverlapPlan(275_000L, 550_000L, 550_000L),
+            plan,
+        )
+    }
+
+    @Test
+    fun planOverlap_allowsBothSidesFullyConsumedAtOneX() {
+        // The seam reproduction: two 500ms clips (a 1s clip trimmed to its
+        // boundary half) with a 500ms transition at 1× — both sides are entirely
+        // the blend. A plan is produced; the caller keeps just the blend.
+        val plan = ClipTransitionGeometry.planOverlap(
+            outgoingSourceDurationUs = 500_000L,
+            incomingSourceDurationUs = 500_000L,
+            transitionDurationUs = 500_000L,
+            outgoingSpeed = null,
+            incomingSpeed = null,
+        )
+        assertEquals(
+            ClipTransitionGeometry.OverlapPlan(500_000L, 500_000L, 500_000L),
+            plan,
+        )
     }
 
     @Test

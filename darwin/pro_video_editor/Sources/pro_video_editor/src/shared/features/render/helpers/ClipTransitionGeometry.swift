@@ -27,9 +27,10 @@ internal enum ClipTransitionGeometry {
   /// incoming clip, or `nil` when the transition cannot be rendered (caller
   /// should fall back to a hard cut).
   ///
-  /// Returns `nil` when either clip would be fully consumed by the blend (no
-  /// body left), preserving the 1× behavior where a transition needs some
-  /// non-blended content on both sides.
+  /// A blend may consume a clip **entirely** (no non-blended body left): the
+  /// caller drops the fully-consumed side and keeps the blend clip in its place,
+  /// so two adjacent transitions can each fill their shared clip. Only a
+  /// non-positive blend, a rounding overrun, or invalid inputs return `nil`.
   static func planOverlap(
     outgoingSourceDurationUs: Int64,
     incomingSourceDurationUs: Int64,
@@ -54,10 +55,12 @@ internal enum ClipTransitionGeometry {
     let tailSourceUs = Int64((dOut * sOut).rounded())
     let headSourceUs = Int64((dOut * sIn).rounded())
 
-    // Both sides must keep some non-blended body, matching the 1× behavior.
+    // A clip may be fully consumed by the blend (body == 0); the caller drops it
+    // and keeps the blend in its place. Reject only a non-positive blend or a
+    // rounding overrun that would consume more than a clip has.
     guard outputDurationUs > 0,
-      outgoingSourceDurationUs - tailSourceUs > 0,
-      incomingSourceDurationUs - headSourceUs > 0
+      outgoingSourceDurationUs - tailSourceUs >= 0,
+      incomingSourceDurationUs - headSourceUs >= 0
     else { return nil }
 
     return OverlapPlan(
