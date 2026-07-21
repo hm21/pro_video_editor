@@ -584,6 +584,16 @@ class RenderVideo {
     var urls: [URL] = []
     var i = 0
 
+    // Append an original clip only if it still has positive duration. A blend
+    // can consume a neighbouring clip entirely (two adjacent transitions sharing
+    // a clip), leaving a zero-length body — drop it and let the blend clip take
+    // its place rather than feed a zero-length clip to the composer.
+    func appendClip(_ clip: VideoClip) {
+      let start = clip.startUs ?? 0
+      if let end = clip.endUs, end <= start { return }
+      result.append(clip)
+    }
+
     while i < work.count {
       let current = work[i]
       let next: VideoClip? = (i + 1 < work.count) ? work[i + 1] : nil
@@ -594,7 +604,7 @@ class RenderVideo {
         && !current.reverseVideo && !(next!.reverseVideo)
 
       if !canOverlap {
-        result.append(clearedOverlap(current))
+        appendClip(clearedOverlap(current))
         i += 1
         continue
       }
@@ -628,7 +638,7 @@ class RenderVideo {
           incomingSpeed: next!.playbackSpeed)
       else {
         PluginLog.print("⚠️ Transition: not enough content at boundary \(i); hard cut")
-        result.append(clearedOverlap(current))
+        appendClip(clearedOverlap(current))
         i += 1
         continue
       }
@@ -651,7 +661,7 @@ class RenderVideo {
         urls.append(rendered.outputURL)
         // Keep the outgoing clip's speed; it now ends `tailSrc` of source
         // earlier (those frames moved into the speed-adjusted blend).
-        result.append(
+        appendClip(
           VideoClip(
             inputPath: current.inputPath, startUs: curStart, endUs: curEnd - tailSrc,
             volume: current.volume, playbackSpeed: current.playbackSpeed,
@@ -666,7 +676,7 @@ class RenderVideo {
           reverseVideo: next!.reverseVideo, transition: next!.transition)
       } else {
         PluginLog.print("⚠️ Transition render failed at boundary \(i); hard cut")
-        result.append(clearedOverlap(current))
+        appendClip(clearedOverlap(current))
       }
       i += 1
     }

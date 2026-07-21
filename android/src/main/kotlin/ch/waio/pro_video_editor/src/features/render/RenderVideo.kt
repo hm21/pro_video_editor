@@ -401,6 +401,15 @@ class RenderVideo(private val context: Context) {
 
         val work = clips.toMutableList()
         val result = mutableListOf<VideoClip>()
+        // Append an original clip only if it still has positive duration. A blend
+        // can consume a neighbouring clip entirely (two adjacent transitions
+        // sharing a clip), leaving a zero-length body — drop it and let the blend
+        // clip take its place rather than feed a zero-length clip to the composer.
+        fun addClip(clip: VideoClip) {
+            val start = clip.startUs ?: 0L
+            val end = clip.endUs
+            if (end == null || end > start) result.add(clip)
+        }
         var doneCount = 0
         var i = 0
 
@@ -414,7 +423,7 @@ class RenderVideo(private val context: Context) {
 
             if (shouldStop.get() || !canOverlap) {
                 // Clear an overlap transition so it is not reinterpreted later.
-                result.add(if (transition?.isOverlap == true) current.copy(transition = null) else current)
+                addClip(if (transition?.isOverlap == true) current.copy(transition = null) else current)
                 i++
                 continue
             }
@@ -439,7 +448,7 @@ class RenderVideo(private val context: Context) {
 
             if (plan == null) {
                 Log.w(RENDER_TAG, "Transition: not enough content for boundary $i, hard cut")
-                result.add(current.copy(transition = null))
+                addClip(current.copy(transition = null))
                 doneCount++
                 onProgress((doneCount.toFloat() / total).coerceIn(0f, 1f))
                 i++
@@ -472,7 +481,7 @@ class RenderVideo(private val context: Context) {
                 collectPath(rendered.outputPath)
                 // Keep the outgoing clip's speed; it now ends `tailSrc` of source
                 // earlier (those frames moved into the speed-adjusted blend).
-                result.add(current.copy(endUs = curEnd - tailSrc, transition = null))
+                addClip(current.copy(endUs = curEnd - tailSrc, transition = null))
                 result.add(
                     VideoClip(
                         inputPath = rendered.outputPath,
@@ -484,7 +493,7 @@ class RenderVideo(private val context: Context) {
                 work[i + 1] = next.copy(startUs = nextStart + headSrc)
             } else {
                 Log.w(RENDER_TAG, "Transition render failed for boundary $i, hard cut")
-                result.add(current.copy(transition = null))
+                addClip(current.copy(transition = null))
             }
 
             doneCount++

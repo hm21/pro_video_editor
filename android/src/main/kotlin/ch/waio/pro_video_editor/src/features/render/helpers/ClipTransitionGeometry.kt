@@ -39,9 +39,10 @@ internal object ClipTransitionGeometry {
      * incoming clip, or `null` when the transition cannot be rendered (caller
      * should fall back to a hard cut).
      *
-     * Returns `null` when either clip would be fully consumed by the blend
-     * (no body left), preserving the 1× behavior where a transition needs some
-     * non-blended content on both sides.
+     * A blend may consume a clip **entirely** (no non-blended body left): the
+     * caller drops the fully-consumed side and keeps the blend clip in its
+     * place, so two adjacent transitions can each fill their shared clip. Only a
+     * non-positive blend, a rounding overrun, or invalid inputs return `null`.
      *
      * @param outgoingSourceDurationUs Trimmed source duration of the outgoing clip.
      * @param incomingSourceDurationUs Trimmed source duration of the incoming clip.
@@ -73,10 +74,12 @@ internal object ClipTransitionGeometry {
         val tailSourceUs = (dOut * sOut).roundToLong()
         val headSourceUs = (dOut * sIn).roundToLong()
 
-        // Both sides must keep some non-blended body, matching the 1× behavior.
+        // A clip may be fully consumed by the blend (body == 0); the caller
+        // drops it and keeps the blend in its place. Reject only a non-positive
+        // blend or a rounding overrun that would consume more than a clip has.
         if (outputDurationUs <= 0L ||
-            outgoingSourceDurationUs - tailSourceUs <= 0L ||
-            incomingSourceDurationUs - headSourceUs <= 0L
+            outgoingSourceDurationUs - tailSourceUs < 0L ||
+            incomingSourceDurationUs - headSourceUs < 0L
         ) {
             return null
         }
