@@ -6,6 +6,7 @@ import 'package:pro_video_editor_example/features/editor/pages/video_editor_basi
 import 'package:pro_video_editor_example/features/editor/pages/video_editor_grounded_example_page.dart';
 
 import 'features/audio/audio_extract_example_page.dart';
+import 'features/audio/audio_merge_example_page.dart';
 import 'features/metadata/video_metadata_example_page.dart';
 import 'features/render/video_renderer_page.dart';
 import 'features/split/split_example_page.dart';
@@ -72,6 +73,11 @@ class _HomePageState extends State<HomePage> {
       icon: Icons.audiotrack,
       title: 'Audio',
       pageBuilder: () => const AudioExtractExamplePage(),
+    ),
+    _ExampleListItem(
+      icon: Icons.merge,
+      title: 'Audio-Merge',
+      pageBuilder: () => const AudioMergeExamplePage(),
     ),
     _ExampleListItem(
       icon: Icons.developer_board_outlined,
