@@ -396,4 +396,127 @@ void main() {
       expect(capturedArgs?['timestamps'], [0]);
     });
   });
+
+  group('mergeAudioToFile', () {
+    List<AudioMergeSegment> twoSegments() => [
+      AudioMergeSegment(
+        video: mockVideo,
+        startTime: Duration.zero,
+        endTime: const Duration(seconds: 2),
+      ),
+      AudioMergeSegment(
+        video: mockVideo,
+        startTime: const Duration(seconds: 1),
+        endTime: const Duration(seconds: 3),
+        speed: 2.0,
+      ),
+    ];
+
+    test('invokes mergeAudio with ordered segments, parses result', () async {
+      MethodCall? capturedCall;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (methodCall) async {
+            capturedCall = methodCall;
+            return {
+              'outputPath': '/tmp/out.wav',
+              'totalDurationUs': 3000000,
+              'segments': [
+                {'outputStartUs': 0, 'outputDurationUs': 2000000},
+                {'outputStartUs': 2000000, 'outputDurationUs': 1000000},
+              ],
+            };
+          });
+
+      final result = await platform.mergeAudioToFile(
+        '/tmp/out.wav',
+        AudioMergeConfigs(
+          segments: twoSegments(),
+          sampleRate: 16000,
+          channels: 1,
+        ),
+      );
+
+      expect(capturedCall?.method, 'mergeAudio');
+      final args = capturedCall?.arguments as Map;
+      expect(args['outputPath'], '/tmp/out.wav');
+      expect(args['format'], 'wav');
+      expect(args['sampleRate'], 16000);
+      expect(args['channels'], 1);
+
+      final segments = args['segments'] as List;
+      expect(segments, hasLength(2));
+      final first = segments[0] as Map;
+      expect(first['startTime'], 0);
+      expect(first['endTime'], 2000000);
+      expect(first['speed'], 1.0);
+      final second = segments[1] as Map;
+      expect(second['startTime'], 1000000);
+      expect(second['endTime'], 3000000);
+      expect(second['speed'], 2.0);
+
+      expect(result.outputPath, '/tmp/out.wav');
+      expect(result.totalDuration, const Duration(seconds: 3));
+      expect(result.segments, hasLength(2));
+      expect(result.segments[0].outputStart, Duration.zero);
+      expect(result.segments[0].outputDuration, const Duration(seconds: 2));
+      expect(result.segments[1].outputStart, const Duration(seconds: 2));
+      expect(result.segments[1].outputDuration, const Duration(seconds: 1));
+    });
+
+    test('empty segments throws ArgumentError, skips native', () async {
+      var invoked = false;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (methodCall) async {
+            invoked = true;
+            return null;
+          });
+
+      await expectLater(
+        platform.mergeAudioToFile(
+          '/tmp/out.wav',
+          AudioMergeConfigs(segments: const []),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(invoked, isFalse);
+    });
+
+    test('AudioMergeSegment rejects endTime <= startTime', () {
+      expect(
+        () => AudioMergeSegment(
+          video: mockVideo,
+          startTime: const Duration(seconds: 3),
+          endTime: const Duration(seconds: 1),
+        ),
+        throwsA(isA<AssertionError>()),
+      );
+    });
+
+    test('AudioMergeSegment rejects non-positive speed', () {
+      expect(
+        () => AudioMergeSegment(
+          video: mockVideo,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 1),
+          speed: 0,
+        ),
+        throwsA(isA<AssertionError>()),
+      );
+    });
+
+    test('maps CANCELED to RenderCanceledException', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (methodCall) async {
+            throw PlatformException(code: 'CANCELED');
+          });
+
+      await expectLater(
+        platform.mergeAudioToFile(
+          '/tmp/out.wav',
+          AudioMergeConfigs(segments: twoSegments()),
+        ),
+        throwsA(isA<RenderCanceledException>()),
+      );
+    });
+  });
 }

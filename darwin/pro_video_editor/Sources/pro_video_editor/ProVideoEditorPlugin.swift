@@ -160,6 +160,9 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     case "extractAudio":
       handleExtractAudio(call: call, result: result)
 
+    case "mergeAudio":
+      handleMergeAudio(call: call, result: result)
+
     case "getWaveform":
       handleGetWaveform(call: call, result: result)
 
@@ -603,6 +606,81 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
             message: error.localizedDescription,
             details: nil
           )
+          if let task = task {
+            task.sendError(flutterError)
+          } else {
+            self.deliverResult(result, flutterError)
+          }
+        }
+      }
+    )
+
+    task.attachHandle(handle)
+  }
+
+  /// Merges the audio of several trimmed clip windows into one file.
+  ///
+  /// Concatenates each segment's `[startTime, endTime)` window (after applying
+  /// its speed) into a single uniform-format audio file and returns an offset
+  /// map. Unlike `extractAudio`, a segment without an audio track contributes
+  /// silence instead of failing. Tracked by id and cancellable.
+  private func handleMergeAudio(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard let args = call.arguments as? [String: Any],
+      let id = args["id"] as? String
+    else {
+      result(
+        FlutterError(code: "INVALID_ARGUMENTS", message: "Missing parameters", details: nil))
+      return
+    }
+
+    guard !id.isEmpty else {
+      result(FlutterError(code: "INVALID_ARGUMENTS", message: "Missing task id", details: nil))
+      return
+    }
+
+    if activeAudioTasks[id] != nil {
+      result(
+        FlutterError(
+          code: "TASK_ALREADY_RUNNING",
+          message: "Audio task with id \(id) is already running",
+          details: nil))
+      return
+    }
+
+    guard let config = AudioMergeConfig.fromArguments(args) else {
+      result(
+        FlutterError(
+          code: "INVALID_ARGUMENTS", message: "Invalid audio merge configuration", details: nil))
+      return
+    }
+
+    postProgress(id: id, progress: 0.0)
+
+    let task = AudioExtractTask(result: result)
+    activeAudioTasks[id] = task
+
+    let handle = MergeAudio.merge(
+      config: config,
+      onProgress: { progress in
+        self.postProgress(id: id, progress: progress)
+      },
+      onComplete: { resultMap in
+        DispatchQueue.main.async {
+          self.postProgress(id: id, progress: 1.0)
+          if let task = self.activeAudioTasks.removeValue(forKey: id) {
+            task.sendSuccess(resultMap)
+          } else {
+            self.deliverResult(result, resultMap)
+          }
+        }
+      },
+      onError: { error in
+        PluginLog.print("❌ Audio merge failed: \(error.localizedDescription)")
+        DispatchQueue.main.async {
+          let task = self.activeAudioTasks.removeValue(forKey: id)
+          let code = (task?.isCanceled == true) ? "CANCELED" : "MERGE_ERROR"
+          let flutterError = FlutterError(
+            code: code, message: error.localizedDescription, details: nil)
           if let task = task {
             task.sendError(flutterError)
           } else {

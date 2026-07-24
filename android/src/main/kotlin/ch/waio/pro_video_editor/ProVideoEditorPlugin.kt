@@ -3,9 +3,11 @@ package ch.waio.pro_video_editor
 import android.os.Handler
 import android.os.Looper
 import ch.waio.pro_video_editor.src.features.audio.ExtractAudio
+import ch.waio.pro_video_editor.src.features.audio.MergeAudio
 import ch.waio.pro_video_editor.src.features.audio.NoAudioTrackException
 import ch.waio.pro_video_editor.src.features.audio.models.AudioExtractConfig
 import ch.waio.pro_video_editor.src.features.audio.models.AudioExtractTask
+import ch.waio.pro_video_editor.src.features.audio.models.AudioMergeConfig
 import ch.waio.pro_video_editor.src.features.metadata.Metadata
 import ch.waio.pro_video_editor.src.features.metadata.models.MetadataConfig
 import ch.waio.pro_video_editor.src.features.render.RenderVideo
@@ -62,6 +64,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var metadata: Metadata
     private lateinit var thumbnailGenerator: ThumbnailGenerator
     private lateinit var extractAudio: ExtractAudio
+    private lateinit var mergeAudio: MergeAudio
     private lateinit var waveformGenerator: WaveformGenerator
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -131,6 +134,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         metadata = Metadata(flutterPluginBinding.applicationContext)
         thumbnailGenerator = ThumbnailGenerator(flutterPluginBinding.applicationContext)
         extractAudio = ExtractAudio(flutterPluginBinding.applicationContext)
+        mergeAudio = MergeAudio(flutterPluginBinding.applicationContext)
         waveformGenerator = WaveformGenerator(flutterPluginBinding.applicationContext)
     }
 
@@ -176,6 +180,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             "renderStopMotion" -> handleRenderStopMotion(call, result)
             "splitVideo" -> handleSplitVideo(call, result)
             "extractAudio" -> handleExtractAudio(call, result)
+            "mergeAudio" -> handleMergeAudio(call, result)
             "getWaveform" -> handleGetWaveform(call, result)
             "startWaveformStream" -> handleStartWaveformStream(call, result)
             "cancelTask" -> handleCancelTask(call, result)
@@ -602,6 +607,71 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         } catch (e: Exception) {
             activeAudioTasks.remove(id)
             result.error("EXTRACT_ERROR", "Failed to start audio extraction: ${e.message}", null)
+        }
+    }
+
+    /**
+     * Merges the audio of several trimmed clip windows into one file.
+     *
+     * Concatenates each segment's `[startTime, endTime)` window (after applying
+     * its speed) into a single uniform-format audio file and returns an offset
+     * map. Unlike [handleExtractAudio], a segment without an audio track
+     * contributes silence instead of failing. Tracked by id and cancellable.
+     */
+    private fun handleMergeAudio(call: MethodCall, result: MethodChannel.Result) {
+        val id = call.argument<String>("id") ?: ""
+        if (id.isBlank()) {
+            result.error("INVALID_ARGUMENTS", "Task id is required and cannot be empty", null)
+            return
+        }
+
+        if (activeAudioTasks.containsKey(id)) {
+            result.error(
+                "TASK_ALREADY_EXISTS",
+                "An audio task with id '$id' is already active",
+                null
+            )
+            return
+        }
+
+        postProgress(id, 0.0)
+
+        val task = AudioExtractTask(job = null, result = result)
+        activeAudioTasks[id] = task
+
+        try {
+            val config = AudioMergeConfig.fromMethodCall(call)
+
+            val jobHandle = mergeAudio.merge(
+                config = config,
+                onProgress = { progress -> postProgress(id, progress) },
+                onComplete = { resultMap ->
+                    mainHandler.post {
+                        postProgress(id, 1.0)
+                        val removedTask = activeAudioTasks.remove(id)
+                        removedTask?.sendValue(resultMap)
+                    }
+                },
+                onError = { error ->
+                    Log.e("MergeAudio", "Error merging audio: ${error.message}")
+                    mainHandler.post {
+                        val removedTask = activeAudioTasks.remove(id)
+                        val code = if (removedTask?.canceled?.get() == true) "CANCELED" else "MERGE_ERROR"
+                        removedTask?.sendError(code, error.message)
+                    }
+                }
+            )
+
+            task.job = jobHandle
+            if (task.canceled.get()) {
+                jobHandle.cancel()
+            }
+        } catch (e: IllegalArgumentException) {
+            activeAudioTasks.remove(id)
+            result.error("INVALID_ARGUMENTS", e.message, null)
+        } catch (e: Exception) {
+            activeAudioTasks.remove(id)
+            result.error("MERGE_ERROR", "Failed to start audio merge: ${e.message}", null)
         }
     }
 

@@ -31,6 +31,18 @@ data class AudioExtractTask(
     }
 
     /**
+     * Sends an arbitrary success value to Flutter (e.g. the audio-merge result
+     * map). Only sends if not already replied to prevent crashes.
+     */
+    fun sendValue(value: Any?) {
+        try {
+            result.success(value)
+        } catch (e: IllegalStateException) {
+            // Result already sent, ignore
+        }
+    }
+
+    /**
      * Sends error response to Flutter.
      * Only sends if not already replied to prevent crashes.
      */

@@ -8,6 +8,8 @@ import 'package:pro_video_editor/core/models/platform/native_log_entry.dart';
 import 'package:pro_video_editor/core/models/platform/native_log_level.dart';
 
 import '/core/models/audio/audio_extract_configs_model.dart';
+import '/core/models/audio/audio_merge_configs_model.dart';
+import '/core/models/audio/audio_merge_result_model.dart';
 import '/core/models/audio/waveform_chunk_model.dart';
 import '/core/models/audio/waveform_configs_model.dart';
 import '/core/models/audio/waveform_data_model.dart';
@@ -304,6 +306,63 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       if (error.code == noAudioErrorCode) {
         throw const AudioNoTrackException();
       } else if (error.code == renderCanceledErrorCode) {
+        throw const RenderCanceledException();
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<AudioMergeResult> mergeAudioToFile(
+    String filePath,
+    AudioMergeConfigs configs, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
+    // Validate before touching native so callers get an ArgumentError rather
+    // than an opaque PlatformException (asserts are stripped in release).
+    if (configs.segments.isEmpty) {
+      throw ArgumentError.value(
+        configs.segments,
+        'segments',
+        'must contain at least one segment',
+      );
+    }
+    for (var i = 0; i < configs.segments.length; i++) {
+      final segment = configs.segments[i];
+      if (segment.endTime <= segment.startTime) {
+        throw ArgumentError(
+          'segment[$i]: endTime (${segment.endTime}) must be after '
+          'startTime (${segment.startTime})',
+        );
+      }
+      if (segment.speed <= 0) {
+        throw ArgumentError(
+          'segment[$i]: speed (${segment.speed}) must be greater than 0',
+        );
+      }
+    }
+
+    try {
+      // Resolve every segment to a local file path, preserving order.
+      final inputPaths = <String>[];
+      for (final segment in configs.segments) {
+        inputPaths.add(await segment.video.safeFilePath());
+      }
+
+      final response = await methodChannel
+          .invokeMethod<Map<dynamic, dynamic>>('mergeAudio', {
+            'nativeLogLevel': nativeLogLevel?.methodValue,
+            'outputPath': filePath,
+            ...configs.toMap(inputPaths),
+          });
+
+      if (response == null) {
+        throw ArgumentError('Failed to merge audio');
+      }
+
+      return AudioMergeResult.fromMap(response);
+    } on PlatformException catch (error) {
+      if (error.code == renderCanceledErrorCode) {
         throw const RenderCanceledException();
       }
       rethrow;

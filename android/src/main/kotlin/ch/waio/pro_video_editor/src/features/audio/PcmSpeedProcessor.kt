@@ -19,16 +19,24 @@ import java.nio.ByteOrder
  * This mirrors the speed handling used in the video render pipeline
  * (see `applyPlaybackSpeed`), keeping audio extraction consistent: a value of
  * `2.0` plays twice as fast while keeping the original pitch.
+ *
+ * When [outputSampleRate] differs from [sampleRate], Sonic additionally
+ * resamples the output to that rate — used by the audio-merge pipeline to bring
+ * every segment onto one uniform sample rate before concatenation.
  */
 @UnstableApi
 class PcmSpeedProcessor(
     speed: Float,
     sampleRate: Int,
-    channelCount: Int
+    channelCount: Int,
+    outputSampleRate: Int = sampleRate
 ) {
     private val sonic = SonicAudioProcessor().apply {
         setSpeed(speed)
         // Pitch is intentionally left at 1.0 so only the duration changes.
+        // A different output rate makes Sonic resample as well (must be set
+        // before configure()).
+        if (outputSampleRate != sampleRate) setOutputSampleRateHz(outputSampleRate)
         configure(
             AudioProcessor.AudioFormat(sampleRate, channelCount, C.ENCODING_PCM_16BIT)
         )

@@ -1,3 +1,6 @@
+## 2.8.0
+- **FEAT**(android, iOS, macOS): Add `ProVideoEditor.mergeAudioToFile` — merge an ordered list of trimmed clip windows (`AudioMergeConfigs`) into one gap-less audio file plus a per-segment offset map (`AudioMergeResult`) that maps each clip back onto the output timeline. Every segment is brought to one uniform format (optional `sampleRate`/`channels` resample/downmix), a clip without an audio track contributes silence instead of throwing, and a single-segment merge is byte-for-byte identical to `extractAudioToFile`. WAV output is exact on all platforms; other formats encode to AAC. Not supported on Web/Windows/Linux.
+
 ## 2.7.1
 - **FIX**(android, iOS, macOS): A clip transition whose blend fully consumes an adjacent clip (no non-blended body left) now renders instead of degrading to a hard cut. `planOverlap` previously required both sides to keep some non-blended body, so a boundary where a clip is entirely the blend — two back-to-back transitions sharing a short clip, or a pre-rendered seam trimmed to exactly the blend — fell back to a hard cut (`not enough content for boundary`). The fully-consumed side is now dropped and the blend takes its place; zero-length clips are no longer fed to the composer.
 

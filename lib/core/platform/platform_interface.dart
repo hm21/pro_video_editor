@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import '/core/models/audio/audio_extract_configs_model.dart';
+import '/core/models/audio/audio_merge_configs_model.dart';
+import '/core/models/audio/audio_merge_result_model.dart';
 import '/core/models/audio/waveform_chunk_model.dart';
 import '/core/models/audio/waveform_configs_model.dart';
 import '/core/models/audio/waveform_data_model.dart';
@@ -338,6 +340,43 @@ abstract class ProVideoEditor extends PlatformInterface {
     NativeLogLevel? nativeLogLevel,
   }) {
     throw UnimplementedError('extractAudioToFile() has not been implemented.');
+  }
+
+  /// Merges the audio of several trimmed clip windows into a single,
+  /// seamlessly concatenated audio file and saves it to disk.
+  ///
+  /// Each [AudioMergeSegment] in [AudioMergeConfigs.segments] contributes only
+  /// its `[startTime, endTime)` window (measured in the source timeline), after
+  /// which its [AudioMergeSegment.speed] is applied. Segments are concatenated
+  /// **in list order with no gaps and no silence between them**, and every
+  /// segment is decoded/encoded to one uniform format (see [AudioMergeConfigs])
+  /// so the concatenation is seamless.
+  ///
+  /// Unlike [extractAudioToFile], a segment whose source has **no audio track**
+  /// does not throw [AudioNoTrackException]; it contributes silence of its
+  /// normal output length so the returned offset map stays aligned.
+  ///
+  /// [filePath] Absolute path where the merged audio will be written.
+  /// [configs] The ordered segments and output-format configuration.
+  ///
+  /// Returns an [AudioMergeResult] with the written path, the total merged
+  /// duration, and a per-segment offset map (`outputStart` / `outputDuration`)
+  /// that lets callers map a timestamp in the output back onto each segment.
+  ///
+  /// Throws:
+  /// - [ArgumentError] if [AudioMergeConfigs.segments] is empty or a segment is
+  ///   invalid (`endTime <= startTime`, `speed <= 0`).
+  /// - [RenderCanceledException] if cancelled via [cancel].
+  /// - [PlatformException] if merging or file writing fails.
+  ///
+  /// Progress updates are emitted via [progressStreamById] using
+  /// [AudioMergeConfigs.id].
+  Future<AudioMergeResult> mergeAudioToFile(
+    String filePath,
+    AudioMergeConfigs configs, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
+    throw UnimplementedError('mergeAudioToFile() has not been implemented.');
   }
 
   /// Generates waveform data from the audio track of a video.
