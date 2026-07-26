@@ -55,6 +55,16 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   /// [RenderEncoderException] for cleaner error handling.
   static const String encoderNotSupportedErrorCode = 'ENCODER_NOT_SUPPORTED';
 
+  /// Error code used when the video encoder could not be acquired because the
+  /// device's codec resources were exhausted or the codec session was
+  /// reclaimed.
+  ///
+  /// Unlike [encoderNotSupportedErrorCode] this is transient: it is thrown as a
+  /// [PlatformException] code and converted to a [RenderEncoderException] with
+  /// `isTransient == true`, which is worth retrying.
+  static const String encoderResourceExhaustedErrorCode =
+      'ENCODER_RESOURCE_EXHAUSTED';
+
   /// Error code used when a video has no audio track.
   ///
   /// This is thrown as a [PlatformException] code during audio extraction
@@ -131,6 +141,21 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     if (id.isEmpty) return;
     _pendingDispatchTaskIds.remove(id);
     _cancelledBeforeDispatchTaskIds.remove(id);
+  }
+
+  /// Maps an encoder failure reported by native to its typed exception, or
+  /// returns `null` when [error] is not an encoder failure.
+  ///
+  /// The two encoder codes differ only in whether a retry can help, which the
+  /// caller reads from [RenderEncoderException.isTransient].
+  RenderEncoderException? _asEncoderException(PlatformException error) {
+    if (error.code == encoderNotSupportedErrorCode) {
+      return RenderEncoderException(error.message);
+    }
+    if (error.code == encoderResourceExhaustedErrorCode) {
+      return RenderEncoderException(error.message, true);
+    }
+    return null;
   }
 
   @override
@@ -513,9 +538,8 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       if (error.code == renderCanceledErrorCode) {
         throw const RenderCanceledException();
       }
-      if (error.code == encoderNotSupportedErrorCode) {
-        throw RenderEncoderException(error.message);
-      }
+      final encoderError = _asEncoderException(error);
+      if (encoderError != null) throw encoderError;
       rethrow;
     } finally {
       _endDispatch(value.id);
@@ -544,9 +568,8 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       if (error.code == renderCanceledErrorCode) {
         throw const RenderCanceledException();
       }
-      if (error.code == encoderNotSupportedErrorCode) {
-        throw RenderEncoderException(error.message);
-      }
+      final encoderError = _asEncoderException(error);
+      if (encoderError != null) throw encoderError;
       rethrow;
     } finally {
       _endDispatch(value.id);
@@ -641,9 +664,8 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       if (error.code == renderCanceledErrorCode) {
         throw const RenderCanceledException();
       }
-      if (error.code == encoderNotSupportedErrorCode) {
-        throw RenderEncoderException(error.message);
-      }
+      final encoderError = _asEncoderException(error);
+      if (encoderError != null) throw encoderError;
       rethrow;
     } finally {
       _endDispatch(value.id);

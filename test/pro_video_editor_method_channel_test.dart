@@ -169,6 +169,74 @@ void main() {
     },
   );
 
+  group('encoder failures', () {
+    MockVideoRenderData renderData() {
+      final mockModel = MockVideoRenderData();
+      when(mockModel.id).thenReturn('test-render-id');
+      when(
+        mockModel.toAsyncMap(),
+      ).thenAnswer((_) async => {'inputPath': 'test.mp4'});
+      return mockModel;
+    }
+
+    void throwPlatformError(String code) {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (methodCall) async {
+            throw PlatformException(code: code, message: 'boom');
+          });
+    }
+
+    test('ENCODER_NOT_SUPPORTED maps to a permanent failure', () async {
+      throwPlatformError('ENCODER_NOT_SUPPORTED');
+
+      await expectLater(
+        platform.renderVideo(renderData()),
+        throwsA(
+          isA<RenderEncoderException>()
+              .having((e) => e.isTransient, 'isTransient', isFalse)
+              .having((e) => e.message, 'message', 'boom'),
+        ),
+      );
+    });
+
+    test('ENCODER_RESOURCE_EXHAUSTED maps to a transient failure', () async {
+      throwPlatformError('ENCODER_RESOURCE_EXHAUSTED');
+
+      await expectLater(
+        platform.renderVideo(renderData()),
+        throwsA(
+          isA<RenderEncoderException>()
+              .having((e) => e.isTransient, 'isTransient', isTrue)
+              .having((e) => e.message, 'message', 'boom'),
+        ),
+      );
+    });
+
+    test('renderVideoToFile maps the transient code too', () async {
+      throwPlatformError('ENCODER_RESOURCE_EXHAUSTED');
+
+      await expectLater(
+        platform.renderVideoToFile('/tmp/out.mp4', renderData()),
+        throwsA(
+          isA<RenderEncoderException>().having(
+            (e) => e.isTransient,
+            'isTransient',
+            isTrue,
+          ),
+        ),
+      );
+    });
+
+    test('an unrelated platform error is rethrown untouched', () async {
+      throwPlatformError('RENDER_ERROR');
+
+      await expectLater(
+        platform.renderVideo(renderData()),
+        throwsA(isA<PlatformException>()),
+      );
+    });
+  });
+
   test('cancel forwards to platform channel', () async {
     MethodCall? capturedCall;
 

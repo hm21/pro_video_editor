@@ -351,7 +351,16 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                         val removedTask = activeRenderTasks.remove(id)
                         val code = when {
                             removedTask?.canceled?.get() == true -> "CANCELED"
-                            error is VideoEncoderConfigurationException -> "ENCODER_NOT_SUPPORTED"
+                            // Transient codec-resource pressure gets its own
+                            // code: unlike ENCODER_NOT_SUPPORTED it is worth
+                            // retrying once codec sessions free up.
+                            error is VideoEncoderConfigurationException ->
+                                if (error.isTransient) {
+                                    "ENCODER_RESOURCE_EXHAUSTED"
+                                } else {
+                                    "ENCODER_NOT_SUPPORTED"
+                                }
+
                             else -> "RENDER_ERROR"
                         }
                         val message = error.message

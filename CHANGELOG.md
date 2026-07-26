@@ -1,3 +1,7 @@
+## 2.9.0
+- **FEAT**(android): `RenderEncoderException` now carries `isTransient`. An encoder failure caused by codec-resource pressure (`ERROR_INSUFFICIENT_RESOURCE` / `ERROR_RECLAIMED` found on the native cause chain — an exhausted codec pool or a reclaimed session) is flagged as transient and worth retrying; only a genuine format/encoder incompatibility stays non-transient.
+- **FIX**(android): The software-encoder fallback no longer silently re-runs the hardware encoder under a `software-encoder` label. The attempt now requires a software encoder that accepts surface input (what Media3's export feeds) and is skipped with an explicit log line when the device has none.
+
 ## 2.8.0
 - **FEAT**(android, iOS, macOS): Add `ProVideoEditor.mergeAudioToFile` — merge an ordered list of trimmed clip windows (`AudioMergeConfigs`) into one gap-less audio file plus a per-segment offset map (`AudioMergeResult`) that maps each clip back onto the output timeline. Every segment is brought to one uniform format (optional `sampleRate`/`channels` resample/downmix), a clip without an audio track contributes silence instead of throwing, and a single-segment merge is byte-for-byte identical to `extractAudioToFile`. WAV output is exact on all platforms; other formats encode to AAC. Not supported on Web/Windows/Linux.
 

@@ -104,7 +104,11 @@ object VideoEncoderConfig {
      * All hardware attempts are tried first because a rejected attempt fails
      * fast (during codec init, before any frame is encoded). The software
      * encoder is genuinely slower at 1080p, so it is deliberately the very last
-     * resort — only reached when every fast hardware option has failed.
+     * resort — only reached when every fast hardware option has failed. Note
+     * that [ResilientVideoEncoderFactory] skips the software attempt on devices
+     * without a surface-capable software encoder for the target MIME type
+     * (Media3's video export can only feed an encoder through an input
+     * surface), so the chain can end one attempt short of this list.
      *
      * @param sourceFrameRate Source frame rate used to cap the operating-rate.
      * @param includeProfileFallbacks Whether to include the Main/Baseline
