@@ -13,6 +13,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.Codec
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EncoderSelector
+import androidx.media3.transformer.EncoderUtil
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.VideoEncoderSettings
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
@@ -105,6 +106,13 @@ class ResilientVideoEncoderFactory(
         }
 
         var lastError: ExportException? = null
+        // First failure that was codec-resource pressure. Kept separately
+        // because it must win over a later, permanent-looking error: once the
+        // pool is starved the *software* attempt can fail with a plain
+        // "format not supported" (Media3 finds no encoder matching the
+        // resolution), which would otherwise mask the starvation and tell the
+        // caller not to retry.
+        var firstTransientError: ExportException? = null
         var failedAttempts = 0
         for (attempt in attempts) {
             if (attempt.useSoftwareEncoder && softwareCandidates.isEmpty()) {
@@ -135,6 +143,7 @@ class ResilientVideoEncoderFactory(
             } catch (e: ExportException) {
                 failedAttempts++
                 val transient = EncoderFailureClassifier.isTransientResourceFailure(e)
+                if (transient && firstTransientError == null) firstTransientError = e
                 Log.w(
                     RENDER_TAG,
                     "Video encoder attempt '${attempt.label}' failed " +
@@ -146,9 +155,12 @@ class ResilientVideoEncoderFactory(
             }
         }
 
-        // Every attempt failed: re-throw the last (typed, descriptive)
-        // ExportException so it can be mapped to a proper error state.
-        throw lastError ?: ExportException.createForUnexpected(
+        // Every attempt failed. A transient failure anywhere in the chain means
+        // a retry can help, so it is surfaced in preference to the last error —
+        // its message also names the real cause. Otherwise the last (typed,
+        // descriptive) ExportException is re-thrown so it can be mapped to a
+        // proper error state.
+        throw firstTransientError ?: lastError ?: ExportException.createForUnexpected(
             IllegalStateException("No video encoder attempts were available")
         )
     }
@@ -225,9 +237,10 @@ class ResilientVideoEncoderFactory(
      * makes Media3 fail this attempt, which is honest, whereas the fallback
      * would run the same hardware encoder that already failed and report it as
      * a "software" attempt. Callers guard the attempt with
-     * [surfaceCapableSoftwareEncoders] so the empty case is normally skipped
-     * before it gets here; the selector can still see a different MIME than the
-     * guard when Media3 falls back to another output format.
+     * [surfaceCapableSoftwareEncoders], which Media3 invokes with the same
+     * `format.sampleMimeType` the guard reads, so in practice the empty case is
+     * always skipped before it gets here — this is the honest fallback for a
+     * Media3 version that queries the selector differently.
      */
     private fun softwareEncoderSelector(): EncoderSelector = EncoderSelector { mime ->
         ImmutableList.copyOf(surfaceCapableSoftwareEncoders(mime))
@@ -267,11 +280,17 @@ class ResilientVideoEncoderFactory(
     /**
      * Whether [info] advertises `COLOR_FormatSurface` for [mime], i.e. whether
      * it can be driven by Media3's surface-based video pipeline.
+     *
+     * Fails *open*: an encoder that reports no color formats at all is treated
+     * as unknown rather than unusable, so a device with an incomplete codec
+     * description still gets its software attempt. A codec that genuinely
+     * cannot take surface input then fails fast during init, which costs one
+     * cheap attempt — far less than silently dropping a fallback that works.
      */
     private fun supportsSurfaceInput(info: MediaCodecInfo, mime: String): Boolean = try {
-        info.getCapabilitiesForType(mime).colorFormats.any {
-            it == MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
-        }
+        val colorFormats = EncoderUtil.getSupportedColorFormats(info, mime)
+        colorFormats.isEmpty() ||
+                colorFormats.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
     } catch (_: IllegalArgumentException) {
         // The encoder does not actually support this MIME type.
         false

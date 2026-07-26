@@ -55,15 +55,15 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   /// [RenderEncoderException] for cleaner error handling.
   static const String encoderNotSupportedErrorCode = 'ENCODER_NOT_SUPPORTED';
 
-  /// Error code used when the video encoder could not be acquired because the
-  /// device's codec resources were exhausted or the codec session was
-  /// reclaimed.
+  /// Error code used when a video codec — the encoder, or a decoder the export
+  /// needed for its input — could not be acquired because the device's codec
+  /// resources were exhausted or the session was reclaimed.
   ///
   /// Unlike [encoderNotSupportedErrorCode] this is transient: it is thrown as a
   /// [PlatformException] code and converted to a [RenderEncoderException] with
   /// `isTransient == true`, which is worth retrying.
-  static const String encoderResourceExhaustedErrorCode =
-      'ENCODER_RESOURCE_EXHAUSTED';
+  static const String codecResourceExhaustedErrorCode =
+      'CODEC_RESOURCE_EXHAUSTED';
 
   /// Error code used when a video has no audio track.
   ///
@@ -152,8 +152,8 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     if (error.code == encoderNotSupportedErrorCode) {
       return RenderEncoderException(error.message);
     }
-    if (error.code == encoderResourceExhaustedErrorCode) {
-      return RenderEncoderException(error.message, true);
+    if (error.code == codecResourceExhaustedErrorCode) {
+      return RenderEncoderException.transient(error.message);
     }
     return null;
   }

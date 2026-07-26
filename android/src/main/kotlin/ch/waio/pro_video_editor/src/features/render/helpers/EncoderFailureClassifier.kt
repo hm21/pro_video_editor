@@ -26,7 +26,7 @@ object EncoderFailureClassifier {
      * Upper bound for the cause-chain walk. Guards against a pathological
      * (cyclic) chain; real Media3 chains are only a few levels deep.
      */
-    private const val MAX_CAUSE_DEPTH = 32
+    internal const val MAX_CAUSE_DEPTH = 32
 
     /**
      * Returns true when [throwable] or any of its causes is a transient

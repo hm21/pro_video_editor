@@ -199,8 +199,8 @@ void main() {
       );
     });
 
-    test('ENCODER_RESOURCE_EXHAUSTED maps to a transient failure', () async {
-      throwPlatformError('ENCODER_RESOURCE_EXHAUSTED');
+    test('CODEC_RESOURCE_EXHAUSTED maps to a transient failure', () async {
+      throwPlatformError('CODEC_RESOURCE_EXHAUSTED');
 
       await expectLater(
         platform.renderVideo(renderData()),
@@ -213,7 +213,7 @@ void main() {
     });
 
     test('renderVideoToFile maps the transient code too', () async {
-      throwPlatformError('ENCODER_RESOURCE_EXHAUSTED');
+      throwPlatformError('CODEC_RESOURCE_EXHAUSTED');
 
       await expectLater(
         platform.renderVideoToFile('/tmp/out.mp4', renderData()),
@@ -227,12 +227,61 @@ void main() {
       );
     });
 
+    test('splitVideo maps both encoder codes', () async {
+      SplitVideoModel splitData() => SplitVideoModel(
+        id: 'split-encoder-id',
+        video: mockVideo,
+        splitPosition: const Duration(seconds: 1),
+        startOutputPath: '/tmp/start.mp4',
+        endOutputPath: '/tmp/end.mp4',
+      );
+
+      throwPlatformError('CODEC_RESOURCE_EXHAUSTED');
+      await expectLater(
+        platform.splitVideo(splitData()),
+        throwsA(
+          isA<RenderEncoderException>().having(
+            (e) => e.isTransient,
+            'isTransient',
+            isTrue,
+          ),
+        ),
+      );
+
+      throwPlatformError('ENCODER_NOT_SUPPORTED');
+      await expectLater(
+        platform.splitVideo(splitData()),
+        throwsA(
+          isA<RenderEncoderException>().having(
+            (e) => e.isTransient,
+            'isTransient',
+            isFalse,
+          ),
+        ),
+      );
+    });
+
     test('an unrelated platform error is rethrown untouched', () async {
       throwPlatformError('RENDER_ERROR');
 
       await expectLater(
         platform.renderVideo(renderData()),
         throwsA(isA<PlatformException>()),
+      );
+    });
+
+    test('toString marks the transient case only', () {
+      expect(
+        const RenderEncoderException('boom').toString(),
+        'RenderEncoderException: boom',
+      );
+      expect(
+        const RenderEncoderException.transient('boom').toString(),
+        'RenderEncoderException(transient): boom',
+      );
+      expect(
+        const RenderEncoderException().toString(),
+        'RenderEncoderException',
       );
     });
   });

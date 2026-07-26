@@ -14,6 +14,13 @@ internal class EncoderFailureClassifierTest {
     private fun isTransient(throwable: Throwable?) =
         EncoderFailureClassifier.isTransientResourceFailure(throwable, fakeClassifier)
 
+    /** Wraps [root] in [depth] plain exceptions, outermost returned. */
+    private fun chainOf(depth: Int, root: Throwable): Throwable {
+        var current = root
+        repeat(depth) { current = RuntimeException("wrapper", current) }
+        return current
+    }
+
     @Test
     fun nullFailure_isNotTransient() {
         assertFalse(isTransient(null))
@@ -65,6 +72,27 @@ internal class EncoderFailureClassifierTest {
         second.next = first
 
         assertFalse(isTransient(first))
+    }
+
+    @Test
+    fun transientCauseWithinDepthLimit_isDetected() {
+        // The deepest link the walk is still guaranteed to inspect.
+        val chain = chainOf(
+            depth = EncoderFailureClassifier.MAX_CAUSE_DEPTH - 1,
+            root = FakeTransient("insufficient resource"),
+        )
+        assertTrue(isTransient(chain))
+    }
+
+    @Test
+    fun transientCauseBeyondDepthLimit_isNotDetected() {
+        // Documents the deliberate cut-off: a chain this deep does not occur in
+        // practice, and bounding the walk matters more than finding it.
+        val chain = chainOf(
+            depth = EncoderFailureClassifier.MAX_CAUSE_DEPTH,
+            root = FakeTransient("insufficient resource"),
+        )
+        assertFalse(isTransient(chain))
     }
 
     @Test

@@ -10,14 +10,11 @@ package ch.waio.pro_video_editor.src.features.render.models
  * the Flutter layer can surface a proper "format/encoder not supported" error
  * state instead of an opaque platform exception.
  *
- * @param isTransient True when the failure was codec-resource pressure (an
- *  exhausted codec pool or a reclaimed session, see
- *  [ch.waio.pro_video_editor.src.features.render.helpers.EncoderFailureClassifier])
- *  rather than an incompatible configuration. A transient failure is worth
- *  retrying once codec resources free up; a non-transient one is not.
+ * Reserved for a *permanent* incompatibility. A failure caused by codec-resource
+ * pressure is reported as [CodecResourceExhaustedException] instead, because the
+ * two call for opposite reactions.
  */
 class VideoEncoderConfigurationException(
     message: String?,
     cause: Throwable? = null,
-    val isTransient: Boolean = false,
 ) : Exception(message, cause)
