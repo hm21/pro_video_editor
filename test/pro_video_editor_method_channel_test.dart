@@ -169,6 +169,123 @@ void main() {
     },
   );
 
+  group('encoder failures', () {
+    MockVideoRenderData renderData() {
+      final mockModel = MockVideoRenderData();
+      when(mockModel.id).thenReturn('test-render-id');
+      when(
+        mockModel.toAsyncMap(),
+      ).thenAnswer((_) async => {'inputPath': 'test.mp4'});
+      return mockModel;
+    }
+
+    void throwPlatformError(String code) {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (methodCall) async {
+            throw PlatformException(code: code, message: 'boom');
+          });
+    }
+
+    test('ENCODER_NOT_SUPPORTED maps to a permanent failure', () async {
+      throwPlatformError('ENCODER_NOT_SUPPORTED');
+
+      await expectLater(
+        platform.renderVideo(renderData()),
+        throwsA(
+          isA<RenderEncoderException>()
+              .having((e) => e.isTransient, 'isTransient', isFalse)
+              .having((e) => e.message, 'message', 'boom'),
+        ),
+      );
+    });
+
+    test('CODEC_RESOURCE_EXHAUSTED maps to a transient failure', () async {
+      throwPlatformError('CODEC_RESOURCE_EXHAUSTED');
+
+      await expectLater(
+        platform.renderVideo(renderData()),
+        throwsA(
+          isA<RenderEncoderException>()
+              .having((e) => e.isTransient, 'isTransient', isTrue)
+              .having((e) => e.message, 'message', 'boom'),
+        ),
+      );
+    });
+
+    test('renderVideoToFile maps the transient code too', () async {
+      throwPlatformError('CODEC_RESOURCE_EXHAUSTED');
+
+      await expectLater(
+        platform.renderVideoToFile('/tmp/out.mp4', renderData()),
+        throwsA(
+          isA<RenderEncoderException>().having(
+            (e) => e.isTransient,
+            'isTransient',
+            isTrue,
+          ),
+        ),
+      );
+    });
+
+    test('splitVideo maps both encoder codes', () async {
+      SplitVideoModel splitData() => SplitVideoModel(
+        id: 'split-encoder-id',
+        video: mockVideo,
+        splitPosition: const Duration(seconds: 1),
+        startOutputPath: '/tmp/start.mp4',
+        endOutputPath: '/tmp/end.mp4',
+      );
+
+      throwPlatformError('CODEC_RESOURCE_EXHAUSTED');
+      await expectLater(
+        platform.splitVideo(splitData()),
+        throwsA(
+          isA<RenderEncoderException>().having(
+            (e) => e.isTransient,
+            'isTransient',
+            isTrue,
+          ),
+        ),
+      );
+
+      throwPlatformError('ENCODER_NOT_SUPPORTED');
+      await expectLater(
+        platform.splitVideo(splitData()),
+        throwsA(
+          isA<RenderEncoderException>().having(
+            (e) => e.isTransient,
+            'isTransient',
+            isFalse,
+          ),
+        ),
+      );
+    });
+
+    test('an unrelated platform error is rethrown untouched', () async {
+      throwPlatformError('RENDER_ERROR');
+
+      await expectLater(
+        platform.renderVideo(renderData()),
+        throwsA(isA<PlatformException>()),
+      );
+    });
+
+    test('toString marks the transient case only', () {
+      expect(
+        const RenderEncoderException('boom').toString(),
+        'RenderEncoderException: boom',
+      );
+      expect(
+        const RenderEncoderException.transient('boom').toString(),
+        'RenderEncoderException(transient): boom',
+      );
+      expect(
+        const RenderEncoderException().toString(),
+        'RenderEncoderException',
+      );
+    });
+  });
+
   test('cancel forwards to platform channel', () async {
     MethodCall? capturedCall;
 

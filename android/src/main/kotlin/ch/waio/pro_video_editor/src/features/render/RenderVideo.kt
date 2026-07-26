@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import mapFormatToMimeType
 import ch.waio.pro_video_editor.src.features.render.helpers.BitrateCapPolicy
+import ch.waio.pro_video_editor.src.features.render.helpers.EncoderFailureClassifier
 import ch.waio.pro_video_editor.src.features.render.helpers.ResilientVideoEncoderFactory
 import ch.waio.pro_video_editor.src.features.render.helpers.applyComposition
 import ch.waio.pro_video_editor.src.features.render.helpers.VolumeControlAudioMixerFactory
@@ -25,6 +26,7 @@ import ch.waio.pro_video_editor.src.features.render.helpers.VideoReverser
 import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionGeometry
 import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionRenderer
 import ch.waio.pro_video_editor.src.features.render.helpers.MediaInfoExtractor
+import ch.waio.pro_video_editor.src.features.render.models.CodecResourceExhaustedException
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderJobHandle
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
@@ -60,6 +62,19 @@ class RenderVideo(private val context: Context) {
         private const val RENDER_STALL_TIMEOUT_MS = 20_000L
 
         private const val RENDER_POLL_INTERVAL_MS = 200L
+
+        /**
+         * Media3 error codes that mean "a codec could not be brought up". Each
+         * can be either transient resource pressure or a permanent
+         * incompatibility, so the cause chain decides (see [mapExportException]).
+         */
+        private val CODEC_INIT_ERROR_CODES = setOf(
+            ExportException.ERROR_CODE_ENCODER_INIT_FAILED,
+            ExportException.ERROR_CODE_ENCODING_FORMAT_UNSUPPORTED,
+            // A starved *decoder* (a preview player still holding one, a
+            // concurrent export) is exactly as transient as a starved encoder.
+            ExportException.ERROR_CODE_DECODER_INIT_FAILED,
+        )
     }
 
     private val effectsProcessor = EffectsProcessor()
@@ -923,27 +938,51 @@ class RenderVideo(private val context: Context) {
      * Translates a Media3 [ExportException] into a more specific, descriptive
      * error where possible.
      *
-     * Encoder configuration failures (which survive the
-     * [ResilientVideoEncoderFactory] fallback chain) are wrapped in a typed
-     * [VideoEncoderConfigurationException] so the Flutter layer can show a
-     * proper "encoder/format not supported" error state instead of a generic
-     * render failure. All other failures are passed through unchanged.
+     * Media3 reports two very different failures under the same error codes, so
+     * the cause chain is inspected ([EncoderFailureClassifier]) to tell them
+     * apart:
+     *
+     *  - transient codec-resource pressure (exhausted codec pool / reclaimed
+     *    session) on either the encoder or a decoder — the same export succeeds
+     *    on a retry, so it becomes a [CodecResourceExhaustedException],
+     *  - a genuinely incompatible encoder configuration (which survived the
+     *    [ResilientVideoEncoderFactory] fallback chain) — retrying is pointless,
+     *    so it becomes a [VideoEncoderConfigurationException].
+     *
+     * Both are typed so the Flutter layer can show a proper error state instead
+     * of a generic render failure. All other failures — including a *permanent*
+     * decoder failure, which is a source-media problem rather than an encoder
+     * one — are passed through unchanged.
      */
     private fun mapExportException(exception: ExportException): Throwable {
-        return when (exception.errorCode) {
-            ExportException.ERROR_CODE_ENCODER_INIT_FAILED,
-            ExportException.ERROR_CODE_ENCODING_FORMAT_UNSUPPORTED ->
-                VideoEncoderConfigurationException(
-                    "The video encoder rejected the export configuration after " +
-                            "exhausting all fallbacks (operating-rate cap/removal, " +
-                            "software encoder, profile downgrade). " +
-                            "Underlying error: ${exception.getErrorCodeName()} - " +
-                            "${exception.message}",
-                    exception
-                )
+        if (exception.errorCode !in CODEC_INIT_ERROR_CODES) return exception
 
-            else -> exception
+        val detail = "Underlying error: ${exception.getErrorCodeName()} - " +
+                "${exception.message}"
+
+        if (EncoderFailureClassifier.isTransientResourceFailure(exception)) {
+            return CodecResourceExhaustedException(
+                "The video codec could not be acquired: the device's codec " +
+                        "resources are exhausted or the codec session was " +
+                        "reclaimed. This is transient — retrying once other " +
+                        "codec sessions are released is expected to succeed. " +
+                        detail,
+                exception,
+            )
         }
+
+        // A permanent decoder failure says nothing about the encoder, so it is
+        // not dressed up as an encoder-configuration problem.
+        if (exception.errorCode == ExportException.ERROR_CODE_DECODER_INIT_FAILED) {
+            return exception
+        }
+
+        return VideoEncoderConfigurationException(
+            "The video encoder rejected the export configuration after " +
+                    "exhausting all fallbacks (operating-rate cap/removal, " +
+                    "software encoder, profile downgrade). " + detail,
+            exception,
+        )
     }
 
     /**

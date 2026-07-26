@@ -13,6 +13,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.Codec
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EncoderSelector
+import androidx.media3.transformer.EncoderUtil
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.VideoEncoderSettings
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
@@ -31,7 +32,10 @@ import com.google.common.collect.ImmutableList
  *     `operating-rate = MAX`), so devices that work keep their original speed.
  *  2. Retries through a fallback chain when the encoder rejects it: capped
  *     operating-rate → operating-rate unset → Main profile → Baseline profile →
- *     software encoder (the slow last resort, see [VideoEncoderConfig]).
+ *     software encoder (the slow last resort, see [VideoEncoderConfig]). The
+ *     software attempt is skipped — with a log line saying so — when the device
+ *     has no software encoder that accepts surface input for the target MIME
+ *     type, because it would otherwise silently re-run the hardware encoder.
  *  3. Surfaces a descriptive [ExportException] (`ERROR_CODE_ENCODER_INIT_FAILED`)
  *     when every attempt fails, so the failure can be reported as a proper
  *     error state instead of a generic render failure.
@@ -93,33 +97,70 @@ class ResilientVideoEncoderFactory(
             sourceFrameRate = sourceFrameRate,
             includeProfileFallbacks = isAvc,
         )
+        // MIME Media3 will request the encoder for; used to decide whether the
+        // software attempt can do anything at all. Resolved lazily so the happy
+        // path (first attempt succeeds) never queries the codec list.
+        val selectionMimeType = format.sampleMimeType ?: mimeType
+        val softwareCandidates: List<MediaCodecInfo> by lazy(LazyThreadSafetyMode.NONE) {
+            surfaceCapableSoftwareEncoders(selectionMimeType)
+        }
 
         var lastError: ExportException? = null
-        for ((index, attempt) in attempts.withIndex()) {
+        // First failure that was codec-resource pressure. Kept separately
+        // because it must win over a later, permanent-looking error: once the
+        // pool is starved the *software* attempt can fail with a plain
+        // "format not supported" (Media3 finds no encoder matching the
+        // resolution), which would otherwise mask the starvation and tell the
+        // caller not to retry.
+        var firstTransientError: ExportException? = null
+        var failedAttempts = 0
+        for (attempt in attempts) {
+            if (attempt.useSoftwareEncoder && softwareCandidates.isEmpty()) {
+                // Without this guard the selector would silently fall back to
+                // the hardware candidates and the attempt would report a
+                // `c2.qti.*` encoder under a "software" label — the exact log
+                // that makes these failures unreadable.
+                Log.w(
+                    RENDER_TAG,
+                    "Skipping encoder attempt '${attempt.label}': no " +
+                            "surface-capable software encoder exists for " +
+                            "$selectionMimeType, so a software fallback is a no-op " +
+                            "(${describeSoftwareEncoderGap(selectionMimeType)})"
+                )
+                continue
+            }
             try {
                 val codec = buildFactoryForAttempt(attempt, sourceFrameRate)
                     .createForVideoEncoding(format, logSessionId)
-                if (index > 0) {
+                if (failedAttempts > 0) {
                     Log.w(
                         RENDER_TAG,
                         "Video encoder fallback succeeded using '${attempt.label}' " +
-                                "after $index failed attempt(s)"
+                                "after $failedAttempts failed attempt(s)"
                     )
                 }
                 return codec
             } catch (e: ExportException) {
+                failedAttempts++
+                val transient = EncoderFailureClassifier.isTransientResourceFailure(e)
+                if (transient && firstTransientError == null) firstTransientError = e
                 Log.w(
                     RENDER_TAG,
                     "Video encoder attempt '${attempt.label}' failed " +
-                            "(${e.getErrorCodeName()}): ${e.message}"
+                            "(${e.getErrorCodeName()}" +
+                            (if (transient) ", transient codec-resource error" else "") +
+                            "): ${e.message}"
                 )
                 lastError = e
             }
         }
 
-        // Every attempt failed: re-throw the last (typed, descriptive)
-        // ExportException so it can be mapped to a proper error state.
-        throw lastError ?: ExportException.createForUnexpected(
+        // Every attempt failed. A transient failure anywhere in the chain means
+        // a retry can help, so it is surfaced in preference to the last error —
+        // its message also names the real cause. Otherwise the last (typed,
+        // descriptive) ExportException is re-thrown so it can be mapped to a
+        // proper error state.
+        throw firstTransientError ?: lastError ?: ExportException.createForUnexpected(
             IllegalStateException("No video encoder attempts were available")
         )
     }
@@ -190,13 +231,69 @@ class ResilientVideoEncoderFactory(
     }
 
     /**
-     * Restricts encoder selection to software encoders, falling back to the
-     * default candidate list when none are available.
+     * Restricts encoder selection to surface-capable software encoders.
+     *
+     * Deliberately *not* falling back to the hardware candidates: an empty list
+     * makes Media3 fail this attempt, which is honest, whereas the fallback
+     * would run the same hardware encoder that already failed and report it as
+     * a "software" attempt. Callers guard the attempt with
+     * [surfaceCapableSoftwareEncoders], which Media3 invokes with the same
+     * `format.sampleMimeType` the guard reads, so in practice the empty case is
+     * always skipped before it gets here — this is the honest fallback for a
+     * Media3 version that queries the selector differently.
      */
     private fun softwareEncoderSelector(): EncoderSelector = EncoderSelector { mime ->
-        val all = EncoderSelector.DEFAULT.selectEncoderInfos(mime)
-        val software = all.filter { isSoftwareEncoder(it) }
-        ImmutableList.copyOf(if (software.isNotEmpty()) software else all)
+        ImmutableList.copyOf(surfaceCapableSoftwareEncoders(mime))
+    }
+
+    /**
+     * Software encoders for [mime] that can be fed from an input `Surface`.
+     *
+     * Media3's video export always writes into the encoder's input surface, so
+     * a software encoder that only accepts ByteBuffer/YUV input (common for
+     * AVC) is unusable here even though it advertises the MIME type. Returns an
+     * empty list when [mime] is null or nothing qualifies.
+     */
+    private fun surfaceCapableSoftwareEncoders(mime: String?): List<MediaCodecInfo> {
+        if (mime == null) return emptyList()
+        return EncoderSelector.DEFAULT.selectEncoderInfos(mime)
+            .filter { isSoftwareEncoder(it) && supportsSurfaceInput(it, mime) }
+    }
+
+    /**
+     * Human-readable reason why [surfaceCapableSoftwareEncoders] came up empty,
+     * for the skip log: either the device ships no software encoder for the
+     * MIME at all, or the ones it ships cannot take surface input.
+     */
+    private fun describeSoftwareEncoderGap(mime: String?): String {
+        if (mime == null) return "no target MIME type"
+        val software = EncoderSelector.DEFAULT.selectEncoderInfos(mime)
+            .filter { isSoftwareEncoder(it) }
+        return if (software.isEmpty()) {
+            "device has no software encoder for this MIME"
+        } else {
+            "software encoder(s) ${software.joinToString { it.name }} reject " +
+                    "surface input"
+        }
+    }
+
+    /**
+     * Whether [info] advertises `COLOR_FormatSurface` for [mime], i.e. whether
+     * it can be driven by Media3's surface-based video pipeline.
+     *
+     * Fails *open*: an encoder that reports no color formats at all is treated
+     * as unknown rather than unusable, so a device with an incomplete codec
+     * description still gets its software attempt. A codec that genuinely
+     * cannot take surface input then fails fast during init, which costs one
+     * cheap attempt — far less than silently dropping a fallback that works.
+     */
+    private fun supportsSurfaceInput(info: MediaCodecInfo, mime: String): Boolean = try {
+        val colorFormats = EncoderUtil.getSupportedColorFormats(info, mime)
+        colorFormats.isEmpty() ||
+                colorFormats.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+    } catch (_: IllegalArgumentException) {
+        // The encoder does not actually support this MIME type.
+        false
     }
 
     private fun isSoftwareEncoder(info: MediaCodecInfo): Boolean {

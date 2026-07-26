@@ -11,6 +11,7 @@ import ch.waio.pro_video_editor.src.features.audio.models.AudioMergeConfig
 import ch.waio.pro_video_editor.src.features.metadata.Metadata
 import ch.waio.pro_video_editor.src.features.metadata.models.MetadataConfig
 import ch.waio.pro_video_editor.src.features.render.RenderVideo
+import ch.waio.pro_video_editor.src.features.render.models.CodecResourceExhaustedException
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderTask
 import ch.waio.pro_video_editor.src.features.render.models.VideoEncoderConfigurationException
@@ -351,7 +352,15 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                         val removedTask = activeRenderTasks.remove(id)
                         val code = when {
                             removedTask?.canceled?.get() == true -> "CANCELED"
-                            error is VideoEncoderConfigurationException -> "ENCODER_NOT_SUPPORTED"
+                            // Transient codec-resource pressure gets its own
+                            // code: unlike ENCODER_NOT_SUPPORTED it is worth
+                            // retrying once codec sessions free up.
+                            error is CodecResourceExhaustedException ->
+                                "CODEC_RESOURCE_EXHAUSTED"
+
+                            error is VideoEncoderConfigurationException ->
+                                "ENCODER_NOT_SUPPORTED"
+
                             else -> "RENDER_ERROR"
                         }
                         val message = error.message
