@@ -126,14 +126,12 @@ void main() {
       // toMap() is the Dart-side JSON form; toAsyncMap() is what actually
       // reaches RenderConfig.fromArgs, so the native key is asserted here.
       expect(
-        (await buildData(trimToCommonTrackEnd: true)
-            .toAsyncMap())['trimToCommonTrackEnd'],
+        (await buildData(
+          trimToCommonTrackEnd: true,
+        ).toAsyncMap())['trimToCommonTrackEnd'],
         isTrue,
       );
-      expect(
-        (await buildData().toAsyncMap())['trimToCommonTrackEnd'],
-        isFalse,
-      );
+      expect((await buildData().toAsyncMap())['trimToCommonTrackEnd'], isFalse);
     });
 
     test('toMap / fromMap roundtrip preserves the value', () {
