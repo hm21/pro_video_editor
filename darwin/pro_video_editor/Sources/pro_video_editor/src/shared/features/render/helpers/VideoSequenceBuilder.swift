@@ -11,15 +11,6 @@ internal class VideoSequenceBuilder {
   private var enableAudio: Bool = true
   private var trimToCommonTrackEnd: Bool = false
 
-  /// How far a clip's audio may fall short of its video before the gap counts
-  /// as content rather than a track-end mismatch.
-  ///
-  /// Capture and export pipelines end the two tracks a fraction of a second
-  /// apart; a survey of published mp4s put the worst case at ~0.4 s. A larger
-  /// gap means the clip is genuinely meant to outlast its audio, and trimming
-  /// it would swallow content instead of a seam.
-  private static let maxTrackEndMismatch = CMTime(value: 500, timescale: 1000)
-
   /// Initializes builder with video clips.
   ///
   /// - Parameter videoClips: Array of video clips to process
@@ -44,20 +35,6 @@ internal class VideoSequenceBuilder {
   func setTrimToCommonTrackEnd(_ enabled: Bool) -> VideoSequenceBuilder {
     self.trimToCommonTrackEnd = enabled
     return self
-  }
-
-  /// The track's time range, loaded asynchronously where the OS supports it.
-  private static func timeRange(of track: AVAssetTrack) async -> CMTimeRange {
-    #if os(iOS)
-      if #available(iOS 15.0, *) {
-        return (try? await track.load(.timeRange)) ?? track.timeRange
-      }
-    #elseif os(macOS)
-      if #available(macOS 13.0, *) {
-        return (try? await track.load(.timeRange)) ?? track.timeRange
-      }
-    #endif
-    return track.timeRange
   }
 
   /// Calculates total duration of all video clips combined.
@@ -214,35 +191,21 @@ internal class VideoSequenceBuilder {
       // the insert but the ClipInstruction keeps the longer duration, creating a gap
       // where AVFoundation calls the compositor with no source frame available
       // (sourceTrackIDs empty), causing a RENDER_ERROR crash.
-      let videoTrackTimeRange = await Self.timeRange(of: videoTrack)
+      let videoTrackTimeRange = await TrackEndTrimmer.timeRange(of: videoTrack)
       let clampedRange = CMTimeRangeGetIntersection(
         rawClipTimeRange, otherRange: videoTrackTimeRange)
       var clipTimeRange = clampedRange.duration > .zero ? clampedRange : rawClipTimeRange
 
-      // A source asset's audio and video tracks routinely end tens of
-      // milliseconds apart, because capture and export stop them
-      // independently. The video clamp above then leaves a range the audio
-      // track cannot fill, `insertTimeRange` silently inserts what exists, and
-      // the export ends on a stretch of missing audio — the seam a looping
-      // player replays every cycle. Cut the clip back to where both tracks
-      // still have content instead.
+      // The video clamp above leaves a range the audio track cannot fill when
+      // the two tracks end apart, `insertTimeRange` silently inserts what
+      // exists, and the export ends on a stretch of missing audio — the seam a
+      // looping player replays every cycle. Cut the clip back to where both
+      // tracks still have content instead.
       if trimToCommonTrackEnd, enableAudio,
-        let audioTrack = try? await MediaInfoExtractor.loadAudioTrack(from: asset)
+        let trimmed = await TrackEndTrimmer.trimmedRange(
+          clipTimeRange, in: asset, label: "Clip \(index)")
       {
-        let commonRange = CMTimeRangeGetIntersection(
-          clipTimeRange, otherRange: await Self.timeRange(of: audioTrack))
-        let shortfall = CMTimeSubtract(clipTimeRange.duration, commonRange.duration)
-        if commonRange.duration > .zero, shortfall <= Self.maxTrackEndMismatch {
-          clipTimeRange = commonRange
-        } else if shortfall > Self.maxTrackEndMismatch {
-          // Too large to be an encoder tail: the clip genuinely outlasts its
-          // own audio (stop motion held past a short sound, a source file with
-          // a broken audio track). Trimming here would swallow content, so
-          // keep the video and leave the tail alone.
-          PluginLog.print(
-            "   ⚠️ Clip \(index) audio ends \(String(format: "%.2f", shortfall.seconds))s early — too far to treat as a track-end mismatch, not trimming"
-          )
-        }
+        clipTimeRange = trimmed
       }
       let clipDuration = clipTimeRange.duration
       let insertStart = totalDuration

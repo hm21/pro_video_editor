@@ -122,6 +122,20 @@ void main() {
       expect(buildData().toMap()['trimToCommonTrackEnd'], isFalse);
     });
 
+    test('toAsyncMap sends the value over the platform channel', () async {
+      // toMap() is the Dart-side JSON form; toAsyncMap() is what actually
+      // reaches RenderConfig.fromArgs, so the native key is asserted here.
+      expect(
+        (await buildData(trimToCommonTrackEnd: true)
+            .toAsyncMap())['trimToCommonTrackEnd'],
+        isTrue,
+      );
+      expect(
+        (await buildData().toAsyncMap())['trimToCommonTrackEnd'],
+        isFalse,
+      );
+    });
+
     test('toMap / fromMap roundtrip preserves the value', () {
       final restored = VideoRenderData.fromMap(
         buildData(trimToCommonTrackEnd: true).toMap(),

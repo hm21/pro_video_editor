@@ -198,7 +198,13 @@ class VideoRenderData {
   ///
   /// It shortens the export by the mismatch, so leave it off when a clip is
   /// meant to outlast its own audio (stop motion held past a short sound).
-  /// Currently honoured on Apple platforms only.
+  /// A gap beyond 500ms is treated as content rather than a track-end
+  /// mismatch and is left alone.
+  ///
+  /// Honoured on Apple platforms only, and ignored when [composition] is set —
+  /// the layered path builds its own timeline, where shortening one clip would
+  /// shift every layer placed after it. Android decides its per-track output
+  /// lengths in `Media3 Transformer` and has no equivalent clamp.
   ///
   /// **Default**: `false`
   final bool trimToCommonTrackEnd;

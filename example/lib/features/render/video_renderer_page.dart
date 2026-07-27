@@ -758,6 +758,15 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  Future<void> _trimToCommonTrackEnd() async {
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      trimToCommonTrackEnd: true,
+    );
+
+    await _renderVideo(data);
+  }
+
   Future<File> _writeAssetAudioToFile(String assetPath) async {
     final ByteData data = await rootBundle.load(assetPath);
     final buffer = data.buffer;
@@ -2286,6 +2295,15 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           leading: const Icon(Icons.volume_off_outlined),
           title: const Text('Remove Audio'),
         ),
+        if (!kIsWeb && (Platform.isIOS || Platform.isMacOS))
+          ListTile(
+            onTap: _trimToCommonTrackEnd,
+            leading: const Icon(Icons.content_cut_outlined),
+            title: const Text('Trim to Common Track End'),
+            subtitle: const Text(
+              'End the clip where both tracks still have content',
+            ),
+          ),
         ListTile(
           onTap: _customAudioReplace,
           leading: const Icon(Icons.library_music_outlined),
