@@ -27,13 +27,15 @@ func applyComposition(
   videoClips: [VideoClip],
   videoEffects: VideoCompositorConfig,
   enableAudio: Bool,
-  audioTracks: [AudioTrackConfig]
+  audioTracks: [AudioTrackConfig],
+  trimToCommonTrackEnd: Bool = false
 ) async throws -> (
   AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID, [URL],
   [FadeWindow]
 ) {
   return try await CompositionBuilder(videoClips: videoClips, videoEffects: videoEffects)
     .setEnableAudio(enableAudio)
+    .setTrimToCommonTrackEnd(trimToCommonTrackEnd)
     .setAudioTracks(audioTracks)
     .build()
 }

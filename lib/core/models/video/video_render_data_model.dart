@@ -30,6 +30,7 @@ class VideoRenderData {
     this.imageLayers,
     this.transform,
     this.enableAudio = true,
+    this.trimToCommonTrackEnd = false,
     this.startTime,
     this.endTime,
     this.colorFilters = const [],
@@ -91,6 +92,7 @@ class VideoRenderData {
     List<ImageLayer> imageLayers = const [],
     ExportTransform? transform,
     bool enableAudio = true,
+    bool trimToCommonTrackEnd = false,
     Duration? startTime,
     Duration? endTime,
     double? blur,
@@ -112,6 +114,7 @@ class VideoRenderData {
       imageLayers: imageLayers,
       transform: transform,
       enableAudio: enableAudio,
+      trimToCommonTrackEnd: trimToCommonTrackEnd,
       startTime: startTime,
       endTime: endTime,
       blur: blur,
@@ -184,6 +187,21 @@ class VideoRenderData {
   ///
   /// **Default**: `true`
   final bool enableAudio;
+
+  /// Whether to end each clip where both of its tracks still have content.
+  ///
+  /// A source asset's audio and video tracks routinely end tens of
+  /// milliseconds apart, because capture and export stop them independently.
+  /// The export then spans the longer track and ends on missing audio or a
+  /// frozen frame — the seam a looping player replays every cycle. Enabling
+  /// this cuts each clip back to the earlier of the two ends.
+  ///
+  /// It shortens the export by the mismatch, so leave it off when a clip is
+  /// meant to outlast its own audio (stop motion held past a short sound).
+  /// Currently honoured on Apple platforms only.
+  ///
+  /// **Default**: `false`
+  final bool trimToCommonTrackEnd;
 
   /// Optional start time for trimming the entire composition across all
   /// segments.
@@ -393,6 +411,7 @@ class VideoRenderData {
       'colorFilters': colorFilterMaps,
       'audioTracks': audioTrackMaps,
       'enableAudio': enableAudio,
+      'trimToCommonTrackEnd': trimToCommonTrackEnd,
       'outputFormat': outputFormat.name,
       'blur': blur,
       // Fall back to the quality config's bitrate when no explicit bitrate is
@@ -422,6 +441,7 @@ class VideoRenderData {
     List<ImageLayer>? imageLayers,
     ExportTransform? transform,
     bool? enableAudio,
+    bool? trimToCommonTrackEnd,
     Duration? startTime,
     Duration? endTime,
     List<ColorFilter>? colorFilters,
@@ -441,6 +461,7 @@ class VideoRenderData {
       imageLayers: imageLayers ?? this.imageLayers,
       transform: transform ?? this.transform,
       enableAudio: enableAudio ?? this.enableAudio,
+      trimToCommonTrackEnd: trimToCommonTrackEnd ?? this.trimToCommonTrackEnd,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       colorFilters: colorFilters ?? this.colorFilters,
@@ -465,6 +486,7 @@ class VideoRenderData {
       'imageLayers': imageLayers?.map((x) => x.toMap()).toList(),
       'transform': transform?.toMap(),
       'enableAudio': enableAudio,
+      'trimToCommonTrackEnd': trimToCommonTrackEnd,
       'startTime': startTime?.inMicroseconds,
       'endTime': endTime?.inMicroseconds,
       'colorFilters': colorFilters.map((x) => x.toMap()).toList(),
@@ -509,6 +531,7 @@ class VideoRenderData {
           ? ExportTransform.fromMap(map['transform'] as Map<String, dynamic>)
           : null,
       enableAudio: map['enableAudio'] as bool,
+      trimToCommonTrackEnd: map['trimToCommonTrackEnd'] as bool? ?? false,
       startTime: map['startTime'] != null
           ? Duration(microseconds: safeParseInt(map['startTime']))
           : null,
@@ -550,6 +573,7 @@ class VideoRenderData {
         'imageLayers: $imageLayers, '
         'transform: $transform, '
         'enableAudio: $enableAudio, '
+        'trimToCommonTrackEnd: $trimToCommonTrackEnd, '
         'startTime: $startTime, '
         'endTime: $endTime, '
         'colorFilters: $colorFilters, '
@@ -573,6 +597,7 @@ class VideoRenderData {
         listEquals(other.imageLayers, imageLayers) &&
         other.transform == transform &&
         other.enableAudio == enableAudio &&
+        other.trimToCommonTrackEnd == trimToCommonTrackEnd &&
         other.startTime == startTime &&
         other.endTime == endTime &&
         listEquals(other.colorFilters, colorFilters) &&
@@ -594,6 +619,7 @@ class VideoRenderData {
         imageLayers.hashCode ^
         transform.hashCode ^
         enableAudio.hashCode ^
+        trimToCommonTrackEnd.hashCode ^
         startTime.hashCode ^
         endTime.hashCode ^
         colorFilters.hashCode ^

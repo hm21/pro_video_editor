@@ -340,6 +340,13 @@ struct RenderConfig: Sendable {
   /// Whether to include audio in output
   let enableAudio: Bool
 
+  /// Whether to end each clip where both of its tracks still have content
+  ///
+  /// A source asset's audio and video tracks routinely end tens of
+  /// milliseconds apart. Spanning the longer one leaves a tail of missing
+  /// audio or a frozen frame, which a looping player replays as a seam.
+  let trimToCommonTrackEnd: Bool
+
   /// Playback speed multiplier (e.g., 2.0 = 2x speed)
   let playbackSpeed: Float?
 
@@ -392,6 +399,7 @@ struct RenderConfig: Sendable {
       bitrate: self.bitrate,
       maxFrameRate: self.maxFrameRate,
       enableAudio: self.enableAudio,
+      trimToCommonTrackEnd: self.trimToCommonTrackEnd,
       playbackSpeed: self.playbackSpeed,
       colorFilters: self.colorFilters,
       audioTracks: self.audioTracks,
@@ -461,6 +469,7 @@ struct RenderConfig: Sendable {
       bitrate: args["bitrate"] as? Int,
       maxFrameRate: (args["maxFrameRate"] as? NSNumber)?.intValue,
       enableAudio: args["enableAudio"] as? Bool ?? true,
+      trimToCommonTrackEnd: args["trimToCommonTrackEnd"] as? Bool ?? false,
       playbackSpeed: (args["playbackSpeed"] as? NSNumber)?.floatValue,
       colorFilters: colorFilters,
       audioTracks: audioTracks,

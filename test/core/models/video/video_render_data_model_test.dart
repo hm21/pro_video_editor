@@ -100,4 +100,51 @@ void main() {
       expect(map['bitrate'], 8000000);
     });
   });
+
+  group('VideoRenderData trimToCommonTrackEnd', () {
+    VideoRenderData buildData({bool? trimToCommonTrackEnd}) {
+      return VideoRenderData(
+        id: 'test',
+        videoSegments: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+        trimToCommonTrackEnd: trimToCommonTrackEnd ?? false,
+      );
+    }
+
+    test('defaults to off so exports keep their full length', () {
+      expect(buildData().trimToCommonTrackEnd, isFalse);
+    });
+
+    test('toMap serializes the value', () {
+      expect(
+        buildData(trimToCommonTrackEnd: true).toMap()['trimToCommonTrackEnd'],
+        isTrue,
+      );
+      expect(buildData().toMap()['trimToCommonTrackEnd'], isFalse);
+    });
+
+    test('toMap / fromMap roundtrip preserves the value', () {
+      final restored = VideoRenderData.fromMap(
+        buildData(trimToCommonTrackEnd: true).toMap(),
+      );
+      expect(restored.trimToCommonTrackEnd, isTrue);
+    });
+
+    test('fromMap defaults to off for payloads without the key', () {
+      final map = buildData(trimToCommonTrackEnd: true).toMap()
+        ..remove('trimToCommonTrackEnd');
+
+      expect(VideoRenderData.fromMap(map).trimToCommonTrackEnd, isFalse);
+    });
+
+    test('copyWith overrides the value', () {
+      expect(
+        buildData().copyWith(trimToCommonTrackEnd: true).trimToCommonTrackEnd,
+        isTrue,
+      );
+      expect(
+        buildData(trimToCommonTrackEnd: true).copyWith().trimToCommonTrackEnd,
+        isTrue,
+      );
+    });
+  });
 }

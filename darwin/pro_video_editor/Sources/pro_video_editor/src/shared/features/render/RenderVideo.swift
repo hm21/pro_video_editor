@@ -205,7 +205,8 @@ class RenderVideo {
               videoClips: workingConfig.videoClips,
               videoEffects: effectsConfig,
               enableAudio: workingConfig.enableAudio,
-              audioTracks: workingConfig.audioTracks
+              audioTracks: workingConfig.audioTracks,
+              trimToCommonTrackEnd: workingConfig.trimToCommonTrackEnd
             )
           }
           let (

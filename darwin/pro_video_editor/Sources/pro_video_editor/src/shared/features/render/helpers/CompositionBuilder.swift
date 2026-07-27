@@ -12,6 +12,7 @@ internal class CompositionBuilder {
   private let videoClips: [VideoClip]
   private let videoEffects: VideoCompositorConfig
   private var enableAudio: Bool = true
+  private var trimToCommonTrackEnd: Bool = false
   private var audioTracks: [AudioTrackConfig] = []
 
   /// Initializes builder with configuration.
@@ -30,6 +31,16 @@ internal class CompositionBuilder {
   /// - Returns: Self for chaining
   func setEnableAudio(_ enabled: Bool) -> CompositionBuilder {
     self.enableAudio = enabled
+    return self
+  }
+
+  /// Ends each clip where both of its tracks still have content.
+  ///
+  /// - Parameter enabled: If true, a clip is cut back to the earlier of its
+  ///   video and audio track ends instead of spanning the longer one
+  /// - Returns: Self for chaining
+  func setTrimToCommonTrackEnd(_ enabled: Bool) -> CompositionBuilder {
+    self.trimToCommonTrackEnd = enabled
     return self
   }
 
@@ -66,6 +77,7 @@ internal class CompositionBuilder {
     // Build video sequence
     let videoBuilder = VideoSequenceBuilder(videoClips: videoClips)
       .setEnableAudio(enableAudio)
+      .setTrimToCommonTrackEnd(trimToCommonTrackEnd)
 
     let videoResult = try await videoBuilder.build(in: composition)
 
