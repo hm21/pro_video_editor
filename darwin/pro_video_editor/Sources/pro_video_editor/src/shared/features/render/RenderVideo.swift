@@ -205,7 +205,8 @@ class RenderVideo {
               videoClips: workingConfig.videoClips,
               videoEffects: effectsConfig,
               enableAudio: workingConfig.enableAudio,
-              audioTracks: workingConfig.audioTracks
+              audioTracks: workingConfig.audioTracks,
+              trimToCommonTrackEnd: workingConfig.trimToCommonTrackEnd
             )
           }
           let (
@@ -507,7 +508,23 @@ class RenderVideo {
     export.outputURL = outputURL
     export.outputFileType = mapFormatToMimeType(format: config.outputFormat)
     export.shouldOptimizeForNetworkUse = config.shouldOptimizeForNetworkUse
+    // Attached before the track loads below so a cancel arriving during them
+    // is still honoured; `export()` only starts in `monitorExportProgress`.
     handle.attach(export: export)
+
+    // This fast path skips the composition entirely, so it has to apply the
+    // common-track-end trim itself — otherwise the flag would be a silent
+    // no-op for exactly the single untrimmed clip it targets. Passthrough
+    // honours `timeRange` frame-accurately (same as the split fast path), so
+    // the export stays lossless.
+    if config.trimToCommonTrackEnd, config.enableAudio,
+      let trimmed = await TrackEndTrimmer.trimmedAssetRange(of: asset, label: "Passthrough")
+    {
+      export.timeRange = trimmed
+      PluginLog.print(
+        "   ✂️ Passthrough trimmed to common track end: "
+          + "\(String(format: "%.3f", trimmed.duration.seconds))s")
+    }
 
     do {
       try await monitorExportProgress(export, onProgress: onProgress)

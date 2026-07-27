@@ -345,6 +345,14 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
           as bool);
 
   @override
+  bool get trimToCommonTrackEnd =>
+      (super.noSuchMethod(
+            Invocation.getter(#trimToCommonTrackEnd),
+            returnValue: false,
+          )
+          as bool);
+
+  @override
   List<_i4.ColorFilter> get colorFilters =>
       (super.noSuchMethod(
             Invocation.getter(#colorFilters),
@@ -404,6 +412,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
     List<_i4.ImageLayer>? imageLayers,
     _i4.ExportTransform? transform,
     bool? enableAudio,
+    bool? trimToCommonTrackEnd,
     Duration? startTime,
     Duration? endTime,
     List<_i4.ColorFilter>? colorFilters,
@@ -424,6 +433,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
               #imageLayers: imageLayers,
               #transform: transform,
               #enableAudio: enableAudio,
+              #trimToCommonTrackEnd: trimToCommonTrackEnd,
               #startTime: startTime,
               #endTime: endTime,
               #colorFilters: colorFilters,
@@ -445,6 +455,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
                 #imageLayers: imageLayers,
                 #transform: transform,
                 #enableAudio: enableAudio,
+                #trimToCommonTrackEnd: trimToCommonTrackEnd,
                 #startTime: startTime,
                 #endTime: endTime,
                 #colorFilters: colorFilters,

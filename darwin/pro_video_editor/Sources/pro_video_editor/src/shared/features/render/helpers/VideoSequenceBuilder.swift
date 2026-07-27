@@ -9,6 +9,7 @@ internal class VideoSequenceBuilder {
 
   private let videoClips: [VideoClip]
   private var enableAudio: Bool = true
+  private var trimToCommonTrackEnd: Bool = false
 
   /// Initializes builder with video clips.
   ///
@@ -23,6 +24,16 @@ internal class VideoSequenceBuilder {
   /// - Returns: Self for chaining
   func setEnableAudio(_ enabled: Bool) -> VideoSequenceBuilder {
     self.enableAudio = enabled
+    return self
+  }
+
+  /// Ends each clip where both of its tracks still have content.
+  ///
+  /// - Parameter enabled: If true, a clip is cut back to the earlier of its
+  ///   video and audio track ends instead of spanning the longer one
+  /// - Returns: Self for chaining
+  func setTrimToCommonTrackEnd(_ enabled: Bool) -> VideoSequenceBuilder {
+    self.trimToCommonTrackEnd = enabled
     return self
   }
 
@@ -180,23 +191,22 @@ internal class VideoSequenceBuilder {
       // the insert but the ClipInstruction keeps the longer duration, creating a gap
       // where AVFoundation calls the compositor with no source frame available
       // (sourceTrackIDs empty), causing a RENDER_ERROR crash.
-      let videoTrackTimeRange: CMTimeRange
-      #if os(iOS)
-        if #available(iOS 15.0, *) {
-          videoTrackTimeRange = (try? await videoTrack.load(.timeRange)) ?? videoTrack.timeRange
-        } else {
-          videoTrackTimeRange = videoTrack.timeRange
-        }
-      #elseif os(macOS)
-        if #available(macOS 13.0, *) {
-          videoTrackTimeRange = (try? await videoTrack.load(.timeRange)) ?? videoTrack.timeRange
-        } else {
-          videoTrackTimeRange = videoTrack.timeRange
-        }
-      #endif
+      let videoTrackTimeRange = await TrackEndTrimmer.timeRange(of: videoTrack)
       let clampedRange = CMTimeRangeGetIntersection(
         rawClipTimeRange, otherRange: videoTrackTimeRange)
-      let clipTimeRange = clampedRange.duration > .zero ? clampedRange : rawClipTimeRange
+      var clipTimeRange = clampedRange.duration > .zero ? clampedRange : rawClipTimeRange
+
+      // The video clamp above leaves a range the audio track cannot fill when
+      // the two tracks end apart, `insertTimeRange` silently inserts what
+      // exists, and the export ends on a stretch of missing audio — the seam a
+      // looping player replays every cycle. Cut the clip back to where both
+      // tracks still have content instead.
+      if trimToCommonTrackEnd, enableAudio,
+        let trimmed = await TrackEndTrimmer.trimmedRange(
+          clipTimeRange, in: asset, label: "Clip \(index)")
+      {
+        clipTimeRange = trimmed
+      }
       let clipDuration = clipTimeRange.duration
       let insertStart = totalDuration
       let sourceRanges: [CMTimeRange]

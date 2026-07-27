@@ -1,3 +1,6 @@
+## 2.10.0
+- **FEAT**(iOS, macOS): Add `VideoRenderData.trimToCommonTrackEnd` (default `false`). Ends each clip where both its video and audio track still have content, so an export no longer finishes on a stretch of missing audio — the seam a looping player replays every cycle. Leave it off when a clip is meant to outlast its own audio.
+
 ## 2.9.0
 - **FEAT**(android): `RenderEncoderException` now carries `isTransient`. A render that failed because the device's codec resources were exhausted is flagged as retryable, so it can be told apart from a genuine format/encoder incompatibility, which is not. Covers a starved decoder as well as a starved encoder.
 - **FIX**(android): The software-encoder fallback no longer silently re-runs the hardware encoder under a `software-encoder` label. It is skipped with an explicit log line when the device has no usable software encoder.
