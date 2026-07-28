@@ -71,9 +71,7 @@ void main() {
     group('isTransparent', () {
       test('is false once a background is set', () {
         expect(
-          const ChromaKey(
-            backgroundColor: Color(0xFF123456),
-          ).isTransparent,
+          const ChromaKey(backgroundColor: Color(0xFF123456)).isTransparent,
           isFalse,
         );
         expect(

@@ -357,9 +357,7 @@ void main() {
             VideoSegment(
               video: secondSource,
               // Overrides the global red with a distinctly different fill.
-              chromaKey: const ChromaKey(
-                backgroundColor: Color(0xFFFFFFFF),
-              ),
+              chromaKey: const ChromaKey(backgroundColor: Color(0xFFFFFFFF)),
             ),
           ],
           chromaKey: const ChromaKey(backgroundColor: backgroundRed),
@@ -471,19 +469,13 @@ void main() {
 
       // Center of the subject: pink outfit, must not be keyed.
       final c = await samplePixel(out, 0.66, 0.45);
-      expect(
-        isRed(c),
-        isFalse,
-        reason: 'The subject was keyed away, got $c',
-      );
+      expect(isRed(c), isFalse, reason: 'The subject was keyed away, got $c');
     });
 
     testWidgets('rejects a frame that is not a screen', (_) async {
       // The plain demo video has no screen at all.
       expect(
-        () => ChromaKey.detect(
-          EditorVideo.asset(kVideoEditorExampleH264Path),
-        ),
+        () => ChromaKey.detect(EditorVideo.asset(kVideoEditorExampleH264Path)),
         throwsA(isA<ChromaKeyDetectionException>()),
       );
     });

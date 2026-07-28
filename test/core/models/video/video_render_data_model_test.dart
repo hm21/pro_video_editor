@@ -230,8 +230,10 @@ void main() {
     test('copyWith overrides and otherwise keeps the key', () {
       const other = ChromaKey(backgroundColor: Color(0xFF0000FF));
 
-      expect(buildData(chromaKey: key).copyWith(chromaKey: other).chromaKey,
-          other);
+      expect(
+        buildData(chromaKey: key).copyWith(chromaKey: other).chromaKey,
+        other,
+      );
       expect(buildData(chromaKey: key).copyWith().chromaKey, key);
     });
 

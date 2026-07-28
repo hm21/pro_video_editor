@@ -193,11 +193,7 @@ void main() {
 
       test('no frames at all', () {
         expect(
-          () => ChromaKeyDetector.fromFrames(
-            [],
-            width: width,
-            height: height,
-          ),
+          () => ChromaKeyDetector.fromFrames([], width: width, height: height),
           throwsA(isA<ChromaKeyDetectionException>()),
         );
       });

@@ -175,10 +175,11 @@ abstract final class ChromaKeyDetector {
       return sqrt(dcb * dcb + dcr * dcr);
     })..sort();
 
-    final spread = distances[(distances.length * 0.99).floor().clamp(
-      0,
-      distances.length - 1,
-    )];
+    final spread =
+        distances[(distances.length * 0.99).floor().clamp(
+          0,
+          distances.length - 1,
+        )];
 
     // Coverage uses a generous band around the median, so a soft edge counts
     // as screen while a wall or a sleeve does not.

@@ -214,13 +214,7 @@ class ChromaKey {
     // Sample across the clip so a subject that briefly touches an edge cannot
     // decide the result on its own.
     final duration = metadata.duration;
-    final at =
-        timestamps ??
-        [
-          duration * 0.25,
-          duration * 0.5,
-          duration * 0.75,
-        ];
+    final at = timestamps ?? [duration * 0.25, duration * 0.5, duration * 0.75];
 
     // Small, and at the source aspect ratio: `cover` then neither crops nor
     // pads, so the sampled ring really is the frame's own border.
@@ -262,11 +256,7 @@ class ChromaKey {
       throw const ChromaKeyDetectionException('Could not decode any frame');
     }
 
-    return ChromaKeyDetector.fromFrames(
-      buffers,
-      width: width,
-      height: height,
-    );
+    return ChromaKeyDetector.fromFrames(buffers, width: width, height: height);
   }
 
   /// The screen color to remove.
