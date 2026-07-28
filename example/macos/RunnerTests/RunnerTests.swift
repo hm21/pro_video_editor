@@ -542,3 +542,217 @@ enum ThumbnailTimestampFixture {
     return bestIndex
   }
 }
+
+// MARK: - Chroma key
+
+/// Cross-platform parity guard for the chroma-key formula.
+///
+/// The golden table below is duplicated verbatim in the Kotlin test
+/// (`android/src/test/.../ChromaKeyMathTest.kt`). Both run it against their own
+/// implementation — Swift's `chromaKeyed(r:g:b:_:)`, which is baked into the
+/// Core Image color cube, and Kotlin's `ChromaKeyMath`, which the GLSL shader
+/// mirrors. If either platform drifts, one of these two tests fails immediately
+/// instead of the difference surfacing later as "the key looks slightly
+/// different on Android".
+///
+/// **When you change the formula, regenerate both tables.**
+class ChromaKeyMathTests: XCTestCase {
+
+  /// The config the golden table was computed for: SMPTE green, defaults.
+  private let config = ChromaKeyConfig(
+    keyR: Double(0x00) / 255.0,
+    keyG: Double(0xB1) / 255.0,
+    keyB: Double(0x40) / 255.0,
+    similarity: 0.15,
+    smoothness: 0.08,
+    spill: 0.5,
+    backgroundColor: -1,
+    backgroundImageData: nil
+  )
+
+  private let tolerance = 1e-4
+
+  /// The same key with a different despill strength.
+  private func withSpill(_ spill: Double) -> ChromaKeyConfig {
+    ChromaKeyConfig(
+      keyR: config.keyR, keyG: config.keyG, keyB: config.keyB,
+      similarity: config.similarity, smoothness: config.smoothness,
+      spill: spill, backgroundColor: -1, backgroundImageData: nil)
+  }
+
+  private struct Golden {
+    let name: String
+    let r, g, b: Double
+    let outR, outG, outB, alpha: Double
+  }
+
+  private let golden: [Golden] = [
+    // The key color itself and its neighbourhood: removed completely.
+    Golden(name: "key color", r: 0.0, g: 0.694118, b: 0.25098,
+           outR: 0.218029, outG: 0.565088, outB: 0.343519, alpha: 0.0),
+    Golden(name: "near key", r: 0.05, g: 0.72, b: 0.28,
+           outR: 0.261122, outG: 0.595058, outB: 0.369608, alpha: 0.0),
+    Golden(name: "bright screen", r: 0.35, g: 0.9, b: 0.5,
+           outR: 0.525426, outG: 0.796183, outB: 0.574457, alpha: 0.0),
+    // Half-lit screen: past the default similarity, so only mostly removed.
+    // This is the documented brightness sensitivity, pinned on purpose.
+    Golden(name: "dim screen 50%", r: 0.0, g: 0.347059, b: 0.12549,
+           outR: 0.109015, outG: 0.282544, outB: 0.17176, alpha: 0.081671),
+    // Neutrals sit at the chroma origin, far from any saturated key.
+    Golden(name: "black", r: 0.0, g: 0.0, b: 0.0,
+           outR: 0.0, outG: 0.0, outB: 0.0, alpha: 1.0),
+    Golden(name: "mid gray", r: 0.5, g: 0.5, b: 0.5,
+           outR: 0.5, outG: 0.5, outB: 0.5, alpha: 1.0),
+    Golden(name: "white", r: 1.0, g: 1.0, b: 1.0,
+           outR: 1.0, outG: 1.0, outB: 1.0, alpha: 1.0),
+    // Skin tone — the calibration anchor quoted in the Dart docs.
+    Golden(name: "skin tone", r: 0.86, g: 0.65, b: 0.53,
+           outR: 0.86, outG: 0.65, outB: 0.53, alpha: 1.0),
+    Golden(name: "pure red", r: 1.0, g: 0.0, b: 0.0,
+           outR: 1.0, outG: 0.0, outB: 0.0, alpha: 1.0),
+    Golden(name: "pure blue", r: 0.0, g: 0.0, b: 1.0,
+           outR: 0.0, outG: 0.0, outB: 1.0, alpha: 1.0),
+    // Kept, but despilled: the green cast is pulled out at full alpha.
+    Golden(name: "green-spilled gray", r: 0.55, g: 0.75, b: 0.55,
+           outR: 0.616767, outG: 0.710487, outB: 0.578338, alpha: 1.0),
+    // Leans away from the key hue, so despill leaves it alone.
+    Golden(name: "magenta", r: 0.8, g: 0.2, b: 0.8,
+           outR: 0.8, outG: 0.2, outB: 0.8, alpha: 1.0),
+  ]
+
+  func testGoldenTableMatchesTheSharedFormula() {
+    for row in golden {
+      let out = chromaKeyed(r: row.r, g: row.g, b: row.b, config)
+      XCTAssertEqual(out.r, row.outR, accuracy: tolerance, "\(row.name): r")
+      XCTAssertEqual(out.g, row.outG, accuracy: tolerance, "\(row.name): g")
+      XCTAssertEqual(out.b, row.outB, accuracy: tolerance, "\(row.name): b")
+      XCTAssertEqual(out.a, row.alpha, accuracy: tolerance, "\(row.name): alpha")
+    }
+  }
+
+  func testKeyColorIsRemovedCompletely() {
+    let out = chromaKeyed(r: config.keyR, g: config.keyG, b: config.keyB, config)
+    XCTAssertEqual(out.a, 0.0, accuracy: tolerance)
+  }
+
+  func testSoftEdgeProducesPartialAlpha() {
+    // Walk the key color toward neutral gray and collect the alpha ramp.
+    let ramp: [Double] = (0...60).map { step in
+      let t = Double(step) / 60.0
+      return chromaKeyed(
+        r: config.keyR + (0.5 - config.keyR) * t,
+        g: config.keyG + (0.5 - config.keyG) * t,
+        b: config.keyB + (0.5 - config.keyB) * t,
+        config
+      ).a
+    }
+
+    XCTAssertTrue(ramp.contains(0.0), "expected a fully keyed sample")
+    XCTAssertTrue(ramp.contains(1.0), "expected a fully opaque sample")
+    XCTAssertTrue(
+      ramp.contains { $0 > 0.01 && $0 < 0.99 },
+      "expected a soft edge, but alpha jumped straight from 0 to 1")
+  }
+
+  func testSpillPullsTheKeyCastOutWithoutDarkening() {
+    let noSpill = withSpill(0.0)
+    let fullSpill = withSpill(1.0)
+
+    let without = chromaKeyed(r: 0.55, g: 0.75, b: 0.55, noSpill)
+    let with = chromaKeyed(r: 0.55, g: 0.75, b: 0.55, fullSpill)
+
+    let castBefore = without.g - max(without.r, without.b)
+    let castAfter = with.g - max(with.r, with.b)
+    XCTAssertLessThan(castAfter, castBefore, "despill did not reduce the green cast")
+
+    // Luma is preserved, so despill never darkens the subject.
+    XCTAssertEqual(
+      lumaOf(r: without.r, g: without.g, b: without.b),
+      lumaOf(r: with.r, g: with.g, b: with.b),
+      accuracy: 1e-3)
+  }
+
+  func testMatteIsBrightnessSensitiveAsDocumented() {
+    // Cb/Cr scale with brightness, so a dimly lit patch of the screen sits
+    // closer to neutral and further from the key point. The default similarity
+    // covers roughly 55%..100% of the reference brightness. Pinned because the
+    // Dart docs promise exactly this.
+    func screenAt(_ fraction: Double) -> Double {
+      chromaKeyed(
+        r: config.keyR * fraction, g: config.keyG * fraction,
+        b: config.keyB * fraction, config
+      ).a
+    }
+
+    XCTAssertEqual(screenAt(1.0), 0.0, accuracy: tolerance)
+    XCTAssertEqual(screenAt(0.55), 0.0, accuracy: tolerance)
+    XCTAssertGreaterThan(screenAt(0.5), 0.0, "a half-lit screen should start to survive")
+  }
+
+  func testNeutralKeyColorDisablesDespillInsteadOfDividingByZero() {
+    let gray = ChromaKeyConfig(
+      keyR: 0.5, keyG: 0.5, keyB: 0.5, similarity: 0.15, smoothness: 0.08,
+      spill: 1.0, backgroundColor: -1, backgroundImageData: nil)
+
+    XCTAssertEqual(gray.keyDirection.cb, 0.0, accuracy: tolerance)
+    XCTAssertEqual(gray.keyDirection.cr, 0.0, accuracy: tolerance)
+
+    let out = chromaKeyed(r: 0.8, g: 0.2, b: 0.4, gray)
+    XCTAssertFalse(out.r.isNaN || out.g.isNaN || out.b.isNaN || out.a.isNaN)
+  }
+
+  /// The cube is what actually runs on Apple, so verify it carries the same
+  /// numbers **and** that its entries are premultiplied, which `CIColorCube`
+  /// requires and which is the one place Apple and Android must differ.
+  func testCubeIsPremultipliedAndMatchesTheFormula() throws {
+    let size = 33
+    let data = try XCTUnwrap(
+      generateChromaLUTData(chroma: config, size: size))
+
+    XCTAssertEqual(data.count, size * size * size * 4 * MemoryLayout<Float>.size)
+
+    let floats: [Float] = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+
+    // Walk the cube's own sample grid, so no interpolation is involved.
+    for bi in stride(from: 0, to: size, by: 8) {
+      for gi in stride(from: 0, to: size, by: 8) {
+        for ri in stride(from: 0, to: size, by: 8) {
+          let rf = Double(ri) / Double(size - 1)
+          let gf = Double(gi) / Double(size - 1)
+          let bf = Double(bi) / Double(size - 1)
+          let expected = chromaKeyed(r: rf, g: gf, b: bf, config)
+
+          let offset = (bi * size * size + gi * size + ri) * 4
+          XCTAssertEqual(
+            Double(floats[offset]), expected.r * expected.a, accuracy: 1e-5)
+          XCTAssertEqual(
+            Double(floats[offset + 1]), expected.g * expected.a, accuracy: 1e-5)
+          XCTAssertEqual(
+            Double(floats[offset + 2]), expected.b * expected.a, accuracy: 1e-5)
+          XCTAssertEqual(Double(floats[offset + 3]), expected.a, accuracy: 1e-5)
+        }
+      }
+    }
+  }
+
+  /// A fully keyed entry must be `(0, 0, 0, 0)`, not `(rgb, 0)` — Core Image
+  /// would otherwise composite the key color back in at the edges.
+  func testFullyKeyedCubeEntriesAreZero() throws {
+    let size = 33
+    let data = try XCTUnwrap(
+      generateChromaLUTData(chroma: config, size: size))
+    let floats: [Float] = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+
+    // Nearest grid point to the key color.
+    let ri = Int((config.keyR * Double(size - 1)).rounded())
+    let gi = Int((config.keyG * Double(size - 1)).rounded())
+    let bi = Int((config.keyB * Double(size - 1)).rounded())
+    let offset = (bi * size * size + gi * size + ri) * 4
+
+    XCTAssertEqual(floats[offset + 3], 0.0, accuracy: 1e-5, "key should be fully removed")
+    XCTAssertEqual(floats[offset], 0.0, accuracy: 1e-5, "premultiplied red must be 0")
+    XCTAssertEqual(floats[offset + 1], 0.0, accuracy: 1e-5, "premultiplied green must be 0")
+    XCTAssertEqual(floats[offset + 2], 0.0, accuracy: 1e-5, "premultiplied blue must be 0")
+  }
+
+}

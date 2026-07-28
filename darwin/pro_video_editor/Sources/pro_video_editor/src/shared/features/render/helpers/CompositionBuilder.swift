@@ -14,6 +14,7 @@ internal class CompositionBuilder {
   private var enableAudio: Bool = true
   private var trimToCommonTrackEnd: Bool = false
   private var audioTracks: [AudioTrackConfig] = []
+  private var globalChromaKey: ChromaKeyConfig?
 
   /// Initializes builder with configuration.
   ///
@@ -53,13 +54,22 @@ internal class CompositionBuilder {
     return self
   }
 
+  /// Sets the chroma key applied to every clip that carries none of its own.
+  ///
+  /// - Parameter key: The global key, or nil for none
+  /// - Returns: Self for chaining
+  func setChromaKey(_ key: ChromaKeyConfig?) -> CompositionBuilder {
+    self.globalChromaKey = key
+    return self
+  }
+
   /// Builds the complete composition.
   ///
   /// - Returns: Tuple containing composition, video composition, render size, audio mix, source track ID, and temporary file URLs to clean up after export
   /// - Throws: Error if composition creation fails
   func build() async throws -> (
     AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID, [URL],
-    [FadeWindow]
+    [FadeWindow], [ChromaKeyWindow]
   ) {
     guard !videoClips.isEmpty else {
       throw NSError(
@@ -196,10 +206,46 @@ internal class CompositionBuilder {
     // Compute dip-to-color windows for fadeToBlack / fadeToWhite transitions.
     let fadeWindows = computeFadeWindows(clipInstructions: videoResult.clipInstructions)
 
+    // Resolve the chroma key per clip onto its span of the composition timeline.
+    let chromaKeyWindows = computeChromaKeyWindows(
+      clipInstructions: videoResult.clipInstructions)
+
     return (
       composition, videoCompositionData, videoResult.renderSize, audioMix, sourceTrackID,
-      temporaryAudioURLs, fadeWindows
+      temporaryAudioURLs, fadeWindows, chromaKeyWindows
     )
+  }
+
+  /// Builds the chroma-key windows from the per-clip instruction time ranges.
+  ///
+  /// Every composition frame belongs to exactly one clip instruction, so one
+  /// window per keyed clip covers the whole timeline — the compositor needs no
+  /// separate global fallback. A clip's own key wins over the global one.
+  ///
+  /// H.264/HEVC carry no alpha and the single-track path has nothing underneath,
+  /// so a key without a background is substituted with opaque black here. The
+  /// Android shader does the same (`applyChromaKey(flattenTransparency:)`), which
+  /// is what keeps the two platforms from diverging into "black" versus
+  /// "unchanged green".
+  private func computeChromaKeyWindows(clipInstructions: [ClipInstruction])
+    -> [ChromaKeyWindow]
+  {
+    var windows: [ChromaKeyWindow] = []
+    for (index, clip) in videoClips.enumerated() {
+      guard index < clipInstructions.count,
+        let key = clip.chromaKey ?? globalChromaKey
+      else { continue }
+
+      let effective = key.isTransparent ? key.withOpaqueBlackBackground() : key
+      let range = clipInstructions[index].timeRange
+      windows.append(
+        ChromaKeyWindow(
+          startUs: Int64(CMTimeGetSeconds(range.start) * 1_000_000),
+          endUs: Int64(CMTimeGetSeconds(CMTimeRangeGetEnd(range)) * 1_000_000),
+          config: effective
+        ))
+    }
+    return windows
   }
 
   /// Builds the dip-to-color windows for `fadeToBlack` / `fadeToWhite`

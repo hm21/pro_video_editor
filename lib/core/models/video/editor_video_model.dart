@@ -5,6 +5,10 @@ import '/core/platform/path/path_provider_helper.dart';
 import '/shared/utils/converters.dart';
 import '/shared/utils/file_constructor_utils.dart';
 
+/// Distinguishes temp files written within the same millisecond, so several
+/// sources resolved concurrently cannot collide on one path.
+int _tempFileCounter = 0;
+
 /// A model that encapsulates various ways to load and represent a video.
 ///
 /// This class supports videos from in-memory bytes, file system, network,
@@ -165,9 +169,15 @@ class EditorVideo {
       final directory = await getTemporaryDirectory();
 
       final now = DateTime.now().millisecondsSinceEpoch;
+      // A per-call counter on top of the timestamp. Several sources are
+      // routinely resolved concurrently (VideoRenderData.toAsyncMap awaits all
+      // of its segments together), and a millisecond is not fine enough to tell
+      // them apart — two of them would pick the same path, write over each
+      // other and end up as one clip.
+      final unique = _tempFileCounter++;
       // Preserve original file extension for proper format detection
       final extension = _getFileExtension();
-      filePath = '${directory.path}/media_$now.$extension';
+      filePath = '${directory.path}/media_${now}_$unique.$extension';
     }
 
     switch (typePreferredFile) {

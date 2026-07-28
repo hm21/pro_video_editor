@@ -26,6 +26,7 @@ import ch.waio.pro_video_editor.src.features.render.helpers.VideoReverser
 import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionGeometry
 import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionRenderer
 import ch.waio.pro_video_editor.src.features.render.helpers.MediaInfoExtractor
+import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
 import ch.waio.pro_video_editor.src.features.render.models.CodecResourceExhaustedException
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderJobHandle
@@ -89,7 +90,17 @@ class RenderVideo(private val context: Context) {
         val hasBlur = config.blur != null && config.blur > 0.0
         val hasColorFilters = config.colorFilters.isNotEmpty()
 
-        return hasImageLayers || hasBlur || hasColorFilters
+        // The chroma key is an ES 2.0 SDR shader, so a 10-bit HDR source has to
+        // be transcoded down first. Checked at every level it can be set:
+        // globally, per clip, and — for the layered path — per layer and per
+        // layer clip.
+        val hasChromaKey = config.chromaKey != null ||
+                config.videoClips.any { it.chromaKey != null } ||
+                config.composition?.layers?.any { layer ->
+                    layer.chromaKey != null || layer.clips.any { it.chromaKey != null }
+                } == true
+
+        return hasImageLayers || hasBlur || hasColorFilters || hasChromaKey
     }
 
     /**
@@ -502,6 +513,7 @@ class RenderVideo(private val context: Context) {
                         inputPath = rendered.outputPath,
                         startUs = 0L,
                         endUs = rendered.durationUs.takeIf { it > 0 },
+                        chromaKey = blendChromaKey(current, next, "$i"),
                     )
                 )
                 // Trim the incoming head in place; it keeps its own speed/transition.
@@ -592,6 +604,7 @@ class RenderVideo(private val context: Context) {
                             inputPath = rendered.outputPath,
                             startUs = 0L,
                             endUs = rendered.durationUs.takeIf { it > 0 },
+                            chromaKey = blendChromaKey(last, first, "loop wrap"),
                         )
                     )
                 } else {
@@ -603,6 +616,30 @@ class RenderVideo(private val context: Context) {
         }
 
         return result
+    }
+
+    /**
+     * The chroma key to apply to a pre-rendered overlap blend.
+     *
+     * The blend is composed from the raw sources by [ClipTransitionRenderer],
+     * which knows nothing about keying, so the key has to be re-applied to its
+     * output. That only has a defined meaning when both sides key the same way:
+     * blending a keyed clip with an unkeyed one produces mixed colors that no
+     * single key can undo. Mismatched sides are therefore left unkeyed and
+     * reported, rather than silently keyed with one side's settings.
+     */
+    private fun blendChromaKey(
+        outgoing: VideoClip,
+        incoming: VideoClip,
+        boundary: String,
+    ): ChromaKeyConfig? {
+        if (outgoing.chromaKey == incoming.chromaKey) return outgoing.chromaKey
+        Log.w(
+            RENDER_TAG,
+            "Chroma key: the two clips at boundary $boundary use different keys; " +
+                "the pre-rendered transition blend is emitted unkeyed"
+        )
+        return null
     }
 
     /**

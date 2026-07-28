@@ -47,6 +47,15 @@ public struct VideoCompositorConfig {
   /// Dip-to-color windows for `fadeToBlack` / `fadeToWhite` clip transitions.
   var fadeWindows: [FadeWindow] = []
 
+  /// Chroma-key windows for the **single-track** path, one per clip that
+  /// carries a key.
+  ///
+  /// Always empty on the layered path, where the key lives on each
+  /// `LayerPlacement` instead: there, every layer is keyed on its own source
+  /// frame before it reaches the canvas, and keying the composed (opaque)
+  /// canvas afterwards would be meaningless.
+  var chromaKeyWindows: [ChromaKeyWindow] = []
+
   var videoRotationDegrees: Double = 0.0
   var shouldApplyOrientationCorrection: Bool = false
 

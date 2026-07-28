@@ -1,3 +1,10 @@
+## 2.11.0
+- **FEAT**(android, iOS, macOS): Add `ChromaKey` — green-screen removal with a soft edge and spill suppression. The keyed area becomes a `backgroundColor`, a `backgroundImage`, or (in a `VideoComposition`) the layer below, so a video can sit behind the screen. Settable on `VideoRenderData`, `VideoLayer` and `VideoSegment`, resolved per clip as segment → layer → global. Note that H.264/HEVC carry no alpha: on the single-track `videoSegments` path a key without a background is flattened to black.
+- **FEAT**: `ChromaKey.autoDetect(video)` measures the key color and `similarity` off the footage, for any saturated screen hue. A constant key sits beside the *recorded* screen and has to spend on `similarity` the margin that protects the subject. `ChromaKey.detect` returns the raw measurement. Costs one thumbnail decode, no render.
+- **FEAT**: `ChromaKey.greenScreen()` and `ChromaKey.blueScreen()` presets. Blue separates skin better but crowds denim, blue eyes and light blue shirts, so it keys tighter and despills more gently.
+- **FIX**(android): A `VideoComposition` layer no longer squares its own alpha. `VideoCompositionTransformation` blended against an already-transparent framebuffer, which thinned any partially transparent edge.
+- **FIX**(android, iOS, macOS): Two sources resolved in the same millisecond no longer collide on one temp file in `EditorVideo.safeFilePath`.
+
 ## 2.10.0
 - **FEAT**(iOS, macOS): Add `VideoRenderData.trimToCommonTrackEnd` (default `false`). Ends each clip where both its video and audio track still have content, so an export no longer finishes on a stretch of missing audio — the seam a looping player replays every cycle. Leave it off when a clip is meant to outlast its own audio.
 

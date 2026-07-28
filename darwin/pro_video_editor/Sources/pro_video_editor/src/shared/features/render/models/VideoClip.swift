@@ -18,6 +18,9 @@ internal struct VideoClip: Sendable {
   /// Placement of this clip within the composition canvas (composition only).
   /// Overrides the layer transform. `nil` = use the layer transform.
   let transform: SegmentTransformConfig?
+  /// Removes a solid-colored background from this clip. Overrides the layer's
+  /// and the global key. `nil` = fall back to those.
+  let chromaKey: ChromaKeyConfig?
 
   init(
     inputPath: String,
@@ -28,7 +31,8 @@ internal struct VideoClip: Sendable {
     reverseVideo: Bool = false,
     transition: ClipTransitionConfig? = nil,
     timelineStartUs: Int64? = nil,
-    transform: SegmentTransformConfig? = nil
+    transform: SegmentTransformConfig? = nil,
+    chromaKey: ChromaKeyConfig? = nil
   ) {
     self.inputPath = inputPath
     self.startUs = startUs
@@ -39,6 +43,7 @@ internal struct VideoClip: Sendable {
     self.transition = transition
     self.timelineStartUs = timelineStartUs
     self.transform = transform
+    self.chromaKey = chromaKey
   }
 
   /// Parses a clip from a platform-channel map. Used by both the single-track
@@ -58,6 +63,9 @@ internal struct VideoClip: Sendable {
       timelineStartUs: (clipMap["timelineStartUs"] as? NSNumber)?.int64Value,
       transform: SegmentTransformConfig.fromArguments(
         clipMap["transform"] as? [String: Any]
+      ),
+      chromaKey: ChromaKeyConfig.fromArguments(
+        clipMap["chromaKey"] as? [String: Any]
       )
     )
   }

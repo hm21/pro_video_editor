@@ -69,7 +69,8 @@ fun applyComposition(
             imageLayers = imageLayerConfigs,
             audioTracks = config.audioTracks,
             globalStartUs = config.startUs,
-            globalEndUs = config.endUs
+            globalEndUs = config.endUs,
+            globalChromaKey = config.chromaKey
         )
         return CompositionResult(
             layeredBuilder.build(),

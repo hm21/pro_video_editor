@@ -137,10 +137,22 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// Dip-to-color windows for fadeToBlack / fadeToWhite clip transitions
   private var fadeWindows: [FadeWindow] = []
 
-  /// Cache for computed LUTs keyed by active filter indices
+  /// Per-clip chroma-key windows (single-track path).
+  private var chromaKeyWindows: [ChromaKeyWindow] = []
+
+  /// Decoded chroma-key background images, keyed by config, so a background is
+  /// decoded once per render rather than once per frame.
+  private var chromaBackgroundCache: [String: CIImage] = [:]
+
+  /// Cache for computed LUTs keyed by the active chroma key and filter indices
   private let lutCacheQueue = DispatchQueue(label: "lut.cache.queue")
   private var lutCache: [String: (data: Data, size: Int)] = [:]
+  /// Insertion order of `lutCache`, so the oldest entry can be evicted.
+  private var lutCacheOrder: [String] = []
   private let defaultLutSize = 33
+  /// A 33³ cube is 574 KB; a long timeline with many distinct keys and filters
+  /// would otherwise accumulate one per combination.
+  private let lutCacheLimit = 8
 
   static var config = VideoCompositorConfig()
 
@@ -176,6 +188,23 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     self.setOverlayImageLayers(from: config.imageLayerConfigs)
     self.colorFilterConfigs = config.colorFilterConfigs
     self.fadeWindows = config.fadeWindows
+    self.chromaKeyWindows = config.chromaKeyWindows
+  }
+
+  /// The chroma key active at the given composition time, if any.
+  ///
+  /// Windows are per clip and never overlap, so the first match wins.
+  private func activeChromaKey(at compositionTime: CMTime) -> ChromaKeyConfig? {
+    guard !chromaKeyWindows.isEmpty else { return nil }
+    let tUs = Int64(CMTimeGetSeconds(compositionTime) * 1_000_000)
+    for window in chromaKeyWindows
+    where window.endUs > window.startUs && tUs >= window.startUs && tUs < window.endUs {
+      return window.config
+    }
+    // The last frame of the timeline lands exactly on the final window's end,
+    // so clamp to it rather than emitting one unkeyed frame.
+    if let last = chromaKeyWindows.last, tUs >= last.endUs { return last.config }
+    return nil
   }
 
   /// Applies a dip-to-color (fade-to-black / fade-to-white) at the given
@@ -261,8 +290,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     }
   }
 
-  /// Computes the LUT for a given set of active color filter indices.
-  /// Results are cached so that each unique combination is only computed once.
+  /// Computes the color-filter cube active at the given composition time.
+  ///
+  /// Results are cached so each unique combination is built only once.
   private func getLUTForActiveFilters(at compositionTime: CMTime) -> (data: Data, size: Int)? {
     guard !colorFilterConfigs.isEmpty else { return nil }
 
@@ -279,7 +309,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     }
 
     guard !activeIndices.isEmpty else { return nil }
-    let cacheKey = activeIndices.map { String($0) }.joined(separator: ",")
+    let cacheKey = "cf:" + activeIndices.map { String($0) }.joined(separator: ",")
 
     // Check cache
     var cached: (data: Data, size: Int)?
@@ -293,16 +323,24 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     let activeMatrices = activeIndices.map { colorFilterConfigs[$0].matrix }
     let combined = combineColorMatrices(activeMatrices)
     guard combined.count == 20 else { return nil }
-    guard let data = generateLUTData(from: combined, size: defaultLutSize) else { return nil }
+    guard let data = generateLUTData(from: combined, size: defaultLutSize) else {
+      return nil
+    }
 
     let result = (data: data, size: defaultLutSize)
     lutCacheQueue.sync {
-      lutCache[cacheKey] = result
+      if lutCache[cacheKey] == nil {
+        lutCache[cacheKey] = result
+        lutCacheOrder.append(cacheKey)
+        while lutCacheOrder.count > lutCacheLimit {
+          lutCache.removeValue(forKey: lutCacheOrder.removeFirst())
+        }
+      }
     }
     return result
   }
 
-  /// Applies the LUT for active color filters at the given composition time.
+  /// Applies the active color cube at the given composition time.
   private func applyColorFilter(to image: CIImage, at compositionTime: CMTime) -> CIImage {
     guard let lut = getLUTForActiveFilters(at: compositionTime),
       let lutFilter = CIFilter(name: "CIColorCube")
@@ -313,6 +351,133 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     lutFilter.setValue(lut.data, forKey: "inputCubeData")
     lutFilter.setValue(image, forKey: kCIInputImageKey)
     return lutFilter.outputImage ?? image
+  }
+
+  /// Applies a chroma key as its own color cube.
+  ///
+  /// The cube encodes the whole key — matte alpha *and* despilled color — since
+  /// both are pure functions of the input RGB. Entries are premultiplied, as
+  /// `CIColorCube` requires. Cached like the color-filter cube.
+  private func applyChromaKeyCube(to image: CIImage, _ config: ChromaKeyConfig) -> CIImage {
+    let cacheKey = "ck:\(config.cacheKey)"
+
+    var cached: (data: Data, size: Int)?
+    lutCacheQueue.sync { cached = lutCache[cacheKey] }
+
+    let lut: (data: Data, size: Int)
+    if let cached = cached {
+      lut = cached
+    } else {
+      guard
+        let data = generateChromaLUTData(chroma: config, size: defaultLutSize)
+      else { return image }
+      lut = (data: data, size: defaultLutSize)
+      lutCacheQueue.sync {
+        if lutCache[cacheKey] == nil {
+          lutCache[cacheKey] = lut
+          lutCacheOrder.append(cacheKey)
+          while lutCacheOrder.count > lutCacheLimit {
+            lutCache.removeValue(forKey: lutCacheOrder.removeFirst())
+          }
+        }
+      }
+    }
+
+    guard let filter = CIFilter(name: "CIColorCube") else { return image }
+    filter.setValue(lut.size, forKey: "inputCubeDimension")
+    filter.setValue(lut.data, forKey: "inputCubeData")
+    filter.setValue(image, forKey: kCIInputImageKey)
+    return filter.outputImage ?? image
+  }
+
+  /// Removes the chroma key from a source frame and fills the keyed area.
+  ///
+  /// Runs on the **raw source frame**, before crop, rotation, flip and scale.
+  /// Three reasons:
+  ///
+  /// 1. It is a single insertion point that covers both branches of the
+  ///    `imageBytesWithCropping` split, where the color filter is duplicated.
+  ///    Applying it inside `applyColorFilter` instead would place it before the
+  ///    crop in one branch and after it in the other, so a background *image*
+  ///    would be cropped along with the video in one case and not the other.
+  /// 2. It matches the Android ordering exactly: there the chroma shader is
+  ///    first in the per-clip chain and `SingleColorLut` grades whatever it
+  ///    produced — so a color filter grades the substituted background too.
+  ///    Folding the filter into the key's own cube instead would grade only the
+  ///    video and leave the background at its raw color.
+  /// 3. It keys unresampled pixels, which keeps the soft edge crisp.
+  ///
+  /// Chaining the color filter's own `CIColorCube` afterwards is safe precisely
+  /// because the background has already been composited: the frame is opaque
+  /// again, so the second cube resetting alpha from its own data changes
+  /// nothing. Without a background it would un-key the frame — which is why the
+  /// single-track path substitutes opaque black for a transparent key, and why
+  /// the layered path keys inside `composeLayered` instead.
+  private func applyChromaKeyStage(to image: CIImage, at compositionTime: CMTime)
+    -> CIImage
+  {
+    guard let chroma = activeChromaKey(at: compositionTime) else { return image }
+    return compositeChromaBackground(applyChromaKeyCube(to: image, chroma), chroma)
+  }
+
+  /// Fills the keyed-out area with the key's background.
+  ///
+  /// A nil background leaves the image transparent, which only carries meaning
+  /// on the layered path — the single-track path substitutes opaque black long
+  /// before this, in `CompositionBuilder.computeChromaKeyWindows`.
+  private func compositeChromaBackground(_ image: CIImage, _ config: ChromaKeyConfig)
+    -> CIImage
+  {
+    let extent = image.extent
+    guard extent.width > 0, extent.height > 0 else { return image }
+
+    if let background = chromaBackgroundImage(for: config) {
+      return image.composited(over: scaleToFill(background, extent))
+    }
+
+    guard config.backgroundColor != -1 else { return image }
+    let argb = config.backgroundColor
+    let color = CIColor(
+      red: CGFloat((argb >> 16) & 0xFF) / 255.0,
+      green: CGFloat((argb >> 8) & 0xFF) / 255.0,
+      blue: CGFloat(argb & 0xFF) / 255.0,
+      alpha: CGFloat((argb >> 24) & 0xFF) / 255.0)
+    return image.composited(over: CIImage(color: color).cropped(to: extent))
+  }
+
+  /// Stretches [image] to exactly cover [extent].
+  ///
+  /// Matches `ImageLayer`'s "no offset means stretch to the frame" semantics and
+  /// the Android shader, which samples the background with the frame's own
+  /// texture coordinates.
+  private func scaleToFill(_ image: CIImage, _ extent: CGRect) -> CIImage {
+    let source = image.extent
+    guard source.width > 0, source.height > 0 else { return image }
+    let scaled = image.transformed(
+      by: CGAffineTransform(
+        scaleX: extent.width / source.width, y: extent.height / source.height))
+    return scaled.transformed(
+      by: CGAffineTransform(
+        translationX: extent.minX - scaled.extent.minX,
+        y: extent.minY - scaled.extent.minY))
+  }
+
+  /// The decoded background image for [config], decoded once and cached.
+  private func chromaBackgroundImage(for config: ChromaKeyConfig) -> CIImage? {
+    guard let data = config.backgroundImageData else { return nil }
+    if let cached = chromaBackgroundCache[config.cacheKey] { return cached }
+
+    #if os(iOS)
+      guard let image = UIImage(data: data), let cgImage = image.cgImage else { return nil }
+    #elseif os(macOS)
+      guard let image = NSImage(data: data),
+        let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+      else { return nil }
+    #endif
+
+    let ciImage = CIImage(cgImage: cgImage)
+    chromaBackgroundCache[config.cacheKey] = ciImage
+    return ciImage
   }
 
   private let context = CIContext(options: [
@@ -353,6 +518,15 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     for placement in instruction.layerPlacements {
       guard let buffer = request.sourceFrame(byTrackID: placement.trackID) else { continue }
       var img = CIImage(cvPixelBuffer: buffer)
+
+      // 0. Remove this layer's chroma key on its raw source frame, before any
+      //    orientation or scaling. A key without a background stays transparent
+      //    here — unlike the single-track path, there really is something
+      //    underneath, and step 5's composite lets it show through.
+      if let key = placement.chromaKey {
+        img = applyChromaKeyCube(to: img, key)
+        img = compositeChromaBackground(img, key)
+      }
 
       // 1. Orient using the source preferred transform (rotation + mirror
       //    metadata), then normalize the extent back to the origin.
@@ -567,6 +741,11 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         }
       }
     }
+
+    // Remove the chroma key on the raw source frame, before any geometry, and
+    // fill the keyed area with its background. One insertion point for both
+    // branches of the imageBytesWithCropping split below.
+    outputImage = applyChromaKeyStage(to: outputImage, at: request.compositionTime)
 
     var center = CGPoint(x: outputImage.extent.midX, y: outputImage.extent.midY)
 

@@ -118,7 +118,8 @@ class RenderVideo {
                 volume: clip.volume,
                 playbackSpeed: clip.playbackSpeed,
                 reverseVideo: clip.reverseVideo,
-                transition: clip.transition
+                transition: clip.transition,
+                chromaKey: clip.chromaKey
               )
             }
             return clip
@@ -193,12 +194,13 @@ class RenderVideo {
           let buildResult:
             (
               AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID,
-              [URL], [FadeWindow]
+              [URL], [FadeWindow], [ChromaKeyWindow]
             )
           if let compositionConfig = workingConfig.composition {
             buildResult = try await LayeredCompositionBuilder(composition: compositionConfig)
               .setEnableAudio(workingConfig.enableAudio)
               .setAudioTracks(workingConfig.audioTracks)
+              .setChromaKey(workingConfig.chromaKey)
               .build()
           } else {
             buildResult = try await applyComposition(
@@ -206,12 +208,13 @@ class RenderVideo {
               videoEffects: effectsConfig,
               enableAudio: workingConfig.enableAudio,
               audioTracks: workingConfig.audioTracks,
-              trimToCommonTrackEnd: workingConfig.trimToCommonTrackEnd
+              trimToCommonTrackEnd: workingConfig.trimToCommonTrackEnd,
+              chromaKey: workingConfig.chromaKey
             )
           }
           let (
             composition, videoCompData, renderSize, audioMix, sourceTrackID, audioTempURLs,
-            fadeWindows
+            fadeWindows, chromaKeyWindows
           ) = buildResult
           temporaryAudioURLs = audioTempURLs
           var videoCompConfig = videoCompData
@@ -265,6 +268,11 @@ class RenderVideo {
           applyScale(
             config: &effectsConfig, scaleX: workingConfig.scaleX,
             scaleY: workingConfig.scaleY)
+          // Before applyColorMatrix, because the key must run on the original
+          // colors — the compositor folds both into one color cube, since a
+          // second CIColorCube would take its alpha from its own cube and
+          // silently un-key the frame.
+          applyChromaKey(config: &effectsConfig, windows: chromaKeyWindows)
           applyColorMatrix(
             config: &effectsConfig,
             filters: workingConfig.colorFilters)
@@ -429,13 +437,6 @@ class RenderVideo {
   }
 
   // MARK: - Helper Methods
-
-  private static func hasGpuIntensiveEffects(_ config: RenderConfig) -> Bool {
-    let hasImageOverlay = !config.imageLayers.isEmpty
-    let hasBlur = config.blur != nil && config.blur! > 0
-    let hasColorFilter = !config.colorFilters.isEmpty
-    return hasImageOverlay || hasBlur || hasColorFilter
-  }
 
   private static func makeVideoCompositorSubclass(with config: VideoCompositorConfig)
     -> AVVideoCompositing.Type
@@ -682,15 +683,17 @@ class RenderVideo {
           VideoClip(
             inputPath: current.inputPath, startUs: curStart, endUs: curEnd - tailSrc,
             volume: current.volume, playbackSpeed: current.playbackSpeed,
-            reverseVideo: false, transition: nil))
+            reverseVideo: false, transition: nil, chromaKey: current.chromaKey))
         result.append(
           VideoClip(
-            inputPath: rendered.outputURL.path, startUs: 0, endUs: rendered.durationUs))
+            inputPath: rendered.outputURL.path, startUs: 0, endUs: rendered.durationUs,
+            chromaKey: blendChromaKey(current, next!, boundary: "\(i)")))
         // Trim the incoming head in place; it keeps its own speed/transition.
         work[i + 1] = VideoClip(
           inputPath: next!.inputPath, startUs: nextStart + headSrc, endUs: nextEnd,
           volume: next!.volume, playbackSpeed: next!.playbackSpeed,
-          reverseVideo: next!.reverseVideo, transition: next!.transition)
+          reverseVideo: next!.reverseVideo, transition: next!.transition,
+          chromaKey: next!.chromaKey)
       } else {
         PluginLog.print("⚠️ Transition render failed at boundary \(i); hard cut")
         appendClip(clearedOverlap(current))
@@ -763,21 +766,23 @@ class RenderVideo {
             result[0] = VideoClip(
               inputPath: first.inputPath, startUs: firstStart + headSrc,
               endUs: lastEnd - tailSrc, volume: first.volume,
-              playbackSpeed: first.playbackSpeed, reverseVideo: false, transition: nil)
+              playbackSpeed: first.playbackSpeed, reverseVideo: false, transition: nil,
+              chromaKey: first.chromaKey)
           } else {
             result[0] = VideoClip(
               inputPath: first.inputPath, startUs: firstStart + headSrc,
               endUs: first.endUs, volume: first.volume,
               playbackSpeed: first.playbackSpeed, reverseVideo: false,
-              transition: first.transition)
+              transition: first.transition, chromaKey: first.chromaKey)
             result[lastIdx] = VideoClip(
               inputPath: last.inputPath, startUs: last.startUs, endUs: lastEnd - tailSrc,
               volume: last.volume, playbackSpeed: last.playbackSpeed,
-              reverseVideo: false, transition: nil)
+              reverseVideo: false, transition: nil, chromaKey: last.chromaKey)
           }
           result.append(
             VideoClip(
-              inputPath: rendered.outputURL.path, startUs: 0, endUs: rendered.durationUs))
+              inputPath: rendered.outputURL.path, startUs: 0, endUs: rendered.durationUs,
+              chromaKey: blendChromaKey(last, first, boundary: "loop wrap")))
         } else {
           PluginLog.print("⚠️ Loop wrap render failed; seamless loop skipped")
         }
@@ -796,7 +801,25 @@ class RenderVideo {
     return VideoClip(
       inputPath: clip.inputPath, startUs: clip.startUs, endUs: clip.endUs,
       volume: clip.volume, playbackSpeed: clip.playbackSpeed,
-      reverseVideo: clip.reverseVideo, transition: nil)
+      reverseVideo: clip.reverseVideo, transition: nil, chromaKey: clip.chromaKey)
+  }
+
+  /// The chroma key to apply to a pre-rendered overlap blend.
+  ///
+  /// The blend is composed from the raw sources by `ClipTransitionRenderer`,
+  /// which knows nothing about keying, so the key has to be re-applied to its
+  /// output. That only has a defined meaning when both sides key the same way:
+  /// blending a keyed clip with an unkeyed one produces mixed colors that no
+  /// single key can undo. Mismatched sides are therefore left unkeyed and
+  /// reported, rather than silently keyed with one side's settings.
+  private static func blendChromaKey(
+    _ outgoing: VideoClip, _ incoming: VideoClip, boundary: String
+  ) -> ChromaKeyConfig? {
+    if outgoing.chromaKey == incoming.chromaKey { return outgoing.chromaKey }
+    PluginLog.print(
+      "⚠️ Chroma key: the two clips at boundary \(boundary) use different keys; "
+        + "the pre-rendered transition blend is emitted unkeyed")
+    return nil
   }
 
   /// Loads a clip's total duration in microseconds.

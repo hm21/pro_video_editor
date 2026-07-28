@@ -18,9 +18,16 @@ import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 /// clip provides its own [VideoSegment.transform], placed using [transform].
 class VideoLayer {
   /// Creates a [VideoLayer] from a list of [clips].
-  const VideoLayer({required this.clips, this.opacity = 1.0, this.transform})
-    : assert(clips.length > 0, 'A layer must contain at least one clip'),
-      assert(opacity >= 0 && opacity <= 1, '[opacity] must be between 0 and 1');
+  const VideoLayer({
+    required this.clips,
+    this.opacity = 1.0,
+    this.transform,
+    this.chromaKey,
+  }) : assert(clips.length > 0, 'A layer must contain at least one clip'),
+       assert(
+         opacity >= 0 && opacity <= 1,
+         '[opacity] must be between 0 and 1',
+       );
 
   /// The time-ordered sequence of clips on this layer.
   final List<VideoSegment> clips;
@@ -37,9 +44,21 @@ class VideoLayer {
   /// clips fill the entire canvas unless they define their own transform.
   final SegmentTransform? transform;
 
+  /// Default chroma key for the clips on this layer.
+  ///
+  /// This is a **default for the clips**, not a post-composite effect: each
+  /// clip is keyed on its own source frame, before it is placed on the canvas.
+  /// A clip with its own [VideoSegment.chromaKey] overrides this; when neither
+  /// is set, the clip falls back to [VideoRenderData.chromaKey].
+  ///
+  /// Since the keyed area is transparent by default, the layer below shows
+  /// through — which is how you put a video behind a green screen.
+  final ChromaKey? chromaKey;
+
   /// Converts this layer to a map for platform channel communication.
   ///
-  /// Resolves each clip's input path, so this is asynchronous.
+  /// Resolves each clip's input path and any chroma-key background image, so
+  /// this is asynchronous.
   Future<Map<String, dynamic>> toAsyncMap() async {
     assert(
       clips.every((c) => c.transition == null),
@@ -57,6 +76,7 @@ class VideoLayer {
       'clips': await Future.wait(clips.map((clip) => clip.toAsyncMap())),
       'opacity': opacity,
       'transform': transform?.toMap(),
+      'chromaKey': await chromaKey?.toAsyncMap(),
     };
   }
 
@@ -65,11 +85,13 @@ class VideoLayer {
     List<VideoSegment>? clips,
     double? opacity,
     SegmentTransform? transform,
+    ChromaKey? chromaKey,
   }) {
     return VideoLayer(
       clips: clips ?? this.clips,
       opacity: opacity ?? this.opacity,
       transform: transform ?? this.transform,
+      chromaKey: chromaKey ?? this.chromaKey,
     );
   }
 
@@ -78,6 +100,7 @@ class VideoLayer {
       'clips': clips.map((x) => x.toMap()).toList(),
       'opacity': opacity,
       'transform': transform?.toMap(),
+      'chromaKey': chromaKey?.toMap(),
     };
   }
 
@@ -92,6 +115,9 @@ class VideoLayer {
       transform: map['transform'] != null
           ? SegmentTransform.fromMap(map['transform'] as Map<String, dynamic>)
           : null,
+      chromaKey: map['chromaKey'] != null
+          ? ChromaKey.fromMap(map['chromaKey'] as Map<String, dynamic>)
+          : null,
     );
   }
 
@@ -102,7 +128,8 @@ class VideoLayer {
 
   @override
   String toString() =>
-      'VideoLayer(clips: $clips, opacity: $opacity, transform: $transform)';
+      'VideoLayer(clips: $clips, opacity: $opacity, transform: $transform, '
+      'chromaKey: $chromaKey)';
 
   @override
   bool operator ==(covariant VideoLayer other) {
@@ -110,9 +137,14 @@ class VideoLayer {
 
     return listEquals(other.clips, clips) &&
         other.opacity == opacity &&
-        other.transform == transform;
+        other.transform == transform &&
+        other.chromaKey == chromaKey;
   }
 
   @override
-  int get hashCode => clips.hashCode ^ opacity.hashCode ^ transform.hashCode;
+  int get hashCode =>
+      clips.hashCode ^
+      opacity.hashCode ^
+      transform.hashCode ^
+      chromaKey.hashCode;
 }

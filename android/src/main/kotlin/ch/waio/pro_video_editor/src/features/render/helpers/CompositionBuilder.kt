@@ -77,6 +77,7 @@ class CompositionBuilder(
             .setRotation(rotationDegrees)
             .setFlip(config.flipX, config.flipY)
             .setScale(config.scaleX, config.scaleY)
+            .setChromaKey(config.chromaKey)
             .setOutputResolution(config.outputWidth, config.outputHeight)
             .setCrop(config.cropWidth, config.cropHeight, config.cropX, config.cropY)
             .setTimedImageLayers(config.imageLayers.map { imageLayer ->

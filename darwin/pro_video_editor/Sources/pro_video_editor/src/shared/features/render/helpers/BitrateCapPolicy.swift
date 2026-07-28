@@ -62,6 +62,7 @@ internal enum BitrateCapPolicy {
       config.maxFrameRate == nil,
       config.playbackSpeed == nil || config.playbackSpeed == 1.0,
       config.blur == nil || config.blur == 0,
+      config.chromaKey == nil,
       config.startUs == nil, config.endUs == nil
     else { return false }
 
@@ -71,5 +72,6 @@ internal enum BitrateCapPolicy {
       && (clip.volume == nil || clip.volume == 1.0)
       && (clip.playbackSpeed == nil || clip.playbackSpeed == 1.0)
       && !clip.reverseVideo
+      && clip.chromaKey == nil
   }
 }

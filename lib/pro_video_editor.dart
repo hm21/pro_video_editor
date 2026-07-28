@@ -15,6 +15,8 @@ export 'features/audio/models/waveform_style.dart';
 export 'core/models/image/editor_layer_image_model.dart';
 export 'core/models/image/image_layer_model.dart';
 export 'core/models/image/layer_animation_model.dart';
+export 'core/models/video/chroma_key_model.dart';
+export 'core/utils/chroma_key_detector.dart';
 export 'core/models/video/color_filter_model.dart';
 export 'core/models/video/progress_model.dart';
 export 'core/models/video/editor_video_model.dart';

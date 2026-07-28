@@ -36,6 +36,7 @@ class VideoRenderData {
     this.colorFilters = const [],
     this.audioTracks = const [],
     this.blur,
+    this.chromaKey,
     this.bitrate,
     this.maxFrameRate,
     this.shouldOptimizeForNetworkUse = false,
@@ -64,6 +65,16 @@ class VideoRenderData {
        assert(
          maxFrameRate == null || maxFrameRate > 0,
          '[maxFrameRate] must be greater than 0',
+       ),
+       assert(
+         composition != null || chromaKey == null || !chromaKey.isTransparent,
+         'A [chromaKey] without a background needs something underneath to '
+         'show through, and videoSegments is a single track with nothing '
+         'below it — H.264/HEVC carry no alpha, so the keyed area would be '
+         'flattened to black. Set chromaKey.backgroundColor or '
+         'chromaKey.backgroundImage, or use composition and put the keyed '
+         'clip on a layer above another one. Pass '
+         'backgroundColor: Color(0xFF000000) if you really do want black.',
        );
 
   /// Creates a [VideoRenderData] with a predefined quality preset.
@@ -96,6 +107,7 @@ class VideoRenderData {
     Duration? startTime,
     Duration? endTime,
     double? blur,
+    ChromaKey? chromaKey,
     int? bitrateOverride,
     int? maxFrameRate,
     List<ColorFilter> colorFilters = const [],
@@ -118,6 +130,7 @@ class VideoRenderData {
       startTime: startTime,
       endTime: endTime,
       blur: blur,
+      chromaKey: chromaKey,
       bitrate: bitrateOverride ?? qualityConfig.bitrate,
       maxFrameRate: maxFrameRate,
       colorFilters: colorFilters,
@@ -233,6 +246,22 @@ class VideoRenderData {
   ///
   /// Higher values result in a stronger blur effect.
   final double? blur;
+
+  /// Removes a solid-colored background ("green screen") from the video.
+  ///
+  /// Applies to every clip that does not carry its own key: a
+  /// [VideoSegment.chromaKey] overrides this, and inside a [composition] a
+  /// [VideoLayer.chromaKey] sits between the two. They are never merged.
+  ///
+  /// Keying runs on the original source colors, so it happens before
+  /// [colorFilters] and [blur].
+  ///
+  /// See [ChromaKey] for how the key is tuned and what the removed area
+  /// becomes. Note that a key without a background is only meaningful with
+  /// [composition] — see the assert on this constructor.
+  ///
+  /// **Note:** Ignored on Web, Windows and Linux.
+  final ChromaKey? chromaKey;
 
   /// The maximum bitrate of the video in bits per second.
   ///
@@ -420,6 +449,7 @@ class VideoRenderData {
       'trimToCommonTrackEnd': trimToCommonTrackEnd,
       'outputFormat': outputFormat.name,
       'blur': blur,
+      'chromaKey': await chromaKey?.toAsyncMap(),
       // Fall back to the quality config's bitrate when no explicit bitrate is
       // set, so a `qualityConfig` used on its own is still applied.
       'bitrate': bitrate ?? qualityConfig?.bitrate,
@@ -453,6 +483,7 @@ class VideoRenderData {
     List<ColorFilter>? colorFilters,
     List<VideoAudioTrack>? audioTracks,
     double? blur,
+    ChromaKey? chromaKey,
     int? bitrate,
     int? maxFrameRate,
     bool? shouldOptimizeForNetworkUse,
@@ -473,6 +504,7 @@ class VideoRenderData {
       colorFilters: colorFilters ?? this.colorFilters,
       audioTracks: audioTracks ?? this.audioTracks,
       blur: blur ?? this.blur,
+      chromaKey: chromaKey ?? this.chromaKey,
       bitrate: bitrate ?? this.bitrate,
       maxFrameRate: maxFrameRate ?? this.maxFrameRate,
       shouldOptimizeForNetworkUse:
@@ -498,6 +530,7 @@ class VideoRenderData {
       'colorFilters': colorFilters.map((x) => x.toMap()).toList(),
       'audioTracks': audioTracks.map((x) => x.toMap()).toList(),
       'blur': blur,
+      'chromaKey': chromaKey?.toMap(),
       'bitrate': bitrate,
       'maxFrameRate': maxFrameRate,
       'shouldOptimizeForNetworkUse': shouldOptimizeForNetworkUse,
@@ -555,6 +588,9 @@ class VideoRenderData {
         ),
       ),
       blur: tryParseDouble(map['blur']),
+      chromaKey: map['chromaKey'] != null
+          ? ChromaKey.fromMap(map['chromaKey'] as Map<String, dynamic>)
+          : null,
       bitrate: map['bitrate'] != null ? safeParseInt(map['bitrate']) : null,
       maxFrameRate: map['maxFrameRate'] != null
           ? safeParseInt(map['maxFrameRate'])
@@ -585,6 +621,7 @@ class VideoRenderData {
         'colorFilters: $colorFilters, '
         'audioTracks: $audioTracks, '
         'blur: $blur, '
+        'chromaKey: $chromaKey, '
         'bitrate: $bitrate, '
         'maxFrameRate: $maxFrameRate, '
         'shouldOptimizeForNetworkUse: $shouldOptimizeForNetworkUse, '
@@ -609,6 +646,7 @@ class VideoRenderData {
         listEquals(other.colorFilters, colorFilters) &&
         listEquals(other.audioTracks, audioTracks) &&
         other.blur == blur &&
+        other.chromaKey == chromaKey &&
         other.bitrate == bitrate &&
         other.maxFrameRate == maxFrameRate &&
         other.shouldOptimizeForNetworkUse == shouldOptimizeForNetworkUse &&
@@ -631,6 +669,7 @@ class VideoRenderData {
         colorFilters.hashCode ^
         audioTracks.hashCode ^
         blur.hashCode ^
+        chromaKey.hashCode ^
         bitrate.hashCode ^
         maxFrameRate.hashCode ^
         shouldOptimizeForNetworkUse.hashCode ^

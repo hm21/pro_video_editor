@@ -61,7 +61,12 @@ data class VideoClip(
     /** Start position on the layer timeline in microseconds (composition only). */
     val timelineStartUs: Long? = null,
     /** Placement within the composition canvas (composition only). */
-    val transform: SegmentTransformConfig? = null
+    val transform: SegmentTransformConfig? = null,
+    /**
+     * Removes a solid-colored background from this clip. Overrides the layer's
+     * and the global key; null falls back to those.
+     */
+    val chromaKey: ChromaKeyConfig? = null
 ) {
     companion object {
         /** Parses a clip from a platform-channel map. */
@@ -70,6 +75,8 @@ data class VideoClip(
             val transitionRaw = clipMap["transition"] as? Map<String, Any?>
             @Suppress("UNCHECKED_CAST")
             val transformRaw = clipMap["transform"] as? Map<String, Any?>
+            @Suppress("UNCHECKED_CAST")
+            val chromaKeyRaw = clipMap["chromaKey"] as? Map<String, Any?>
             return VideoClip(
                 inputPath = clipMap["inputPath"] as String,
                 startUs = (clipMap["startUs"] as? Number)?.toLong(),
@@ -79,7 +86,8 @@ data class VideoClip(
                 reverseVideo = clipMap["reverseVideo"] as? Boolean ?: false,
                 transition = transitionRaw?.let { TransitionConfig.fromMap(it) },
                 timelineStartUs = (clipMap["timelineStartUs"] as? Number)?.toLong(),
-                transform = transformRaw?.let { SegmentTransformConfig.fromMap(it) }
+                transform = transformRaw?.let { SegmentTransformConfig.fromMap(it) },
+                chromaKey = ChromaKeyConfig.fromMap(chromaKeyRaw)
             )
         }
     }
@@ -128,7 +136,12 @@ data class SegmentTransformConfig(
 data class LayerConfig(
     val clips: List<VideoClip>,
     val opacity: Float,
-    val transform: SegmentTransformConfig?
+    val transform: SegmentTransformConfig?,
+    /**
+     * Default chroma key for the clips on this layer. A clip's own key wins;
+     * null falls back to the global key.
+     */
+    val chromaKey: ChromaKeyConfig? = null
 ) {
     companion object {
         fun fromMap(map: Map<String, Any?>): LayerConfig? {
@@ -138,10 +151,13 @@ data class LayerConfig(
             if (clips.isEmpty()) return null
             @Suppress("UNCHECKED_CAST")
             val transformRaw = map["transform"] as? Map<String, Any?>
+            @Suppress("UNCHECKED_CAST")
+            val chromaKeyRaw = map["chromaKey"] as? Map<String, Any?>
             return LayerConfig(
                 clips = clips,
                 opacity = (map["opacity"] as? Number)?.toFloat() ?: 1.0f,
-                transform = transformRaw?.let { SegmentTransformConfig.fromMap(it) }
+                transform = transformRaw?.let { SegmentTransformConfig.fromMap(it) },
+                chromaKey = ChromaKeyConfig.fromMap(chromaKeyRaw)
             )
         }
     }
@@ -200,6 +216,105 @@ data class ColorFilterConfig(
                 matrix = matrix,
                 startUs = (map["startUs"] as? Number)?.toLong(),
                 endUs = (map["endUs"] as? Number)?.toLong()
+            )
+        }
+    }
+}
+
+/**
+ * Removes a solid-colored background ("green screen").
+ *
+ * Mirrors the Dart `ChromaKey` model and the Swift `ChromaKeyConfig`. The
+ * keying math lives in `ChromaKeyMath` and is the same formula Apple bakes into
+ * its color cube; the GPU runs it in `ChromaKeyEffect`'s fragment shader.
+ *
+ * @property keyR/keyG/keyB The screen color to remove, gamma-encoded, 0..1
+ * @property similarity Chroma-plane radius within which a pixel is fully removed
+ * @property smoothness Width of the soft ramp just beyond [similarity]
+ * @property spill How strongly the key's color cast is pulled out of the rest
+ * @property backgroundColor Solid background ARGB, or null when none
+ * @property backgroundImageData Background image bytes, or null when none
+ */
+data class ChromaKeyConfig(
+    val keyR: Double,
+    val keyG: Double,
+    val keyB: Double,
+    val similarity: Double = 0.20,
+    val smoothness: Double = 0.08,
+    val spill: Double = 0.5,
+    val backgroundColor: Int? = null,
+    val backgroundImageData: ByteArray? = null,
+) {
+    /** The key color projected onto the Cb/Cr chroma plane. */
+    val keyCb: Double = -0.168736 * keyR - 0.331264 * keyG + 0.5 * keyB
+    val keyCr: Double = 0.5 * keyR - 0.418688 * keyG - 0.081312 * keyB
+
+    /**
+     * Unit vector pointing from neutral toward the key hue, used to pull the
+     * key's cast back out during spill suppression. Zero for a neutral (gray)
+     * key color, which disables despill rather than dividing by zero.
+     */
+    val keyDirCb: Double
+    val keyDirCr: Double
+
+    init {
+        val length = kotlin.math.sqrt(keyCb * keyCb + keyCr * keyCr)
+        if (length > 1e-5) {
+            keyDirCb = keyCb / length
+            keyDirCr = keyCr / length
+        } else {
+            keyDirCb = 0.0
+            keyDirCr = 0.0
+        }
+    }
+
+    /** Whether the keyed area is left transparent rather than filled. */
+    val isTransparent: Boolean
+        get() = backgroundColor == null && backgroundImageData == null
+
+    // Hand-written because of the ByteArray, like ImageLayer below.
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+        other as ChromaKeyConfig
+        return keyR == other.keyR &&
+                keyG == other.keyG &&
+                keyB == other.keyB &&
+                similarity == other.similarity &&
+                smoothness == other.smoothness &&
+                spill == other.spill &&
+                backgroundColor == other.backgroundColor &&
+                (backgroundImageData?.contentEquals(other.backgroundImageData)
+                    ?: (other.backgroundImageData == null))
+    }
+
+    override fun hashCode(): Int {
+        var result = keyR.hashCode()
+        result = 31 * result + keyG.hashCode()
+        result = 31 * result + keyB.hashCode()
+        result = 31 * result + similarity.hashCode()
+        result = 31 * result + smoothness.hashCode()
+        result = 31 * result + spill.hashCode()
+        result = 31 * result + (backgroundColor?.hashCode() ?: 0)
+        result = 31 * result + (backgroundImageData?.contentHashCode() ?: 0)
+        return result
+    }
+
+    companion object {
+        fun fromMap(map: Map<String, Any?>?): ChromaKeyConfig? {
+            if (map == null) return null
+            val keyColor = (map["keyColor"] as? Number)?.toInt() ?: return null
+            val bgImage = (map["bgImageData"] as? ByteArray)?.takeIf { it.isNotEmpty() }
+
+            return ChromaKeyConfig(
+                keyR = ((keyColor shr 16) and 0xFF) / 255.0,
+                keyG = ((keyColor shr 8) and 0xFF) / 255.0,
+                keyB = (keyColor and 0xFF) / 255.0,
+                similarity = (map["similarity"] as? Number)?.toDouble() ?: 0.20,
+                smoothness = (map["smoothness"] as? Number)?.toDouble() ?: 0.08,
+                spill = (map["spill"] as? Number)?.toDouble() ?: 0.5,
+                backgroundColor = (map["bgColor"] as? Number)?.toInt(),
+                backgroundImageData = bgImage,
             )
         }
     }
@@ -360,6 +475,12 @@ data class RenderConfig(
     val colorFilters: List<ColorFilterConfig> = emptyList(),
     val audioTracks: List<AudioTrackConfig> = emptyList(),
     val blur: Double? = null,
+    /**
+     * Removes a solid-colored background ("green screen") from every clip that
+     * does not carry its own key. A [VideoClip.chromaKey] overrides this, and
+     * in the layered path a [LayerConfig.chromaKey] sits between the two.
+     */
+    val chromaKey: ChromaKeyConfig? = null,
     /** Global start time in microseconds for trimming the final composition */
     val startUs: Long? = null,
     /** Global end time in microseconds for trimming the final composition */
@@ -481,6 +602,9 @@ data class RenderConfig(
                 colorFilters = colorFilters,
                 audioTracks = audioTracks,
                 blur = call.argument<Number>("blur")?.toDouble(),
+                chromaKey = ChromaKeyConfig.fromMap(
+                    call.argument<Map<String, Any?>>("chromaKey")
+                ),
                 startUs = call.argument<Number?>("startUs")?.toLong(),
                 endUs = call.argument<Number?>("endUs")?.toLong(),
                 shouldOptimizeForNetworkUse = call.argument<Boolean>("shouldOptimizeForNetworkUse")
