@@ -243,13 +243,21 @@ class ChromaKey {
     int? height;
     for (final frame in frames) {
       final codec = await instantiateImageCodec(frame);
-      final image = (await codec.getNextFrame()).image;
-      final data = await image.toByteData();
-      if (data == null) continue;
-      width ??= image.width;
-      height ??= image.height;
-      if (image.width != width || image.height != height) continue;
-      buffers.add(data.buffer.asUint8List());
+      try {
+        final image = (await codec.getNextFrame()).image;
+        try {
+          final data = await image.toByteData();
+          if (data == null) continue;
+          width ??= image.width;
+          height ??= image.height;
+          if (image.width != width || image.height != height) continue;
+          buffers.add(data.buffer.asUint8List());
+        } finally {
+          image.dispose();
+        }
+      } finally {
+        codec.dispose();
+      }
     }
 
     if (buffers.isEmpty || width == null || height == null) {
@@ -262,8 +270,13 @@ class ChromaKey {
   /// The screen color to remove.
   ///
   /// **Default**: `0xFF00B140`, the SMPTE "chroma key green" most physical
-  /// screens are painted in. Only the hue is used — the brightness of this
-  /// color does not matter.
+  /// screens are painted in.
+  ///
+  /// Both the hue **and** the brightness matter. The key point is this color's
+  /// un-normalized Cb/Cr projection, and Cb/Cr scale with brightness, so a key
+  /// color much darker than the recorded screen sits closer to neutral and can
+  /// leave the whole screen outside [similarity]. Prefer [autoDetect] over
+  /// picking a swatch by eye.
   ///
   /// ## Blue screens
   ///
@@ -347,6 +360,13 @@ class ChromaKey {
   ///
   /// Mutually exclusive with [backgroundImage]. When both are `null` the keyed
   /// area is transparent — see the class docs for what that means per path.
+  ///
+  /// **Must be fully opaque.** Only the RGB channels are used: the fill is a
+  /// replacement for the removed screen, not a tint over it. A translucent
+  /// background is not expressible identically on both renderers, so it is
+  /// rejected rather than silently rendered two different ways. For a
+  /// see-through result leave this `null` and put the backdrop on a lower
+  /// [VideoLayer].
   final Color? backgroundColor;
 
   /// An image to put behind the subject, stretched to fill the frame.
@@ -361,6 +381,13 @@ class ChromaKey {
   ///
   /// Resolves [backgroundImage] to bytes, so this is asynchronous.
   Future<Map<String, dynamic>> toAsyncMap() async {
+    assert(
+      backgroundColor == null || backgroundColor!.a == 1.0,
+      '[backgroundColor] must be fully opaque — only its RGB channels are '
+      'used, and both renderers fill the keyed area solidly. For a '
+      'see-through result leave it null and put the backdrop on a lower '
+      'VideoLayer of a VideoComposition.',
+    );
     return {
       'keyColor': color.toARGB32(),
       'similarity': similarity,
@@ -372,6 +399,12 @@ class ChromaKey {
   }
 
   /// Creates a copy with updated values.
+  ///
+  /// [backgroundColor] and [backgroundImage] are mutually exclusive, so passing
+  /// one **drops** the other — that is what lets a key switch from an image
+  /// background to a color one. Passing neither keeps whichever is already set.
+  /// Pass [removeBackground] to clear both and leave the keyed area
+  /// transparent, which no combination of the other arguments can express.
   ChromaKey copyWith({
     Color? color,
     double? similarity,
@@ -379,14 +412,41 @@ class ChromaKey {
     double? spill,
     Color? backgroundColor,
     EditorLayerImage? backgroundImage,
+    bool removeBackground = false,
   }) {
+    assert(
+      backgroundColor == null || backgroundImage == null,
+      'Provide at most one of [backgroundColor] or [backgroundImage]',
+    );
+    assert(
+      !removeBackground || (backgroundColor == null && backgroundImage == null),
+      '[removeBackground] clears the background, so it cannot be combined '
+      'with [backgroundColor] or [backgroundImage]',
+    );
+
+    final Color? nextColor;
+    final EditorLayerImage? nextImage;
+    if (removeBackground) {
+      nextColor = null;
+      nextImage = null;
+    } else if (backgroundColor != null) {
+      nextColor = backgroundColor;
+      nextImage = null;
+    } else if (backgroundImage != null) {
+      nextColor = null;
+      nextImage = backgroundImage;
+    } else {
+      nextColor = this.backgroundColor;
+      nextImage = this.backgroundImage;
+    }
+
     return ChromaKey(
       color: color ?? this.color,
       similarity: similarity ?? this.similarity,
       smoothness: smoothness ?? this.smoothness,
       spill: spill ?? this.spill,
-      backgroundColor: backgroundColor ?? this.backgroundColor,
-      backgroundImage: backgroundImage ?? this.backgroundImage,
+      backgroundColor: nextColor,
+      backgroundImage: nextImage,
     );
   }
 

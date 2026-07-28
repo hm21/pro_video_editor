@@ -182,6 +182,72 @@ void main() {
       test('keeps every value when called empty', () {
         expect(key.copyWith(), key);
       });
+
+      test('switching from an image background to a color drops the image', () {
+        final withImage = key.copyWith(
+          backgroundImage: EditorLayerImage.asset('assets/bg.png'),
+        );
+        expect(withImage.backgroundImage, isNotNull);
+        expect(withImage.backgroundColor, isNull);
+
+        final withColor = withImage.copyWith(
+          backgroundColor: const Color(0xFF0000FF),
+        );
+
+        expect(withColor.backgroundColor, const Color(0xFF0000FF));
+        expect(
+          withColor.backgroundImage,
+          isNull,
+          reason:
+              'the two are mutually exclusive, so setting one clears the '
+              'other instead of tripping the assert',
+        );
+      });
+
+      test('switching from a color background to an image drops the color', () {
+        final copy = key.copyWith(
+          backgroundImage: EditorLayerImage.asset('assets/bg.png'),
+        );
+
+        expect(copy.backgroundImage, isNotNull);
+        expect(copy.backgroundColor, isNull);
+      });
+
+      test('removeBackground clears both and leaves the key transparent', () {
+        final copy = key.copyWith(removeBackground: true);
+
+        expect(copy.isTransparent, isTrue);
+        expect(copy.backgroundColor, isNull);
+        expect(copy.backgroundImage, isNull);
+        expect(copy.color, key.color, reason: 'only the background is cleared');
+        expect(copy.similarity, key.similarity);
+      });
+
+      test('removeBackground cannot be combined with a background', () {
+        expect(
+          () => key.copyWith(
+            removeBackground: true,
+            backgroundColor: const Color(0xFF00FF00),
+          ),
+          throwsA(isA<AssertionError>()),
+        );
+      });
+    });
+
+    group('backgroundColor opacity', () {
+      test('a translucent background is rejected when serialized', () {
+        // Only RGB reaches either renderer, so a translucent fill would render
+        // two different ways. Caught at the boundary rather than silently.
+        const translucent = ChromaKey(backgroundColor: Color(0x80FF0000));
+
+        expect(translucent.toAsyncMap(), throwsA(isA<AssertionError>()));
+      });
+
+      test('an opaque background serializes fine', () async {
+        const opaque = ChromaKey(backgroundColor: Color(0xFFFF0000));
+
+        await expectLater(opaque.toAsyncMap(), completes);
+      });
     });
 
     group('equality', () {

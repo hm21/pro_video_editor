@@ -618,7 +618,7 @@ class VideoSequenceBuilder(
         // with opaque black instead (see applyChromaKey for why).
         applyChromaKey(
             clipVideoEffects,
-            clip.chromaKey ?: globalChromaKey,
+            if (clip.suppressChromaKey) null else clip.chromaKey ?: globalChromaKey,
             flattenTransparency = true,
         )
 

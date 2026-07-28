@@ -201,11 +201,26 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     where window.endUs > window.startUs && tUs >= window.startUs && tUs < window.endUs {
       return window.config
     }
-    // The last frame of the timeline lands exactly on the final window's end,
-    // so clamp to it rather than emitting one unkeyed frame.
-    if let last = chromaKeyWindows.last, tUs >= last.endUs { return last.config }
+    // The very last frame of the timeline can land exactly on the final
+    // window's end, so clamp to it rather than emitting one unkeyed frame.
+    //
+    // Only ever by a frame, and only for the window that actually ends the
+    // timeline. Windows are emitted per *keyed* clip, so the array is sparse:
+    // an unconditional clamp applied the last keyed clip's key to every clip
+    // after it, keying clips that carry no key at all.
+    if let last = chromaKeyWindows.last, tUs >= last.endUs,
+      tUs - last.endUs <= Self.chromaKeyEndClampToleranceUs
+    {
+      return last.config
+    }
     return nil
   }
+
+  /// How far past a window's end still counts as its final frame.
+  ///
+  /// One frame at 24 fps, the slowest rate worth accommodating; anything beyond
+  /// that is a different clip, not a rounding edge.
+  private static let chromaKeyEndClampToleranceUs: Int64 = 41_667
 
   /// Applies a dip-to-color (fade-to-black / fade-to-white) at the given
   /// composition time, if any fade window is active. The video is mixed toward
@@ -435,13 +450,26 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       return image.composited(over: scaleToFill(background, extent))
     }
 
+    // A background image that will not decode must not quietly leave the keyed
+    // area transparent: on the layered path that shows the layer below instead
+    // of the requested backdrop, and Android would disagree. Fill with opaque
+    // black, matching `ChromaKeyEffect`'s fallback for the same case.
+    if config.backgroundImageData != nil {
+      return image.composited(over: CIImage(color: .black).cropped(to: extent))
+    }
+
     guard config.backgroundColor != -1 else { return image }
     let argb = config.backgroundColor
+    // Alpha is deliberately ignored: the fill replaces the removed screen
+    // rather than tinting it, and Android's shader has no alpha uniform for it.
+    // `ChromaKey.toAsyncMap` asserts the color is opaque, so this only bites in
+    // release. For a see-through result the key is left backgroundless and the
+    // backdrop goes on a lower layer.
     let color = CIColor(
       red: CGFloat((argb >> 16) & 0xFF) / 255.0,
       green: CGFloat((argb >> 8) & 0xFF) / 255.0,
       blue: CGFloat(argb & 0xFF) / 255.0,
-      alpha: CGFloat((argb >> 24) & 0xFF) / 255.0)
+      alpha: 1.0)
     return image.composited(over: CIImage(color: color).cropped(to: extent))
   }
 
@@ -670,6 +698,15 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
       outputImage = CIImage(cvPixelBuffer: sourceBuffer)
 
+      // Remove the chroma key on the raw decoded frame and fill the keyed area
+      // with its background — before the layer-instruction transform below,
+      // which on a mixed-resolution timeline is a real bilinear resample. Keying
+      // interpolated pixels widens the matte edge by an invented pixel and runs
+      // the ramp over colors the decoder never produced. Android keys first for
+      // the same reason (`applyChromaKey` is added ahead of
+      // `VideoCompositionTransformation` in the effect chain).
+      outputImage = applyChromaKeyStage(to: outputImage, at: request.compositionTime)
+
       // Apply layer instruction transform first (video scaling/centering/rotation)
       // This ensures all videos are properly sized and oriented before applying user effects.
       // The layerInstruction contains the preferredTransform which already handles video rotation
@@ -741,11 +778,6 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         }
       }
     }
-
-    // Remove the chroma key on the raw source frame, before any geometry, and
-    // fill the keyed area with its background. One insertion point for both
-    // branches of the imageBytesWithCropping split below.
-    outputImage = applyChromaKeyStage(to: outputImage, at: request.compositionTime)
 
     var center = CGPoint(x: outputImage.extent.midX, y: outputImage.extent.midY)
 

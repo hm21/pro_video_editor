@@ -55,6 +55,20 @@ void main() {
     });
   }
 
+  /// A PNG whose top half is [top] and bottom half is [bottom].
+  ///
+  /// A solid background cannot tell a vertically flipped texture from a correct
+  /// one, and neither can a left/right split. This can.
+  Future<Uint8List> stackedPng(Color top, Color bottom) {
+    return paintPng(canvas, (c) {
+      final w = canvas.width;
+      final h = canvas.height;
+      c
+        ..drawRect(Rect.fromLTWH(0, 0, w, h / 2), Paint()..color = top)
+        ..drawRect(Rect.fromLTWH(0, h / 2, w, h / 2), Paint()..color = bottom);
+    });
+  }
+
   /// A solid-color PNG.
   Future<Uint8List> solidPng(Color color) {
     return paintPng(
@@ -247,6 +261,39 @@ void main() {
         final c = await samplePixel(out, p.dx, p.dy);
         expect(isBlue(c), isTrue, reason: 'Subject was keyed at $p, got $c');
       }
+    });
+
+    testWidgets('the background image is not vertically flipped', (_) async {
+      // Android uploads the bitmap with GLUtils.texImage2D, which puts row 0
+      // at t=0, but samples it with the frame's own coordinate, where t=0 is
+      // the *bottom*. Media3 flips bitmap textures for exactly this reason.
+      // Only an asymmetric background can see the difference.
+      final out = await pve.renderVideo(
+        VideoRenderData(
+          videoSegments: [VideoSegment(video: greenScreen)],
+          chromaKey: ChromaKey(
+            backgroundImage: EditorLayerImage.memory(
+              await stackedPng(backgroundRed, subjectBlue),
+            ),
+          ),
+        ),
+      );
+
+      // Sampled inside the keyed (left) half, so only the background shows.
+      final top = await samplePixel(out, 0.15, 0.2);
+      final bottom = await samplePixel(out, 0.15, 0.8);
+
+      expect(
+        isRed(top),
+        isTrue,
+        reason: 'Background image top should be red, got $top — flipped?',
+      );
+      expect(
+        isBlue(bottom),
+        isTrue,
+        reason:
+            'Background image bottom should be blue, got $bottom — flipped?',
+      );
     });
 
     testWidgets('a color filter does not un-key the frame', (_) async {

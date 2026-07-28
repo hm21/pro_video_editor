@@ -623,7 +623,8 @@ var task = VideoRenderData(
          ColorFilter(matrix: [ 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0 ]),
     ],
     chromaKey: const ChromaKey(
-        // Defaults to SMPTE "chroma key green"; only the hue is used.
+        // Defaults to SMPTE "chroma key green". Brightness matters as well as
+        // hue, so measure it with `ChromaKey.autoDetect` when you can.
         color: Color(0xFF00B140),
         similarity: 0.20,  // raise it if the screen survives the key
         smoothness: 0.08,  // width of the soft edge
@@ -660,7 +661,7 @@ const blueKey = ChromaKey.blueScreen(backgroundColor: Color(0xFF000000));
 /// single-track `videoSegments` path there is nothing underneath and the codec
 /// carries no alpha, so a key there needs a `backgroundColor` or
 /// `backgroundImage`.
-final task = VideoRenderData(
+final keyedTask = VideoRenderData(
     composition: VideoComposition(
         layers: [
             VideoLayer(clips: [VideoSegment(video: backgroundVideo)]),

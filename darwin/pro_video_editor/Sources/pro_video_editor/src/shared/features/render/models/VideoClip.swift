@@ -21,6 +21,13 @@ internal struct VideoClip: Sendable {
   /// Removes a solid-colored background from this clip. Overrides the layer's
   /// and the global key. `nil` = fall back to those.
   let chromaKey: ChromaKeyConfig?
+  /// Opts this clip out of the layer/global key entirely.
+  ///
+  /// Internal, never parsed from the platform channel. `chromaKey == nil` means
+  /// "inherit", so it cannot express "deliberately unkeyed" — which is exactly
+  /// what a pre-rendered overlap blend needs when the two clips it was composed
+  /// from carry different keys. See `RenderVideo.blendChromaKey`.
+  let suppressChromaKey: Bool
 
   init(
     inputPath: String,
@@ -32,7 +39,8 @@ internal struct VideoClip: Sendable {
     transition: ClipTransitionConfig? = nil,
     timelineStartUs: Int64? = nil,
     transform: SegmentTransformConfig? = nil,
-    chromaKey: ChromaKeyConfig? = nil
+    chromaKey: ChromaKeyConfig? = nil,
+    suppressChromaKey: Bool = false
   ) {
     self.inputPath = inputPath
     self.startUs = startUs
@@ -44,6 +52,7 @@ internal struct VideoClip: Sendable {
     self.timelineStartUs = timelineStartUs
     self.transform = transform
     self.chromaKey = chromaKey
+    self.suppressChromaKey = suppressChromaKey
   }
 
   /// Parses a clip from a platform-channel map. Used by both the single-track

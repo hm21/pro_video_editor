@@ -67,7 +67,7 @@ class VideoRenderData {
          '[maxFrameRate] must be greater than 0',
        ),
        assert(
-         composition != null || chromaKey == null || !chromaKey.isTransparent,
+         _everyKeyHasABackground(composition, chromaKey, videoSegments),
          'A [chromaKey] without a background needs something underneath to '
          'show through, and videoSegments is a single track with nothing '
          'below it — H.264/HEVC carry no alpha, so the keyed area would be '
@@ -76,6 +76,26 @@ class VideoRenderData {
          'clip on a layer above another one. Pass '
          'backgroundColor: Color(0xFF000000) if you really do want black.',
        );
+
+  /// Whether every key that can reach the single-track path has a background.
+  ///
+  /// Checks the per-segment keys as well as the global one: they are resolved
+  /// as `segment → global`, so a transparent key set on a single [VideoSegment]
+  /// is flattened to black exactly like a transparent global one. The layered
+  /// path is exempt — there a lower [VideoLayer] is what shows through.
+  static bool _everyKeyHasABackground(
+    VideoComposition? composition,
+    ChromaKey? chromaKey,
+    List<VideoSegment>? videoSegments,
+  ) {
+    if (composition != null) return true;
+    if (chromaKey != null && chromaKey.isTransparent) return false;
+    return videoSegments?.every((segment) {
+          final key = segment.chromaKey;
+          return key == null || !key.isTransparent;
+        }) ??
+        true;
+  }
 
   /// Creates a [VideoRenderData] with a predefined quality preset.
   ///

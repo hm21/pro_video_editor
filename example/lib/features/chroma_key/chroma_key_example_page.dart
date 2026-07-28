@@ -71,8 +71,11 @@ class _ChromaKeyExamplePageState extends State<ChromaKeyExamplePage> {
 
   @override
   void dispose() {
-    if (_isPreviewInitialized) _controllerPreview?.dispose();
+    // Unconditional: the controller can be fully initialized and playing while
+    // `_isPreviewInitialized` is still false, when the page is popped between
+    // `initialize()` and the `setState` that flips the flag.
     _chewieControllerPreview?.dispose();
+    _controllerPreview?.dispose();
     super.dispose();
   }
 
@@ -195,6 +198,14 @@ class _ChromaKeyExamplePageState extends State<ChromaKeyExamplePage> {
 
     _controllerPreview = VideoPlayerController.file(File(outputPath));
     await _controllerPreview!.initialize();
+
+    // Checked before the Chewie controller exists, so a page popped during
+    // initialization never leaves an autoplaying player behind.
+    if (!mounted) {
+      await _disposePreview();
+      return;
+    }
+
     _chewieControllerPreview = ChewieController(
       videoPlayerController: _controllerPreview!,
       autoPlay: true,
@@ -202,7 +213,6 @@ class _ChromaKeyExamplePageState extends State<ChromaKeyExamplePage> {
       placeholder: Container(color: Colors.black),
     );
 
-    if (!mounted) return;
     setState(() => _isPreviewInitialized = true);
   }
 

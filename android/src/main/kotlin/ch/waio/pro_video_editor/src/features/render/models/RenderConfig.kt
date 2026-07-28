@@ -66,7 +66,16 @@ data class VideoClip(
      * Removes a solid-colored background from this clip. Overrides the layer's
      * and the global key; null falls back to those.
      */
-    val chromaKey: ChromaKeyConfig? = null
+    val chromaKey: ChromaKeyConfig? = null,
+    /**
+     * Opts this clip out of the layer/global key entirely.
+     *
+     * Internal, never parsed from the platform channel. `chromaKey = null`
+     * means "inherit", so it cannot express "deliberately unkeyed" — which is
+     * exactly what a pre-rendered overlap blend needs when the two clips it was
+     * composed from carry different keys. See `RenderVideo.blendChromaKey`.
+     */
+    val suppressChromaKey: Boolean = false
 ) {
     companion object {
         /** Parses a clip from a platform-channel map. */

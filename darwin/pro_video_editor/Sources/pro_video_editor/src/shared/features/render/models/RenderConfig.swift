@@ -220,9 +220,29 @@ public struct ChromaKeyConfig: Sendable, Equatable {
   /// hash is not a safe cache key across the lifetime of a render, and the
   /// background image data is far too large to hash per frame.
   var cacheKey: String {
-    let bgLength = backgroundImageData?.count ?? 0
     return "\(keyR),\(keyG),\(keyB),\(similarity),\(smoothness),\(spill),"
-      + "\(backgroundColor),\(bgLength)"
+      + "\(backgroundColor),\(backgroundImageFingerprint)"
+  }
+
+  /// Cheap content fingerprint of the background image.
+  ///
+  /// The byte count alone is not an identity — two different backgrounds that
+  /// happen to be the same size would share a cache entry, and the second clip
+  /// would render the first one's image. Mixing in the head and tail bytes
+  /// separates them while staying O(1), which matters because `cacheKey` is
+  /// evaluated per frame.
+  private var backgroundImageFingerprint: String {
+    guard let data = backgroundImageData, !data.isEmpty else { return "0" }
+    let sampleSize = min(32, data.count)
+    let head = data.prefix(sampleSize).reduce(into: UInt64(1_469_598_103_934_665_603)) {
+      accumulator, byte in
+      accumulator = (accumulator ^ UInt64(byte)) &* 1_099_511_628_211
+    }
+    let tail = data.suffix(sampleSize).reduce(into: UInt64(1_469_598_103_934_665_603)) {
+      accumulator, byte in
+      accumulator = (accumulator ^ UInt64(byte)) &* 1_099_511_628_211
+    }
+    return "\(data.count)-\(head)-\(tail)"
   }
 
   static func fromArguments(_ args: [String: Any]?) -> ChromaKeyConfig? {

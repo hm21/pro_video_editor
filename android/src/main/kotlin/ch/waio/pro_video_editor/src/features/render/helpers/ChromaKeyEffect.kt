@@ -1,5 +1,6 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
+import RENDER_TAG
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -13,6 +14,7 @@ import androidx.media3.effect.BaseGlShaderProgram
 import androidx.media3.effect.GlEffect
 import androidx.media3.effect.GlShaderProgram
 import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
+import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 
 /**
  * Removes a solid-colored background ("green screen") from every frame.
@@ -45,8 +47,10 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
         if (useHdr) {
             // The shader is an ES 2.0 SDR program. HEVC 10-bit/HDR sources are
             // pre-transcoded to 8-bit SDR by VideoTranscoder before they reach
-            // here (see RenderVideo.hasGpuEffects), so this is a guard against
-            // that gate regressing rather than an expected path.
+            // here — `RenderVideo.hasGpuEffects` detects a key at every level it
+            // can be set, and the transcode step rewrites both `videoClips` and
+            // every composition layer's clips. So this is a guard against that
+            // gate regressing rather than an expected path.
             throw VideoFrameProcessingException(
                 "Chroma key does not support HDR input"
             )
@@ -62,10 +66,21 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
 
         private val glProgram: GlProgram
 
-        /** Decoded once at construction, never per frame. */
-        private val backgroundBitmap: Bitmap? = config.backgroundImageData?.let { bytes ->
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        }
+        /**
+         * Bounds-only probe of the background image.
+         *
+         * Decoding just the header tells us whether the bytes are usable — and
+         * how large they are — without holding a full-size bitmap from
+         * construction until the first draw. The real decode happens in
+         * [drawFrame], where there is a GL context to size it against.
+         */
+        private val backgroundBounds: BitmapFactory.Options? =
+            config.backgroundImageData?.let { bytes ->
+                BitmapFactory.Options().apply {
+                    inJustDecodeBounds = true
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, this)
+                }.takeIf { it.outWidth > 0 && it.outHeight > 0 }
+            }
 
         /**
          * Background texture id. A 1x1 placeholder is uploaded when there is no
@@ -75,8 +90,15 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
         private var backgroundTexId: Int = -1
 
         private val bgMode: Int = when {
-            backgroundBitmap != null -> BG_IMAGE
+            backgroundBounds != null -> BG_IMAGE
             config.backgroundColor != null -> BG_COLOR
+            // An image was asked for but its bytes will not decode. Falling
+            // through to BG_TRANSPARENT would quietly un-key the clip on the
+            // single-track path, where `applyChromaKey` has already ruled that
+            // the area must be filled — the export would come out looking like
+            // the key never ran. Fill with opaque black instead, which is what
+            // Apple produces in the same situation.
+            config.backgroundImageData != null -> BG_COLOR
             else -> BG_TRANSPARENT
         }
 
@@ -139,7 +161,15 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
                 // pixel (a gap frame carrying AlphaScale(0)) stays transparent.
                 "  float outA = src.a * a;\n" +
                 "  if (uBgMode == 2) {\n" +
-                "    vec3 bg = texture2D(uBgSampler, vTexSamplingCoord).rgb;\n" +
+                // The background comes from a Bitmap, and GLUtils.texImage2D
+                // uploads its first row at t=0, while a frame texture puts t=0
+                // at the *bottom* of the frame. Sampling the bitmap with the
+                // frame's own coordinate would show it upside down, so flip t
+                // here — the same correction Media3's BitmapOverlay applies via
+                // its flipVerticallyMatrix.
+                "    vec2 bgCoord = vec2(vTexSamplingCoord.x," +
+                " 1.0 - vTexSamplingCoord.y);\n" +
+                "    vec3 bg = texture2D(uBgSampler, bgCoord).rgb;\n" +
                 "    gl_FragColor = vec4(mix(bg, rgb, outA), src.a);\n" +
                 "  } else if (uBgMode == 1) {\n" +
                 "    gl_FragColor = vec4(mix(uBgColor, rgb, outA), src.a);\n" +
@@ -150,6 +180,13 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
         }
 
         init {
+            if (backgroundBounds == null && config.backgroundImageData != null) {
+                Log.w(
+                    RENDER_TAG,
+                    "Chroma key: the background image could not be decoded; " +
+                        "filling the keyed area with opaque black instead"
+                )
+            }
             try {
                 glProgram = GlProgram(VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE)
             } catch (e: Exception) {
@@ -167,9 +204,13 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
                 glProgram.use()
 
                 if (backgroundTexId == -1) {
-                    backgroundTexId = GlUtil.createTexture(
-                        backgroundBitmap ?: onePixelPlaceholder()
-                    )
+                    // createTexture uploads the pixels, so nothing needs the
+                    // bitmap afterwards — including the placeholder, which used
+                    // to be allocated and then dropped on the floor.
+                    val bitmap = decodeBackgroundWithinTextureLimit()
+                        ?: onePixelPlaceholder()
+                    backgroundTexId = GlUtil.createTexture(bitmap)
+                    bitmap.recycle()
                 }
 
                 glProgram.setSamplerTexIdUniform("uTexSampler", inputTexId, 0)
@@ -220,11 +261,68 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
                     GlUtil.deleteTexture(backgroundTexId)
                     backgroundTexId = -1
                 }
-                glProgram.delete()
             } catch (e: Exception) {
                 throw VideoFrameProcessingException(e)
+            } finally {
+                // Deleting the texture can throw, and the program still has to
+                // go — otherwise a failure on the way out leaks it.
+                try {
+                    glProgram.delete()
+                } catch (e: Exception) {
+                    throw VideoFrameProcessingException(e)
+                }
             }
-            backgroundBitmap?.recycle()
+        }
+
+        /**
+         * Decodes the background image, downscaled to fit `GL_MAX_TEXTURE_SIZE`.
+         *
+         * A camera photo easily exceeds the 4096 (or 2048) px limit a mid-range
+         * GPU reports, and `GlUtil.createTexture` throws above it — which inside
+         * [drawFrame] kills the whole export on its first frame. The shader
+         * stretches the texture to the frame anyway, so the extra resolution was
+         * never going to survive; dropping it here costs nothing.
+         *
+         * Must be called on the GL thread.
+         */
+        private fun decodeBackgroundWithinTextureLimit(): Bitmap? {
+            val bytes = config.backgroundImageData ?: return null
+            val bounds = backgroundBounds ?: return null
+
+            val limit = maxTextureSize()
+            var sampleSize = 1
+            while (bounds.outWidth / sampleSize > limit ||
+                bounds.outHeight / sampleSize > limit
+            ) {
+                sampleSize *= 2
+            }
+
+            val decoded = BitmapFactory.decodeByteArray(
+                bytes, 0, bytes.size,
+                BitmapFactory.Options().apply { inSampleSize = sampleSize }
+            ) ?: return null
+
+            // inSampleSize only halves, so one more exact pass may be needed.
+            if (decoded.width <= limit && decoded.height <= limit) return decoded
+            val scale = minOf(
+                limit.toFloat() / decoded.width,
+                limit.toFloat() / decoded.height
+            )
+            val scaled = Bitmap.createScaledBitmap(
+                decoded,
+                (decoded.width * scale).toInt().coerceAtLeast(1),
+                (decoded.height * scale).toInt().coerceAtLeast(1),
+                /* filter= */ true
+            )
+            if (scaled !== decoded) decoded.recycle()
+            return scaled
+        }
+
+        /** The GPU's maximum texture dimension, or a conservative fallback. */
+        private fun maxTextureSize(): Int {
+            val value = IntArray(1)
+            GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, value, 0)
+            return if (value[0] > 0) value[0] else 2048
         }
 
         /** The background color as linear-free RGB in 0..1, or black. */

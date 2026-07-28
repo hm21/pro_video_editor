@@ -755,4 +755,31 @@ class ChromaKeyMathTests: XCTestCase {
     XCTAssertEqual(floats[offset + 2], 0.0, accuracy: 1e-5, "premultiplied blue must be 0")
   }
 
+  /// Two different background images of the same byte length must not share a
+  /// cache entry, or the second clip renders the first one's backdrop.
+  func testCacheKeySeparatesEqualLengthBackgrounds() {
+    func withBackground(_ bytes: [UInt8]) -> ChromaKeyConfig {
+      ChromaKeyConfig(
+        keyR: config.keyR, keyG: config.keyG, keyB: config.keyB,
+        similarity: config.similarity, smoothness: config.smoothness,
+        spill: config.spill, backgroundColor: -1,
+        backgroundImageData: Data(bytes))
+    }
+
+    let a = withBackground(Array(repeating: 0x11, count: 128))
+    var bBytes = Array(repeating: UInt8(0x11), count: 128)
+    bBytes[0] = 0x22
+    let b = withBackground(bBytes)
+
+    XCTAssertEqual(a.backgroundImageData?.count, b.backgroundImageData?.count)
+    XCTAssertNotEqual(a.cacheKey, b.cacheKey)
+    XCTAssertEqual(a.cacheKey, withBackground(Array(repeating: 0x11, count: 128)).cacheKey)
+  }
+
+  /// A key with no background image at all keeps a stable, distinct key.
+  func testCacheKeyIsStableWithoutABackgroundImage() {
+    XCTAssertEqual(config.cacheKey, config.cacheKey)
+    XCTAssertNotEqual(config.cacheKey, withSpill(0.9).cacheKey)
+  }
+
 }

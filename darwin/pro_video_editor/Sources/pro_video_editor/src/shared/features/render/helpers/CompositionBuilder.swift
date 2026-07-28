@@ -233,6 +233,7 @@ internal class CompositionBuilder {
     var windows: [ChromaKeyWindow] = []
     for (index, clip) in videoClips.enumerated() {
       guard index < clipInstructions.count,
+        !clip.suppressChromaKey,
         let key = clip.chromaKey ?? globalChromaKey
       else { continue }
 

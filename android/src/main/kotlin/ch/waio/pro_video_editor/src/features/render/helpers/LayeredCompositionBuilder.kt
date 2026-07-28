@@ -328,7 +328,14 @@ class LayeredCompositionBuilder(
         // layered path. Media3's compositor blends the sequences with
         // glBlendFuncSeparate, so a transparent key really does let the layer
         // below show through.
-        applyChromaKey(effects, clip.chromaKey ?: layerChromaKey ?: globalChromaKey)
+        applyChromaKey(
+            effects,
+            if (clip.suppressChromaKey) {
+                null
+            } else {
+                clip.chromaKey ?: layerChromaKey ?: globalChromaKey
+            }
+        )
 
         val draw = placement.draw
         val clipBox = placement.clip

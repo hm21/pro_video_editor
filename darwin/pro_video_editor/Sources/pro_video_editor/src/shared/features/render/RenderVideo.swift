@@ -166,7 +166,8 @@ class RenderVideo {
           let (newClips, urls) = await preRenderTransitions(
             clips: workingConfig.videoClips,
             enableAudio: workingConfig.enableAudio,
-            outputFormat: workingConfig.outputFormat)
+            outputFormat: workingConfig.outputFormat,
+            globalChromaKey: workingConfig.chromaKey)
           workingConfig = workingConfig.copyWith(videoClips: newClips)
           transitionURLs = urls
         }
@@ -586,7 +587,8 @@ class RenderVideo {
   /// (e.g. a neighbour is reversed or has too little content) — those cases are
   /// handled live by the main pipeline.
   private static func preRenderTransitions(
-    clips: [VideoClip], enableAudio: Bool, outputFormat: String
+    clips: [VideoClip], enableAudio: Bool, outputFormat: String,
+    globalChromaKey: ChromaKeyConfig?
   ) async -> ([VideoClip], [URL]) {
     // An overlap transition on the last/only clip loops back into the first clip
     // (seamless loop). Captured before the between-clip pass clears it.
@@ -684,10 +686,12 @@ class RenderVideo {
             inputPath: current.inputPath, startUs: curStart, endUs: curEnd - tailSrc,
             volume: current.volume, playbackSpeed: current.playbackSpeed,
             reverseVideo: false, transition: nil, chromaKey: current.chromaKey))
+        let blend = blendChromaKey(
+          current, next!, global: globalChromaKey, boundary: "\(i)")
         result.append(
           VideoClip(
             inputPath: rendered.outputURL.path, startUs: 0, endUs: rendered.durationUs,
-            chromaKey: blendChromaKey(current, next!, boundary: "\(i)")))
+            chromaKey: blend.config, suppressChromaKey: blend.suppressed))
         // Trim the incoming head in place; it keeps its own speed/transition.
         work[i + 1] = VideoClip(
           inputPath: next!.inputPath, startUs: nextStart + headSrc, endUs: nextEnd,
@@ -779,10 +783,12 @@ class RenderVideo {
               volume: last.volume, playbackSpeed: last.playbackSpeed,
               reverseVideo: false, transition: nil, chromaKey: last.chromaKey)
           }
+          let wrapBlend = blendChromaKey(
+            last, first, global: globalChromaKey, boundary: "loop wrap")
           result.append(
             VideoClip(
               inputPath: rendered.outputURL.path, startUs: 0, endUs: rendered.durationUs,
-              chromaKey: blendChromaKey(last, first, boundary: "loop wrap")))
+              chromaKey: wrapBlend.config, suppressChromaKey: wrapBlend.suppressed))
         } else {
           PluginLog.print("⚠️ Loop wrap render failed; seamless loop skipped")
         }
@@ -813,13 +819,35 @@ class RenderVideo {
   /// single key can undo. Mismatched sides are therefore left unkeyed and
   /// reported, rather than silently keyed with one side's settings.
   private static func blendChromaKey(
-    _ outgoing: VideoClip, _ incoming: VideoClip, boundary: String
-  ) -> ChromaKeyConfig? {
-    if outgoing.chromaKey == incoming.chromaKey { return outgoing.chromaKey }
+    _ outgoing: VideoClip, _ incoming: VideoClip, global: ChromaKeyConfig?,
+    boundary: String
+  ) -> BlendChromaKey {
+    // Compare the *effective* keys. A clip that leaves its own key nil still
+    // inherits the global one, so comparing the raw per-clip fields reported a
+    // mismatch for two clips that in fact key identically.
+    let outgoingKey = outgoing.chromaKey ?? global
+    let incomingKey = incoming.chromaKey ?? global
+    if outgoingKey == incomingKey { return BlendChromaKey(outgoingKey, false) }
+
     PluginLog.print(
       "⚠️ Chroma key: the two clips at boundary \(boundary) use different keys; "
         + "the pre-rendered transition blend is emitted unkeyed")
-    return nil
+    // A nil key alone would mean "inherit", and `computeChromaKeyWindows` would
+    // then fall back to the global key — applying to the blend the very thing
+    // this warning promises it will not. The suppress flag is what makes
+    // "unkeyed" actually mean unkeyed.
+    return BlendChromaKey(nil, true)
+  }
+
+  /// The key for a pre-rendered blend, and whether it opts out of the global one.
+  private struct BlendChromaKey {
+    let config: ChromaKeyConfig?
+    let suppressed: Bool
+
+    init(_ config: ChromaKeyConfig?, _ suppressed: Bool) {
+      self.config = config
+      self.suppressed = suppressed
+    }
   }
 
   /// Loads a clip's total duration in microseconds.

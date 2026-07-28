@@ -187,6 +187,61 @@ void main() {
       );
     });
 
+    test('rejects a transparent key set on a single segment', () {
+      // Keys resolve segment → global, so a transparent per-segment key is
+      // flattened to black exactly like a transparent global one. The guard
+      // used to look only at the global key and let this through silently.
+      expect(
+        () => VideoRenderData(
+          id: 'test',
+          videoSegments: [
+            VideoSegment(video: EditorVideo.file('a.mp4')),
+            VideoSegment(
+              video: EditorVideo.file('b.mp4'),
+              chromaKey: const ChromaKey(),
+            ),
+          ],
+        ),
+        throwsA(isA<AssertionError>()),
+      );
+    });
+
+    test('allows a backed key on a segment', () {
+      expect(
+        VideoRenderData(
+          id: 'test',
+          videoSegments: [
+            VideoSegment(
+              video: EditorVideo.file('a.mp4'),
+              chromaKey: const ChromaKey(backgroundColor: Color(0xFF000000)),
+            ),
+          ],
+        ).videoSegments!.first.chromaKey,
+        isNotNull,
+      );
+    });
+
+    test('allows a transparent segment key inside a composition', () {
+      expect(
+        VideoRenderData(
+          id: 'test',
+          composition: VideoComposition(
+            layers: [
+              VideoLayer(
+                clips: [
+                  VideoSegment(
+                    video: EditorVideo.file('test.mp4'),
+                    chromaKey: const ChromaKey(),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ).composition,
+        isNotNull,
+      );
+    });
+
     test('allows a transparent key inside a composition', () {
       expect(
         VideoRenderData(

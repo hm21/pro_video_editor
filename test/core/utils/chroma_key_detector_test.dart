@@ -41,6 +41,28 @@ void main() {
     return buffer;
   }
 
+  /// Builds an RGBA frame split vertically: [left] over the leftmost
+  /// [leftFraction] of the width, [right] over the rest. Both reach the frame
+  /// border, which is what the coverage test is there to catch.
+  Uint8List splitFrame({
+    required Color left,
+    required Color right,
+    double leftFraction = 0.5,
+  }) {
+    final buffer = Uint8List(width * height * 4);
+    for (var y = 0; y < height; y++) {
+      for (var x = 0; x < width; x++) {
+        final c = x < width * leftFraction ? left : right;
+        final i = (y * width + x) * 4;
+        buffer[i] = (c.r * 255).round();
+        buffer[i + 1] = (c.g * 255).round();
+        buffer[i + 2] = (c.b * 255).round();
+        buffer[i + 3] = 255;
+      }
+    }
+    return buffer;
+  }
+
   double chromaDistance(Color a, Color b) {
     final ca = ChromaKeyDetector.chromaOf(a.r, a.g, a.b);
     final cb = ChromaKeyDetector.chromaOf(b.r, b.g, b.b);
@@ -196,6 +218,51 @@ void main() {
           () => ChromaKeyDetector.fromFrames([], width: width, height: height),
           throwsA(isA<ChromaKeyDetectionException>()),
         );
+      });
+
+      test('a border that is half screen and half studio wall', () {
+        // The regression this guards: coverage used to be derived from a
+        // percentile of the very distances it was measuring, so it came out
+        // at ~99% for any frame at all and this never threw.
+        expect(
+          () => ChromaKeyDetector.fromFrames(
+            [splitFrame(left: green, right: const Color(0xFF8B5A2B))],
+            width: width,
+            height: height,
+          ),
+          throwsA(
+            isA<ChromaKeyDetectionException>().having(
+              (e) => e.message,
+              'message',
+              contains('one color'),
+            ),
+          ),
+        );
+      });
+
+      test('a border that is half screen and half red curtain', () {
+        expect(
+          () => ChromaKeyDetector.fromFrames(
+            [splitFrame(left: green, right: const Color(0xFFCC2222))],
+            width: width,
+            height: height,
+          ),
+          throwsA(isA<ChromaKeyDetectionException>()),
+        );
+      });
+
+      test('coverage is a real measurement, not a constant', () {
+        // A minority of off-screen pixels is tolerated, but it has to show up
+        // in `coverage` — the old implementation reported ~1.0 regardless.
+        final result = ChromaKeyDetector.fromFrames(
+          [splitFrame(left: green, right: skin, leftFraction: 0.8)],
+          width: width,
+          height: height,
+        );
+
+        expect(result.coverage, lessThan(0.95));
+        expect(result.coverage, greaterThan(0.6));
+        expect(chromaDistance(result.color, green), lessThan(0.01));
       });
 
       test('a buffer that is too small for the stated size', () {

@@ -222,7 +222,16 @@ class RenderVideo(private val context: Context) {
                     // 1) Pre-transcode HEVC 10-bit clips (if needed).
                     if (needsPreTranscode) {
                         Log.d(RENDER_TAG, "Pre-transcoding HEVC 10-bit videos...")
-                        val inputPaths = workingConfig.videoClips.map { it.inputPath }
+                        // Both paths, not just the single-track one: a GPU
+                        // effect on a composition layer needs its clips
+                        // transcoded too. ChromaKeyEffect is an ES 2.0 SDR
+                        // shader and hard-fails on an HDR input, so leaving the
+                        // layered clips untouched here aborted the export.
+                        val inputPaths = (
+                            workingConfig.videoClips.map { it.inputPath } +
+                                (workingConfig.composition?.layers ?: emptyList())
+                                    .flatMap { layer -> layer.clips.map { it.inputPath } }
+                            ).distinct()
                         val transcodeMap = VideoTranscoder.transcodeClipsIfNeeded(
                             context, inputPaths
                         )
@@ -234,13 +243,22 @@ class RenderVideo(private val context: Context) {
                                 "Pre-transcoded ${transcodedFiles.size} HEVC 10-bit videos to H.264"
                             )
                         }
-                        val updatedClips = workingConfig.videoClips.map { clip ->
+                        fun retarget(clip: VideoClip): VideoClip {
                             val newPath = transcodeMap[clip.inputPath] ?: clip.inputPath
-                            if (newPath != clip.inputPath) {
+                            return if (newPath != clip.inputPath) {
                                 clip.copy(inputPath = newPath)
                             } else clip
                         }
-                        workingConfig = workingConfig.copy(videoClips = updatedClips)
+                        workingConfig = workingConfig.copy(
+                            videoClips = workingConfig.videoClips.map(::retarget),
+                            composition = workingConfig.composition?.let { composition ->
+                                composition.copy(
+                                    layers = composition.layers.map { layer ->
+                                        layer.copy(clips = layer.clips.map(::retarget))
+                                    }
+                                )
+                            }
+                        )
                     }
 
                     // 2) Pre-render reversed clips into single forward MP4 temp files.
@@ -273,6 +291,7 @@ class RenderVideo(private val context: Context) {
                         val transitionedClips = preRenderTransitions(
                             workingConfig.videoClips,
                             enableAudio = workingConfig.enableAudio,
+                            globalChromaKey = workingConfig.chromaKey,
                             shouldStop = shouldStopPolling,
                             collectPath = { paths.add(it) },
                             onProgress = { f -> transitionProgress(f.toDouble()) },
@@ -410,6 +429,7 @@ class RenderVideo(private val context: Context) {
     private fun preRenderTransitions(
         clips: List<VideoClip>,
         enableAudio: Boolean,
+        globalChromaKey: ChromaKeyConfig?,
         shouldStop: AtomicBoolean,
         collectPath: (String) -> Unit,
         onProgress: (Float) -> Unit,
@@ -508,12 +528,14 @@ class RenderVideo(private val context: Context) {
                 // Keep the outgoing clip's speed; it now ends `tailSrc` of source
                 // earlier (those frames moved into the speed-adjusted blend).
                 addClip(current.copy(endUs = curEnd - tailSrc, transition = null))
+                val blendKey = blendChromaKey(current, next, globalChromaKey, "$i")
                 result.add(
                     VideoClip(
                         inputPath = rendered.outputPath,
                         startUs = 0L,
                         endUs = rendered.durationUs.takeIf { it > 0 },
-                        chromaKey = blendChromaKey(current, next, "$i"),
+                        chromaKey = blendKey.config,
+                        suppressChromaKey = blendKey.suppressed,
                     )
                 )
                 // Trim the incoming head in place; it keeps its own speed/transition.
@@ -599,12 +621,15 @@ class RenderVideo(private val context: Context) {
                         result[0] = first.copy(startUs = firstStart + headSrc)
                         result[lastIdx] = last.copy(endUs = lastEnd - tailSrc)
                     }
+                    val wrapKey =
+                        blendChromaKey(last, first, globalChromaKey, "loop wrap")
                     result.add(
                         VideoClip(
                             inputPath = rendered.outputPath,
                             startUs = 0L,
                             endUs = rendered.durationUs.takeIf { it > 0 },
-                            chromaKey = blendChromaKey(last, first, "loop wrap"),
+                            chromaKey = wrapKey.config,
+                            suppressChromaKey = wrapKey.suppressed,
                         )
                     )
                 } else {
@@ -631,16 +656,33 @@ class RenderVideo(private val context: Context) {
     private fun blendChromaKey(
         outgoing: VideoClip,
         incoming: VideoClip,
+        global: ChromaKeyConfig?,
         boundary: String,
-    ): ChromaKeyConfig? {
-        if (outgoing.chromaKey == incoming.chromaKey) return outgoing.chromaKey
+    ): BlendChromaKey {
+        // Compare the *effective* keys. A clip that leaves its own key null
+        // still inherits the global one, so comparing the raw per-clip fields
+        // reported a mismatch for two clips that in fact key identically.
+        val outgoingKey = outgoing.chromaKey ?: global
+        val incomingKey = incoming.chromaKey ?: global
+        if (outgoingKey == incomingKey) return BlendChromaKey(outgoingKey, false)
+
         Log.w(
             RENDER_TAG,
             "Chroma key: the two clips at boundary $boundary use different keys; " +
                 "the pre-rendered transition blend is emitted unkeyed"
         )
-        return null
+        // A null key alone would mean "inherit", and `VideoSequenceBuilder`
+        // would then fall back to the global key — applying to the blend the
+        // very thing this warning promises it will not. The suppress flag is
+        // what makes "unkeyed" actually mean unkeyed.
+        return BlendChromaKey(null, true)
     }
+
+    /** The key for a pre-rendered blend, and whether it opts out of the global one. */
+    private data class BlendChromaKey(
+        val config: ChromaKeyConfig?,
+        val suppressed: Boolean,
+    )
 
     /**
      * Internal render implementation after optional pre-transcoding.

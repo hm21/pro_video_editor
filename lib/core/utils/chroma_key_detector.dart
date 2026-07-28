@@ -80,6 +80,17 @@ abstract final class ChromaKeyDetector {
   /// At least this share of the border must belong to one color.
   static const _minCoverage = 0.6;
 
+  /// How far from the median a border pixel may sit and still count as screen.
+  ///
+  /// Deliberately a **constant**, not a percentile of the measured
+  /// distribution: a band derived from the distances themselves would contain
+  /// a fixed share of them by construction, and the coverage test below would
+  /// pass for every possible frame. Sized off the default `similarity` — wide
+  /// enough that an unevenly lit screen still counts (the falloff shows up as
+  /// spread, not as missing coverage), tight enough that skin (`0.38`–`0.42`
+  /// from green) and an olive shirt (`0.26`) do not.
+  static const _coverageBand = 0.20;
+
   /// Multiplier on the measured spread, so the soft edge and a little
   /// frame-to-frame noise stay inside the key.
   static const _spreadMargin = 2.0;
@@ -175,17 +186,12 @@ abstract final class ChromaKeyDetector {
       return sqrt(dcb * dcb + dcr * dcr);
     })..sort();
 
-    final spread =
-        distances[(distances.length * 0.99).floor().clamp(
-          0,
-          distances.length - 1,
-        )];
-
-    // Coverage uses a generous band around the median, so a soft edge counts
-    // as screen while a wall or a sleeve does not.
-    final band = max(spread, _minSimilarity);
-    final covered = distances.where((d) => d <= band).length;
-    final coverage = covered / distances.length;
+    // Which border pixels belong to the screen. The band is a constant, so
+    // this is a real measurement — a wall or a sleeve falls outside it and
+    // drags coverage down, while an unevenly lit screen stays inside and shows
+    // up as spread instead.
+    final screen = distances.takeWhile((d) => d <= _coverageBand).toList();
+    final coverage = screen.length / distances.length;
 
     if (coverage < _minCoverage) {
       throw ChromaKeyDetectionException(
@@ -194,6 +200,11 @@ abstract final class ChromaKeyDetector {
         'area, or set the key manually.',
       );
     }
+
+    // Measured over the screen pixels alone, so anything that reached the
+    // border without being part of the screen cannot widen the key.
+    final spread =
+        screen[(screen.length * 0.99).floor().clamp(0, screen.length - 1)];
 
     final similarity = (spread * _spreadMargin).clamp(
       _minSimilarity,
