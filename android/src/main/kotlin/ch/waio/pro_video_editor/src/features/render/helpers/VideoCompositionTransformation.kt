@@ -23,6 +23,10 @@ import kotlin.math.roundToInt
  * rest stays transparent, so the default Media3 compositor can alpha-blend the
  * layers on top of each other.
  *
+ * The draw itself does **not** blend — see the note in `drawFrame`. Partial
+ * alpha (a chroma-keyed edge, an [androidx.media3.effect.AlphaScale]d layer)
+ * passes through unchanged and is blended once, by the Media3 compositor.
+ *
  * When a clip box ([clipX], [clipY], [clipWidth], [clipHeight]) is provided, the
  * draw is scissored to that box (canvas pixels, top-left origin). This clips
  * `cover` overflow so a scaled-up clip cannot bleed past its target rectangle
@@ -99,9 +103,18 @@ class VideoCompositionTransformation(
                 GLES20.glClearColor(0f, 0f, 0f, 0f)
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-                // Enable alpha blending to support transparent layers/overlays.
-                GLES20.glEnable(GLES20.GL_BLEND)
-                GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                // No blending: this draw replaces. The target was just cleared
+                // to (0,0,0,0) and exactly one quad is drawn, so there is
+                // nothing to blend against — and GL_SRC_ALPHA/
+                // GL_ONE_MINUS_SRC_ALPHA against a transparent destination
+                // *squares* the alpha (dst.a = a*a + 0*(1-a)). That was
+                // harmless while this shader only ever saw opaque input, but a
+                // chroma-keyed layer arrives with a soft, partially transparent
+                // edge, which blending here would darken and thin out.
+                //
+                // The one real blend is Media3's own DefaultCompositorGlProgram,
+                // which uses glBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA,
+                // ONE, ONE_MINUS_SRC_ALPHA) — correct straight-alpha source-over.
 
                 val glMatrix = FloatArray(16)
                 Matrix.setIdentityM(glMatrix, 0)
@@ -170,7 +183,6 @@ class VideoCompositionTransformation(
                 if (applyScissor) {
                     GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
                 }
-                GLES20.glDisable(GLES20.GL_BLEND)
                 GlUtil.checkGlError()
             } catch (e: Exception) {
                 throw VideoFrameProcessingException(e, presentationTimeUs)

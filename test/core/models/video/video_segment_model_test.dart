@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 
@@ -124,6 +126,53 @@ void main() {
 
     test('toString contains class name', () {
       expect(segment.toString(), contains('VideoSegment'));
+    });
+
+    group('chromaKey', () {
+      const key = ChromaKey(
+        similarity: 0.3,
+        backgroundColor: Color(0xFF0000FF),
+      );
+
+      test('defaults to null so the clip inherits the layer/global key', () {
+        expect(segment.chromaKey, isNull);
+      });
+
+      // toAsyncMap resolves the source to a local path, so these use a file
+      // video — an asset would need the platform channel.
+      final local = VideoSegment(video: EditorVideo.file('test.mp4'));
+
+      test('toAsyncMap sends the key over the platform channel', () async {
+        final map = await local.copyWith(chromaKey: key).toAsyncMap();
+
+        expect(map['chromaKey'], isA<Map<String, dynamic>>());
+        expect((map['chromaKey'] as Map)['similarity'], 0.3);
+      });
+
+      test('toAsyncMap omits the key when unset', () async {
+        expect((await local.toAsyncMap())['chromaKey'], isNull);
+      });
+
+      test('toMap / fromMap roundtrip preserves the key', () {
+        final withKey = segment.copyWith(chromaKey: key);
+
+        expect(VideoSegment.fromMap(withKey.toMap()).chromaKey, key);
+        expect(VideoSegment.fromMap(segment.toMap()).chromaKey, isNull);
+      });
+
+      test('copyWith overrides and otherwise keeps the key', () {
+        final withKey = segment.copyWith(chromaKey: key);
+
+        expect(withKey.copyWith().chromaKey, key);
+        expect(
+          withKey.copyWith(chromaKey: const ChromaKey()).chromaKey,
+          const ChromaKey(),
+        );
+      });
+
+      test('a differing key breaks equality', () {
+        expect(segment.copyWith(chromaKey: key), isNot(segment));
+      });
     });
   });
 }

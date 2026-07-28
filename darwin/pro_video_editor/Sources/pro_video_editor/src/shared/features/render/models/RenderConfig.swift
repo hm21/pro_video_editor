@@ -162,6 +162,116 @@ public struct ColorFilterConfig: Sendable {
   }
 }
 
+/// Configuration for removing a solid-colored background ("green screen").
+///
+/// Mirrors the Dart `ChromaKey` model and the Kotlin `ChromaKeyConfig`. The
+/// keying math itself lives in `ApplyChromaKey.swift` and is byte-for-byte the
+/// same formula the Android fragment shader runs.
+public struct ChromaKeyConfig: Sendable, Equatable {
+  /// The screen color to remove, as gamma-encoded RGB in 0...1.
+  let keyR: Double
+  let keyG: Double
+  let keyB: Double
+  /// Chroma-plane radius within which a pixel is removed completely.
+  let similarity: Double
+  /// Width of the soft ramp just beyond `similarity`.
+  let smoothness: Double
+  /// How strongly the key's color cast is pulled out of the remaining pixels.
+  let spill: Double
+  /// Solid background ARGB, or -1 when none (the sentinel convention used by
+  /// `ColorFilterConfig.startUs`/`endUs`).
+  let backgroundColor: Int64
+  /// Background image bytes, or nil when none.
+  let backgroundImageData: Data?
+
+  /// Whether the keyed area is left transparent rather than filled.
+  var isTransparent: Bool { backgroundColor == -1 && backgroundImageData == nil }
+
+  /// The same key, but filling the removed area with opaque black.
+  ///
+  /// Used on the single-track path, where nothing sits underneath and the codec
+  /// carries no alpha, so "transparent" has no meaning. Android does the same
+  /// substitution in `applyChromaKey(flattenTransparency:)`.
+  func withOpaqueBlackBackground() -> ChromaKeyConfig {
+    ChromaKeyConfig(
+      keyR: keyR, keyG: keyG, keyB: keyB,
+      similarity: similarity, smoothness: smoothness, spill: spill,
+      backgroundColor: Int64(0xFF00_0000), backgroundImageData: nil)
+  }
+
+  /// The key color projected onto the Cb/Cr chroma plane.
+  var keyChroma: (cb: Double, cr: Double) {
+    chromaOf(r: keyR, g: keyG, b: keyB)
+  }
+
+  /// The unit vector pointing from neutral toward the key hue, used to pull
+  /// the key's cast back out during spill suppression. Zero for a neutral
+  /// (gray) key color, which disables despill rather than dividing by zero.
+  var keyDirection: (cb: Double, cr: Double) {
+    let c = keyChroma
+    let length = (c.cb * c.cb + c.cr * c.cr).squareRoot()
+    guard length > 1e-5 else { return (0, 0) }
+    return (c.cb / length, c.cr / length)
+  }
+
+  /// Stable identity for the compositor's color-cube cache.
+  ///
+  /// Deliberately not `hashValue`: Swift seeds its hashing per process, so a
+  /// hash is not a safe cache key across the lifetime of a render, and the
+  /// background image data is far too large to hash per frame.
+  var cacheKey: String {
+    return "\(keyR),\(keyG),\(keyB),\(similarity),\(smoothness),\(spill),"
+      + "\(backgroundColor),\(backgroundImageFingerprint)"
+  }
+
+  /// Cheap content fingerprint of the background image.
+  ///
+  /// The byte count alone is not an identity — two different backgrounds that
+  /// happen to be the same size would share a cache entry, and the second clip
+  /// would render the first one's image. Mixing in the head and tail bytes
+  /// separates them while staying O(1), which matters because `cacheKey` is
+  /// evaluated per frame.
+  private var backgroundImageFingerprint: String {
+    guard let data = backgroundImageData, !data.isEmpty else { return "0" }
+    let sampleSize = min(32, data.count)
+    let head = data.prefix(sampleSize).reduce(into: UInt64(1_469_598_103_934_665_603)) {
+      accumulator, byte in
+      accumulator = (accumulator ^ UInt64(byte)) &* 1_099_511_628_211
+    }
+    let tail = data.suffix(sampleSize).reduce(into: UInt64(1_469_598_103_934_665_603)) {
+      accumulator, byte in
+      accumulator = (accumulator ^ UInt64(byte)) &* 1_099_511_628_211
+    }
+    return "\(data.count)-\(head)-\(tail)"
+  }
+
+  static func fromArguments(_ args: [String: Any]?) -> ChromaKeyConfig? {
+    guard let args = args,
+      let keyColor = (args["keyColor"] as? NSNumber)?.int64Value
+    else { return nil }
+
+    let backgroundImageData: Data?
+    if let flutterData = args["bgImageData"] as? FlutterStandardTypedData {
+      backgroundImageData = flutterData.data.isEmpty ? nil : flutterData.data
+    } else if let data = args["bgImageData"] as? Data, !data.isEmpty {
+      backgroundImageData = data
+    } else {
+      backgroundImageData = nil
+    }
+
+    return ChromaKeyConfig(
+      keyR: Double((keyColor >> 16) & 0xFF) / 255.0,
+      keyG: Double((keyColor >> 8) & 0xFF) / 255.0,
+      keyB: Double(keyColor & 0xFF) / 255.0,
+      similarity: (args["similarity"] as? NSNumber)?.doubleValue ?? 0.20,
+      smoothness: (args["smoothness"] as? NSNumber)?.doubleValue ?? 0.08,
+      spill: (args["spill"] as? NSNumber)?.doubleValue ?? 0.5,
+      backgroundColor: (args["bgColor"] as? NSNumber)?.int64Value ?? -1,
+      backgroundImageData: backgroundImageData
+    )
+  }
+}
+
 /// Configuration for a custom audio track with timing and volume.
 struct AudioTrackConfig {
   let path: String
@@ -227,6 +337,9 @@ struct LayerConfig: Sendable {
   let opacity: Float
   /// Default placement for clips without their own transform.
   let transform: SegmentTransformConfig?
+  /// Default chroma key for the clips on this layer. A clip's own key wins;
+  /// `nil` falls back to the global key.
+  let chromaKey: ChromaKeyConfig?
 
   static func fromArguments(_ args: [String: Any]?) -> LayerConfig? {
     guard let args = args,
@@ -237,7 +350,8 @@ struct LayerConfig: Sendable {
     return LayerConfig(
       clips: clips,
       opacity: (args["opacity"] as? NSNumber)?.floatValue ?? 1.0,
-      transform: SegmentTransformConfig.fromArguments(args["transform"] as? [String: Any])
+      transform: SegmentTransformConfig.fromArguments(args["transform"] as? [String: Any]),
+      chromaKey: ChromaKeyConfig.fromArguments(args["chromaKey"] as? [String: Any])
     )
   }
 }
@@ -359,6 +473,11 @@ struct RenderConfig: Sendable {
   /// Blur radius (nil = no blur, experimental feature)
   let blur: Double?
 
+  /// Removes a solid-colored background ("green screen") from every clip that
+  /// does not carry its own key. A `VideoClip.chromaKey` overrides this, and in
+  /// the layered path a `LayerConfig.chromaKey` sits between the two.
+  let chromaKey: ChromaKeyConfig?
+
   /// Global start time in microseconds for trimming the final composition
   let startUs: Int64?
 
@@ -404,6 +523,7 @@ struct RenderConfig: Sendable {
       colorFilters: self.colorFilters,
       audioTracks: self.audioTracks,
       blur: self.blur,
+      chromaKey: self.chromaKey,
       startUs: self.startUs,
       endUs: self.endUs,
       shouldOptimizeForNetworkUse: self.shouldOptimizeForNetworkUse,
@@ -474,6 +594,7 @@ struct RenderConfig: Sendable {
       colorFilters: colorFilters,
       audioTracks: audioTracks,
       blur: (args["blur"] as? NSNumber)?.doubleValue,
+      chromaKey: ChromaKeyConfig.fromArguments(args["chromaKey"] as? [String: Any]),
       startUs: (args["startUs"] as? NSNumber)?.int64Value,
       endUs: (args["endUs"] as? NSNumber)?.int64Value,
       shouldOptimizeForNetworkUse: args["shouldOptimizeForNetworkUse"] as? Bool ?? true,

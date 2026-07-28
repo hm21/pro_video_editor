@@ -16,6 +16,7 @@ internal class LayeredCompositionBuilder {
   private let config: CompositionConfig
   private var enableAudio: Bool = true
   private var audioTracks: [AudioTrackConfig] = []
+  private var globalChromaKey: ChromaKeyConfig?
 
   init(composition: CompositionConfig) {
     self.config = composition
@@ -31,6 +32,14 @@ internal class LayeredCompositionBuilder {
     return self
   }
 
+  /// Sets the chroma key for clips carrying neither their own nor a layer key.
+  ///
+  /// Resolved per clip as `clip ?? layer ?? global`; never merged.
+  func setChromaKey(_ key: ChromaKeyConfig?) -> LayeredCompositionBuilder {
+    self.globalChromaKey = key
+    return self
+  }
+
   /// A clip after it has been inserted onto its layer's track, with the data
   /// needed to build instructions and the audio mix.
   private struct PlacedClip {
@@ -42,6 +51,7 @@ internal class LayeredCompositionBuilder {
     let transformConfig: SegmentTransformConfig?
     let preferredTransform: CGAffineTransform
     let displaySize: CGSize
+    let chromaKey: ChromaKeyConfig?
   }
 
   private struct AudioWindow {
@@ -52,7 +62,7 @@ internal class LayeredCompositionBuilder {
 
   func build() async throws -> (
     AVMutableComposition, VideoCompositionData, CGSize, AVAudioMix?, CMPersistentTrackID, [URL],
-    [FadeWindow]
+    [FadeWindow], [ChromaKeyWindow]
   ) {
     guard !config.layers.isEmpty else {
       throw NSError(
@@ -156,7 +166,8 @@ internal class LayeredCompositionBuilder {
             opacity: layer.opacity,
             transformConfig: clip.transform ?? layer.transform,
             preferredTransform: pt,
-            displaySize: displaySize))
+            displaySize: displaySize,
+            chromaKey: clip.chromaKey ?? layer.chromaKey ?? globalChromaKey))
       }
     }
 
@@ -209,9 +220,12 @@ internal class LayeredCompositionBuilder {
         + "\(audioTracks.count) audio tracks, "
         + "canvas \(Int(canvasSize.width))x\(Int(canvasSize.height))")
 
+    // No chroma-key windows: the layered path keys each layer on its own
+    // source frame via LayerPlacement, before it reaches the canvas. Keying the
+    // composed (opaque) canvas afterwards would be meaningless.
     return (
       composition, videoCompositionData, canvasSize, audioMix, firstVideoTrackID,
-      temporaryAudioURLs, []
+      temporaryAudioURLs, [], []
     )
   }
 
@@ -250,7 +264,8 @@ internal class LayeredCompositionBuilder {
           targetRect: resolveRect(clip.transformConfig, displaySize: clip.displaySize),
           fit: clip.transformConfig?.fit ?? "fill",
           preferredTransform: clip.preferredTransform,
-          displaySize: clip.displaySize)
+          displaySize: clip.displaySize,
+          chromaKey: clip.chromaKey)
       }
 
       let timeRange = CMTimeRange(

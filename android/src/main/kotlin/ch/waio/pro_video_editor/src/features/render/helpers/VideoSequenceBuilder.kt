@@ -3,6 +3,7 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 import RENDER_TAG
 import android.content.Context
 import android.net.Uri
+import applyChromaKey
 import applyScale
 import androidx.media3.common.C
 import androidx.media3.common.Effect
@@ -18,6 +19,7 @@ import androidx.media3.effect.SpeedChangeEffect
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
+import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
@@ -60,6 +62,7 @@ class VideoSequenceBuilder(
     private var scaleY: Float? = null
     private var outputWidth: Int? = null
     private var outputHeight: Int? = null
+    private var globalChromaKey: ChromaKeyConfig? = null
     private val rotatedDimensionsCache = mutableMapOf<String, Triple<Int, Int, Int>>()
 
     data class CropConfig(
@@ -101,6 +104,16 @@ class VideoSequenceBuilder(
     fun setScale(scaleX: Float?, scaleY: Float?): VideoSequenceBuilder {
         this.scaleX = scaleX
         this.scaleY = scaleY
+        return this
+    }
+
+    /**
+     * Sets the chroma key applied to every clip that carries none of its own.
+     *
+     * A [VideoClip.chromaKey] overrides this per clip; the two are never merged.
+     */
+    fun setChromaKey(chromaKey: ChromaKeyConfig?): VideoSequenceBuilder {
+        this.globalChromaKey = chromaKey
         return this
     }
 
@@ -595,6 +608,20 @@ class VideoSequenceBuilder(
 
         // Build video effects
         val clipVideoEffects = mutableListOf<Effect>()
+
+        // Chroma key first, so it sees the original decoded colors — before
+        // rotation, flip, the color LUT and blur. A clip's own key wins over
+        // the global one; they are never merged.
+        //
+        // flattenTransparency is on because this is the single-track path:
+        // there is no layer underneath, so a key without a background is filled
+        // with opaque black instead (see applyChromaKey for why).
+        applyChromaKey(
+            clipVideoEffects,
+            if (clip.suppressChromaKey) null else clip.chromaKey ?: globalChromaKey,
+            flattenTransparency = true,
+        )
+
         clipVideoEffects.addAll(videoEffects)
 
         // Calculate video dimensions for image layer positioning

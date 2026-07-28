@@ -487,6 +487,9 @@ internal struct LayerPlacement: Sendable {
   let preferredTransform: CGAffineTransform
   /// The source display size after applying `preferredTransform`.
   let displaySize: CGSize
+  /// Chroma key for this layer, resolved as `clip ?? layer ?? global`.
+  /// Applied to the layer's own source frame, before it reaches the canvas.
+  let chromaKey: ChromaKeyConfig?
 }
 
 /// Custom video composition instruction that explicitly provides source track IDs.

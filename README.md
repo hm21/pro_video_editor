@@ -129,6 +129,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🎞️ **Clip Transitions**: Add transitions between adjacent clips — `dissolve`, `fadeToBlack`, `fadeToWhite`, `slide`, `push`, and `wipe` — with configurable duration, easing curve, and direction.
 - 🧮 **Color Matrix**: Apply one or multiple 4x5 color matrices (e.g., for filters).
 - 💧 **Blur**: Add a blur effect to the video.
+- 🟩 **Chroma Key**: Remove a green (or blue, or any saturated hue) screen with a soft edge and spill suppression, and fill it with a color, an image, or — in a `VideoComposition` — the layer below. `ChromaKey.autoDetect` measures the key straight off the footage; `greenScreen()`/`blueScreen()` presets are there when you already know. Configurable globally, per `VideoLayer`, or per `VideoSegment`.
 - 📡 **Bitrate**: Cap the video bitrate. Sources already below the cap are exported losslessly over the fast path; sources above it are re-encoded down to the cap. If constant bitrate (CBR) isn't supported, it will gracefully fall back to the next available mode.
 - 🌐 **Streaming Optimization**: Optimize video for progressive playback by placing metadata (moov atom) at the start of the file.
 
@@ -160,6 +161,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 | `Multiple ColorMatrix 4x5` | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Cancel export task`       | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Blur background`          | 🧪      | 🧪  | 🧪     | ❌      | ❌     | 🚫   |
+| `Chroma Key (Greenscreen)` | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Custom Audio Tracks`      | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Merge Videos`             | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Stop-Motion (Images→Video)`| ✅     | ✅  | ✅     | ❌      | ❌     | 🚫   |
@@ -620,12 +622,56 @@ var task = VideoRenderData(
          ColorFilter(matrix: [ 1.0, 0.0, 0.0, 0.0, 50.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0 ]),
          ColorFilter(matrix: [ 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0 ]),
     ],
+    chromaKey: const ChromaKey(
+        // Defaults to SMPTE "chroma key green". Brightness matters as well as
+        // hue, so measure it with `ChromaKey.autoDetect` when you can.
+        color: Color(0xFF00B140),
+        similarity: 0.20,  // raise it if the screen survives the key
+        smoothness: 0.08,  // width of the soft edge
+        spill: 0.5,        // pull the green cast off the subject's edges
+        backgroundColor: Color(0xFF000000),
+    ),
 );
 
 Uint8List result = await ProVideoEditor.instance.renderVideo(task);
 
 /// Note: Blur is an experimental feature (🧪 in platform matrix)
 /// The blur effect may render differently than in Flutter's preview.
+
+/// Chroma key: the most reliable key is measured, not guessed. Paint, lighting
+/// and the camera all shift the recorded screen away from any constant, and
+/// that shift has to be paid for with a wider `similarity` — the very margin
+/// that protects the subject. On a real studio clip the SMPTE constant sat
+/// 0.10–0.20 away from the screen and needed `similarity: 0.20`; the measured
+/// color sat within 0.05 and 0.10 was plenty.
+final key = await ChromaKey.autoDetect(
+    greenScreenVideo,
+    backgroundColor: Colors.black,
+);
+
+/// When you already know the screen, the presets carry the measured values.
+/// Note that blue is not green with a different hue: it separates skin better,
+/// but denim (0.19), blue eyes (0.20) and light blue shirts (0.21) all crowd
+/// it, so `blueScreen()` keys tighter and despills more gently.
+const greenKey = ChromaKey.greenScreen(backgroundColor: Color(0xFF000000));
+const blueKey = ChromaKey.blueScreen(backgroundColor: Color(0xFF000000));
+
+/// Chroma key: to put a *video* behind the green screen, leave the key
+/// transparent and place the keyed clip on a layer above another one. In the
+/// single-track `videoSegments` path there is nothing underneath and the codec
+/// carries no alpha, so a key there needs a `backgroundColor` or
+/// `backgroundImage`.
+final keyedTask = VideoRenderData(
+    composition: VideoComposition(
+        layers: [
+            VideoLayer(clips: [VideoSegment(video: backgroundVideo)]),
+            VideoLayer(
+                clips: [VideoSegment(video: greenScreenVideo)],
+                chromaKey: const ChromaKey(),
+            ),
+        ],
+    ),
+);
 
 /// Listen progress
 StreamBuilder<ProgressModel>(

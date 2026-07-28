@@ -21,6 +21,10 @@ const String kVideoEditorExampleDivinePath =
 /// Darwin AVAssetWriter path downmixes them to stereo).
 const String kVideoEditorExampleSurround51Path = 'assets/surround_5_1.mp4';
 
+/// A local path to a real green-screen clip: a person in front of a lit studio
+/// screen. Cropped to the screen area, so nothing outside it survives the key.
+const String kVideoEditorExampleGreenScreenPath = 'assets/greenscreen.mp4';
+
 /// A local path to the first example audio track used in video editor demos.
 const String kVideoEditorExampleAudio1Path = 'assets/audio1.mp3';
 

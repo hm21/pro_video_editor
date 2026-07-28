@@ -105,6 +105,42 @@ void main() {
         throwsAssertionError,
       );
     });
+
+    group('chromaKey', () {
+      const key = ChromaKey(similarity: 0.25);
+
+      test('defaults to null so clips inherit the global key', () {
+        expect(layer.chromaKey, isNull);
+      });
+
+      // toAsyncMap resolves each clip's source to a local path, so these use a
+      // file video — an asset would need the platform channel.
+      final local = VideoLayer(
+        clips: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+      );
+
+      test('toAsyncMap sends the key over the platform channel', () async {
+        final map = await local.copyWith(chromaKey: key).toAsyncMap();
+
+        expect(map['chromaKey'], isA<Map<String, dynamic>>());
+        expect((map['chromaKey'] as Map)['similarity'], 0.25);
+      });
+
+      test('toAsyncMap omits the key when unset', () async {
+        expect((await local.toAsyncMap())['chromaKey'], isNull);
+      });
+
+      test('toJson / fromJson roundtrip preserves the key', () {
+        final withKey = layer.copyWith(chromaKey: key);
+
+        expect(VideoLayer.fromJson(withKey.toJson()), withKey);
+        expect(VideoLayer.fromJson(layer.toJson()).chromaKey, isNull);
+      });
+
+      test('a differing key breaks equality', () {
+        expect(layer.copyWith(chromaKey: key), isNot(layer));
+      });
+    });
   });
 
   group('VideoComposition', () {

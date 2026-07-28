@@ -7,6 +7,7 @@ import 'package:pro_video_editor_example/features/editor/pages/video_editor_grou
 
 import 'features/audio/audio_extract_example_page.dart';
 import 'features/audio/audio_merge_example_page.dart';
+import 'features/chroma_key/chroma_key_example_page.dart';
 import 'features/metadata/video_metadata_example_page.dart';
 import 'features/render/video_renderer_page.dart';
 import 'features/split/split_example_page.dart';
@@ -83,6 +84,11 @@ class _HomePageState extends State<HomePage> {
       icon: Icons.developer_board_outlined,
       title: 'Video-Renderer',
       pageBuilder: () => const VideoRendererPage(),
+    ),
+    _ExampleListItem(
+      icon: Icons.filter_center_focus,
+      title: 'Chroma Key (Greenscreen)',
+      pageBuilder: () => const ChromaKeyExamplePage(),
     ),
     _ExampleListItem(
       icon: Icons.burst_mode_outlined,

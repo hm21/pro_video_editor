@@ -1,6 +1,7 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
+import applyChromaKey
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -17,6 +18,7 @@ import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import ch.waio.pro_video_editor.src.features.render.models.AudioTrackConfig
+import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
 import ch.waio.pro_video_editor.src.features.render.models.CompositionConfig
 import ch.waio.pro_video_editor.src.features.render.models.SegmentTransformConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
@@ -55,7 +57,12 @@ class LayeredCompositionBuilder(
     /** Global trim start across the whole composition, in microseconds. */
     private val globalStartUs: Long? = null,
     /** Global trim end across the whole composition, in microseconds. */
-    private val globalEndUs: Long? = null
+    private val globalEndUs: Long? = null,
+    /**
+     * Chroma key for clips that carry neither their own nor a layer key.
+     * Resolved per clip as `clip ?: layer ?: global`; never merged.
+     */
+    private val globalChromaKey: ChromaKeyConfig? = null
 ) {
     /** Temp files (source duplicates) to delete after export. */
     val temporaryFiles: MutableList<File> = mutableListOf()
@@ -196,7 +203,8 @@ class LayeredCompositionBuilder(
                 seqBuilder.addItem(
                     buildClipItem(
                         clip, srcStartUs, srcEndUs, effectivePath, placement,
-                        displayW, displayH, layer.opacity, canvasW, canvasH
+                        displayW, displayH, layer.opacity, canvasW, canvasH,
+                        layer.chromaKey
                     )
                 )
                 outputCursorUs += outputDurationUs
@@ -299,7 +307,8 @@ class LayeredCompositionBuilder(
         displayH: Int,
         opacity: Float,
         canvasW: Int,
-        canvasH: Int
+        canvasH: Int,
+        layerChromaKey: ChromaKeyConfig?
     ): EditedMediaItem {
         val mediaItemBuilder = MediaItem.Builder().setUri(Uri.fromFile(File(inputPath)))
         if (srcStartUs != null || srcEndUs != null) {
@@ -310,6 +319,24 @@ class LayeredCompositionBuilder(
         }
 
         val effects = mutableListOf<Effect>()
+
+        // Chroma key first: each layer is keyed on its own source frame, before
+        // it is placed on the canvas. Keying the composed canvas afterwards
+        // would be meaningless, since it is already opaque.
+        //
+        // flattenTransparency stays off here — this is the whole point of the
+        // layered path. Media3's compositor blends the sequences with
+        // glBlendFuncSeparate, so a transparent key really does let the layer
+        // below show through.
+        applyChromaKey(
+            effects,
+            if (clip.suppressChromaKey) {
+                null
+            } else {
+                clip.chromaKey ?: layerChromaKey ?: globalChromaKey
+            }
+        )
+
         val draw = placement.draw
         val clipBox = placement.clip
         effects += VideoCompositionTransformation(

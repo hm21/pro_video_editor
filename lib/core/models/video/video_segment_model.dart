@@ -21,6 +21,7 @@ class VideoSegment {
     this.transition,
     this.timelineStart,
     this.transform,
+    this.chromaKey,
   }) : assert(
          startTime == null || endTime == null || startTime < endTime,
          'startTime must be before endTime',
@@ -122,7 +123,21 @@ class VideoSegment {
   /// or fills the entire canvas if neither is set.
   final SegmentTransform? transform;
 
+  /// Removes a solid-colored background from this clip only.
+  ///
+  /// Overrides [VideoLayer.chromaKey] and [VideoRenderData.chromaKey] for this
+  /// clip; the three are never merged. When `null`, the clip falls back to its
+  /// layer's key, then to the global one.
+  ///
+  /// **Ignored inside an overlap [transition]** (dissolve/slide/push/wipe) when
+  /// the two clips at that boundary carry different keys — that blend is
+  /// pre-rendered from the raw sources and is emitted unkeyed with a warning.
+  final ChromaKey? chromaKey;
+
   /// Converts this clip to a map for platform channel communication.
+  ///
+  /// Resolves the input path and any chroma-key background image, so this is
+  /// asynchronous.
   Future<Map<String, dynamic>> toAsyncMap() async {
     final inputPath = await video.safeFilePath();
 
@@ -136,6 +151,7 @@ class VideoSegment {
       'transition': transition?.toMap(),
       'timelineStartUs': timelineStart?.inMicroseconds,
       'transform': transform?.toMap(),
+      'chromaKey': await chromaKey?.toAsyncMap(),
     };
   }
 
@@ -150,6 +166,7 @@ class VideoSegment {
     ClipTransition? transition,
     Duration? timelineStart,
     SegmentTransform? transform,
+    ChromaKey? chromaKey,
   }) {
     return VideoSegment(
       video: video ?? this.video,
@@ -161,6 +178,7 @@ class VideoSegment {
       transition: transition ?? this.transition,
       timelineStart: timelineStart ?? this.timelineStart,
       transform: transform ?? this.transform,
+      chromaKey: chromaKey ?? this.chromaKey,
     );
   }
 
@@ -176,7 +194,8 @@ class VideoSegment {
         other.reverseVideo == reverseVideo &&
         other.transition == transition &&
         other.timelineStart == timelineStart &&
-        other.transform == transform;
+        other.transform == transform &&
+        other.chromaKey == chromaKey;
   }
 
   @override
@@ -189,7 +208,8 @@ class VideoSegment {
         reverseVideo.hashCode ^
         transition.hashCode ^
         timelineStart.hashCode ^
-        transform.hashCode;
+        transform.hashCode ^
+        chromaKey.hashCode;
   }
 
   @override
@@ -202,7 +222,8 @@ class VideoSegment {
         'reverseVideo: $reverseVideo, '
         'transition: $transition, '
         'timelineStart: $timelineStart, '
-        'transform: $transform)';
+        'transform: $transform, '
+        'chromaKey: $chromaKey)';
   }
 
   Map<String, dynamic> toMap() {
@@ -216,6 +237,7 @@ class VideoSegment {
       'transition': transition?.toMap(),
       'timelineStart': timelineStart?.inMicroseconds,
       'transform': transform?.toMap(),
+      'chromaKey': chromaKey?.toMap(),
     };
   }
 
@@ -239,6 +261,9 @@ class VideoSegment {
           : null,
       transform: map['transform'] != null
           ? SegmentTransform.fromMap(map['transform'] as Map<String, dynamic>)
+          : null,
+      chromaKey: map['chromaKey'] != null
+          ? ChromaKey.fromMap(map['chromaKey'] as Map<String, dynamic>)
           : null,
     );
   }
