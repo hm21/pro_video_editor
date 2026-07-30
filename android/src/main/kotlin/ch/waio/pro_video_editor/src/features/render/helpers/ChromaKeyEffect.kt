@@ -302,7 +302,7 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
 
             // A portrait photo is stored as landscape pixels plus an EXIF tag;
             // without this the background would be keyed in sideways.
-            val decoded = ImageOrientation.apply(raw, probe.orientation)
+            val decoded = ImageOrientation.orient(raw, probe.orientation)
 
             // inSampleSize only halves, so one more exact pass may be needed.
             if (decoded.width <= limit && decoded.height <= limit) return decoded

@@ -509,7 +509,6 @@ enum ThumbnailTimestampFixture {
   }
 }
 
-
 // MARK: - EXIF orientation on caller-supplied images
 
 /// `decodeOrientedImage` must honor the EXIF `Orientation` tag.
@@ -597,6 +596,41 @@ class DecodeOrientedImageTests: XCTestCase {
     XCTAssertEqual(quadrants.bottomRight, .bottomRight)
   }
 
+  /// The case `NSImage` used to paper over on macOS: it rasterized every source
+  /// into RGB before the compositor saw it, whereas `CGImageSource` hands back
+  /// the file's own color space — so a one-component grayscale JPEG now reaches
+  /// CoreImage as gray, and the render path's `CIContext` does no color
+  /// management (`workingColorSpace: NSNull`). Pins that such an image still
+  /// lands on the right pixels, and still turns.
+  ///
+  /// Classified by rank, not by value: a transfer function may move the levels,
+  /// but it must not reorder them, and `grayQuadrants` refuses to guess when two
+  /// of them come back equal — which is what a flattened or blank decode looks
+  /// like.
+  func testGrayscaleImageDecodesAndStillOrients() throws {
+    let untagged = try XCTUnwrap(
+      OrientedImageFixture.grayscaleQuadrantJpeg(width: storedWidth, height: storedHeight))
+    let tagged = OrientedImageFixture.tagging(untagged, orientation: rotate90)
+
+    let plain = try XCTUnwrap(decodeOrientedImage(untagged))
+    XCTAssertEqual(plain.extent.width, CGFloat(storedWidth))
+    XCTAssertEqual(plain.extent.height, CGFloat(storedHeight))
+    let asStored = try XCTUnwrap(OrientedImageFixture.grayQuadrants(of: plain))
+    XCTAssertEqual(asStored.topLeft, .topLeft)
+    XCTAssertEqual(asStored.topRight, .topRight)
+    XCTAssertEqual(asStored.bottomLeft, .bottomLeft)
+    XCTAssertEqual(asStored.bottomRight, .bottomRight)
+
+    let rotated = try XCTUnwrap(decodeOrientedImage(tagged))
+    XCTAssertEqual(rotated.extent.width, CGFloat(storedHeight))
+    XCTAssertEqual(rotated.extent.height, CGFloat(storedWidth))
+    let asDisplayed = try XCTUnwrap(OrientedImageFixture.grayQuadrants(of: rotated))
+    XCTAssertEqual(asDisplayed.topLeft, .bottomLeft)
+    XCTAssertEqual(asDisplayed.topRight, .topLeft)
+    XCTAssertEqual(asDisplayed.bottomLeft, .bottomRight)
+    XCTAssertEqual(asDisplayed.bottomRight, .topRight)
+  }
+
   func testUndecodableBytesReturnNil() {
     XCTAssertNil(decodeOrientedImage(Data([0x00, 0x01, 0x02, 0x03])))
     XCTAssertNil(decodeOrientedImage(Data()))
@@ -606,7 +640,10 @@ class DecodeOrientedImageTests: XCTestCase {
 // MARK: - EXIF orientation test fixtures
 
 /// Builds and reads back the EXIF-orientation fixtures.
-/// Shared by the iOS and macOS RunnerTests.
+///
+/// Duplicated in the iOS and macOS RunnerTests: they are separate test targets
+/// with no shared source directory, as `ThumbnailTimestampFixture` already is.
+/// Keep the two copies in step.
 enum OrientedImageFixture {
 
   /// EXIF `Orientation` = 6, i.e. display by rotating the stored pixels 90° CW.
@@ -625,6 +662,18 @@ enum OrientedImageFixture {
       case .bottomRight: return (255, 255, 0)  // yellow
       }
     }
+
+    /// The grayscale fixture's level for this corner. Strictly increasing in
+    /// the order the cases are declared, which is what lets `grayQuadrants`
+    /// classify by rank instead of by value.
+    var gray: UInt8 {
+      switch self {
+      case .topLeft: return 16
+      case .topRight: return 96
+      case .bottomLeft: return 176
+      case .bottomRight: return 248
+      }
+    }
   }
 
   struct Quadrants {
@@ -638,8 +687,7 @@ enum OrientedImageFixture {
   ///
   /// Built from raw top-down raster bytes, so "row 0 is the top" is a property of
   /// the fixture rather than something the test has to assume about a drawing
-  /// context. Encoded at maximum quality: the quadrant centers are sampled far
-  /// from the color edges, so what ringing survives cannot flip a classification.
+  /// context.
   static func quadrantJpeg(width: Int, height: Int) -> Data? {
     var raster = [UInt8]()
     raster.reserveCapacity(width * height * 4)
@@ -665,6 +713,43 @@ enum OrientedImageFixture {
         intent: .defaultIntent)
     else { return nil }
 
+    return encodeJpeg(image)
+  }
+
+  /// A one-component grayscale JPEG whose four quadrants are four distinct gray
+  /// levels — the same layout as `quadrantJpeg`, in a color space that is not
+  /// RGB.
+  static func grayscaleQuadrantJpeg(width: Int, height: Int) -> Data? {
+    var raster = [UInt8]()
+    raster.reserveCapacity(width * height)
+    for row in 0..<height {
+      for col in 0..<width {
+        raster.append(corner(col: col, row: row, width: width, height: height).gray)
+      }
+    }
+
+    guard let provider = CGDataProvider(data: Data(raster) as CFData),
+      let image = CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bitsPerPixel: 8,
+        bytesPerRow: width,
+        space: CGColorSpaceCreateDeviceGray(),
+        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: false,
+        intent: .defaultIntent)
+    else { return nil }
+
+    return encodeJpeg(image)
+  }
+
+  /// Encodes `image` as a maximum-quality JPEG: the quadrant centers are sampled
+  /// far from the color edges, so what ringing survives cannot flip a
+  /// classification.
+  private static func encodeJpeg(_ image: CGImage) -> Data? {
     let encoded = NSMutableData()
     guard
       let destination = CGImageDestinationCreateWithData(
@@ -728,6 +813,50 @@ enum OrientedImageFixture {
       topRight: corner(atFractionX: 0.75, y: 0.25),
       bottomLeft: corner(atFractionX: 0.25, y: 0.75),
       bottomRight: corner(atFractionX: 0.75, y: 0.75))
+  }
+
+  /// Classifies the four quadrant centers of a grayscale `image` back to the
+  /// stored corner each level came from, by **rank** rather than by value: the
+  /// decode may put the levels through a transfer function, but it must not
+  /// reorder them.
+  ///
+  /// Returns nil when two centers come back equal — a flattened or blank decode
+  /// would otherwise be ranked into some arbitrary permutation and could pass by
+  /// luck.
+  static func grayQuadrants(of image: CIImage) -> Quadrants? {
+    guard let raster = raster(of: image) else { return nil }
+    let (pixels, width, height) = raster
+    guard width >= 2, height >= 2 else { return nil }
+
+    func level(atFractionX fx: Double, y fy: Double) -> UInt8 {
+      let col = min(width - 1, Int(Double(width) * fx))
+      let row = min(height - 1, Int(Double(height) * fy))
+      return pixels[(row * width + col) * 4]
+    }
+
+    // Positions in the order Quadrants declares them.
+    let levels = [
+      level(atFractionX: 0.25, y: 0.25),
+      level(atFractionX: 0.75, y: 0.25),
+      level(atFractionX: 0.25, y: 0.75),
+      level(atFractionX: 0.75, y: 0.75),
+    ]
+    guard Set(levels).count == levels.count else { return nil }
+
+    // Corner.allCases is declared darkest-first, matching Corner.gray.
+    let darkestFirst = Corner.allCases
+    var corners = [Corner](repeating: .topLeft, count: levels.count)
+    for (rank, position) in levels.enumerated()
+      .sorted(by: { $0.element < $1.element })
+      .map({ $0.offset })
+      .enumerated()
+    {
+      corners[position] = darkestFirst[rank]
+    }
+
+    return Quadrants(
+      topLeft: corners[0], topRight: corners[1],
+      bottomLeft: corners[2], bottomRight: corners[3])
   }
 
   /// Which corner of the stored image the pixel at (`col`, `row`) belongs to,

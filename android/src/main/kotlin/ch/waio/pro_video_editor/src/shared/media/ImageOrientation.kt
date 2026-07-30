@@ -22,7 +22,7 @@ import java.io.ByteArrayInputStream
 internal object ImageOrientation {
 
     /** The eight orientations EXIF defines; anything else means "no transform". */
-    private val DEFINED_ORIENTATIONS = setOf(
+    private val DEFINED_ORIENTATIONS = intArrayOf(
         ExifInterface.ORIENTATION_NORMAL,
         ExifInterface.ORIENTATION_FLIP_HORIZONTAL,
         ExifInterface.ORIENTATION_ROTATE_180,
@@ -73,7 +73,7 @@ internal object ImageOrientation {
             ExifInterface(ByteArrayInputStream(data)).getAttributeInt(
                 ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL
             )
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             ExifInterface.ORIENTATION_NORMAL
         }
         return if (orientation in DEFINED_ORIENTATIONS) {
@@ -102,8 +102,11 @@ internal object ImageOrientation {
      * rendered sideways.
      *
      * When both [reqWidth] and [reqHeight] are positive the bitmap is decoded
-     * downscaled toward that size instead of at full resolution. [config], when
-     * given, is passed on as `inPreferredConfig`.
+     * downscaled toward that size instead of at full resolution — worth passing
+     * whenever the caller is going to scale the result down anyway, since it
+     * saves both the oversized decode and the oversized rotation copy. The
+     * request is in *displayed* pixels, i.e. after the orientation. [config],
+     * when given, is passed on as `inPreferredConfig`.
      */
     fun decode(
         data: ByteArray,
@@ -115,22 +118,31 @@ internal object ImageOrientation {
         BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
+        // `inSampleSize` measures the stored pixels, so the request has to be
+        // turned back into stored space first — the same swap, since exchanging
+        // the two dimensions is its own inverse.
+        val orientation = read(data)
+        val (srcReqWidth, srcReqHeight) = orientedSize(reqWidth, reqHeight, orientation)
+
         val opts = BitmapFactory.Options().apply {
-            inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight, reqWidth, reqHeight)
+            inSampleSize =
+                sampleSizeFor(bounds.outWidth, bounds.outHeight, srcReqWidth, srcReqHeight)
             if (config != null) inPreferredConfig = config
         }
         val raw = BitmapFactory.decodeByteArray(data, 0, data.size, opts) ?: return null
-        return apply(raw, read(data))
+        return orient(raw, orientation)
     }
 
     /**
-     * Applies [orientation] to [bitmap].
+     * Turns [bitmap] the way [orientation] says it should be displayed.
      *
-     * Returns a new bitmap and recycles [bitmap] when the orientation calls for a
-     * transform; returns [bitmap] untouched otherwise (including for the
-     * "undefined" orientation a file without the tag reports).
+     * **Takes ownership of [bitmap].** Returns a new bitmap and recycles
+     * [bitmap] when the orientation calls for a transform; returns [bitmap]
+     * untouched otherwise (including for the "undefined" orientation a file
+     * without the tag reports). Either way the caller must use the return value
+     * and treat [bitmap] as gone.
      */
-    fun apply(bitmap: Bitmap, orientation: Int): Bitmap {
+    fun orient(bitmap: Bitmap, orientation: Int): Bitmap {
         val matrix = Matrix()
         when (orientation) {
             ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)

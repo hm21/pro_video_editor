@@ -1,5 +1,5 @@
 ## 2.11.1
-- **FIX**(android, iOS, macOS): A `ChromaKey.backgroundImage` or image `VideoLayer` fed a photo straight from the gallery no longer renders sideways. Phones store a portrait shot as landscape pixels plus an EXIF `Orientation` tag, and the decoders dropped it — so the same image came out upright on macOS but rotated 90° on Android and iOS. All three now orient on decode.
+- **FIX**(android, iOS, macOS): A `ChromaKey.backgroundImage` or image `VideoLayer` fed a photo straight from the gallery no longer renders sideways — the EXIF `Orientation` tag is now honored on all three platforms.
 
 ## 2.11.0
 - **FEAT**(android, iOS, macOS): Add `ChromaKey` — green-screen removal with a soft edge and spill suppression. The keyed area becomes a `backgroundColor`, a `backgroundImage`, or (in a `VideoComposition`) the layer below. Settable on `VideoRenderData`, `VideoLayer` and `VideoSegment`, resolved per clip as segment → layer → global. H.264/HEVC carry no alpha, so on the single-track `videoSegments` path a key without a background is flattened to black.

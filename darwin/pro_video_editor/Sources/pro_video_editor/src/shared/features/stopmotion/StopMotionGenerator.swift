@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreGraphics
+import CoreImage
 import Foundation
 import ImageIO
 
@@ -215,9 +216,24 @@ internal enum StopMotionGenerator {
       options[kCGImageSourceThumbnailMaxPixelSize] = maxPixelSize
     }
 
-    return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
-      ?? CGImageSourceCreateImageAtIndex(source, 0, nil)
+    if let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+      return thumbnail
+    }
+
+    // Fallback. `CGImageSourceCreateImageAtIndex` hands back the *stored* pixels
+    // and drops the tag, so going straight to it would undo the one thing the
+    // thumbnail above was doing for us and put a portrait frame back on its
+    // side. `decodeOrientedImage` applies the orientation the same way the
+    // render path does, at the cost of the full-size decode this path was
+    // trying to avoid — acceptable, since it only runs when the thumbnail
+    // decode has already failed.
+    guard let oriented = decodeOrientedImage(data) else { return nil }
+    return orientationContext.createCGImage(oriented, from: oriented.extent)
   }
+
+  /// Renders the orientation fallback in [decodeImage]. Kept off the render
+  /// path's context so a stop-motion job never contends with an export.
+  private static let orientationContext = CIContext(options: [.workingColorSpace: NSNull()])
 
   /// Rounds a dimension down to the nearest even value (codec requirement),
   /// with a minimum of 2.

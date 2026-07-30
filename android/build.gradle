@@ -61,7 +61,7 @@ android {
         // EXIF metadata. Preferred over android.media.ExifInterface: it covers
         // HEIF/AVIF/WebP/PNG as well as JPEG, and it is plain Java, so the
         // orientation parsing is reachable from the JVM unit tests.
-        implementation("androidx.exifinterface:exifinterface:1.4.1")
+        implementation("androidx.exifinterface:exifinterface:1.4.2")
 
         // Coroutines
         implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
