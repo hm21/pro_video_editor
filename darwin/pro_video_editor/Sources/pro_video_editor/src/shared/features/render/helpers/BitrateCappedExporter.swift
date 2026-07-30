@@ -16,22 +16,65 @@ import Foundation
 /// they do in the export-session path.
 internal enum BitrateCappedExporter {
 
-  /// Thread-safe cancellation flag shared between the task-cancellation
-  /// handler and the sample pump queues.
-  private final class CancelState {
-    private let lock = NSLock()
-    private var canceled = false
+  /// Serializes every reader/writer touch against the one teardown that
+  /// invalidates them.
+  ///
+  /// `onCancel` runs on the cancelling task's thread while the sample pumps run
+  /// on their own queues, so a bare cancellation flag only narrows the window —
+  /// the teardown still lands *inside* a pump operation. Two ways that crashes,
+  /// both seen in the field:
+  ///
+  /// - `AVAssetReader.cancelReading` tearing the reader down while a pump sits
+  ///   in `copyNextSampleBuffer` faults inside AVFoundation (`EXC_BAD_ACCESS`).
+  /// - Arming or finishing an input after `AVAssetWriter.cancelWriting` raises
+  ///   `NSInternalInconsistencyException` ("Cannot call method when status is
+  ///   4", i.e. `.cancelled`).
+  ///
+  /// Routing both sides through this gate means a teardown can only ever land
+  /// *between* whole operations. Contention stays cheap: a pump holds the gate
+  /// for a single `copyNextSampleBuffer` / `append`, and a pump waiting on a
+  /// wedged encoder has already returned (`isReadyForMoreMediaData` went false
+  /// and the block is simply not re-invoked), so it holds nothing while a
+  /// cancel tears down. The lock is recursive so that arming — which runs
+  /// inside the gate — cannot deadlock if AVFoundation ever invokes the pump
+  /// block on the arming thread.
+  private final class SessionGate {
+    private let lock = NSRecursiveLock()
+    private var ended = false
 
-    func cancel() {
-      lock.lock()
-      canceled = true
-      lock.unlock()
-    }
-
-    var isCanceled: Bool {
+    /// Runs [body] while the session is live, or returns [fallback] once it has
+    /// ended. The fallback doubles as the pump's "nothing more to do" answer,
+    /// so a pump that loses the race to a cancel drains instead of touching a
+    /// torn-down reader or writer.
+    func whileLive<T>(or fallback: T, _ body: () -> T) -> T {
       lock.lock()
       defer { lock.unlock() }
-      return canceled
+      guard !ended else { return fallback }
+      return body()
+    }
+
+    /// [whileLive(or:_:)] for teardown-sensitive calls with no result.
+    func whileLive(_ body: () -> Void) {
+      whileLive(or: ()) { body() }
+    }
+
+    /// Ends the session exactly once. Returns `true` only for the caller that
+    /// actually ended it, so exactly one owns the teardown and a second cancel
+    /// cannot repeat it.
+    ///
+    /// Taking the lock is what makes the teardown that follows safe: a gated
+    /// operation already in flight must release the lock before this can set
+    /// the flag, and no later one can start once it is set. By the time this
+    /// returns `true`, nothing is touching the reader or writer — so the winner
+    /// tears them down *after* this returns, without holding the lock across
+    /// AVFoundation calls.
+    @discardableResult
+    func end() -> Bool {
+      lock.lock()
+      defer { lock.unlock() }
+      guard !ended else { return false }
+      ended = true
+      return true
     }
   }
 
@@ -214,7 +257,7 @@ internal enum BitrateCappedExporter {
     }
     writer.startSession(atSourceTime: exportStart)
 
-    let cancelState = CancelState()
+    let session = SessionGate()
     let terminator = ContinuationTerminator()
 
     try await withTaskCancellationHandler {
@@ -225,7 +268,7 @@ internal enum BitrateCappedExporter {
         pump(
           input: videoInput, output: videoOutput, group: group,
           queue: DispatchQueue(label: "ch.waio.pro_video_editor.bitrate_export.video"),
-          cancelState: cancelState
+          session: session
         ) { sample in
           guard totalSeconds > 0 else { return }
           let pts = CMSampleBufferGetPresentationTimeStamp(sample)
@@ -238,30 +281,35 @@ internal enum BitrateCappedExporter {
           pump(
             input: audioInput, output: audioOutput, group: group,
             queue: DispatchQueue(label: "ch.waio.pro_video_editor.bitrate_export.audio"),
-            cancelState: cancelState,
+            session: session,
             onSample: nil)
         }
 
         group.notify(queue: DispatchQueue(label: "ch.waio.pro_video_editor.bitrate_export.done")) {
-          if cancelState.isCanceled {
-            reader.cancelReading()
-            writer.cancelWriting()
-            try? FileManager.default.removeItem(at: outputURL)
-            terminator.finish(.failure(CancellationError()))
-            return
-          }
+          // A cancel that got here first already tore the session down and
+          // finished the continuation from `onCancel`; `end` then returns false
+          // and every `terminator.finish` below is a no-op.
           if reader.status == .failed {
-            writer.cancelWriting()
-            try? FileManager.default.removeItem(at: outputURL)
+            if session.end() {
+              writer.cancelWriting()
+              try? FileManager.default.removeItem(at: outputURL)
+            }
             terminator.finish(.failure(reader.error ?? error(6, "Reading composed frames failed")))
             return
           }
           if writer.status == .failed {
-            reader.cancelReading()
-            try? FileManager.default.removeItem(at: outputURL)
+            if session.end() {
+              reader.cancelReading()
+              try? FileManager.default.removeItem(at: outputURL)
+            }
             terminator.finish(.failure(writer.error ?? error(7, "Writing encoded samples failed")))
             return
           }
+          // Finalizing owns the writer from here: `cancelWriting` concurrent
+          // with `finishWriting` is not safe, so take the session before
+          // starting it. Losing that race means a cancel already tore the
+          // writer down and unwound the task, so there is nothing to finalize.
+          guard session.end() else { return }
           writer.finishWriting {
             if writer.status == .completed {
               terminator.finish(.success(()))
@@ -276,16 +324,18 @@ internal enum BitrateCappedExporter {
         }
       }
     } onCancel: {
-      cancelState.cancel()
-      // Unblocks the pumps: copyNextSampleBuffer returns nil after cancel. Also
-      // tear down the writer and complete the continuation directly — a pump
-      // parked on a wedged encoder (isReadyForMoreMediaData stuck false) is
-      // never re-invoked to observe the cancel, so group.notify would never
+      // Ending the session stops the pumps (their next gated step returns the
+      // "done" fallback) and guarantees none is mid-operation, so the teardown
+      // below cannot land inside one. Complete the continuation directly too —
+      // a pump parked on a wedged encoder (isReadyForMoreMediaData stuck false)
+      // is never re-invoked to observe the cancel, so group.notify would never
       // fire and the task would hang holding the export gate. Only delete the
       // output if this cancel actually won the race (the export hadn't already
       // finished successfully).
-      reader.cancelReading()
-      writer.cancelWriting()
+      if session.end() {
+        reader.cancelReading()
+        writer.cancelWriting()
+      }
       if terminator.finish(.failure(CancellationError())) {
         try? FileManager.default.removeItem(at: outputURL)
       }
@@ -295,43 +345,53 @@ internal enum BitrateCappedExporter {
   // MARK: - Sample pumping
 
   /// Copies samples from [output] into [input] on [queue] until the source is
-  /// drained, an append fails, or the export is canceled. Calls
-  /// `group.leave()` exactly once when this track is done.
+  /// drained, an append fails, or [session] ends. Calls `group.leave()` exactly
+  /// once when this track is done.
+  ///
+  /// Every reader/writer call goes through [session], so a cancel racing this
+  /// pump can only land between whole operations — see ``SessionGate``.
   private static func pump(
     input: AVAssetWriterInput,
     output: AVAssetReaderOutput,
     group: DispatchGroup,
     queue: DispatchQueue,
-    cancelState: CancelState,
+    session: SessionGate,
     onSample: ((CMSampleBuffer) -> Void)?
   ) {
     group.enter()
     var finished = false  // Confined to [queue]; guards double-leave.
-    input.requestMediaDataWhenReady(on: queue) {
-      while input.isReadyForMoreMediaData {
-        if finished { return }
-        if cancelState.isCanceled {
+
+    // Arming is gated too: `requestMediaDataWhenReady` on an input whose writer
+    // was already cancelled raises "Cannot call method when status is 4".
+    let armed = session.whileLive(or: false) {
+      input.requestMediaDataWhenReady(on: queue) {
+        while input.isReadyForMoreMediaData {
+          if finished { return }
+
+          // `nil` covers both "source drained" and "the session ended under
+          // us"; `false` from the append covers both "writer moved to .failed"
+          // (surfaced after both pumps stop) and the same lost race. Every one
+          // of them means this track is done.
+          let sample: CMSampleBuffer? = session.whileLive(or: nil) {
+            output.copyNextSampleBuffer()
+          }
+          if let sample, session.whileLive(or: false, { input.append(sample) }) {
+            onSample?(sample)
+            continue
+          }
+
           finished = true
-          input.markAsFinished()
+          session.whileLive { input.markAsFinished() }
           group.leave()
           return
         }
-        guard let sample = output.copyNextSampleBuffer() else {
-          finished = true
-          input.markAsFinished()
-          group.leave()
-          return
-        }
-        if !input.append(sample) {
-          // Writer moved to .failed; surface the error after both pumps stop.
-          finished = true
-          input.markAsFinished()
-          group.leave()
-          return
-        }
-        onSample?(sample)
       }
+      return true
     }
+
+    // The session ended before this pump was ever armed, so the block will
+    // never run: balance the `enter` here instead.
+    if !armed { group.leave() }
   }
 
   // MARK: - Helpers
