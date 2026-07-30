@@ -3,12 +3,6 @@ import CoreImage
 import Foundation
 import ImageIO
 
-#if os(iOS)
-  import UIKit
-#elseif os(macOS)
-  import AppKit
-#endif
-
 struct ImageLayer {
   /// Decoded frames: one for a static image, several for an animated GIF.
   let frames: [CIImage]
@@ -268,21 +262,10 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         frameEndsUs = gif.frameEndsUs
         totalDurationUs = gif.totalUs
       } else {
-        // Static image: decode the single frame.
-        #if os(iOS)
-          guard let uiImage = UIImage(data: layer.imageData),
-            let cgImage = uiImage.cgImage
-          else {
-            continue
-          }
-        #elseif os(macOS)
-          guard let nsImage = NSImage(data: layer.imageData),
-            let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
-          else {
-            continue
-          }
-        #endif
-        frames = [CIImage(cgImage: cgImage)]
+        // Static image: decode the single frame, honoring its EXIF orientation
+        // so a gallery photo is laid in upright rather than sideways.
+        guard let image = decodeOrientedImage(layer.imageData) else { continue }
+        frames = [image]
         frameEndsUs = [0]
         totalDurationUs = 0
       }
@@ -495,15 +478,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     guard let data = config.backgroundImageData else { return nil }
     if let cached = chromaBackgroundCache[config.cacheKey] { return cached }
 
-    #if os(iOS)
-      guard let image = UIImage(data: data), let cgImage = image.cgImage else { return nil }
-    #elseif os(macOS)
-      guard let image = NSImage(data: data),
-        let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
-      else { return nil }
-    #endif
-
-    let ciImage = CIImage(cgImage: cgImage)
+    // Oriented on decode: a portrait background photo is stored as landscape
+    // pixels plus an EXIF tag, and would otherwise be keyed in rotated 90°.
+    guard let ciImage = decodeOrientedImage(data) else { return nil }
     chromaBackgroundCache[config.cacheKey] = ciImage
     return ciImage
   }

@@ -275,9 +275,9 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
   ///
   /// Exercises, in a single render:
   /// - A 3-layer [VideoComposition] on an explicit canvas with a background.
-  /// - Base layer: two trimmed clips joined by an intra-layer dissolve
-  ///   transition, the second sped up and at reduced volume.
-  /// - A reversed, muted picture-in-picture layer that enters after 2s.
+  /// - Base layer: two trimmed clips played back-to-back, the second at
+  ///   reduced volume.
+  /// - A muted picture-in-picture layer that enters after 2s.
   /// - A semi-transparent secondary video placed bottom-left.
   /// - Image overlays: a timed sticker with fade in/out animations.
   /// - A timed warm color filter over the first 6 seconds.
@@ -299,37 +299,31 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
         canvasSize: meta.resolution,
         backgroundColor: Colors.black,
         layers: [
-          // Base layer: two trimmed clips, dissolve between them, the second
-          // sped up to 1.5x at half volume.
+          // Base layer: two trimmed clips back-to-back, the second at half
+          // volume. Transitions and playbackSpeed are not supported inside a
+          // composition — see the transition demos for those.
           VideoLayer(
             clips: [
               VideoSegment(
                 video: _video,
                 startTime: Duration.zero,
                 endTime: const Duration(seconds: 5),
-                transition: const ClipTransition(
-                  type: ClipTransitionType.dissolve,
-                  duration: Duration(milliseconds: 800),
-                  curve: AnimationCurve.easeInOut,
-                ),
               ),
               VideoSegment(
                 video: _video,
                 startTime: const Duration(seconds: 10),
                 endTime: const Duration(seconds: 16),
-                playbackSpeed: 1.5,
                 volume: 0.5,
               ),
             ],
           ),
-          // Reversed, muted picture-in-picture, top-right, enters at 2s.
+          // Muted picture-in-picture, top-right, enters at 2s.
           VideoLayer(
             clips: [
               VideoSegment(
                 video: _video,
                 startTime: const Duration(seconds: 4),
                 endTime: const Duration(seconds: 9),
-                reverseVideo: true,
                 volume: 0,
                 timelineStart: const Duration(seconds: 2),
               ),

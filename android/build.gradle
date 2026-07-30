@@ -57,7 +57,12 @@ android {
         implementation("androidx.media3:media3-inspector-frame:$media3_version")
         implementation("androidx.media3:media3-effect:$media3_version")
         implementation("androidx.media3:media3-muxer:$media3_version")
-        
+
+        // EXIF metadata. Preferred over android.media.ExifInterface: it covers
+        // HEIF/AVIF/WebP/PNG as well as JPEG, and it is plain Java, so the
+        // orientation parsing is reachable from the JVM unit tests.
+        implementation("androidx.exifinterface:exifinterface:1.4.2")
+
         // Coroutines
         implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
         implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")

@@ -1,3 +1,6 @@
+## 2.11.1
+- **FIX**(android, iOS, macOS): A `ChromaKey.backgroundImage` or image `VideoLayer` fed a photo straight from the gallery no longer renders sideways — the EXIF `Orientation` tag is now honored on all three platforms.
+
 ## 2.11.0
 - **FEAT**(android, iOS, macOS): Add `ChromaKey` — green-screen removal with a soft edge and spill suppression. The keyed area becomes a `backgroundColor`, a `backgroundImage`, or (in a `VideoComposition`) the layer below. Settable on `VideoRenderData`, `VideoLayer` and `VideoSegment`, resolved per clip as segment → layer → global. H.264/HEVC carry no alpha, so on the single-track `videoSegments` path a key without a background is flattened to black.
 - **FEAT**: `ChromaKey.autoDetect(video)` measures the key color and `similarity` off the footage, for any saturated screen hue. `ChromaKey.detect` returns the raw measurement. Costs one thumbnail decode, no render.

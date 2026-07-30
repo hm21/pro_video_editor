@@ -3,9 +3,6 @@ package ch.waio.pro_video_editor.src.features.stopmotion
 import RENDER_TAG
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Matrix
-import android.media.ExifInterface
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -30,7 +27,7 @@ import applyBitrate
 import ch.waio.pro_video_editor.src.features.render.models.RenderJobHandle
 import ch.waio.pro_video_editor.src.features.stopmotion.models.StopMotionConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
-import java.io.ByteArrayInputStream
+import ch.waio.pro_video_editor.src.shared.media.ImageOrientation
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -105,9 +102,9 @@ class StopMotionGenerator(private val context: Context) {
                 var targetWidth = config.width ?: 0
                 var targetHeight = config.height ?: 0
                 if (targetWidth <= 0 || targetHeight <= 0) {
-                    val (w, h) = orientedBounds(config.frames[0].imageData)
-                    targetWidth = w
-                    targetHeight = h
+                    val probe = ImageOrientation.probe(config.frames[0].imageData)
+                    targetWidth = probe?.width ?: 2
+                    targetHeight = probe?.height ?: 2
                 }
                 targetWidth = evenize(targetWidth)
                 targetHeight = evenize(targetHeight)
@@ -117,7 +114,8 @@ class StopMotionGenerator(private val context: Context) {
                 config.frames.forEachIndexed { index, frame ->
                     if (shouldStopPolling.get()) return@Thread
 
-                    val bitmap = decodeOriented(frame.imageData, targetWidth, targetHeight)
+                    val bitmap = ImageOrientation
+                        .decode(frame.imageData, targetWidth, targetHeight)
                         ?: throw IllegalStateException("Failed to decode frame $index")
 
                     val file = File(
@@ -296,87 +294,6 @@ class StopMotionGenerator(private val context: Context) {
                 }
             }
         })
-    }
-
-    /** Returns the orientation-corrected pixel size of an encoded image. */
-    private fun orientedBounds(data: ByteArray): Pair<Int, Int> {
-        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(data, 0, data.size, opts)
-        val w = if (opts.outWidth > 0) opts.outWidth else 2
-        val h = if (opts.outHeight > 0) opts.outHeight else 2
-        return when (readExifOrientation(data)) {
-            ExifInterface.ORIENTATION_ROTATE_90,
-            ExifInterface.ORIENTATION_ROTATE_270,
-            ExifInterface.ORIENTATION_TRANSPOSE,
-            ExifInterface.ORIENTATION_TRANSVERSE -> Pair(h, w)
-            else -> Pair(w, h)
-        }
-    }
-
-    /**
-     * Decodes an encoded image downscaled to roughly [reqW]×[reqH] and applies
-     * its EXIF orientation, so portrait photos are not rendered sideways.
-     */
-    private fun decodeOriented(data: ByteArray, reqW: Int, reqH: Int): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-
-        val opts = BitmapFactory.Options().apply {
-            inSampleSize = calcInSampleSize(bounds.outWidth, bounds.outHeight, reqW, reqH)
-        }
-        val raw = BitmapFactory.decodeByteArray(data, 0, data.size, opts) ?: return null
-        return applyOrientation(raw, readExifOrientation(data))
-    }
-
-    private fun readExifOrientation(data: ByteArray): Int {
-        return try {
-            ExifInterface(ByteArrayInputStream(data))
-                .getAttributeInt(
-                    ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL
-                )
-        } catch (e: Exception) {
-            ExifInterface.ORIENTATION_NORMAL
-        }
-    }
-
-    private fun applyOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
-        val matrix = Matrix()
-        when (orientation) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
-            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
-            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
-            ExifInterface.ORIENTATION_TRANSPOSE -> {
-                matrix.postRotate(90f)
-                matrix.postScale(-1f, 1f)
-            }
-            ExifInterface.ORIENTATION_TRANSVERSE -> {
-                matrix.postRotate(270f)
-                matrix.postScale(-1f, 1f)
-            }
-            else -> return bitmap
-        }
-        val rotated = Bitmap.createBitmap(
-            bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true
-        )
-        if (rotated != bitmap) bitmap.recycle()
-        return rotated
-    }
-
-    /** Largest power-of-two sample size that keeps the image ≥ the target size. */
-    private fun calcInSampleSize(srcW: Int, srcH: Int, reqW: Int, reqH: Int): Int {
-        if (reqW <= 0 || reqH <= 0) return 1
-        var sample = 1
-        var halfW = srcW / 2
-        var halfH = srcH / 2
-        while (halfW >= reqW && halfH >= reqH) {
-            sample *= 2
-            halfW /= 2
-            halfH /= 2
-        }
-        return sample
     }
 
     /** Rounds a dimension down to the nearest even value, minimum 2. */

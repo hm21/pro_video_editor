@@ -2,7 +2,6 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
@@ -15,6 +14,7 @@ import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.TimestampWrapper
 import ch.waio.pro_video_editor.src.features.render.models.ImageLayer
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.ImageOrientation
 
 /**
  * Applies static image overlay on video.
@@ -148,12 +148,25 @@ fun applyTimedImageLayers(
                     "Layer: animated GIF with ${gifFrames.size} frame(s), loop=${layer.loop}"
                 )
             } else {
-                val options = BitmapFactory.Options().apply {
-                    inPreferredConfig = Bitmap.Config.ARGB_8888
-                }
-                val layerBitmap = BitmapFactory.decodeByteArray(
-                    imageBytes, 0, imageBytes.size, options
+                // Decoded through ImageOrientation so a gallery photo carrying an
+                // EXIF orientation is laid in the way the user sees it, not as the
+                // sideways pixels it is stored as.
+                //
+                // `prepareOverlay` scales the result down straight away, so it is
+                // decoded no larger than it will end up: a full-resolution decode
+                // of a phone photo costs a second full-resolution copy when the
+                // orientation has to be turned, which is where an overlay OOMs.
+                val (reqWidth, reqHeight) = overlayDecodeSize(layer, videoWidth, videoHeight)
+                val layerBitmap = ImageOrientation.decode(
+                    imageBytes,
+                    reqWidth = reqWidth,
+                    reqHeight = reqHeight,
+                    config = Bitmap.Config.ARGB_8888,
                 )
+                if (layerBitmap == null) {
+                    Log.e(RENDER_TAG, "Layer: image bytes did not decode; skipping layer")
+                    continue
+                }
                 val prepared = prepareOverlay(layerBitmap, layer, videoWidth, videoHeight)
 
                 bitmapOverlay = if (hasAnimations) {
@@ -207,6 +220,28 @@ private data class PreparedOverlay(
     val baseNormY: Float,
     val overlaySettings: StaticOverlaySettings,
 )
+
+/**
+ * The size [prepareOverlay] will first scale a decoded layer down to, in
+ * displayed pixels, or `0 × 0` when it keeps the image at its natural size.
+ *
+ * Mirrors [prepareOverlay]'s own branching, so decoding to this size cannot cost
+ * resolution the overlay would otherwise have kept. A layer with an explicit
+ * size is scaled to it; a layer with neither an explicit size nor a position is
+ * stretched over the whole frame; a positioned layer without an explicit size is
+ * laid out from its own pixel dimensions and so must not be sampled down.
+ */
+internal fun overlayDecodeSize(
+    layer: VideoSequenceBuilder.ImageLayerConfig,
+    videoWidth: Int,
+    videoHeight: Int,
+): Pair<Int, Int> {
+    val width = layer.width
+    val height = layer.height
+    if (width != null && height != null) return Pair(width.toInt(), height.toInt())
+    if (layer.x == null && layer.y == null) return Pair(videoWidth, videoHeight)
+    return Pair(0, 0)
+}
 
 /**
  * Scales, positions, unpremultiplies and rotates a single overlay [rawBitmap]

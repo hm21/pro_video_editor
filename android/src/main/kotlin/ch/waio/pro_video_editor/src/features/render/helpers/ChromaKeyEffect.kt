@@ -15,6 +15,7 @@ import androidx.media3.effect.GlEffect
 import androidx.media3.effect.GlShaderProgram
 import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.ImageOrientation
 
 /**
  * Removes a solid-colored background ("green screen") from every frame.
@@ -70,17 +71,13 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
          * Bounds-only probe of the background image.
          *
          * Decoding just the header tells us whether the bytes are usable — and
-         * how large they are — without holding a full-size bitmap from
-         * construction until the first draw. The real decode happens in
-         * [drawFrame], where there is a GL context to size it against.
+         * how large they are once their EXIF orientation is honored — without
+         * holding a full-size bitmap from construction until the first draw. The
+         * real decode happens in [drawFrame], where there is a GL context to
+         * size it against.
          */
-        private val backgroundBounds: BitmapFactory.Options? =
-            config.backgroundImageData?.let { bytes ->
-                BitmapFactory.Options().apply {
-                    inJustDecodeBounds = true
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, this)
-                }.takeIf { it.outWidth > 0 && it.outHeight > 0 }
-            }
+        private val backgroundProbe: ImageOrientation.Probe? =
+            config.backgroundImageData?.let { ImageOrientation.probe(it) }
 
         /**
          * Background texture id. A 1x1 placeholder is uploaded when there is no
@@ -90,7 +87,7 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
         private var backgroundTexId: Int = -1
 
         private val bgMode: Int = when {
-            backgroundBounds != null -> BG_IMAGE
+            backgroundProbe != null -> BG_IMAGE
             config.backgroundColor != null -> BG_COLOR
             // An image was asked for but its bytes will not decode. Falling
             // through to BG_TRANSPARENT would quietly un-key the clip on the
@@ -180,7 +177,7 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
         }
 
         init {
-            if (backgroundBounds == null && config.backgroundImageData != null) {
+            if (backgroundProbe == null && config.backgroundImageData != null) {
                 Log.w(
                     RENDER_TAG,
                     "Chroma key: the background image could not be decoded; " +
@@ -287,20 +284,25 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
          */
         private fun decodeBackgroundWithinTextureLimit(): Bitmap? {
             val bytes = config.backgroundImageData ?: return null
-            val bounds = backgroundBounds ?: return null
+            val probe = backgroundProbe ?: return null
 
             val limit = maxTextureSize()
             var sampleSize = 1
-            while (bounds.outWidth / sampleSize > limit ||
-                bounds.outHeight / sampleSize > limit
-            ) {
+            // `probe` is oriented and `inSampleSize` applies to the stored pixels,
+            // but an orientation only ever exchanges the two dimensions, so the
+            // pair is over the limit either way round.
+            while (probe.width / sampleSize > limit || probe.height / sampleSize > limit) {
                 sampleSize *= 2
             }
 
-            val decoded = BitmapFactory.decodeByteArray(
+            val raw = BitmapFactory.decodeByteArray(
                 bytes, 0, bytes.size,
                 BitmapFactory.Options().apply { inSampleSize = sampleSize }
             ) ?: return null
+
+            // A portrait photo is stored as landscape pixels plus an EXIF tag;
+            // without this the background would be keyed in sideways.
+            val decoded = ImageOrientation.orient(raw, probe.orientation)
 
             // inSampleSize only halves, so one more exact pass may be needed.
             if (decoded.width <= limit && decoded.height <= limit) return decoded

@@ -508,3 +508,418 @@ enum ThumbnailTimestampFixture {
     return bestIndex
   }
 }
+
+// MARK: - EXIF orientation on caller-supplied images
+
+/// `decodeOrientedImage` must honor the EXIF `Orientation` tag.
+///
+/// A phone stores a portrait photo as *landscape* pixels plus a tag saying how
+/// to turn them, and the chroma-key background and image layers are fed exactly
+/// those bytes. This is the decode that keeps them upright, and that keeps iOS,
+/// macOS and Android agreeing on the same input — Android pins the same contract
+/// in `ImageOrientationTest`.
+///
+/// The fixtures are built here rather than checked in because the usual encoders
+/// bake the orientation into the pixels and drop the tag, so a "landscape pixels
+/// + Orientation=6" image cannot be produced by round-tripping one. The APP1
+/// EXIF segment is spliced in by hand instead; see
+/// `OrientedImageFixture.tagging(_:orientation:)`.
+class DecodeOrientedImageTests: XCTestCase {
+
+  /// Stored (pre-orientation) size: deliberately landscape, so an orientation
+  /// that is honored is visible as a portrait result.
+  private let storedWidth = 32
+  private let storedHeight = 16
+
+  /// EXIF 6: "the 0th row is the visual right side" — display by rotating the
+  /// stored pixels 90° clockwise.
+  private let rotate90 = OrientedImageFixture.orientationRotate90
+
+  private func untaggedJpeg() throws -> Data {
+    try XCTUnwrap(OrientedImageFixture.quadrantJpeg(width: storedWidth, height: storedHeight))
+  }
+
+  private func taggedJpeg() throws -> Data {
+    OrientedImageFixture.tagging(try untaggedJpeg(), orientation: rotate90)
+  }
+
+  /// Guards the hand-written APP1 segment itself. Without this, a splice that
+  /// silently produced no tag would make every "not rotated" assertion below
+  /// pass for the wrong reason.
+  func testFixtureCarriesTheOrientationTagItClaimsTo() throws {
+    XCTAssertEqual(OrientedImageFixture.declaredOrientation(try taggedJpeg()), rotate90)
+    XCTAssertEqual(OrientedImageFixture.declaredOrientation(try untaggedJpeg()), nil)
+  }
+
+  func testExifOrientationSwapsTheDecodedDimensions() throws {
+    let image = try XCTUnwrap(decodeOrientedImage(try taggedJpeg()))
+
+    // Swapped relative to the pixels actually stored in the file.
+    XCTAssertEqual(image.extent.width, CGFloat(storedHeight))
+    XCTAssertEqual(image.extent.height, CGFloat(storedWidth))
+    XCTAssertEqual(image.extent.origin, .zero)
+  }
+
+  /// The counter-test: without it, "rotate everything" would satisfy the
+  /// assertion above.
+  func testUntaggedImageIsNotRotated() throws {
+    let image = try XCTUnwrap(decodeOrientedImage(try untaggedJpeg()))
+
+    XCTAssertEqual(image.extent.width, CGFloat(storedWidth))
+    XCTAssertEqual(image.extent.height, CGFloat(storedHeight))
+    XCTAssertEqual(image.extent.origin, .zero)
+  }
+
+  /// Extent alone would also be satisfied by a decode that swapped the size and
+  /// left the pixels where they were, so check where the quadrants landed.
+  ///
+  /// Rotating the stored image 90° clockwise sends top-left → top-right,
+  /// top-right → bottom-right, bottom-right → bottom-left, bottom-left →
+  /// top-left.
+  func testExifOrientationRotatesThePixelsAndNotJustTheExtent() throws {
+    let image = try XCTUnwrap(decodeOrientedImage(try taggedJpeg()))
+    let quadrants = try XCTUnwrap(OrientedImageFixture.quadrants(of: image))
+
+    XCTAssertEqual(quadrants.topLeft, .bottomLeft)
+    XCTAssertEqual(quadrants.topRight, .topLeft)
+    XCTAssertEqual(quadrants.bottomLeft, .bottomRight)
+    XCTAssertEqual(quadrants.bottomRight, .topRight)
+  }
+
+  func testUntaggedImageKeepsItsQuadrantsWhereTheyWere() throws {
+    let image = try XCTUnwrap(decodeOrientedImage(try untaggedJpeg()))
+    let quadrants = try XCTUnwrap(OrientedImageFixture.quadrants(of: image))
+
+    XCTAssertEqual(quadrants.topLeft, .topLeft)
+    XCTAssertEqual(quadrants.topRight, .topRight)
+    XCTAssertEqual(quadrants.bottomLeft, .bottomLeft)
+    XCTAssertEqual(quadrants.bottomRight, .bottomRight)
+  }
+
+  /// The case `NSImage` used to paper over on macOS: it rasterized every source
+  /// into RGB before the compositor saw it, whereas `CGImageSource` hands back
+  /// the file's own color space — so a one-component grayscale JPEG now reaches
+  /// CoreImage as gray, and the render path's `CIContext` does no color
+  /// management (`workingColorSpace: NSNull`). Pins that such an image still
+  /// lands on the right pixels, and still turns.
+  ///
+  /// Classified by rank, not by value: a transfer function may move the levels,
+  /// but it must not reorder them, and `grayQuadrants` refuses to guess when two
+  /// of them come back equal — which is what a flattened or blank decode looks
+  /// like.
+  func testGrayscaleImageDecodesAndStillOrients() throws {
+    let untagged = try XCTUnwrap(
+      OrientedImageFixture.grayscaleQuadrantJpeg(width: storedWidth, height: storedHeight))
+    let tagged = OrientedImageFixture.tagging(untagged, orientation: rotate90)
+
+    let plain = try XCTUnwrap(decodeOrientedImage(untagged))
+    XCTAssertEqual(plain.extent.width, CGFloat(storedWidth))
+    XCTAssertEqual(plain.extent.height, CGFloat(storedHeight))
+    let asStored = try XCTUnwrap(OrientedImageFixture.grayQuadrants(of: plain))
+    XCTAssertEqual(asStored.topLeft, .topLeft)
+    XCTAssertEqual(asStored.topRight, .topRight)
+    XCTAssertEqual(asStored.bottomLeft, .bottomLeft)
+    XCTAssertEqual(asStored.bottomRight, .bottomRight)
+
+    let rotated = try XCTUnwrap(decodeOrientedImage(tagged))
+    XCTAssertEqual(rotated.extent.width, CGFloat(storedHeight))
+    XCTAssertEqual(rotated.extent.height, CGFloat(storedWidth))
+    let asDisplayed = try XCTUnwrap(OrientedImageFixture.grayQuadrants(of: rotated))
+    XCTAssertEqual(asDisplayed.topLeft, .bottomLeft)
+    XCTAssertEqual(asDisplayed.topRight, .topLeft)
+    XCTAssertEqual(asDisplayed.bottomLeft, .bottomRight)
+    XCTAssertEqual(asDisplayed.bottomRight, .topRight)
+  }
+
+  func testUndecodableBytesReturnNil() {
+    XCTAssertNil(decodeOrientedImage(Data([0x00, 0x01, 0x02, 0x03])))
+    XCTAssertNil(decodeOrientedImage(Data()))
+  }
+}
+
+// MARK: - EXIF orientation test fixtures
+
+/// Builds and reads back the EXIF-orientation fixtures.
+///
+/// Duplicated in the iOS and macOS RunnerTests: they are separate test targets
+/// with no shared source directory, as `ThumbnailTimestampFixture` already is.
+/// Keep the two copies in step.
+enum OrientedImageFixture {
+
+  /// EXIF `Orientation` = 6, i.e. display by rotating the stored pixels 90° CW.
+  static let orientationRotate90: UInt32 = 6
+
+  /// Which corner of the *stored* image a color came from. Each quadrant of the
+  /// fixture gets its own color, so a rotation is readable as a permutation.
+  enum Corner: CaseIterable {
+    case topLeft, topRight, bottomLeft, bottomRight
+
+    var rgb: (r: UInt8, g: UInt8, b: UInt8) {
+      switch self {
+      case .topLeft: return (255, 0, 0)  // red
+      case .topRight: return (0, 255, 0)  // green
+      case .bottomLeft: return (0, 0, 255)  // blue
+      case .bottomRight: return (255, 255, 0)  // yellow
+      }
+    }
+
+    /// The grayscale fixture's level for this corner. Strictly increasing in
+    /// the order the cases are declared, which is what lets `grayQuadrants`
+    /// classify by rank instead of by value.
+    var gray: UInt8 {
+      switch self {
+      case .topLeft: return 16
+      case .topRight: return 96
+      case .bottomLeft: return 176
+      case .bottomRight: return 248
+      }
+    }
+  }
+
+  struct Quadrants {
+    let topLeft: Corner
+    let topRight: Corner
+    let bottomLeft: Corner
+    let bottomRight: Corner
+  }
+
+  /// A JPEG whose four quadrants are four distinct flat colors.
+  ///
+  /// Built from raw top-down raster bytes, so "row 0 is the top" is a property of
+  /// the fixture rather than something the test has to assume about a drawing
+  /// context.
+  static func quadrantJpeg(width: Int, height: Int) -> Data? {
+    var raster = [UInt8]()
+    raster.reserveCapacity(width * height * 4)
+    for row in 0..<height {
+      for col in 0..<width {
+        let rgb = corner(col: col, row: row, width: width, height: height).rgb
+        raster.append(contentsOf: [rgb.r, rgb.g, rgb.b, 255])
+      }
+    }
+
+    guard let provider = CGDataProvider(data: Data(raster) as CFData),
+      let image = CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bitsPerPixel: 32,
+        bytesPerRow: width * 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: false,
+        intent: .defaultIntent)
+    else { return nil }
+
+    return encodeJpeg(image)
+  }
+
+  /// A one-component grayscale JPEG whose four quadrants are four distinct gray
+  /// levels — the same layout as `quadrantJpeg`, in a color space that is not
+  /// RGB.
+  static func grayscaleQuadrantJpeg(width: Int, height: Int) -> Data? {
+    var raster = [UInt8]()
+    raster.reserveCapacity(width * height)
+    for row in 0..<height {
+      for col in 0..<width {
+        raster.append(corner(col: col, row: row, width: width, height: height).gray)
+      }
+    }
+
+    guard let provider = CGDataProvider(data: Data(raster) as CFData),
+      let image = CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bitsPerPixel: 8,
+        bytesPerRow: width,
+        space: CGColorSpaceCreateDeviceGray(),
+        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: false,
+        intent: .defaultIntent)
+    else { return nil }
+
+    return encodeJpeg(image)
+  }
+
+  /// Encodes `image` as a maximum-quality JPEG: the quadrant centers are sampled
+  /// far from the color edges, so what ringing survives cannot flip a
+  /// classification.
+  private static func encodeJpeg(_ image: CGImage) -> Data? {
+    let encoded = NSMutableData()
+    guard
+      let destination = CGImageDestinationCreateWithData(
+        encoded, "public.jpeg" as CFString, 1, nil)
+    else { return nil }
+    CGImageDestinationAddImage(
+      destination, image,
+      [kCGImageDestinationLossyCompressionQuality: 1.0] as CFDictionary)
+    guard CGImageDestinationFinalize(destination) else { return nil }
+    return encoded as Data
+  }
+
+  /// Splices a minimal APP1 EXIF segment declaring `orientation` into `jpeg`.
+  ///
+  /// Written out byte by byte because the encoders bake the orientation in and
+  /// drop the tag: a TIFF header, one IFD entry for tag `0x0112` (Orientation),
+  /// type SHORT, and no next IFD.
+  static func tagging(_ jpeg: Data, orientation: UInt32) -> Data {
+    let app1: [UInt8] = [
+      0xFF, 0xE1, 0x00, 0x22,  // APP1, length 34 = 2 + 32 bytes of payload
+      0x45, 0x78, 0x69, 0x66, 0x00, 0x00,  // "Exif\0\0"
+      0x4D, 0x4D, 0x00, 0x2A,  // TIFF header, big-endian ("MM")
+      0x00, 0x00, 0x00, 0x08,  // IFD0 sits 8 bytes in
+      0x00, 0x01,  // one entry
+      0x01, 0x12,  // tag 0x0112: Orientation
+      0x00, 0x03,  // type 3: SHORT
+      0x00, 0x00, 0x00, 0x01,  // count 1
+      0x00, UInt8(orientation), 0x00, 0x00,  // the value, left-aligned
+      0x00, 0x00, 0x00, 0x00,  // no next IFD
+    ]
+
+    var bytes = [UInt8](jpeg)
+    bytes.insert(contentsOf: app1, at: app1InsertionPoint(bytes))
+    return Data(bytes)
+  }
+
+  /// The EXIF orientation `jpeg` declares, or nil when it declares none.
+  static func declaredOrientation(_ jpeg: Data) -> UInt32? {
+    guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil),
+      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+    else { return nil }
+    return properties[kCGImagePropertyOrientation] as? UInt32
+  }
+
+  /// Classifies the four quadrant centers of `image` back to the stored corner
+  /// each color came from.
+  static func quadrants(of image: CIImage) -> Quadrants? {
+    guard let raster = raster(of: image) else { return nil }
+    let (pixels, width, height) = raster
+    guard width >= 2, height >= 2 else { return nil }
+
+    func corner(atFractionX fx: Double, y fy: Double) -> Corner {
+      let col = min(width - 1, Int(Double(width) * fx))
+      let row = min(height - 1, Int(Double(height) * fy))
+      let offset = (row * width + col) * 4
+      return nearestCorner((pixels[offset], pixels[offset + 1], pixels[offset + 2]))
+    }
+
+    return Quadrants(
+      topLeft: corner(atFractionX: 0.25, y: 0.25),
+      topRight: corner(atFractionX: 0.75, y: 0.25),
+      bottomLeft: corner(atFractionX: 0.25, y: 0.75),
+      bottomRight: corner(atFractionX: 0.75, y: 0.75))
+  }
+
+  /// Classifies the four quadrant centers of a grayscale `image` back to the
+  /// stored corner each level came from, by **rank** rather than by value: the
+  /// decode may put the levels through a transfer function, but it must not
+  /// reorder them.
+  ///
+  /// Returns nil when two centers come back equal — a flattened or blank decode
+  /// would otherwise be ranked into some arbitrary permutation and could pass by
+  /// luck.
+  static func grayQuadrants(of image: CIImage) -> Quadrants? {
+    guard let raster = raster(of: image) else { return nil }
+    let (pixels, width, height) = raster
+    guard width >= 2, height >= 2 else { return nil }
+
+    func level(atFractionX fx: Double, y fy: Double) -> UInt8 {
+      let col = min(width - 1, Int(Double(width) * fx))
+      let row = min(height - 1, Int(Double(height) * fy))
+      return pixels[(row * width + col) * 4]
+    }
+
+    // Positions in the order Quadrants declares them.
+    let levels = [
+      level(atFractionX: 0.25, y: 0.25),
+      level(atFractionX: 0.75, y: 0.25),
+      level(atFractionX: 0.25, y: 0.75),
+      level(atFractionX: 0.75, y: 0.75),
+    ]
+    guard Set(levels).count == levels.count else { return nil }
+
+    // Corner.allCases is declared darkest-first, matching Corner.gray.
+    let darkestFirst = Corner.allCases
+    var corners = [Corner](repeating: .topLeft, count: levels.count)
+    for (rank, position) in levels.enumerated()
+      .sorted(by: { $0.element < $1.element })
+      .map({ $0.offset })
+      .enumerated()
+    {
+      corners[position] = darkestFirst[rank]
+    }
+
+    return Quadrants(
+      topLeft: corners[0], topRight: corners[1],
+      bottomLeft: corners[2], bottomRight: corners[3])
+  }
+
+  /// Which corner of the stored image the pixel at (`col`, `row`) belongs to,
+  /// with row 0 the top.
+  private static func corner(col: Int, row: Int, width: Int, height: Int) -> Corner {
+    let isLeft = col < width / 2
+    let isTop = row < height / 2
+    if isTop { return isLeft ? .topLeft : .topRight }
+    return isLeft ? .bottomLeft : .bottomRight
+  }
+
+  /// `image`'s pixels in raster order, row 0 the top.
+  private static func raster(of image: CIImage) -> (
+    pixels: [UInt8], width: Int, height: Int
+  )? {
+    let context = CIContext(options: [.workingColorSpace: NSNull()])
+    guard let cgImage = context.createCGImage(image, from: image.extent) else { return nil }
+
+    let width = cgImage.width
+    let height = cgImage.height
+    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+    guard
+      let bitmap = CGContext(
+        data: &pixels,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: width * 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { return nil }
+
+    bitmap.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+    return (pixels, width, height)
+  }
+
+  /// The quadrant color closest to `color`, so JPEG ringing does not matter.
+  private static func nearestCorner(_ color: (r: UInt8, g: UInt8, b: UInt8)) -> Corner {
+    var best = Corner.topLeft
+    var bestDistance = Int.max
+    for candidate in Corner.allCases {
+      let rgb = candidate.rgb
+      let dr = Int(color.r) - Int(rgb.r)
+      let dg = Int(color.g) - Int(rgb.g)
+      let db = Int(color.b) - Int(rgb.b)
+      let distance = dr * dr + dg * dg + db * db
+      if distance < bestDistance {
+        bestDistance = distance
+        best = candidate
+      }
+    }
+    return best
+  }
+
+  /// Where an APP1 segment may be inserted: after SOI, and after a leading JFIF
+  /// APP0 if the encoder wrote one — putting it first would leave a JFIF file
+  /// whose APP0 no longer follows SOI. Being the *first* APP1 is what matters,
+  /// since that is the one a reader takes.
+  private static func app1InsertionPoint(_ bytes: [UInt8]) -> Int {
+    var index = 2  // past SOI (FFD8)
+    while index + 4 <= bytes.count, bytes[index] == 0xFF, bytes[index + 1] == 0xE0 {
+      index += 2 + (Int(bytes[index + 2]) << 8 | Int(bytes[index + 3]))
+    }
+    return index
+  }
+}
