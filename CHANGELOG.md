@@ -1,5 +1,7 @@
 ## 2.11.1
 - **FIX**(android, iOS, macOS): A `ChromaKey.backgroundImage` or image `VideoLayer` fed a photo straight from the gallery no longer renders sideways — the EXIF `Orientation` tag is now honored on all three platforms.
+- **FIX**(iOS, macOS): A stop-motion frame no longer lands sideways when its thumbnail decode falls back to the full-size decode.
+- **PERF**(android): An image `VideoLayer` is decoded at the size it will be scaled to instead of at full resolution, so a large gallery photo no longer risks an out-of-memory overlay.
 
 ## 2.11.0
 - **FEAT**(android, iOS, macOS): Add `ChromaKey` — green-screen removal with a soft edge and spill suppression. The keyed area becomes a `backgroundColor`, a `backgroundImage`, or (in a `VideoComposition`) the layer below. Settable on `VideoRenderData`, `VideoLayer` and `VideoSegment`, resolved per clip as segment → layer → global. H.264/HEVC carry no alpha, so on the single-track `videoSegments` path a key without a background is flattened to black.
