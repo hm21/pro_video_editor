@@ -2,7 +2,6 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
@@ -15,6 +14,7 @@ import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.TimestampWrapper
 import ch.waio.pro_video_editor.src.features.render.models.ImageLayer
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.ImageOrientation
 
 /**
  * Applies static image overlay on video.
@@ -148,12 +148,16 @@ fun applyTimedImageLayers(
                     "Layer: animated GIF with ${gifFrames.size} frame(s), loop=${layer.loop}"
                 )
             } else {
-                val options = BitmapFactory.Options().apply {
-                    inPreferredConfig = Bitmap.Config.ARGB_8888
-                }
-                val layerBitmap = BitmapFactory.decodeByteArray(
-                    imageBytes, 0, imageBytes.size, options
+                // Decoded through ImageOrientation so a gallery photo carrying an
+                // EXIF orientation is laid in the way the user sees it, not as the
+                // sideways pixels it is stored as.
+                val layerBitmap = ImageOrientation.decode(
+                    imageBytes, config = Bitmap.Config.ARGB_8888
                 )
+                if (layerBitmap == null) {
+                    Log.e(RENDER_TAG, "Failed to decode image layer")
+                    continue
+                }
                 val prepared = prepareOverlay(layerBitmap, layer, videoWidth, videoHeight)
 
                 bitmapOverlay = if (hasAnimations) {
