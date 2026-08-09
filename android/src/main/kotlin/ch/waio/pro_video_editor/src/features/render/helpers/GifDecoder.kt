@@ -23,6 +23,12 @@ object GifDecoder {
     /** A single decoded GIF frame and how long it is shown. */
     data class GifFrame(val bitmap: Bitmap, val durationUs: Long)
 
+    /**
+     * How many leading bytes [isGif] needs, so a caller holding a file can
+     * check the signature without reading the whole image.
+     */
+    const val MAGIC_LENGTH = 3
+
     /** Returns true when [bytes] start with the `GIF` signature. */
     fun isGif(bytes: ByteArray): Boolean =
         bytes.size >= 3 &&

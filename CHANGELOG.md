@@ -1,3 +1,9 @@
+## 2.11.2
+- **PERF**(android, iOS, macOS): A file-backed image is handed to the renderer as a path and opened only while it is decoded, instead of crossing the platform channel as bytes. A few hundred stop-motion frames at 3–4 MB each used to exhaust Android's heap before the first one was decoded. Applies to `StopMotionFrame`, image `VideoLayer`s and `ChromaKey.backgroundImage` built from `EditorLayerImage.file`; other sources still travel as bytes.
+- **PERF**(android): A `VideoRenderData.audioTracks` entry is pre-rendered through a scratch file instead of one in-memory PCM byte array, which reached ~30 MB for a three-minute stereo track.
+- **FIX**(android): A source whose decoder emits float PCM no longer comes out as noise in `extractAudio`/`mergeAudio` — the samples were read big-endian on a little-endian device.
+- **FIX**(android): An `audioTracks` entry that is shorter than its slot and not looping now fills the rest of that slot with silence, as documented, instead of ending the exported audio early.
+
 ## 2.11.1
 - **FIX**(android, iOS, macOS): A `ChromaKey.backgroundImage` or image `VideoLayer` fed a photo straight from the gallery no longer renders sideways — the EXIF `Orientation` tag is now honored on all three platforms.
 - **FIX**(iOS, macOS): A stop-motion frame no longer lands sideways when its thumbnail decode falls back to the full-size decode.

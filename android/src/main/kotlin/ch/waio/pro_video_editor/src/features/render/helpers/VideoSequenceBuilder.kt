@@ -24,6 +24,7 @@ import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.EncodedImage
 import java.io.File
 
 /**
@@ -73,7 +74,7 @@ class VideoSequenceBuilder(
     )
 
     data class ImageLayerConfig(
-        val imageBytes: ByteArray?,
+        val image: EncodedImage?,
         val scaleX: Float?,
         val scaleY: Float?,
         val withCropping: Boolean = false,

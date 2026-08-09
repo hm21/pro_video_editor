@@ -441,7 +441,13 @@ class VideoRenderData {
         : await Future.wait(
             imageLayers!.map(
               (layer) async => {
-                'imageData': await layer.image.safeByteArray(),
+                // A file-backed layer image travels as a path and is opened
+                // only while it is decoded; see
+                // [EditorLayerImage.toChannelSource].
+                ...await layer.image.toChannelSource(
+                  pathKey: 'imagePath',
+                  dataKey: 'imageData',
+                ),
                 'startUs': layer.startTime?.inMicroseconds,
                 'endUs': layer.endTime?.inMicroseconds,
                 'x': layer.offset?.dx.toInt(),

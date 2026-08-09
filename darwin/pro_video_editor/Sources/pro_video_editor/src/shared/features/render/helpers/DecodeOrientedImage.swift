@@ -20,9 +20,21 @@ import ImageIO
 ///
 /// Returns nil when the bytes do not decode.
 func decodeOrientedImage(_ data: Data) -> CIImage? {
-  guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-    let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
-  else { return nil }
+  return decodeOrientedImage(.bytes(data))
+}
+
+/// `decodeOrientedImage` for an image that may live on disk.
+///
+/// A file-backed image is decoded straight off its URL, so the encoded bytes
+/// are never copied onto the heap on the way to ImageIO.
+func decodeOrientedImage(_ image: EncodedImage) -> CIImage? {
+  guard let source = image.imageSource else { return nil }
+  return decodeOrientedImage(source: source)
+}
+
+/// The shared tail of both entry points, once a source has been opened.
+func decodeOrientedImage(source: CGImageSource) -> CIImage? {
+  guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
 
   let image = CIImage(cgImage: cgImage)
   let orientation = exifOrientation(of: source)

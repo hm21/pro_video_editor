@@ -39,7 +39,7 @@ fun applyChromaKey(
     }
 
     val background = when {
-        effective.backgroundImageData != null -> "image"
+        effective.backgroundImage != null -> "image"
         effective.backgroundColor != null -> "color"
         else -> "transparent"
     }

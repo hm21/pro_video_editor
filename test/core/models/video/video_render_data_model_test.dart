@@ -1,6 +1,10 @@
+import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart';
+import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
 import 'package:pro_video_editor/core/models/video/chroma_key_model.dart';
 import 'package:pro_video_editor/core/models/video/editor_video_model.dart';
 import 'package:pro_video_editor/core/models/video/video_composition_model.dart';
@@ -300,6 +304,63 @@ void main() {
       );
 
       expect(data.chromaKey, key);
+    });
+  });
+
+  group('VideoRenderData imageLayers', () {
+    late Directory tempDir;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('image_layer_test');
+    });
+
+    tearDown(() {
+      if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+    });
+
+    Future<List<Map<String, dynamic>>> layerMaps(
+      List<ImageLayer> layers,
+    ) async {
+      final map = await VideoRenderData(
+        id: 'test',
+        videoSegments: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+        imageLayers: layers,
+      ).toAsyncMap();
+      return (map['imageLayers'] as List).cast<Map<String, dynamic>>();
+    }
+
+    test('sends a file-backed layer as a path, not bytes', () async {
+      final file = File('${tempDir.path}/overlay.png')
+        ..writeAsBytesSync([1, 2, 3, 4]);
+
+      final maps = await layerMaps([
+        ImageLayer(image: EditorLayerImage.file(file.path)),
+      ]);
+
+      expect(maps.single['imagePath'], file.path);
+      expect(maps.single.containsKey('imageData'), isFalse);
+    });
+
+    test('still sends an in-memory layer as bytes', () async {
+      final bytes = Uint8List.fromList([7, 7, 7]);
+
+      final maps = await layerMaps([
+        ImageLayer(image: EditorLayerImage.memory(bytes)),
+      ]);
+
+      expect(maps.single['imageData'], bytes);
+      expect(maps.single.containsKey('imagePath'), isFalse);
+    });
+
+    test('throws naming the path when a layer image is gone', () async {
+      final missing = '${tempDir.path}/gone.png';
+
+      await expectLater(
+        layerMaps([ImageLayer(image: EditorLayerImage.file(missing))]),
+        throwsA(
+          isA<FileSystemException>().having((e) => e.path, 'path', missing),
+        ),
+      );
     });
   });
 }

@@ -1,16 +1,19 @@
 package ch.waio.pro_video_editor.src.features.stopmotion.models
 
+import ch.waio.pro_video_editor.src.shared.media.EncodedImage
 import io.flutter.plugin.common.MethodCall
 
 /**
  * Configuration for a single stop-motion frame.
  *
- * @property imageData Encoded image bytes (PNG/JPEG/etc.) for this frame.
+ * @property image The encoded image (PNG/JPEG/etc.) for this frame. A frame the
+ *   caller has on disk arrives as a path and is opened when it is encoded; only
+ *   an in-memory source travels as bytes.
  * @property durationUs How long this frame is held on screen, in microseconds.
  *   When `null`, the default frame duration (`1 / frameRate`) is used.
  */
 class StopMotionFrameConfig(
-    val imageData: ByteArray,
+    val image: EncodedImage,
     val durationUs: Long?,
 )
 
@@ -42,11 +45,18 @@ data class StopMotionConfig(
             val rawFrames = call.argument<List<Map<String, Any?>>>("frames")
                 ?: throw IllegalArgumentException("Missing frames")
 
-            val frames = rawFrames.mapNotNull { map ->
-                val data = map["imageData"] as? ByteArray ?: return@mapNotNull null
-                if (data.isEmpty()) return@mapNotNull null
+            val frames = rawFrames.mapIndexed { index, map ->
+                // A frame that cannot be read fails the render. Skipping it
+                // would return a video that is one shot short and a frame
+                // duration too brief, with nothing to say so — for a sequence
+                // of stills that is a corrupt result, not a degraded one.
+                val image = EncodedImage.fromMap(
+                    map, pathKey = "imagePath", dataKey = "imageData"
+                ) ?: throw IllegalArgumentException(
+                    "Frame $index carries neither an image path nor image bytes"
+                )
                 val durationUs = (map["durationUs"] as? Number)?.toLong()
-                StopMotionFrameConfig(data, durationUs)
+                StopMotionFrameConfig(image, durationUs)
             }
 
             if (frames.isEmpty()) {

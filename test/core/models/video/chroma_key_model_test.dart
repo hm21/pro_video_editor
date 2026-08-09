@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui';
 
@@ -109,6 +110,20 @@ void main() {
         ).toAsyncMap();
 
         expect(map['bgImageData'], bytes);
+      });
+
+      test('sends a file-backed background as a path, not bytes', () async {
+        final tempDir = Directory.systemTemp.createTempSync('chroma_bg_test');
+        addTearDown(() => tempDir.deleteSync(recursive: true));
+        final file = File('${tempDir.path}/bg.jpg')
+          ..writeAsBytesSync([1, 2, 3, 4]);
+
+        final map = await ChromaKey(
+          backgroundImage: EditorLayerImage.file(file.path),
+        ).toAsyncMap();
+
+        expect(map['bgImagePath'], file.path);
+        expect(map.containsKey('bgImageData'), isFalse);
       });
     });
 

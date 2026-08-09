@@ -161,6 +161,36 @@ class EditorLayerImage {
     return bytes;
   }
 
+  /// Resolves this image for a platform-channel call, as either a path or
+  /// bytes.
+  ///
+  /// A file-backed image travels as its path under [pathKey] and is left on
+  /// disk for the native side to open while it decodes — which keeps a large
+  /// photo, or a few hundred of them, out of the channel message entirely.
+  /// Every other source resolves to bytes under [dataKey] via [safeByteArray].
+  ///
+  /// **A path-backed image has to stay on disk, unchanged, until the call it is
+  /// passed to has finished.** Its bytes are no longer copied here, so a file
+  /// the app deletes or rewrites in the meantime — or one in a cache directory
+  /// the system may reclaim under storage pressure — fails the render. Copy
+  /// such an image somewhere stable first, or pass it as bytes.
+  ///
+  /// Throws a [FileSystemException] naming the path when a file-backed image is
+  /// not there, since the renderer would otherwise only discover that much
+  /// later, with nothing left to say which file was missing.
+  Future<Map<String, dynamic>> toChannelSource({
+    required String pathKey,
+    required String dataKey,
+  }) async {
+    final file = this.file;
+    if (file == null) return {dataKey: await safeByteArray()};
+
+    if (!await file.exists()) {
+      throw FileSystemException('Image file not found', file.path);
+    }
+    return {pathKey: file.path};
+  }
+
   /// Converts this [EditorLayerImage] into a serializable [Map].
   Map<String, dynamic> toMap() {
     return <String, dynamic>{

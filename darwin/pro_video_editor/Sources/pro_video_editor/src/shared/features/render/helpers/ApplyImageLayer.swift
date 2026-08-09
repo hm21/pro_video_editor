@@ -54,7 +54,7 @@ func resolveOpenEndedOutAnimations(
       }
     guard hasOutPhase else { return layer }
     return ImageLayerConfig(
-      imageData: layer.imageData,
+      image: layer.image,
       startUs: layer.startUs,
       endUs: totalDurationUs,
       x: layer.x, y: layer.y,

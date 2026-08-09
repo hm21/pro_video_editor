@@ -101,8 +101,12 @@ class StopMotionGenerator(private val context: Context) {
                 // frames can be decoded downscaled instead of at full resolution.
                 var targetWidth = config.width ?: 0
                 var targetHeight = config.height ?: 0
+                // Kept so the first frame's decode does not re-read the EXIF
+                // this probe has already parsed.
+                var firstProbe: ImageOrientation.Probe? = null
                 if (targetWidth <= 0 || targetHeight <= 0) {
-                    val probe = ImageOrientation.probe(config.frames[0].imageData)
+                    val probe = ImageOrientation.probe(config.frames[0].image)
+                    firstProbe = probe
                     targetWidth = probe?.width ?: 2
                     targetHeight = probe?.height ?: 2
                 }
@@ -114,9 +118,17 @@ class StopMotionGenerator(private val context: Context) {
                 config.frames.forEachIndexed { index, frame ->
                     if (shouldStopPolling.get()) return@Thread
 
-                    val bitmap = ImageOrientation
-                        .decode(frame.imageData, targetWidth, targetHeight)
-                        ?: throw IllegalStateException("Failed to decode frame $index")
+                    val bitmap = ImageOrientation.decode(
+                        frame.image,
+                        reqWidth = targetWidth,
+                        reqHeight = targetHeight,
+                        knownOrientation = if (index == 0) firstProbe?.orientation else null,
+                    ) ?: throw IllegalStateException(
+                        // Name the source: a path-backed frame fails here rather
+                        // than at the call, so without it there is nothing to
+                        // tell the caller which photo went missing.
+                        "Failed to decode frame $index (${frame.image.describe()})"
+                    )
 
                     val file = File(
                         context.cacheDir,

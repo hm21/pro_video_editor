@@ -46,7 +46,7 @@ fun applyComposition(
         // converted here and applied at the composition level.
         val imageLayerConfigs = config.imageLayers.map { imageLayer ->
             VideoSequenceBuilder.ImageLayerConfig(
-                imageBytes = imageLayer.imageData,
+                image = imageLayer.image,
                 scaleX = config.scaleX,
                 scaleY = config.scaleY,
                 withCropping = config.imageBytesWithCropping,

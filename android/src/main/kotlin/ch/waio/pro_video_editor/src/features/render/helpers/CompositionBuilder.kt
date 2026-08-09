@@ -82,7 +82,7 @@ class CompositionBuilder(
             .setCrop(config.cropWidth, config.cropHeight, config.cropX, config.cropY)
             .setTimedImageLayers(config.imageLayers.map { imageLayer ->
                 VideoSequenceBuilder.ImageLayerConfig(
-                    imageBytes = imageLayer.imageData,
+                    image = imageLayer.image,
                     scaleX = config.scaleX,
                     scaleY = config.scaleY,
                     withCropping = config.imageBytesWithCropping,

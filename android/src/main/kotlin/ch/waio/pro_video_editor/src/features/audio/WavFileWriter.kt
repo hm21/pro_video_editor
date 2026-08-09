@@ -1,10 +1,10 @@
 package ch.waio.pro_video_editor.src.features.audio
 
 import android.media.AudioFormat
-import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import androidx.media3.common.util.UnstableApi
+import ch.waio.pro_video_editor.src.shared.media.PcmRangeDecoder
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
@@ -139,270 +139,85 @@ class WavFileWriter(private val outputFile: File, private val speed: Float = 1.0
         onProgress: (Double) -> Unit,
         shouldStop: () -> Boolean
     ) {
-        var decoder: MediaCodec? = null
         var outputStream: FileOutputStream? = null
 
         try {
             totalDataSize = 0
 
-            val mime = audioFormat.getString(MediaFormat.KEY_MIME)!!
-            decoder = MediaCodec.createDecoderByType(mime)
-            decoder.configure(audioFormat, null, null, 0)
-            decoder.start()
+            val stream = FileOutputStream(outputFile)
+            outputStream = stream
 
-            // Get the decoder's ACTUAL output format immediately after starting
-            // don't rely on INFO_OUTPUT_FORMAT_CHANGED which may not be sent
-            val decoderOutputFormat = decoder.outputFormat
-            
-            // output parameters from decoder
-            sampleRate = if (decoderOutputFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
-                decoderOutputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            } else {
-                audioFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            }
-            
-            numChannels = if (decoderOutputFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
-                decoderOutputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            } else {
-                audioFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            }
-            
-            // Determine bits per sample from PCM encoding
-            // Convert float PCM to 16-bit integer for compatibility
-            if (decoderOutputFormat.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
-                val pcmEncoding = decoderOutputFormat.getInteger(MediaFormat.KEY_PCM_ENCODING)
-                when (pcmEncoding) {
-                    AudioFormat.ENCODING_PCM_16BIT -> {
-                        bitsPerSample = 16
-                        isFloatPcm = false
-                    }
-                    AudioFormat.ENCODING_PCM_8BIT -> {
-                        bitsPerSample = 8
-                        isFloatPcm = false
-                    }
-                    AudioFormat.ENCODING_PCM_FLOAT -> {
-                        // Convert float to 16-bit for better compatibility
-                        bitsPerSample = 16
-                        isFloatPcm = true
-                    }
-                    else -> {
-                        bitsPerSample = 16
-                        isFloatPcm = false
-                    }
-                }
-            } else {
-                bitsPerSample = 16
-                isFloatPcm = false
-            }
+            // Placeholder header, so the PCM starts at byte 44. It is rewritten
+            // as soon as the decoder reports its real format, and again at the
+            // end with the measured sizes.
+            writeWavHeader(stream, 0)
+            var formatKnown = false
 
-            extractor.selectTrack(audioTrackIndex)
+            PcmRangeDecoder.decode(
+                extractor = extractor,
+                audioTrackIndex = audioTrackIndex,
+                inputFormat = audioFormat,
+                startUs = startUs,
+                endUs = endUs,
+                onFormat = { format ->
+                    sampleRate = format.sampleRate
+                    numChannels = format.channelCount
+                    isFloatPcm = format.isFloatPcm
+                    // Float is converted to int16 before it reaches us, so the
+                    // only depth that survives the decoder is 8-bit.
+                    bitsPerSample =
+                        if (format.pcmEncoding == AudioFormat.ENCODING_PCM_8BIT) 8 else 16
 
-            if (startUs > 0) {
-                extractor.seekTo(startUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-            }
-
-            outputStream = FileOutputStream(outputFile)
-
-            // Write initial WAV header with decoder output format
-            // We'll update the sizes at the end
-            writeWavHeader(outputStream, 0)
-
-            val validEndUs = if (endUs == Long.MAX_VALUE) Long.MAX_VALUE else endUs
-            val totalDurationUs = if (validEndUs == Long.MAX_VALUE) Long.MAX_VALUE else (validEndUs - startUs)
-            var currentTimeUs = startUs
-            var inputEos = false
-            var outputEos = false
-
-            onProgress(0.0)
-            maybeInitSpeedProcessor()
-
-            while (!outputEos && !shouldStop()) {
-                if (!inputEos) {
-                    val inputBufferId = decoder.dequeueInputBuffer(10000)
-                    if (inputBufferId >= 0) {
-                        val decoderInputBuffer = decoder.getInputBuffer(inputBufferId)!!
-                        decoderInputBuffer.clear()
-
-                        val sampleSize = extractor.readSampleData(decoderInputBuffer, 0)
-                        val presentationTimeUs = extractor.sampleTime
-
-                        if (sampleSize < 0 || presentationTimeUs > validEndUs) {
-                            // End of stream or reached end time
-                            decoder.queueInputBuffer(inputBufferId, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            inputEos = true
-                        } else {
-                            decoder.queueInputBuffer(inputBufferId, 0, sampleSize, presentationTimeUs, 0)
-                            extractor.advance()
-                            currentTimeUs = presentationTimeUs
-
-                            if (totalDurationUs != Long.MAX_VALUE) {
-                                val progress = ((currentTimeUs - startUs).toDouble() / totalDurationUs).coerceIn(0.0, 1.0)
-                                onProgress(progress)
+                    rewriteWavHeader(stream)
+                    if (!formatKnown) {
+                        formatKnown = true
+                        maybeInitSpeedProcessor()
+                    } else {
+                        // A mid-stream change: the processor is tied to the old
+                        // sample rate and channel count, so drain what it holds
+                        // and build a new one for the new format.
+                        val processor = speedProcessor
+                        if (processor != null) {
+                            val tail = processor.drain()
+                            if (tail.isNotEmpty()) {
+                                stream.write(tail)
+                                totalDataSize += tail.size
                             }
+                            speedProcessor = null
+                            maybeInitSpeedProcessor()
                         }
                     }
-                }
-
-                val bufferInfo = MediaCodec.BufferInfo()
-                val outputBufferId = decoder.dequeueOutputBuffer(bufferInfo, 10000)
-
-                when {
-                    outputBufferId == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                        // Output format changed during decoding - update our parameters
-                        val newOutputFormat = decoder.outputFormat
-                        
-                        var formatChanged = false
-                        if (newOutputFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
-                            val newSampleRate = newOutputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                            if (newSampleRate != sampleRate) {
-                                sampleRate = newSampleRate
-                                formatChanged = true
-                            }
-                        }
-                        if (newOutputFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
-                            val newChannels = newOutputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                            if (newChannels != numChannels) {
-                                numChannels = newChannels
-                                formatChanged = true
-                            }
-                        }
-                        if (newOutputFormat.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
-                            val pcmEncoding = newOutputFormat.getInteger(MediaFormat.KEY_PCM_ENCODING)
-                            when (pcmEncoding) {
-                                AudioFormat.ENCODING_PCM_16BIT -> {
-                                    if (bitsPerSample != 16 || isFloatPcm) {
-                                        bitsPerSample = 16
-                                        isFloatPcm = false
-                                        formatChanged = true
-                                    }
-                                }
-                                AudioFormat.ENCODING_PCM_8BIT -> {
-                                    if (bitsPerSample != 8 || isFloatPcm) {
-                                        bitsPerSample = 8
-                                        isFloatPcm = false
-                                        formatChanged = true
-                                    }
-                                }
-                                AudioFormat.ENCODING_PCM_FLOAT -> {
-                                    // Convert float to 16-bit for compatibility
-                                    if (bitsPerSample != 16 || !isFloatPcm) {
-                                        bitsPerSample = 16
-                                        isFloatPcm = true
-                                        formatChanged = true
-                                    }
-                                }
-                                else -> {
-                                    if (bitsPerSample != 16 || isFloatPcm) {
-                                        bitsPerSample = 16
-                                        isFloatPcm = false
-                                        formatChanged = true
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // If format changed, rewrite the header
-                        if (formatChanged) {
-                            outputStream.flush()
-                            RandomAccessFile(outputFile, "rw").use { raf ->
-                                raf.seek(0L)
-                            
-                                val byteRate = sampleRate * numChannels * bitsPerSample / 8
-                                val blockAlign = (numChannels * bitsPerSample / 8).toShort()
-                            
-                                val headerBytes = ByteBuffer.allocate(44).apply {
-                                    // All values written in little-endian order
-                                    // Magic number constants are pre-encoded for little-endian
-                                    order(ByteOrder.LITTLE_ENDIAN)
-                                    putInt(RIFF_HEADER)
-                                    putInt(0)  // Will update at end
-                                    putInt(WAVE_HEADER)
-                                    
-                                    putInt(FMT_HEADER)
-                                    putInt(16)
-                                    putShort(PCM_FORMAT)
-                                    putShort(numChannels.toShort())
-                                    putInt(sampleRate)
-                                    putInt(byteRate)
-                                    putShort(blockAlign)
-                                    putShort(bitsPerSample.toShort())
-                                    
-                                    putInt(DATA_HEADER)
-                                    putInt(0)  // Will update at end
-                                }.array()
-                            
-                                raf.write(headerBytes)
-                            }
-
-                            // Re-create the speed processor for the new PCM
-                            // format, flushing whatever it had buffered first.
-                            val processor = speedProcessor
-                            if (processor != null) {
-                                val tail = processor.drain()
-                                if (tail.isNotEmpty()) {
-                                    outputStream.write(tail)
-                                    totalDataSize += tail.size
-                                }
-                                speedProcessor = null
-                                maybeInitSpeedProcessor()
-                            }
-                        }
-                    }
-                    outputBufferId >= 0 -> {
-                        val decoderOutputBuffer = decoder.getOutputBuffer(outputBufferId)!!
-
-                        if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                            outputEos = true
-                        }
-
-                        if (bufferInfo.size > 0) {
-                            // Get PCM data from decoder output buffer
-                            decoderOutputBuffer.position(bufferInfo.offset)
-                            decoderOutputBuffer.limit(bufferInfo.offset + bufferInfo.size)
-                            
-                            if (isFloatPcm) {
-                                // Convert float PCM to 16-bit integer PCM
-                                val floatSamples = bufferInfo.size / 4 // 4 bytes per float
-                                val int16Buffer = ByteBuffer.allocate(floatSamples * 2) // 2 bytes per int16
-                                int16Buffer.order(ByteOrder.LITTLE_ENDIAN)
-                                
-                                for (i in 0 until floatSamples) {
-                                    val floatValue = decoderOutputBuffer.float
-                                    // Clamp and convert float [-1.0, 1.0] to int16 [-32768, 32767]
-                                    val intValue = (floatValue.coerceIn(-1.0f, 1.0f) * 32767.0f).toInt().toShort()
-                                    int16Buffer.putShort(intValue)
-                                }
-
-                                writePcm(outputStream, int16Buffer.array())
-                            } else {
-                                // Write PCM data directly (already in correct format)
-                                val pcmData = ByteArray(bufferInfo.size)
-                                decoderOutputBuffer.get(pcmData)
-                                writePcm(outputStream, pcmData)
-                            }
-                        }
-
-                        decoder.releaseOutputBuffer(outputBufferId, false)
-                    }
-                }
-            }
+                },
+                onPcm = { pcm, _, _ -> writePcm(stream, pcm) },
+                onProgress = onProgress,
+                shouldStop = shouldStop,
+            )
 
             // Flush any samples buffered by the speed processor.
-            flushSpeedProcessor(outputStream)
+            flushSpeedProcessor(stream)
 
-            outputStream.flush()
-            outputStream.close()
+            stream.flush()
+            stream.close()
             outputStream = null
 
             // Update WAV header with actual sizes
             updateWavHeader()
 
             onProgress(1.0)
-
         } finally {
             outputStream?.close()
-            decoder?.stop()
-            decoder?.release()
+        }
+    }
+
+    /**
+     * Rewrites the 44-byte header in place with the format now in force,
+     * leaving the size fields at zero for [updateWavHeader] to fill in.
+     */
+    private fun rewriteWavHeader(outputStream: FileOutputStream) {
+        outputStream.flush()
+        RandomAccessFile(outputFile, "rw").use { raf ->
+            raf.seek(0L)
+            raf.write(wavHeaderBytes(0))
         }
     }
 
@@ -539,6 +354,11 @@ class WavFileWriter(private val outputFile: File, private val speed: Float = 1.0
      * Note: RIFF files have a 4GB limit due to 32-bit size fields. This is a WAV format limitation.
      */
     private fun writeWavHeader(outputStream: FileOutputStream, dataSize: Long) {
+        outputStream.write(wavHeaderBytes(dataSize))
+    }
+
+    /** The 44-byte RIFF/WAVE header for the current format and [dataSize]. */
+    private fun wavHeaderBytes(dataSize: Long): ByteArray {
         val header = ByteBuffer.allocate(44)
         header.order(ByteOrder.LITTLE_ENDIAN)
 
@@ -573,7 +393,7 @@ class WavFileWriter(private val outputFile: File, private val speed: Float = 1.0
         header.putInt(DATA_HEADER)                          // "data"
         header.putInt(safeSizeForHeader)                    // Data size
 
-        outputStream.write(header.array())
+        return header.array()
     }
 
     /**

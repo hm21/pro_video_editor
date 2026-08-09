@@ -2,14 +2,16 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
 import android.content.Context
-import android.media.AudioFormat
-import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
-import android.os.Build
 import androidx.media3.common.util.UnstableApi
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.PcmRangeDecoder
+import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.OutputStream
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -95,15 +97,43 @@ object AudioPreRenderer {
             return null
         }
 
-        // Step 1: Decode the trimmed source range into a PCM byte array.
+        // Step 1: Decode the trimmed source range into a scratch PCM file.
         val decoded = try {
-            decodeRange(audioPath, audioStartUs.coerceAtLeast(0L), audioEndUs)
+            decodeRange(
+                context.cacheDir, audioPath, audioStartUs.coerceAtLeast(0L), audioEndUs
+            )
         } catch (e: Exception) {
             Log.e(RENDER_TAG, "AudioPreRenderer: decode failed: ${e.message}")
             return null
         } ?: return null
 
-        if (decoded.pcmBytes.isEmpty()) {
+        try {
+            return assemble(
+                context = context,
+                decoded = decoded,
+                loop = loop,
+                compositionStartUs = compositionStartUs,
+                compositionDurationUs = compositionDurationUs,
+                videoDurationUs = videoDurationUs
+            )
+        } finally {
+            decoded.pcmFile.delete()
+        }
+    }
+
+    /**
+     * Writes the WAV described by [decoded] and the composition timing, i.e.
+     * everything after the source has been decoded.
+     */
+    private fun assemble(
+        context: Context,
+        decoded: DecodedAudio,
+        loop: Boolean,
+        compositionStartUs: Long,
+        compositionDurationUs: Long,
+        videoDurationUs: Long
+    ): Result? {
+        if (decoded.byteLength <= 0L) {
             Log.e(RENDER_TAG, "AudioPreRenderer: decoder produced no PCM data")
             return null
         }
@@ -142,9 +172,9 @@ object AudioPreRenderer {
 
                 writeSilence(raf, leadingSilenceBytes)
 
-                writeAudioBody(
+                val bodyBytesWritten = writeAudioBody(
                     raf = raf,
-                    sourcePcm = decoded.pcmBytes,
+                    sourcePcm = decoded.pcmFile,
                     targetBytes = bodyBytes,
                     loop = loop,
                     bytesPerFrame = bytesPerFrame
@@ -153,9 +183,8 @@ object AudioPreRenderer {
                 writeSilence(raf, trailingSilenceBytes)
 
                 // Update RIFF/data chunk sizes in the header.
-                val totalDataBytes = leadingSilenceBytes +
-                        actualBodyBytesWritten(decoded.pcmBytes.size.toLong(), bodyBytes, loop) +
-                        trailingSilenceBytes
+                val totalDataBytes =
+                    leadingSilenceBytes + bodyBytesWritten + trailingSilenceBytes
                 updateWavSizes(raf, totalDataBytes)
             }
         } catch (e: Exception) {
@@ -180,26 +209,44 @@ object AudioPreRenderer {
     // Internal: decoding
     // ---------------------------------------------------------------------
 
-    private data class DecodedAudio(
-        val pcmBytes: ByteArray,
+    /**
+     * The decoded source range, spooled to disk.
+     *
+     * @property pcmFile Scratch file holding the raw PCM; the caller deletes it.
+     * @property byteLength How many PCM bytes [pcmFile] holds.
+     */
+    private class DecodedAudio(
+        val pcmFile: File,
+        val byteLength: Long,
         val sampleRate: Int,
         val channelCount: Int
     )
 
     /**
-     * Decodes the audio range `[startUs, endUs)` from `path` into a
-     * 16-bit signed little-endian PCM byte array.
+     * Decodes the audio range `[startUs, endUs)` from `path` into a scratch file
+     * of 16-bit signed little-endian PCM.
+     *
+     * The PCM goes to disk rather than into a byte array because it is the one
+     * allocation here that grows with the clip: a three-minute stereo track
+     * decodes to ~30 MB, and holding that (plus the copy every array growth
+     * makes) is enough to push an export over Android's managed-heap limit.
      *
      * Float PCM is converted to int16. Output sample rate / channel
      * count match the decoder output.
      */
     private fun decodeRange(
+        cacheDir: File,
         path: String,
         startUs: Long,
         endUs: Long?
     ): DecodedAudio? {
         val extractor = MediaExtractor()
-        var decoder: MediaCodec? = null
+        val pcmFile = File(
+            cacheDir,
+            "prerender_pcm_${System.currentTimeMillis()}_${System.nanoTime()}.raw"
+        )
+        var pcmOutput: OutputStream? = null
+        var decodedFully = false
 
         try {
             extractor.setDataSource(path)
@@ -221,190 +268,87 @@ object AudioPreRenderer {
                 return null
             }
 
-            extractor.selectTrack(audioTrackIndex)
-            if (startUs > 0) {
-                extractor.seekTo(startUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-            }
+            val sink = BufferedOutputStream(FileOutputStream(pcmFile))
+            pcmOutput = sink
 
-            val mime = inputFormat.getString(MediaFormat.KEY_MIME)!!
-            decoder = MediaCodec.createDecoderByType(mime)
-            decoder.configure(inputFormat, null, null, 0)
-            decoder.start()
-
-            // Initial format from decoder (may change later).
-            var sampleRate = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            var channelCount = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            var isFloatPcm = false
-
-            val decoderInitialFormat = decoder.outputFormat
-            if (decoderInitialFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
-                sampleRate = decoderInitialFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            }
-            if (decoderInitialFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
-                channelCount = decoderInitialFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            }
-            isFloatPcm = readIsFloatPcm(decoderInitialFormat) ?: false
-
-            val pcmOutput = java.io.ByteArrayOutputStream()
             val effectiveEndUs = endUs ?: Long.MAX_VALUE
-            val timeoutUs = 10_000L
-            var inputEos = false
-            var outputEos = false
+            var pcmByteLength = 0L
+            var sampleRate = 0
+            var channelCount = 0
 
-            // Track the actual presentation time of the first sample we emit.
-            // We only start writing PCM once we have crossed `startUs` so the
-            // resulting buffer is sample-aligned with the requested trim.
+            // The extractor seeks to the sync frame at or before `startUs`, so
+            // the first buffer usually begins early. Dropping that lead-in — and
+            // the tail past `endUs` — is what makes the trim sample-exact, which
+            // is what keeps a loop boundary gap-less.
             var hasCrossedStart = false
 
-            while (!outputEos) {
-                if (!inputEos) {
-                    val inputBufferId = decoder.dequeueInputBuffer(timeoutUs)
-                    if (inputBufferId >= 0) {
-                        val inputBuffer = decoder.getInputBuffer(inputBufferId)!!
-                        inputBuffer.clear()
+            PcmRangeDecoder.decode(
+                extractor = extractor,
+                audioTrackIndex = audioTrackIndex,
+                inputFormat = inputFormat,
+                startUs = startUs,
+                endUs = effectiveEndUs,
+                stopAfterEndUs = true,
+                onFormat = { format ->
+                    sampleRate = format.sampleRate
+                    channelCount = format.channelCount
+                },
+                onPcm = { pcm, bufferStartUs, format ->
+                    val bytesPerFrame = (format.channelCount * 2).coerceAtLeast(1)
+                    val rate = format.sampleRate
 
-                        val sampleSize = extractor.readSampleData(inputBuffer, 0)
-                        val presentationTimeUs = extractor.sampleTime
+                    val skipBytes = if (!hasCrossedStart && rate > 0) {
+                        val deltaUs = (startUs - bufferStartUs).coerceAtLeast(0L)
+                        ((deltaUs * rate / 1_000_000L) * bytesPerFrame)
+                            .coerceAtMost(pcm.size.toLong()).toInt()
+                    } else 0
 
-                        if (sampleSize < 0 || presentationTimeUs > effectiveEndUs) {
-                            decoder.queueInputBuffer(
-                                inputBufferId, 0, 0, 0,
-                                MediaCodec.BUFFER_FLAG_END_OF_STREAM
-                            )
-                            inputEos = true
-                        } else {
-                            decoder.queueInputBuffer(
-                                inputBufferId, 0, sampleSize, presentationTimeUs, 0
-                            )
-                            extractor.advance()
-                        }
+                    val dropBytes = if (effectiveEndUs != Long.MAX_VALUE && rate > 0) {
+                        val frameDurationUs = 1_000_000.0 / rate
+                        val bufferEndUs = bufferStartUs +
+                                ((pcm.size / bytesPerFrame) * frameDurationUs).toLong()
+                        if (bufferEndUs > effectiveEndUs) {
+                            val overUs = bufferEndUs - effectiveEndUs
+                            ((overUs * rate / 1_000_000L) * bytesPerFrame)
+                                .coerceAtMost((pcm.size - skipBytes).toLong()).toInt()
+                        } else 0
+                    } else 0
+
+                    val writeLen = pcm.size - skipBytes - dropBytes
+                    if (writeLen > 0) {
+                        sink.write(pcm, skipBytes, writeLen)
+                        pcmByteLength += writeLen
+                        hasCrossedStart = true
                     }
-                }
+                },
+            )
 
-                val info = MediaCodec.BufferInfo()
-                val outputBufferId = decoder.dequeueOutputBuffer(info, timeoutUs)
-                when {
-                    outputBufferId == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                        val newFormat = decoder.outputFormat
-                        if (newFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
-                            sampleRate = newFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                        }
-                        if (newFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
-                            channelCount = newFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                        }
-                        readIsFloatPcm(newFormat)?.let { isFloatPcm = it }
-                    }
+            sink.flush()
 
-                    outputBufferId >= 0 -> {
-                        val outputBuffer = decoder.getOutputBuffer(outputBufferId)!!
-
-                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                            outputEos = true
-                        }
-
-                        if (info.size > 0) {
-                            val bufferStartUs = info.presentationTimeUs
-                            val bytesPerFrameOut = channelCount * 2
-                            val frameDurationUs =
-                                if (sampleRate > 0) 1_000_000.0 / sampleRate else 0.0
-
-                            outputBuffer.position(info.offset)
-                            outputBuffer.limit(info.offset + info.size)
-
-                            // Convert decoder bytes to int16 PCM bytes.
-                            val pcmChunk = if (isFloatPcm) {
-                                convertFloatToInt16(outputBuffer, info.size)
-                            } else {
-                                val arr = ByteArray(info.size)
-                                outputBuffer.get(arr)
-                                arr
-                            }
-
-                            // Determine how many leading bytes to skip so
-                            // the output starts exactly at `startUs`.
-                            val skipBytes = if (!hasCrossedStart) {
-                                val bytesPerFrameLocal = bytesPerFrameOut.coerceAtLeast(1)
-                                val deltaUs = (startUs - bufferStartUs).coerceAtLeast(0L)
-                                val rawSkip = (deltaUs * sampleRate / 1_000_000L) *
-                                        bytesPerFrameLocal
-                                rawSkip.coerceAtMost(pcmChunk.size.toLong()).toInt()
-                            } else 0
-
-                            // Determine how many trailing bytes to drop so
-                            // the output ends exactly at `endUs`.
-                            val dropBytes = if (effectiveEndUs != Long.MAX_VALUE) {
-                                val bufferEndUs = bufferStartUs +
-                                        ((pcmChunk.size / bytesPerFrameOut) * frameDurationUs).toLong()
-                                if (bufferEndUs > effectiveEndUs) {
-                                    val overUs = bufferEndUs - effectiveEndUs
-                                    val rawDrop = (overUs * sampleRate / 1_000_000L) *
-                                            bytesPerFrameOut
-                                    rawDrop.coerceAtMost((pcmChunk.size - skipBytes).toLong())
-                                        .toInt()
-                                } else 0
-                            } else 0
-
-                            val writeLen = pcmChunk.size - skipBytes - dropBytes
-                            if (writeLen > 0) {
-                                pcmOutput.write(pcmChunk, skipBytes, writeLen)
-                                hasCrossedStart = true
-                            }
-                        }
-
-                        decoder.releaseOutputBuffer(outputBufferId, false)
-
-                        if (effectiveEndUs != Long.MAX_VALUE &&
-                            info.presentationTimeUs >= effectiveEndUs
-                        ) {
-                            // We have decoded past the requested end; signal
-                            // EOS so we can finish quickly.
-                            outputEos = true
-                        }
-                    }
-                }
+            if (sampleRate <= 0 || channelCount <= 0) {
+                Log.e(RENDER_TAG, "AudioPreRenderer: decoder reported no usable PCM format")
+                return null
             }
 
+            decodedFully = true
             return DecodedAudio(
-                pcmBytes = pcmOutput.toByteArray(),
+                pcmFile = pcmFile,
+                byteLength = pcmByteLength,
                 sampleRate = sampleRate,
                 channelCount = channelCount
             )
         } finally {
             try {
-                decoder?.stop()
-            } catch (_: Exception) {
-            }
-            try {
-                decoder?.release()
+                pcmOutput?.close()
             } catch (_: Exception) {
             }
             try {
                 extractor.release()
             } catch (_: Exception) {
             }
+            // A range that never made it to a DecodedAudio owns no scratch file.
+            if (!decodedFully) pcmFile.delete()
         }
-    }
-
-    private fun readIsFloatPcm(format: MediaFormat): Boolean? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return null
-        if (!format.containsKey(MediaFormat.KEY_PCM_ENCODING)) return null
-        return when (format.getInteger(MediaFormat.KEY_PCM_ENCODING)) {
-            AudioFormat.ENCODING_PCM_FLOAT -> true
-            else -> false
-        }
-    }
-
-    private fun convertFloatToInt16(buffer: ByteBuffer, byteCount: Int): ByteArray {
-        val floatCount = byteCount / 4
-        val out = ByteBuffer.allocate(floatCount * 2).order(ByteOrder.LITTLE_ENDIAN)
-        val savedOrder = buffer.order()
-        buffer.order(ByteOrder.nativeOrder())
-        for (i in 0 until floatCount) {
-            val sample = buffer.float.coerceIn(-1.0f, 1.0f)
-            out.putShort((sample * 32767.0f).toInt().toShort())
-        }
-        buffer.order(savedOrder)
-        return out.array()
     }
 
     // ---------------------------------------------------------------------
@@ -440,14 +384,24 @@ object AudioPreRenderer {
         raf.write(header.array())
     }
 
-    private fun updateWavSizes(raf: RandomAccessFile, dataSize: Long) {
-        val safeDataSize = dataSize.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    /**
+     * Writes the measured [dataSize] into the RIFF and data chunk headers.
+     *
+     * RIFF sizes are *unsigned* 32-bit, so they are clamped at `0xFFFFFFFF`
+     * (~4 GB, the format's ceiling) rather than at [Int.MAX_VALUE] — clamping at
+     * half the range would still let `36 + dataSize` wrap negative and write a
+     * size no reader accepts, which is the corrupt-file case the measured byte
+     * count exists to prevent.
+     */
+    internal fun updateWavSizes(raf: RandomAccessFile, dataSize: Long) {
+        val safeDataSize = dataSize.coerceIn(0L, MAX_RIFF_SIZE)
+        val riffSize = (36L + safeDataSize).coerceAtMost(MAX_RIFF_SIZE)
         // RIFF chunk size at offset 4 (little-endian).
         raf.seek(4)
-        raf.write(intToLittleEndian(36 + safeDataSize))
+        raf.write(uInt32ToLittleEndian(riffSize))
         // data chunk size at offset 40 (little-endian).
         raf.seek(40)
-        raf.write(intToLittleEndian(safeDataSize))
+        raf.write(uInt32ToLittleEndian(safeDataSize))
         // Move back to end so subsequent writes append correctly.
         raf.seek(raf.length())
     }
@@ -463,39 +417,52 @@ object AudioPreRenderer {
         }
     }
 
-    private fun writeAudioBody(
+    /**
+     * Fills [targetBytes] of audio body into [raf]: [sourcePcm] copied in,
+     * replayed from the start as often as needed when [loop] is set, and
+     * whatever the source cannot cover left silent.
+     *
+     * That silence is the documented behavior for a non-looping track shorter
+     * than its slot (see [render]) — and dropping the gap instead would end the
+     * WAV early, finishing the export short of the video. Covering it here
+     * rather than at the call site keeps the two from drifting apart.
+     *
+     * Returns how many bytes were written, which is [targetBytes] rounded down
+     * to a frame boundary. The count is what the WAV header declares, and a
+     * header that disagrees with the body by even one frame makes the file
+     * unreadable.
+     */
+    internal fun writeAudioBody(
         raf: RandomAccessFile,
-        sourcePcm: ByteArray,
+        sourcePcm: File,
         targetBytes: Long,
         loop: Boolean,
         bytesPerFrame: Int
-    ) {
-        if (sourcePcm.isEmpty() || targetBytes <= 0L) return
+    ): Long {
+        if (targetBytes <= 0L) return 0L
 
         // Align targetBytes to frame boundary (defensive).
         val alignedTarget = (targetBytes / bytesPerFrame) * bytesPerFrame
+        val buffer = ByteArray(1 shl 16)
         var written = 0L
 
-        if (loop) {
-            while (written < alignedTarget) {
-                val remaining = alignedTarget - written
-                val toWrite = minOf(remaining, sourcePcm.size.toLong()).toInt()
-                raf.write(sourcePcm, 0, toWrite)
-                written += toWrite
+        while (written < alignedTarget) {
+            val passStart = written
+            FileInputStream(sourcePcm).use { source ->
+                while (written < alignedTarget) {
+                    val wanted = minOf(buffer.size.toLong(), alignedTarget - written).toInt()
+                    val read = source.read(buffer, 0, wanted)
+                    if (read <= 0) break
+                    raf.write(buffer, 0, read)
+                    written += read
+                }
             }
-        } else {
-            val toWrite = minOf(alignedTarget, sourcePcm.size.toLong()).toInt()
-            raf.write(sourcePcm, 0, toWrite)
+            // An empty (or vanished) source would otherwise spin here forever.
+            if (written == passStart || !loop) break
         }
-    }
 
-    private fun actualBodyBytesWritten(
-        sourceSize: Long,
-        targetBytes: Long,
-        loop: Boolean
-    ): Long {
-        if (sourceSize <= 0L || targetBytes <= 0L) return 0L
-        return if (loop) targetBytes else minOf(targetBytes, sourceSize)
+        writeSilence(raf, alignedTarget - written)
+        return alignedTarget
     }
 
     // ---------------------------------------------------------------------
@@ -515,7 +482,11 @@ object AudioPreRenderer {
         return (byteCount / bytesPerFrame) * bytesPerFrame
     }
 
-    private fun intToLittleEndian(value: Int): ByteArray {
+    /** [value] as the four little-endian bytes of an unsigned 32-bit field. */
+    private fun uInt32ToLittleEndian(value: Long): ByteArray {
         return ByteArray(4) { i -> ((value ushr (8 * i)) and 0xFF).toByte() }
     }
+
+    /** The largest value a RIFF/data chunk size field can hold. */
+    private const val MAX_RIFF_SIZE = 0xFFFFFFFFL
 }

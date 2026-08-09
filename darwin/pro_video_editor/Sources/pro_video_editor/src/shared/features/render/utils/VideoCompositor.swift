@@ -49,10 +49,10 @@ struct ImageLayer {
 ///
 /// Returns nil for non-animated sources (single frame / zero duration) so the
 /// caller can fall back to a plain static decode.
-private func decodeGifFrames(_ data: Data) -> (
+private func decodeGifFrames(_ image: EncodedImage) -> (
   frames: [CIImage], frameEndsUs: [Int64], totalUs: Int64
 )? {
-  guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+  guard let source = image.imageSource else { return nil }
   let count = CGImageSourceGetCount(source)
   if count <= 1 { return nil }
 
@@ -256,7 +256,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       let frameEndsUs: [Int64]
       let totalDurationUs: Int64
 
-      if let gif = decodeGifFrames(layer.imageData) {
+      if let gif = decodeGifFrames(layer.image) {
         // Animated GIF: keep every frame and its timeline.
         frames = gif.frames
         frameEndsUs = gif.frameEndsUs
@@ -264,7 +264,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       } else {
         // Static image: decode the single frame, honoring its EXIF orientation
         // so a gallery photo is laid in upright rather than sideways.
-        guard let image = decodeOrientedImage(layer.imageData) else { continue }
+        guard let image = decodeOrientedImage(layer.image) else { continue }
         frames = [image]
         frameEndsUs = [0]
         totalDurationUs = 0
@@ -437,7 +437,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     // area transparent: on the layered path that shows the layer below instead
     // of the requested backdrop, and Android would disagree. Fill with opaque
     // black, matching `ChromaKeyEffect`'s fallback for the same case.
-    if config.backgroundImageData != nil {
+    if config.backgroundImage != nil {
       return image.composited(over: CIImage(color: .black).cropped(to: extent))
     }
 
@@ -475,12 +475,12 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
   /// The decoded background image for [config], decoded once and cached.
   private func chromaBackgroundImage(for config: ChromaKeyConfig) -> CIImage? {
-    guard let data = config.backgroundImageData else { return nil }
+    guard let image = config.backgroundImage else { return nil }
     if let cached = chromaBackgroundCache[config.cacheKey] { return cached }
 
     // Oriented on decode: a portrait background photo is stored as landscape
     // pixels plus an EXIF tag, and would otherwise be keyed in rotated 90°.
-    guard let ciImage = decodeOrientedImage(data) else { return nil }
+    guard let ciImage = decodeOrientedImage(image) else { return nil }
     chromaBackgroundCache[config.cacheKey] = ciImage
     return ciImage
   }
