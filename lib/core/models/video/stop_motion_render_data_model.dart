@@ -45,6 +45,12 @@ class StopMotionFrame {
   /// handed to the native side as a path and opened one frame at a time, while
   /// every other source has to travel as bytes — and a few hundred photos of
   /// bytes at once is more than Android's managed heap will hold.
+  ///
+  /// **A file-backed frame must stay on disk, unchanged, until the render
+  /// finishes.** The renderer opens it while it encodes that frame rather than
+  /// copying it up front, so a frame that is deleted or rewritten mid-render —
+  /// including one in a cache directory the system reclaims under storage
+  /// pressure — fails the export. See [EditorLayerImage.toChannelSource].
   final EditorLayerImage image;
 
   /// Optional time this frame is held on screen.
@@ -55,15 +61,16 @@ class StopMotionFrame {
   /// Converts this frame to a map for platform channel communication.
   ///
   /// A file-backed frame travels as its path (`imagePath`) and is left on disk
-  /// for the native side to open when it encodes that frame. Any other source
-  /// resolves to bytes (`imageData`) via [EditorLayerImage.safeByteArray].
+  /// for the native side to open when it encodes that frame; any other source
+  /// resolves to bytes (`imageData`). See [EditorLayerImage.toChannelSource]
+  /// for what that asks of the file, and for the [FileSystemException] a
+  /// missing one raises here.
   Future<Map<String, dynamic>> toAsyncMap() async {
-    final file = image.file;
     return {
-      if (file != null)
-        'imagePath': file.path
-      else
-        'imageData': await image.safeByteArray(),
+      ...await image.toChannelSource(
+        pathKey: 'imagePath',
+        dataKey: 'imageData',
+      ),
       'durationUs': duration?.inMicroseconds,
     };
   }

@@ -3,7 +3,6 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 import RENDER_TAG
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.opengl.GLES20
 import androidx.media3.common.VideoFrameProcessingException
 import androidx.media3.common.util.GlProgram
@@ -77,7 +76,7 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
          * size it against.
          */
         private val backgroundProbe: ImageOrientation.Probe? =
-            config.backgroundImageData?.let { ImageOrientation.probe(it) }
+            config.backgroundImage?.let { ImageOrientation.probe(it) }
 
         /**
          * Background texture id. A 1x1 placeholder is uploaded when there is no
@@ -95,7 +94,7 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
             // the area must be filled — the export would come out looking like
             // the key never ran. Fill with opaque black instead, which is what
             // Apple produces in the same situation.
-            config.backgroundImageData != null -> BG_COLOR
+            config.backgroundImage != null -> BG_COLOR
             else -> BG_TRANSPARENT
         }
 
@@ -177,7 +176,7 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
         }
 
         init {
-            if (backgroundProbe == null && config.backgroundImageData != null) {
+            if (backgroundProbe == null && config.backgroundImage != null) {
                 Log.w(
                     RENDER_TAG,
                     "Chroma key: the background image could not be decoded; " +
@@ -283,41 +282,14 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
          * Must be called on the GL thread.
          */
         private fun decodeBackgroundWithinTextureLimit(): Bitmap? {
-            val bytes = config.backgroundImageData ?: return null
+            val image = config.backgroundImage ?: return null
             val probe = backgroundProbe ?: return null
 
-            val limit = maxTextureSize()
-            var sampleSize = 1
-            // `probe` is oriented and `inSampleSize` applies to the stored pixels,
-            // but an orientation only ever exchanges the two dimensions, so the
-            // pair is over the limit either way round.
-            while (probe.width / sampleSize > limit || probe.height / sampleSize > limit) {
-                sampleSize *= 2
-            }
-
-            val raw = BitmapFactory.decodeByteArray(
-                bytes, 0, bytes.size,
-                BitmapFactory.Options().apply { inSampleSize = sampleSize }
-            ) ?: return null
-
-            // A portrait photo is stored as landscape pixels plus an EXIF tag;
-            // without this the background would be keyed in sideways.
-            val decoded = ImageOrientation.orient(raw, probe.orientation)
-
-            // inSampleSize only halves, so one more exact pass may be needed.
-            if (decoded.width <= limit && decoded.height <= limit) return decoded
-            val scale = minOf(
-                limit.toFloat() / decoded.width,
-                limit.toFloat() / decoded.height
+            // Oriented on the way out, so a portrait photo is not keyed in
+            // sideways, and reusing the probe means the header is read once.
+            return ImageOrientation.decodeWithin(
+                image, maxSize = maxTextureSize(), knownProbe = probe
             )
-            val scaled = Bitmap.createScaledBitmap(
-                decoded,
-                (decoded.width * scale).toInt().coerceAtLeast(1),
-                (decoded.height * scale).toInt().coerceAtLeast(1),
-                /* filter= */ true
-            )
-            if (scaled !== decoded) decoded.recycle()
-            return scaled
         }
 
         /** The GPU's maximum texture dimension, or a conservative fallback. */

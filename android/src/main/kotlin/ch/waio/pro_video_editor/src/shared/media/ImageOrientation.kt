@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import androidx.exifinterface.media.ExifInterface
-import java.io.File
 
 /**
  * EXIF-aware decoding of caller-supplied encoded images.
@@ -50,9 +49,6 @@ internal object ImageOrientation {
         return probeOf(opts.outWidth, opts.outHeight, image)
     }
 
-    /** [probe] for an image whose bytes are already in memory. */
-    fun probe(data: ByteArray): Probe? = probe(EncodedImage.OfBytes(data))
-
     /**
      * [probe] for stored dimensions that are already known, skipping the header
      * decode.
@@ -62,10 +58,6 @@ internal object ImageOrientation {
         val (width, height) = orientedSize(storedWidth, storedHeight, orientation)
         return Probe(width, height, orientation)
     }
-
-    /** [probeOf] for an image whose bytes are already in memory. */
-    fun probeOf(storedWidth: Int, storedHeight: Int, data: ByteArray): Probe =
-        probeOf(storedWidth, storedHeight, EncodedImage.OfBytes(data))
 
     /**
      * The EXIF orientation stored in [image], always one of the eight defined
@@ -93,9 +85,6 @@ internal object ImageOrientation {
         }
     }
 
-    /** [read] for an image whose bytes are already in memory. */
-    fun read(data: ByteArray): Int = read(EncodedImage.OfBytes(data))
-
     /** Whether [orientation] exchanges the image's width and height. */
     fun swapsDimensions(orientation: Int): Boolean = when (orientation) {
         ExifInterface.ORIENTATION_ROTATE_90,
@@ -120,39 +109,93 @@ internal object ImageOrientation {
      * saves both the oversized decode and the oversized rotation copy. The
      * request is in *displayed* pixels, i.e. after the orientation. [config],
      * when given, is passed on as `inPreferredConfig`.
+     *
+     * A caller that has already probed the image passes the orientation it read
+     * as [knownOrientation], so a file is not parsed for its EXIF twice.
      */
     fun decode(
         image: EncodedImage,
         reqWidth: Int = 0,
         reqHeight: Int = 0,
         config: Bitmap.Config? = null,
+        knownOrientation: Int? = null,
     ): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        decodeBitmap(image, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val orientation = knownOrientation ?: read(image)
 
-        // `inSampleSize` measures the stored pixels, so the request has to be
-        // turned back into stored space first — the same swap, since exchanging
-        // the two dimensions is its own inverse.
-        val orientation = read(image)
-        val (srcReqWidth, srcReqHeight) = orientedSize(reqWidth, reqHeight, orientation)
+        // Reading the header is another open of the file, and it only earns
+        // that when a downscale was actually asked for — without a target size
+        // the sample size is 1 whatever the header turns out to say.
+        val sampleSize = if (reqWidth > 0 && reqHeight > 0) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            decodeBitmap(image, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+            // `inSampleSize` measures the stored pixels, so the request has to
+            // be turned back into stored space first — the same swap, since
+            // exchanging the two dimensions is its own inverse.
+            val (srcReqWidth, srcReqHeight) = orientedSize(reqWidth, reqHeight, orientation)
+            sampleSizeFor(bounds.outWidth, bounds.outHeight, srcReqWidth, srcReqHeight)
+        } else {
+            1
+        }
 
         val opts = BitmapFactory.Options().apply {
-            inSampleSize =
-                sampleSizeFor(bounds.outWidth, bounds.outHeight, srcReqWidth, srcReqHeight)
+            inSampleSize = sampleSize
             if (config != null) inPreferredConfig = config
         }
         val raw = decodeBitmap(image, opts) ?: return null
         return orient(raw, orientation)
     }
 
-    /** [decode] for an image whose bytes are already in memory. */
-    fun decode(
-        data: ByteArray,
-        reqWidth: Int = 0,
-        reqHeight: Int = 0,
-        config: Bitmap.Config? = null,
-    ): Bitmap? = decode(EncodedImage.OfBytes(data), reqWidth, reqHeight, config)
+    /**
+     * Decodes [image] oriented and no larger than [maxSize] in either
+     * dimension.
+     *
+     * [decode] samples *toward* a requested size and may land a little above
+     * it; this guarantees the ceiling, which is what a GL texture needs — one
+     * pixel over the driver's `GL_MAX_TEXTURE_SIZE` and `createTexture` throws.
+     * A caller that has already probed the image passes [knownProbe] so the
+     * header is not read twice.
+     */
+    fun decodeWithin(
+        image: EncodedImage,
+        maxSize: Int,
+        knownProbe: Probe? = null,
+    ): Bitmap? {
+        if (maxSize <= 0) return null
+        val resolved = knownProbe ?: probe(image) ?: return null
+
+        // Halve until both sides are inside the limit. `resolved` is oriented
+        // and `inSampleSize` applies to the stored pixels, but an orientation
+        // only ever exchanges the two dimensions, so the pair is over the limit
+        // either way round.
+        var sampleSize = 1
+        while (resolved.width / sampleSize > maxSize ||
+            resolved.height / sampleSize > maxSize
+        ) {
+            sampleSize *= 2
+        }
+
+        val opts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        val raw = decodeBitmap(image, opts) ?: return null
+        val decoded = orient(raw, resolved.orientation)
+
+        // inSampleSize only halves, so one more exact pass may be needed.
+        if (decoded.width <= maxSize && decoded.height <= maxSize) return decoded
+
+        val scale = minOf(
+            maxSize.toFloat() / decoded.width,
+            maxSize.toFloat() / decoded.height,
+        )
+        val scaled = Bitmap.createScaledBitmap(
+            decoded,
+            (decoded.width * scale).toInt().coerceAtLeast(1),
+            (decoded.height * scale).toInt().coerceAtLeast(1),
+            /* filter= */ true
+        )
+        if (scaled !== decoded) decoded.recycle()
+        return scaled
+    }
 
     /** Runs [BitmapFactory] over whichever source [image] holds. */
     private fun decodeBitmap(image: EncodedImage, opts: BitmapFactory.Options): Bitmap? =
@@ -160,18 +203,11 @@ internal object ImageOrientation {
             is EncodedImage.OfBytes ->
                 BitmapFactory.decodeByteArray(image.data, 0, image.data.size, opts)
 
-            is EncodedImage.OfFile -> decodeFile(image.file, opts)
+            // `decodeFile` already catches its own open failures and answers
+            // null, so there is nothing to add around it here.
+            is EncodedImage.OfFile ->
+                BitmapFactory.decodeFile(image.file.absolutePath, opts)
         }
-
-    /**
-     * `BitmapFactory.decodeFile` in stream form, so a file that cannot be opened
-     * comes back as null instead of throwing.
-     */
-    private fun decodeFile(file: File, opts: BitmapFactory.Options): Bitmap? = try {
-        file.inputStream().use { BitmapFactory.decodeStream(it, null, opts) }
-    } catch (_: Exception) {
-        null
-    }
 
     /**
      * Turns [bitmap] the way [orientation] says it should be displayed.

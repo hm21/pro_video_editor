@@ -106,7 +106,7 @@ fun applyTimedImageLayers(
     )
     for (layer in imageLayers) {
         try {
-            val imageBytes = layer.imageBytes ?: continue
+            val image = layer.image ?: continue
             val startTimeUs = layer.startUs
             val endTimeUs = layer.endUs
             val hasAnimations = layer.animations.isNotEmpty()
@@ -119,7 +119,15 @@ fun applyTimedImageLayers(
 
             // Animated GIFs decode to several frames; everything else (PNG/JPEG
             // and static GIFs) decodes to a single bitmap.
-            val gifFrames = GifDecoder.decode(imageBytes)
+            //
+            // Only the GIF path needs the whole encoded image in memory, so the
+            // magic is sniffed off the first few bytes first — a file-backed
+            // photo would otherwise be read in full just to learn it is a JPEG,
+            // which is exactly the copy a path is meant to avoid.
+            val gifFrames = image.readHeader(GifDecoder.MAGIC_LENGTH)
+                ?.takeIf { GifDecoder.isGif(it) }
+                ?.let { image.readBytes() }
+                ?.let { GifDecoder.decode(it) }
 
             val bitmapOverlay: BitmapOverlay
             if (gifFrames != null) {
@@ -158,13 +166,16 @@ fun applyTimedImageLayers(
                 // orientation has to be turned, which is where an overlay OOMs.
                 val (reqWidth, reqHeight) = overlayDecodeSize(layer, videoWidth, videoHeight)
                 val layerBitmap = ImageOrientation.decode(
-                    imageBytes,
+                    image,
                     reqWidth = reqWidth,
                     reqHeight = reqHeight,
                     config = Bitmap.Config.ARGB_8888,
                 )
                 if (layerBitmap == null) {
-                    Log.e(RENDER_TAG, "Layer: image bytes did not decode; skipping layer")
+                    Log.e(
+                        RENDER_TAG,
+                        "Layer: image did not decode (${image.describe()}); skipping layer"
+                    )
                     continue
                 }
                 val prepared = prepareOverlay(layerBitmap, layer, videoWidth, videoHeight)

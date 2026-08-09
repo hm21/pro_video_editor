@@ -55,6 +55,39 @@ Future<List<StopMotionFrame>> buildFrames(
   return frames;
 }
 
+/// Writes [count] frames into [dir] and returns them as *path-backed* frames.
+///
+/// The bytes-backed [buildFrames] never reaches the native path branch, which
+/// is a whole decoder per platform — `BitmapFactory.decodeFile` on Android,
+/// `CGImageSourceCreateWithURL` on Darwin.
+Future<List<StopMotionFrame>> buildFileFrames(
+  Directory dir,
+  int count, {
+  Duration? duration,
+  int width = 320,
+  int height = 240,
+}) async {
+  final byteFrames = await buildFrames(
+    count,
+    duration: duration,
+    width: width,
+    height: height,
+  );
+
+  final frames = <StopMotionFrame>[];
+  for (var i = 0; i < byteFrames.length; i++) {
+    final file = File('${dir.path}/frame_$i.png');
+    await file.writeAsBytes(await byteFrames[i].image.safeByteArray());
+    frames.add(
+      StopMotionFrame(
+        image: EditorLayerImage.file(file.path),
+        duration: duration,
+      ),
+    );
+  }
+  return frames;
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -86,6 +119,67 @@ void main() {
         meta.duration.inMilliseconds,
         closeTo(2000, 800),
         reason: '10 frames at 5 fps should be ~2s',
+      );
+    }, skip: !supportsStopMotion);
+
+    testWidgets('renders file-backed frames the same as byte-backed', (
+      _,
+    ) async {
+      // The point of the path branch is that a frame is opened as it is
+      // encoded rather than copied into the render call — so it has to produce
+      // the same video, not just any video.
+      final tempDir = await Directory.systemTemp.createTemp('stop_motion_path');
+      addTearDown(() => tempDir.delete(recursive: true));
+
+      final frames = await buildFileFrames(
+        tempDir,
+        10,
+        width: 480,
+        height: 360,
+      );
+      final result = await ProVideoEditor.instance.renderStopMotion(
+        StopMotionRenderData(frames: frames, frameRate: 5),
+      );
+
+      expect(
+        result.lengthInBytes,
+        greaterThan(1000),
+        reason: 'Path-backed stop-motion output too small',
+      );
+
+      final meta = await ProVideoEditor.instance.getMetadata(
+        EditorVideo.memory(result),
+      );
+      expect(meta.extension, 'mp4');
+      expect(
+        meta.duration.inMilliseconds,
+        closeTo(2000, 800),
+        reason: '10 frames at 5 fps should be ~2s',
+      );
+      // Sizing comes from a probe of the first frame, which reads the file
+      // header on the same branch.
+      expect(meta.resolution.width, closeTo(480, 16));
+      expect(meta.resolution.height, closeTo(360, 16));
+    }, skip: !supportsStopMotion);
+
+    testWidgets('a frame file deleted before the render fails the call', (
+      _,
+    ) async {
+      final tempDir = await Directory.systemTemp.createTemp('stop_motion_gone');
+      addTearDown(() => tempDir.delete(recursive: true));
+
+      final frames = await buildFileFrames(tempDir, 4);
+      final missingPath = frames[2].image.file!.path;
+      await File(missingPath).delete();
+
+      // Caught in Dart, before any native work, so the path is still nameable.
+      await expectLater(
+        ProVideoEditor.instance.renderStopMotion(
+          StopMotionRenderData(frames: frames, frameRate: 4),
+        ),
+        throwsA(
+          isA<FileSystemException>().having((e) => e.path, 'path', missingPath),
+        ),
       );
     }, skip: !supportsStopMotion);
 

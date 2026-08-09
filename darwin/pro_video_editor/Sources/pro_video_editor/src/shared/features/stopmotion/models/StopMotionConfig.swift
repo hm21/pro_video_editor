@@ -7,45 +7,25 @@ import Foundation
 #endif
 
 /// Configuration for a single stop-motion frame.
-///
-/// Exactly one of `imagePath` / `imageData` is set. A frame the caller has on
-/// disk arrives as a path and is read when it is encoded, so a long sequence
-/// never has to be held in memory all at once; only an in-memory source travels
-/// as bytes.
 struct StopMotionFrameConfig {
-  /// Path to the encoded image file (PNG/JPEG/etc.) for this frame.
-  let imagePath: String?
-
-  /// The encoded image bytes (PNG/JPEG/etc.) for this frame.
-  let imageData: Data?
+  /// Where this frame's encoded image lives. A frame the caller has on disk
+  /// arrives as a path and is read while it is encoded, so a long sequence
+  /// never has to be held in memory all at once; only an in-memory source
+  /// travels as bytes.
+  let image: EncodedImage
 
   /// How long this frame is held on screen, in microseconds.
   /// When `nil`, the default frame duration (`1 / frameRate`) is used.
   let durationUs: Int64?
 
   static func fromArguments(_ args: [String: Any]?) -> StopMotionFrameConfig? {
-    guard let args = args else { return nil }
-
-    let durationUs = (args["durationUs"] as? NSNumber)?.int64Value
-
-    if let imagePath = args["imagePath"] as? String, !imagePath.isEmpty {
-      return StopMotionFrameConfig(
-        imagePath: imagePath, imageData: nil, durationUs: durationUs)
-    }
-
-    let imageData: Data?
-    if let flutterData = args["imageData"] as? FlutterStandardTypedData {
-      imageData = flutterData.data
-    } else {
-      imageData = args["imageData"] as? Data
-    }
-
-    guard let imageData = imageData, !imageData.isEmpty else { return nil }
+    guard let args = args,
+      let image = EncodedImage.from(args, pathKey: "imagePath", dataKey: "imageData")
+    else { return nil }
 
     return StopMotionFrameConfig(
-      imagePath: nil,
-      imageData: imageData,
-      durationUs: durationUs
+      image: image,
+      durationUs: (args["durationUs"] as? NSNumber)?.int64Value
     )
   }
 }
@@ -84,9 +64,14 @@ struct StopMotionConfig {
       let id = args["id"] as? String, !id.isEmpty
     else { return nil }
 
+    // A frame that carries no usable image fails the whole config. Dropping it
+    // would return a video one shot short and a frame duration too brief, with
+    // nothing to say so — for a sequence of stills that is a corrupt result,
+    // not a degraded one. Android's `StopMotionConfig` rejects it the same way.
     var frames: [StopMotionFrameConfig] = []
-    if let framesRaw = args["frames"] as? [[String: Any]] {
-      frames = framesRaw.compactMap { StopMotionFrameConfig.fromArguments($0) }
+    for raw in args["frames"] as? [[String: Any]] ?? [] {
+      guard let frame = StopMotionFrameConfig.fromArguments(raw) else { return nil }
+      frames.append(frame)
     }
 
     guard !frames.isEmpty else { return nil }

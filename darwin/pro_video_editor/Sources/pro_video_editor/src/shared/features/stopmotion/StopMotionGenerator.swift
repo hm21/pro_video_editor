@@ -61,7 +61,10 @@ internal enum StopMotionGenerator {
     guard let firstImage = decodeImage(config.frames[0], maxPixelSize: nil) else {
       throw NSError(
         domain: "StopMotion", code: 2,
-        userInfo: [NSLocalizedDescriptionKey: "Failed to decode first frame"])
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "Failed to decode first frame (\(config.frames[0].image.describe))"
+        ])
     }
 
     let targetWidth = evenize(config.width ?? firstImage.width)
@@ -131,7 +134,13 @@ internal enum StopMotionGenerator {
         guard let image = image else {
           throw NSError(
             domain: "StopMotion", code: 5,
-            userInfo: [NSLocalizedDescriptionKey: "Failed to decode frame \(index)"])
+            userInfo: [
+              // Name the source: a path-backed frame fails here rather than at
+              // the call, so without it there is nothing to tell the caller
+              // which photo went missing.
+              NSLocalizedDescriptionKey:
+                "Failed to decode frame \(index) (\(frame.image.describe))"
+            ])
         }
 
         // Wait until the writer can accept more samples.
@@ -207,7 +216,7 @@ internal enum StopMotionGenerator {
   /// A file-backed frame is read straight from disk, so ImageIO only ever holds
   /// the one frame being decoded rather than the whole sequence.
   private static func decodeImage(_ frame: StopMotionFrameConfig, maxPixelSize: Int?) -> CGImage? {
-    guard let source = makeImageSource(frame) else { return nil }
+    guard let source = frame.image.imageSource else { return nil }
 
     var options: [CFString: Any] = [
       kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -230,27 +239,11 @@ internal enum StopMotionGenerator {
     // render path does, at the cost of the full-size decode this path was
     // trying to avoid — acceptable, since it only runs when the thumbnail
     // decode has already failed.
-    guard let data = loadImageData(frame), let oriented = decodeOrientedImage(data) else {
-      return nil
-    }
+    //
+    // The source is already open, so it is reused rather than reopened: a
+    // path-backed frame never gets copied onto the heap on this path either.
+    guard let oriented = decodeOrientedImage(source: source) else { return nil }
     return orientationContext.createCGImage(oriented, from: oriented.extent)
-  }
-
-  /// An ImageIO source over whichever of the frame's two sources is set.
-  private static func makeImageSource(_ frame: StopMotionFrameConfig) -> CGImageSource? {
-    if let path = frame.imagePath {
-      return CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil)
-    }
-    guard let data = frame.imageData else { return nil }
-    return CGImageSourceCreateWithData(data as CFData, nil)
-  }
-
-  /// The frame's encoded bytes, reading the file when it is path-backed. Only
-  /// the orientation fallback in [decodeImage] needs them.
-  private static func loadImageData(_ frame: StopMotionFrameConfig) -> Data? {
-    if let data = frame.imageData { return data }
-    guard let path = frame.imagePath else { return nil }
-    return try? Data(contentsOf: URL(fileURLWithPath: path))
   }
 
   /// Renders the orientation fallback in [decodeImage]. Kept off the render

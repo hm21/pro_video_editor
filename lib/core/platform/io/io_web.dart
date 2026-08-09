@@ -30,6 +30,9 @@ class File {
     throw ArgumentError('This function is not supported on the web.');
   }
 
+  /// Whether the file exists. Always `false`: the web has no file system.
+  Future<bool> exists() async => false;
+
   /// Read bytes sync
   String readAsStringSync() {
     throw ArgumentError('This function is not supported on the web.');
@@ -39,6 +42,22 @@ class File {
   Future<void> openWrite() {
     throw ArgumentError('This function is not supported on the web.');
   }
+}
+
+/// Web stand-in for `dart:io`'s exception of the same name, so code that
+/// reports a file problem by path compiles for web/WASM targets too.
+class FileSystemException implements Exception {
+  /// Creates a [FileSystemException] describing [message] for [path].
+  const FileSystemException([this.message = '', this.path = '']);
+
+  /// A description of the problem.
+  final String message;
+
+  /// The path of the file the problem concerns.
+  final String path;
+
+  @override
+  String toString() => 'FileSystemException: $message, path = \'$path\'';
 }
 
 /// Information about the environment in which the current program is running.

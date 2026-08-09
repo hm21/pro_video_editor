@@ -24,13 +24,25 @@ internal class AudioPreRendererTest {
     /** 16-bit stereo, i.e. one frame is four bytes. */
     private val bytesPerFrame = 4
 
+    /**
+     * `render` documents that a non-looping track "plays once and any remaining
+     * composition time is filled with silence". Returning only the audio would
+     * end the WAV early and finish the export short of the video.
+     */
     @Test
-    fun aSourceShorterThanTheBodyPlaysOnceWhenNotLooping() {
+    fun aSourceShorterThanTheBodyPlaysOnceThenGoesSilent() {
         val source = pcmFile(size = 100)
         val (written, output) = writeBody(source, targetBytes = 400, loop = false)
 
-        assertEquals(100L, written)
-        assertEquals(100L, output.length())
+        assertEquals(400L, written)
+        assertEquals(400L, output.length())
+
+        val bytes = output.readBytes()
+        assertEquals(0, bytes[99].compareTo((99 % 251).toByte()))
+        assertTrue(
+            bytes.drop(100).all { it == 0.toByte() },
+            "the uncovered tail of the body must be silence",
+        )
     }
 
     @Test
@@ -58,15 +70,16 @@ internal class AudioPreRendererTest {
 
     /**
      * A source that yields nothing would spin forever in the replay loop if the
-     * writer only watched the byte count.
+     * writer only watched the byte count. It still owes the body its full
+     * length, so the slot comes out silent rather than missing.
      */
     @Test
-    fun anEmptySourceWritesNothingInsteadOfLoopingForever() {
+    fun anEmptySourceGoesSilentInsteadOfLoopingForever() {
         val source = pcmFile(size = 0)
         val (written, output) = writeBody(source, targetBytes = 400, loop = true)
 
-        assertEquals(0L, written)
-        assertEquals(0L, output.length())
+        assertEquals(400L, written)
+        assertTrue(output.readBytes().all { it == 0.toByte() })
     }
 
     @Test
@@ -75,6 +88,45 @@ internal class AudioPreRendererTest {
         val (written, _) = writeBody(source, targetBytes = 0, loop = true)
 
         assertEquals(0L, written)
+    }
+
+    /**
+     * RIFF sizes are *unsigned* 32-bit. Clamping the data size at
+     * [Int.MAX_VALUE] — half the format's range — let `36 + dataSize` wrap into
+     * a negative number and write a size no reader accepts, which is the
+     * corrupt-file case the measured byte count exists to prevent. About 3.4 h
+     * of 48 kHz 16-bit stereo reaches it.
+     */
+    @Test
+    fun theHeaderSizesNeverWrapNegative() {
+        val atSignedLimit = updateSizes(dataSize = Int.MAX_VALUE.toLong())
+        assertEquals(2_147_483_683L, readUInt32(atSignedLimit, 4))
+        assertEquals(2_147_483_647L, readUInt32(atSignedLimit, 40))
+
+        // Past the format's own ceiling both fields saturate, as WavFileWriter
+        // does, rather than truncating to something smaller than the body.
+        val pastRiffLimit = updateSizes(dataSize = 0x1_0000_0000L)
+        assertEquals(0xFFFF_FFFFL, readUInt32(pastRiffLimit, 4))
+        assertEquals(0xFFFF_FFFFL, readUInt32(pastRiffLimit, 40))
+    }
+
+    /** The 44-byte header after [AudioPreRenderer.updateWavSizes]. */
+    private fun updateSizes(dataSize: Long): ByteArray {
+        val output = File.createTempFile("prerender_header", ".wav")
+        output.deleteOnExit()
+        RandomAccessFile(output, "rw").use { raf ->
+            raf.setLength(44)
+            AudioPreRenderer.updateWavSizes(raf, dataSize)
+        }
+        return output.readBytes()
+    }
+
+    private fun readUInt32(bytes: ByteArray, offset: Int): Long {
+        var value = 0L
+        for (i in 0 until 4) {
+            value = value or ((bytes[offset + i].toLong() and 0xFF) shl (8 * i))
+        }
+        return value
     }
 
     /** A scratch PCM file of [size] bytes, each one distinct within a frame. */

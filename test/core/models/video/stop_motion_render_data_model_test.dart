@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui';
 
@@ -5,6 +6,22 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 
 void main() {
+  late Directory tempDir;
+
+  setUp(() {
+    tempDir = Directory.systemTemp.createTempSync('stop_motion_test');
+  });
+
+  tearDown(() {
+    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+  });
+
+  /// Writes a stand-in frame file and returns it. The frames only ever travel
+  /// as a path here, so the bytes never have to be a real image.
+  File writeFrameFile(String name) {
+    return File('${tempDir.path}/$name')..writeAsBytesSync([1, 2, 3, 4]);
+  }
+
   group('StopMotionFrame', () {
     final image = EditorLayerImage.memory(Uint8List.fromList([1, 2, 3, 4]));
 
@@ -28,13 +45,25 @@ void main() {
     });
 
     test('toAsyncMap sends a file-backed frame as a path, not bytes', () async {
-      final frame = StopMotionFrame(
-        image: EditorLayerImage.file('/tmp/frame_01.jpg'),
-      );
+      final file = writeFrameFile('frame_01.jpg');
+      final frame = StopMotionFrame(image: EditorLayerImage.file(file.path));
       final map = await frame.toAsyncMap();
 
-      expect(map['imagePath'], '/tmp/frame_01.jpg');
+      expect(map['imagePath'], file.path);
       expect(map.containsKey('imageData'), isFalse);
+    });
+
+    test('toAsyncMap throws naming the path when the frame is missing',
+        () async {
+      final missing = '${tempDir.path}/gone.jpg';
+      final frame = StopMotionFrame(image: EditorLayerImage.file(missing));
+
+      await expectLater(
+        frame.toAsyncMap(),
+        throwsA(
+          isA<FileSystemException>().having((e) => e.path, 'path', missing),
+        ),
+      );
     });
 
     test('toMap / fromMap roundtrip preserves data', () {
@@ -104,22 +133,22 @@ void main() {
       });
 
       test('keeps file-backed frames out of the channel payload', () async {
+        final files = [
+          for (var i = 0; i < 3; i++) writeFrameFile('frame_$i.jpg'),
+        ];
         final data = StopMotionRenderData(
           frames: [
-            for (var i = 0; i < 3; i++)
-              StopMotionFrame(
-                image: EditorLayerImage.file('/tmp/frame_$i.jpg'),
-              ),
+            for (final file in files)
+              StopMotionFrame(image: EditorLayerImage.file(file.path)),
           ],
         );
         final map = await data.toAsyncMap();
 
         final frameMaps = (map['frames'] as List).cast<Map<String, dynamic>>();
-        expect(frameMaps.map((frame) => frame['imagePath']), [
-          '/tmp/frame_0.jpg',
-          '/tmp/frame_1.jpg',
-          '/tmp/frame_2.jpg',
-        ]);
+        expect(
+          frameMaps.map((frame) => frame['imagePath']),
+          files.map((file) => file.path),
+        );
         expect(
           frameMaps.any((frame) => frame.containsKey('imageData')),
           isFalse,

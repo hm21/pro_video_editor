@@ -76,7 +76,9 @@ struct ClipTransitionConfig {
 }
 
 public struct ImageLayerConfig: Sendable {
-  let imageData: Data
+  /// Where this layer's encoded image lives — a path when the caller had it on
+  /// disk, bytes otherwise.
+  let image: EncodedImage
   let startUs: Int64
   /// endUs of -1 indicates the image should be displayed until the end of the video.
   let endUs: Int64
@@ -96,20 +98,9 @@ public struct ImageLayerConfig: Sendable {
   let animations: [LayerAnimationConfig]
 
   static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
-    guard let args = args else { return nil }
-
-    // Convert imageBytes from Flutter (FlutterStandardTypedData) to Data
-    let imageData: Data?
-    if let flutterData = args["imageData"] as? FlutterStandardTypedData {
-      imageData = flutterData.data
-    } else {
-      imageData = args["imageData"] as? Data
-    }
-
-    // Return nil if imageData is missing or empty
-    guard let imageData = imageData, !imageData.isEmpty else {
-      return nil
-    }
+    guard let args = args,
+      let image = EncodedImage.from(args, pathKey: "imagePath", dataKey: "imageData")
+    else { return nil }
 
     // Parse animations array
     var animations: [LayerAnimationConfig] = []
@@ -126,7 +117,7 @@ public struct ImageLayerConfig: Sendable {
     // Use -1 as sentinel value for "from start" when startUs is null
     // Use -1 for endUs to signify "until the end of the video"
     return ImageLayerConfig(
-      imageData: imageData,
+      image: image,
       startUs: (args["startUs"] as? NSNumber)?.int64Value ?? -1,
       endUs: (args["endUs"] as? NSNumber)?.int64Value ?? -1,
       x: (args["x"] as? NSNumber)?.int64Value,
@@ -181,11 +172,11 @@ public struct ChromaKeyConfig: Sendable, Equatable {
   /// Solid background ARGB, or -1 when none (the sentinel convention used by
   /// `ColorFilterConfig.startUs`/`endUs`).
   let backgroundColor: Int64
-  /// Background image bytes, or nil when none.
-  let backgroundImageData: Data?
+  /// Where the background image lives, or nil when there is none.
+  let backgroundImage: EncodedImage?
 
   /// Whether the keyed area is left transparent rather than filled.
-  var isTransparent: Bool { backgroundColor == -1 && backgroundImageData == nil }
+  var isTransparent: Bool { backgroundColor == -1 && backgroundImage == nil }
 
   /// The same key, but filling the removed area with opaque black.
   ///
@@ -196,7 +187,7 @@ public struct ChromaKeyConfig: Sendable, Equatable {
     ChromaKeyConfig(
       keyR: keyR, keyG: keyG, keyB: keyB,
       similarity: similarity, smoothness: smoothness, spill: spill,
-      backgroundColor: Int64(0xFF00_0000), backgroundImageData: nil)
+      backgroundColor: Int64(0xFF00_0000), backgroundImage: nil)
   }
 
   /// The key color projected onto the Cb/Cr chroma plane.
@@ -226,13 +217,16 @@ public struct ChromaKeyConfig: Sendable, Equatable {
 
   /// Cheap content fingerprint of the background image.
   ///
-  /// The byte count alone is not an identity — two different backgrounds that
-  /// happen to be the same size would share a cache entry, and the second clip
-  /// would render the first one's image. Mixing in the head and tail bytes
-  /// separates them while staying O(1), which matters because `cacheKey` is
-  /// evaluated per frame.
+  /// A path is already an identity, so it is used as-is. For bytes, the count
+  /// alone is not one — two different backgrounds that happen to be the same
+  /// size would share a cache entry, and the second clip would render the
+  /// first one's image. Mixing in the head and tail bytes separates them while
+  /// staying O(1), which matters because `cacheKey` is evaluated per frame.
   private var backgroundImageFingerprint: String {
-    guard let data = backgroundImageData, !data.isEmpty else { return "0" }
+    guard let image = backgroundImage else { return "0" }
+    guard case .bytes(let data) = image else { return image.describe }
+    guard !data.isEmpty else { return "0" }
+
     let sampleSize = min(32, data.count)
     let head = data.prefix(sampleSize).reduce(into: UInt64(1_469_598_103_934_665_603)) {
       accumulator, byte in
@@ -250,14 +244,8 @@ public struct ChromaKeyConfig: Sendable, Equatable {
       let keyColor = (args["keyColor"] as? NSNumber)?.int64Value
     else { return nil }
 
-    let backgroundImageData: Data?
-    if let flutterData = args["bgImageData"] as? FlutterStandardTypedData {
-      backgroundImageData = flutterData.data.isEmpty ? nil : flutterData.data
-    } else if let data = args["bgImageData"] as? Data, !data.isEmpty {
-      backgroundImageData = data
-    } else {
-      backgroundImageData = nil
-    }
+    let backgroundImage = EncodedImage.from(
+      args, pathKey: "bgImagePath", dataKey: "bgImageData")
 
     return ChromaKeyConfig(
       keyR: Double((keyColor >> 16) & 0xFF) / 255.0,
@@ -267,7 +255,7 @@ public struct ChromaKeyConfig: Sendable, Equatable {
       smoothness: (args["smoothness"] as? NSNumber)?.doubleValue ?? 0.08,
       spill: (args["spill"] as? NSNumber)?.doubleValue ?? 0.5,
       backgroundColor: (args["bgColor"] as? NSNumber)?.int64Value ?? -1,
-      backgroundImageData: backgroundImageData
+      backgroundImage: backgroundImage
     )
   }
 }

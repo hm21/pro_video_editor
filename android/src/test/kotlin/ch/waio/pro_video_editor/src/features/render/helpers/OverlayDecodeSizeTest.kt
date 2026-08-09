@@ -25,7 +25,7 @@ internal class OverlayDecodeSizeTest {
         x: Int? = null,
         y: Int? = null,
     ) = VideoSequenceBuilder.ImageLayerConfig(
-        imageBytes = null,
+        image = null,
         scaleX = null,
         scaleY = null,
         width = width,

@@ -379,7 +379,8 @@ class ChromaKey {
 
   /// Converts this key to a map for platform channel communication.
   ///
-  /// Resolves [backgroundImage] to bytes, so this is asynchronous.
+  /// Resolves [backgroundImage] to a path or to bytes, so this is asynchronous.
+  /// See [EditorLayerImage.toChannelSource].
   Future<Map<String, dynamic>> toAsyncMap() async {
     assert(
       backgroundColor == null || backgroundColor!.a == 1.0,
@@ -388,13 +389,18 @@ class ChromaKey {
       'see-through result leave it null and put the backdrop on a lower '
       'VideoLayer of a VideoComposition.',
     );
+    final background = backgroundImage;
     return {
       'keyColor': color.toARGB32(),
       'similarity': similarity,
       'smoothness': smoothness,
       'spill': spill,
       'bgColor': backgroundColor?.toARGB32(),
-      'bgImageData': await backgroundImage?.safeByteArray(),
+      if (background != null)
+        ...await background.toChannelSource(
+          pathKey: 'bgImagePath',
+          dataKey: 'bgImageData',
+        ),
     };
   }
 

@@ -2,6 +2,7 @@ package ch.waio.pro_video_editor.src.features.render.models
 
 import PACKAGE_TAG
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.EncodedImage
 import io.flutter.plugin.common.MethodCall
 
 /**
@@ -242,7 +243,7 @@ data class ColorFilterConfig(
  * @property smoothness Width of the soft ramp just beyond [similarity]
  * @property spill How strongly the key's color cast is pulled out of the rest
  * @property backgroundColor Solid background ARGB, or null when none
- * @property backgroundImageData Background image bytes, or null when none
+ * @property backgroundImage Background image source, or null when none
  */
 data class ChromaKeyConfig(
     val keyR: Double,
@@ -252,7 +253,7 @@ data class ChromaKeyConfig(
     val smoothness: Double = 0.08,
     val spill: Double = 0.5,
     val backgroundColor: Int? = null,
-    val backgroundImageData: ByteArray? = null,
+    val backgroundImage: EncodedImage? = null,
 ) {
     /** The key color projected onto the Cb/Cr chroma plane. */
     val keyCb: Double = -0.168736 * keyR - 0.331264 * keyG + 0.5 * keyB
@@ -279,41 +280,13 @@ data class ChromaKeyConfig(
 
     /** Whether the keyed area is left transparent rather than filled. */
     val isTransparent: Boolean
-        get() = backgroundColor == null && backgroundImageData == null
-
-    // Hand-written because of the ByteArray, like ImageLayer below.
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        other as ChromaKeyConfig
-        return keyR == other.keyR &&
-                keyG == other.keyG &&
-                keyB == other.keyB &&
-                similarity == other.similarity &&
-                smoothness == other.smoothness &&
-                spill == other.spill &&
-                backgroundColor == other.backgroundColor &&
-                (backgroundImageData?.contentEquals(other.backgroundImageData)
-                    ?: (other.backgroundImageData == null))
-    }
-
-    override fun hashCode(): Int {
-        var result = keyR.hashCode()
-        result = 31 * result + keyG.hashCode()
-        result = 31 * result + keyB.hashCode()
-        result = 31 * result + similarity.hashCode()
-        result = 31 * result + smoothness.hashCode()
-        result = 31 * result + spill.hashCode()
-        result = 31 * result + (backgroundColor?.hashCode() ?: 0)
-        result = 31 * result + (backgroundImageData?.contentHashCode() ?: 0)
-        return result
-    }
+        get() = backgroundColor == null && backgroundImage == null
 
     companion object {
         fun fromMap(map: Map<String, Any?>?): ChromaKeyConfig? {
             if (map == null) return null
             val keyColor = (map["keyColor"] as? Number)?.toInt() ?: return null
-            val bgImage = (map["bgImageData"] as? ByteArray)?.takeIf { it.isNotEmpty() }
+            val bgImage = EncodedImage.fromMap(map, "bgImagePath", "bgImageData")
 
             return ChromaKeyConfig(
                 keyR = ((keyColor shr 16) and 0xFF) / 255.0,
@@ -323,7 +296,7 @@ data class ChromaKeyConfig(
                 smoothness = (map["smoothness"] as? Number)?.toDouble() ?: 0.08,
                 spill = (map["spill"] as? Number)?.toDouble() ?: 0.5,
                 backgroundColor = (map["bgColor"] as? Number)?.toInt(),
-                backgroundImageData = bgImage,
+                backgroundImage = bgImage,
             )
         }
     }
@@ -399,7 +372,7 @@ data class LayerAnimationConfig(
 /**
  * Represents an image overlay layer with timing information.
  *
- * @property imageData The image data as a byte array
+ * @property image The image source — a path when the caller had it on disk
  * @property startUs Start time in microseconds when the layer should appear
  * @property endUs End time in microseconds when the layer should disappear (-1 = until end of video)
  * @property x Horizontal offset in pixels (null = stretch to fill)
@@ -411,7 +384,7 @@ data class LayerAnimationConfig(
  * @property animations List of animations to apply to this layer
  */
 data class ImageLayer(
-    val imageData: ByteArray,
+    val image: EncodedImage,
     val startUs: Long,
     val endUs: Long,
     val x: Int? = null,
@@ -421,37 +394,7 @@ data class ImageLayer(
     val rotation: Double = 0.0,
     val loop: Boolean = true,
     val animations: List<LayerAnimationConfig> = emptyList()
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        other as ImageLayer
-        return imageData.contentEquals(other.imageData) &&
-                startUs == other.startUs &&
-                endUs == other.endUs &&
-                x == other.x &&
-                y == other.y &&
-                width == other.width &&
-                height == other.height &&
-                rotation == other.rotation &&
-                loop == other.loop &&
-                animations == other.animations
-    }
-
-    override fun hashCode(): Int {
-        var result = imageData.contentHashCode()
-        result = 31 * result + startUs.hashCode()
-        result = 31 * result + endUs.hashCode()
-        result = 31 * result + (x?.hashCode() ?: 0)
-        result = 31 * result + (y?.hashCode() ?: 0)
-        result = 31 * result + (width?.hashCode() ?: 0)
-        result = 31 * result + (height?.hashCode() ?: 0)
-        result = 31 * result + rotation.hashCode()
-        result = 31 * result + loop.hashCode()
-        result = 31 * result + animations.hashCode()
-        return result
-    }
-}
+)
 
 data class RenderConfig(
     val videoClips: List<VideoClip>,
@@ -547,7 +490,7 @@ data class RenderConfig(
             // Parse image layers
             val imageLayersRaw = call.argument<List<Map<String, Any>>>("imageLayers")
             val imageLayers: List<ImageLayer> = imageLayersRaw?.mapNotNull { layerMap ->
-                val imageData = layerMap["imageData"] as? ByteArray
+                val image = EncodedImage.fromMap(layerMap, "imagePath", "imageData")
                 val startUs = (layerMap["startUs"] as? Number)?.toLong() ?: -1L
                 val endUs = (layerMap["endUs"] as? Number)?.toLong() ?: -1L
                 val x = (layerMap["x"] as? Number)?.toInt()
@@ -562,11 +505,11 @@ data class RenderConfig(
                 val animationsRaw = layerMap["animations"] as? List<Map<String, Any?>>
                 val animations = animationsRaw?.map { LayerAnimationConfig.fromMap(it) } ?: emptyList()
 
-                if (imageData == null || imageData.isEmpty()) {
+                if (image == null) {
                     null
                 } else {
                     ImageLayer(
-                        imageData, startUs, endUs, x, y, width, height,
+                        image, startUs, endUs, x, y, width, height,
                         rotation, loop, animations
                     )
                 }
