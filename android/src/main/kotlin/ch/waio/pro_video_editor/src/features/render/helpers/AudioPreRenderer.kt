@@ -9,7 +9,11 @@ import android.media.MediaFormat
 import android.os.Build
 import androidx.media3.common.util.UnstableApi
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.OutputStream
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -95,15 +99,43 @@ object AudioPreRenderer {
             return null
         }
 
-        // Step 1: Decode the trimmed source range into a PCM byte array.
+        // Step 1: Decode the trimmed source range into a scratch PCM file.
         val decoded = try {
-            decodeRange(audioPath, audioStartUs.coerceAtLeast(0L), audioEndUs)
+            decodeRange(
+                context.cacheDir, audioPath, audioStartUs.coerceAtLeast(0L), audioEndUs
+            )
         } catch (e: Exception) {
             Log.e(RENDER_TAG, "AudioPreRenderer: decode failed: ${e.message}")
             return null
         } ?: return null
 
-        if (decoded.pcmBytes.isEmpty()) {
+        try {
+            return assemble(
+                context = context,
+                decoded = decoded,
+                loop = loop,
+                compositionStartUs = compositionStartUs,
+                compositionDurationUs = compositionDurationUs,
+                videoDurationUs = videoDurationUs
+            )
+        } finally {
+            decoded.pcmFile.delete()
+        }
+    }
+
+    /**
+     * Writes the WAV described by [decoded] and the composition timing, i.e.
+     * everything after the source has been decoded.
+     */
+    private fun assemble(
+        context: Context,
+        decoded: DecodedAudio,
+        loop: Boolean,
+        compositionStartUs: Long,
+        compositionDurationUs: Long,
+        videoDurationUs: Long
+    ): Result? {
+        if (decoded.byteLength <= 0L) {
             Log.e(RENDER_TAG, "AudioPreRenderer: decoder produced no PCM data")
             return null
         }
@@ -142,9 +174,9 @@ object AudioPreRenderer {
 
                 writeSilence(raf, leadingSilenceBytes)
 
-                writeAudioBody(
+                val bodyBytesWritten = writeAudioBody(
                     raf = raf,
-                    sourcePcm = decoded.pcmBytes,
+                    sourcePcm = decoded.pcmFile,
                     targetBytes = bodyBytes,
                     loop = loop,
                     bytesPerFrame = bytesPerFrame
@@ -153,9 +185,8 @@ object AudioPreRenderer {
                 writeSilence(raf, trailingSilenceBytes)
 
                 // Update RIFF/data chunk sizes in the header.
-                val totalDataBytes = leadingSilenceBytes +
-                        actualBodyBytesWritten(decoded.pcmBytes.size.toLong(), bodyBytes, loop) +
-                        trailingSilenceBytes
+                val totalDataBytes =
+                    leadingSilenceBytes + bodyBytesWritten + trailingSilenceBytes
                 updateWavSizes(raf, totalDataBytes)
             }
         } catch (e: Exception) {
@@ -180,26 +211,45 @@ object AudioPreRenderer {
     // Internal: decoding
     // ---------------------------------------------------------------------
 
-    private data class DecodedAudio(
-        val pcmBytes: ByteArray,
+    /**
+     * The decoded source range, spooled to disk.
+     *
+     * @property pcmFile Scratch file holding the raw PCM; the caller deletes it.
+     * @property byteLength How many PCM bytes [pcmFile] holds.
+     */
+    private class DecodedAudio(
+        val pcmFile: File,
+        val byteLength: Long,
         val sampleRate: Int,
         val channelCount: Int
     )
 
     /**
-     * Decodes the audio range `[startUs, endUs)` from `path` into a
-     * 16-bit signed little-endian PCM byte array.
+     * Decodes the audio range `[startUs, endUs)` from `path` into a scratch file
+     * of 16-bit signed little-endian PCM.
+     *
+     * The PCM goes to disk rather than into a byte array because it is the one
+     * allocation here that grows with the clip: a three-minute stereo track
+     * decodes to ~30 MB, and holding that (plus the copy every array growth
+     * makes) is enough to push an export over Android's managed-heap limit.
      *
      * Float PCM is converted to int16. Output sample rate / channel
      * count match the decoder output.
      */
     private fun decodeRange(
+        cacheDir: File,
         path: String,
         startUs: Long,
         endUs: Long?
     ): DecodedAudio? {
         val extractor = MediaExtractor()
         var decoder: MediaCodec? = null
+        val pcmFile = File(
+            cacheDir,
+            "prerender_pcm_${System.currentTimeMillis()}_${System.nanoTime()}.raw"
+        )
+        var pcmOutput: OutputStream? = null
+        var decodedFully = false
 
         try {
             extractor.setDataSource(path)
@@ -245,7 +295,9 @@ object AudioPreRenderer {
             }
             isFloatPcm = readIsFloatPcm(decoderInitialFormat) ?: false
 
-            val pcmOutput = java.io.ByteArrayOutputStream()
+            val sink = BufferedOutputStream(FileOutputStream(pcmFile))
+            pcmOutput = sink
+            var pcmByteLength = 0L
             val effectiveEndUs = endUs ?: Long.MAX_VALUE
             val timeoutUs = 10_000L
             var inputEos = false
@@ -346,7 +398,8 @@ object AudioPreRenderer {
 
                             val writeLen = pcmChunk.size - skipBytes - dropBytes
                             if (writeLen > 0) {
-                                pcmOutput.write(pcmChunk, skipBytes, writeLen)
+                                sink.write(pcmChunk, skipBytes, writeLen)
+                                pcmByteLength += writeLen
                                 hasCrossedStart = true
                             }
                         }
@@ -364,12 +417,19 @@ object AudioPreRenderer {
                 }
             }
 
+            sink.flush()
+            decodedFully = true
             return DecodedAudio(
-                pcmBytes = pcmOutput.toByteArray(),
+                pcmFile = pcmFile,
+                byteLength = pcmByteLength,
                 sampleRate = sampleRate,
                 channelCount = channelCount
             )
         } finally {
+            try {
+                pcmOutput?.close()
+            } catch (_: Exception) {
+            }
             try {
                 decoder?.stop()
             } catch (_: Exception) {
@@ -382,6 +442,8 @@ object AudioPreRenderer {
                 extractor.release()
             } catch (_: Exception) {
             }
+            // A range that never made it to a DecodedAudio owns no scratch file.
+            if (!decodedFully) pcmFile.delete()
         }
     }
 
@@ -463,39 +525,45 @@ object AudioPreRenderer {
         }
     }
 
-    private fun writeAudioBody(
+    /**
+     * Copies [sourcePcm] into [raf] until [targetBytes] is covered, replaying it
+     * from the start as often as needed when [loop] is set, and returns how many
+     * bytes were written.
+     *
+     * The count is measured rather than predicted: it is what the WAV header has
+     * to declare, and a header that disagrees with the body by even one frame
+     * makes the file unreadable.
+     */
+    internal fun writeAudioBody(
         raf: RandomAccessFile,
-        sourcePcm: ByteArray,
+        sourcePcm: File,
         targetBytes: Long,
         loop: Boolean,
         bytesPerFrame: Int
-    ) {
-        if (sourcePcm.isEmpty() || targetBytes <= 0L) return
+    ): Long {
+        if (targetBytes <= 0L) return 0L
 
         // Align targetBytes to frame boundary (defensive).
         val alignedTarget = (targetBytes / bytesPerFrame) * bytesPerFrame
+        val buffer = ByteArray(1 shl 16)
         var written = 0L
 
-        if (loop) {
-            while (written < alignedTarget) {
-                val remaining = alignedTarget - written
-                val toWrite = minOf(remaining, sourcePcm.size.toLong()).toInt()
-                raf.write(sourcePcm, 0, toWrite)
-                written += toWrite
+        while (written < alignedTarget) {
+            val passStart = written
+            FileInputStream(sourcePcm).use { source ->
+                while (written < alignedTarget) {
+                    val wanted = minOf(buffer.size.toLong(), alignedTarget - written).toInt()
+                    val read = source.read(buffer, 0, wanted)
+                    if (read <= 0) break
+                    raf.write(buffer, 0, read)
+                    written += read
+                }
             }
-        } else {
-            val toWrite = minOf(alignedTarget, sourcePcm.size.toLong()).toInt()
-            raf.write(sourcePcm, 0, toWrite)
+            // An empty (or vanished) source would otherwise spin here forever.
+            if (written == passStart || !loop) break
         }
-    }
 
-    private fun actualBodyBytesWritten(
-        sourceSize: Long,
-        targetBytes: Long,
-        loop: Boolean
-    ): Long {
-        if (sourceSize <= 0L || targetBytes <= 0L) return 0L
-        return if (loop) targetBytes else minOf(targetBytes, sourceSize)
+        return written
     }
 
     // ---------------------------------------------------------------------
