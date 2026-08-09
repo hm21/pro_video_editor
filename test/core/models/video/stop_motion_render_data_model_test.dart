@@ -53,18 +53,20 @@ void main() {
       expect(map.containsKey('imageData'), isFalse);
     });
 
-    test('toAsyncMap throws naming the path when the frame is missing',
-        () async {
-      final missing = '${tempDir.path}/gone.jpg';
-      final frame = StopMotionFrame(image: EditorLayerImage.file(missing));
+    test(
+      'toAsyncMap throws naming the path when the frame is missing',
+      () async {
+        final missing = '${tempDir.path}/gone.jpg';
+        final frame = StopMotionFrame(image: EditorLayerImage.file(missing));
 
-      await expectLater(
-        frame.toAsyncMap(),
-        throwsA(
-          isA<FileSystemException>().having((e) => e.path, 'path', missing),
-        ),
-      );
-    });
+        await expectLater(
+          frame.toAsyncMap(),
+          throwsA(
+            isA<FileSystemException>().having((e) => e.path, 'path', missing),
+          ),
+        );
+      },
+    );
 
     test('toMap / fromMap roundtrip preserves data', () {
       final frame = StopMotionFrame(

@@ -122,66 +122,79 @@ void main() {
       );
     }, skip: !supportsStopMotion);
 
-    testWidgets('renders file-backed frames the same as byte-backed', (
-      _,
-    ) async {
-      // The point of the path branch is that a frame is opened as it is
-      // encoded rather than copied into the render call — so it has to produce
-      // the same video, not just any video.
-      final tempDir = await Directory.systemTemp.createTemp('stop_motion_path');
-      addTearDown(() => tempDir.delete(recursive: true));
+    testWidgets(
+      'renders file-backed frames the same as byte-backed',
+      (_) async {
+        // The point of the path branch is that a frame is opened as it is
+        // encoded rather than copied into the render call — so it has to
+        // produce the same video, not just any video.
+        final tempDir = await Directory.systemTemp.createTemp(
+          'stop_motion_path',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
 
-      final frames = await buildFileFrames(
-        tempDir,
-        10,
-        width: 480,
-        height: 360,
-      );
-      final result = await ProVideoEditor.instance.renderStopMotion(
-        StopMotionRenderData(frames: frames, frameRate: 5),
-      );
+        final frames = await buildFileFrames(
+          tempDir,
+          10,
+          width: 480,
+          height: 360,
+        );
+        final result = await ProVideoEditor.instance.renderStopMotion(
+          StopMotionRenderData(frames: frames, frameRate: 5),
+        );
 
-      expect(
-        result.lengthInBytes,
-        greaterThan(1000),
-        reason: 'Path-backed stop-motion output too small',
-      );
+        expect(
+          result.lengthInBytes,
+          greaterThan(1000),
+          reason: 'Path-backed stop-motion output too small',
+        );
 
-      final meta = await ProVideoEditor.instance.getMetadata(
-        EditorVideo.memory(result),
-      );
-      expect(meta.extension, 'mp4');
-      expect(
-        meta.duration.inMilliseconds,
-        closeTo(2000, 800),
-        reason: '10 frames at 5 fps should be ~2s',
-      );
-      // Sizing comes from a probe of the first frame, which reads the file
-      // header on the same branch.
-      expect(meta.resolution.width, closeTo(480, 16));
-      expect(meta.resolution.height, closeTo(360, 16));
-    }, skip: !supportsStopMotion);
+        final meta = await ProVideoEditor.instance.getMetadata(
+          EditorVideo.memory(result),
+        );
+        expect(meta.extension, 'mp4');
+        expect(
+          meta.duration.inMilliseconds,
+          closeTo(2000, 800),
+          reason: '10 frames at 5 fps should be ~2s',
+        );
+        // Sizing comes from a probe of the first frame, which reads the file
+        // header on the same branch.
+        expect(meta.resolution.width, closeTo(480, 16));
+        expect(meta.resolution.height, closeTo(360, 16));
+      },
+      skip: !supportsStopMotion,
+    );
 
-    testWidgets('a frame file deleted before the render fails the call', (
-      _,
-    ) async {
-      final tempDir = await Directory.systemTemp.createTemp('stop_motion_gone');
-      addTearDown(() => tempDir.delete(recursive: true));
+    testWidgets(
+      'a frame file deleted before the render fails the call',
+      (_) async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'stop_motion_gone',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
 
-      final frames = await buildFileFrames(tempDir, 4);
-      final missingPath = frames[2].image.file!.path;
-      await File(missingPath).delete();
+        final frames = await buildFileFrames(tempDir, 4);
+        final missingPath = frames[2].image.file!.path;
+        await File(missingPath).delete();
 
-      // Caught in Dart, before any native work, so the path is still nameable.
-      await expectLater(
-        ProVideoEditor.instance.renderStopMotion(
-          StopMotionRenderData(frames: frames, frameRate: 4),
-        ),
-        throwsA(
-          isA<FileSystemException>().having((e) => e.path, 'path', missingPath),
-        ),
-      );
-    }, skip: !supportsStopMotion);
+        // Caught in Dart, before any native work, so the path is still
+        // nameable.
+        await expectLater(
+          ProVideoEditor.instance.renderStopMotion(
+            StopMotionRenderData(frames: frames, frameRate: 4),
+          ),
+          throwsA(
+            isA<FileSystemException>().having(
+              (e) => e.path,
+              'path',
+              missingPath,
+            ),
+          ),
+        );
+      },
+      skip: !supportsStopMotion,
+    );
 
     testWidgets('per-frame duration overrides the default', (_) async {
       // 4 frames, each held 500ms → ~2 seconds regardless of frameRate.
