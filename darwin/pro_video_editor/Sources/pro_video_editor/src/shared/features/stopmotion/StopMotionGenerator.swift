@@ -58,7 +58,7 @@ internal enum StopMotionGenerator {
 
     // Decode the first frame (orientation-corrected, full size) to derive the
     // output size when not provided.
-    guard let firstImage = decodeImage(config.frames[0].imageData, maxPixelSize: nil) else {
+    guard let firstImage = decodeImage(config.frames[0], maxPixelSize: nil) else {
       throw NSError(
         domain: "StopMotion", code: 2,
         userInfo: [NSLocalizedDescriptionKey: "Failed to decode first frame"])
@@ -127,7 +127,7 @@ internal enum StopMotionGenerator {
         try Task.checkCancellation()
 
         let image = index == 0
-          ? firstImage : decodeImage(frame.imageData, maxPixelSize: maxDimension)
+          ? firstImage : decodeImage(frame, maxPixelSize: maxDimension)
         guard let image = image else {
           throw NSError(
             domain: "StopMotion", code: 5,
@@ -200,11 +200,14 @@ internal enum StopMotionGenerator {
 
   // MARK: - Helpers
 
-  /// Decodes an encoded image, applying its EXIF orientation. When
+  /// Decodes a frame's image, applying its EXIF orientation. When
   /// [maxPixelSize] is provided the image is also downscaled so its largest
   /// dimension does not exceed that value (keeps memory/CPU low for big photos).
-  private static func decodeImage(_ data: Data, maxPixelSize: Int?) -> CGImage? {
-    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+  ///
+  /// A file-backed frame is read straight from disk, so ImageIO only ever holds
+  /// the one frame being decoded rather than the whole sequence.
+  private static func decodeImage(_ frame: StopMotionFrameConfig, maxPixelSize: Int?) -> CGImage? {
+    guard let source = makeImageSource(frame) else { return nil }
 
     var options: [CFString: Any] = [
       kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -227,8 +230,27 @@ internal enum StopMotionGenerator {
     // render path does, at the cost of the full-size decode this path was
     // trying to avoid — acceptable, since it only runs when the thumbnail
     // decode has already failed.
-    guard let oriented = decodeOrientedImage(data) else { return nil }
+    guard let data = loadImageData(frame), let oriented = decodeOrientedImage(data) else {
+      return nil
+    }
     return orientationContext.createCGImage(oriented, from: oriented.extent)
+  }
+
+  /// An ImageIO source over whichever of the frame's two sources is set.
+  private static func makeImageSource(_ frame: StopMotionFrameConfig) -> CGImageSource? {
+    if let path = frame.imagePath {
+      return CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil)
+    }
+    guard let data = frame.imageData else { return nil }
+    return CGImageSourceCreateWithData(data as CFData, nil)
+  }
+
+  /// The frame's encoded bytes, reading the file when it is path-backed. Only
+  /// the orientation fallback in [decodeImage] needs them.
+  private static func loadImageData(_ frame: StopMotionFrameConfig) -> Data? {
+    if let data = frame.imageData { return data }
+    guard let path = frame.imagePath else { return nil }
+    return try? Data(contentsOf: URL(fileURLWithPath: path))
   }
 
   /// Renders the orientation fallback in [decodeImage]. Kept off the render

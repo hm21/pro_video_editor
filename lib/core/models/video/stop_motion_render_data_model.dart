@@ -40,6 +40,11 @@ class StopMotionFrame {
   ///
   /// Supports images from in-memory bytes, file system, network, or asset
   /// bundle via [EditorLayerImage].
+  ///
+  /// Prefer [EditorLayerImage.file] for long sequences: a file-backed frame is
+  /// handed to the native side as a path and opened one frame at a time, while
+  /// every other source has to travel as bytes — and a few hundred photos of
+  /// bytes at once is more than Android's managed heap will hold.
   final EditorLayerImage image;
 
   /// Optional time this frame is held on screen.
@@ -49,10 +54,16 @@ class StopMotionFrame {
 
   /// Converts this frame to a map for platform channel communication.
   ///
-  /// Resolves the image bytes via [EditorLayerImage.safeByteArray].
+  /// A file-backed frame travels as its path (`imagePath`) and is left on disk
+  /// for the native side to open when it encodes that frame. Any other source
+  /// resolves to bytes (`imageData`) via [EditorLayerImage.safeByteArray].
   Future<Map<String, dynamic>> toAsyncMap() async {
+    final file = image.file;
     return {
-      'imageData': await image.safeByteArray(),
+      if (file != null)
+        'imagePath': file.path
+      else
+        'imageData': await image.safeByteArray(),
       'durationUs': duration?.inMicroseconds,
     };
   }

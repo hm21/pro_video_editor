@@ -1,16 +1,20 @@
 package ch.waio.pro_video_editor.src.features.stopmotion.models
 
+import ch.waio.pro_video_editor.src.shared.media.EncodedImage
 import io.flutter.plugin.common.MethodCall
+import java.io.File
 
 /**
  * Configuration for a single stop-motion frame.
  *
- * @property imageData Encoded image bytes (PNG/JPEG/etc.) for this frame.
+ * @property image The encoded image (PNG/JPEG/etc.) for this frame. A frame the
+ *   caller has on disk arrives as a path and is opened when it is encoded; only
+ *   an in-memory source travels as bytes.
  * @property durationUs How long this frame is held on screen, in microseconds.
  *   When `null`, the default frame duration (`1 / frameRate`) is used.
  */
 class StopMotionFrameConfig(
-    val imageData: ByteArray,
+    val image: EncodedImage,
     val durationUs: Long?,
 )
 
@@ -43,10 +47,9 @@ data class StopMotionConfig(
                 ?: throw IllegalArgumentException("Missing frames")
 
             val frames = rawFrames.mapNotNull { map ->
-                val data = map["imageData"] as? ByteArray ?: return@mapNotNull null
-                if (data.isEmpty()) return@mapNotNull null
+                val image = parseImage(map) ?: return@mapNotNull null
                 val durationUs = (map["durationUs"] as? Number)?.toLong()
-                StopMotionFrameConfig(data, durationUs)
+                StopMotionFrameConfig(image, durationUs)
             }
 
             if (frames.isEmpty()) {
@@ -64,6 +67,19 @@ data class StopMotionConfig(
                 outputPath = call.argument<String>("outputPath"),
                 bitrate = (call.argument<Number>("bitrate"))?.toInt(),
             )
+        }
+
+        /**
+         * Reads a frame's image source, preferring the on-disk path Dart sends
+         * for a file-backed frame. Returns null for a frame that carries
+         * neither, so it is skipped instead of failing the whole render.
+         */
+        private fun parseImage(map: Map<String, Any?>): EncodedImage? {
+            val path = (map["imagePath"] as? String)?.takeIf { it.isNotBlank() }
+            if (path != null) return EncodedImage.OfFile(File(path))
+
+            val data = (map["imageData"] as? ByteArray)?.takeIf { it.isNotEmpty() }
+            return data?.let { EncodedImage.OfBytes(it) }
         }
     }
 }

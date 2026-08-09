@@ -1,6 +1,7 @@
 package ch.waio.pro_video_editor.src.shared.media
 
 import androidx.exifinterface.media.ExifInterface
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -135,6 +136,47 @@ internal class ImageOrientationTest {
                 "orientation $orientation"
             )
         }
+    }
+
+    /**
+     * A stop-motion frame is handed over as a file path rather than as bytes, so
+     * a long sequence never sits in the managed heap all at once. That only
+     * holds up if a frame read off disk is oriented like the same bytes in
+     * memory — reading EXIF from the wrong end of a file, or not at all, would
+     * put every photo in the export back on its side.
+     */
+    @Test
+    fun aFileIsOrientedLikeTheSameBytesInMemory() {
+        for (orientation in 1..8) {
+            val bytes = jpegWithOrientation(orientation)
+            val file = File.createTempFile("frame_$orientation", ".jpg")
+            file.deleteOnExit()
+            file.writeBytes(bytes)
+
+            assertEquals(
+                ImageOrientation.read(bytes),
+                ImageOrientation.read(EncodedImage.OfFile(file)),
+                "orientation $orientation"
+            )
+            assertEquals(
+                ImageOrientation.probeOf(storedWidth, storedHeight, bytes).width,
+                ImageOrientation.probeOf(
+                    storedWidth, storedHeight, EncodedImage.OfFile(file)
+                ).width,
+                "orientation $orientation"
+            )
+        }
+    }
+
+    /** An unreadable frame falls back to "no transform" instead of throwing. */
+    @Test
+    fun aMissingFileReportsTheNormalOrientation() {
+        val missing = File("/definitely/not/a/frame.jpg")
+
+        assertEquals(
+            ExifInterface.ORIENTATION_NORMAL,
+            ImageOrientation.read(EncodedImage.OfFile(missing))
+        )
     }
 
     @Test

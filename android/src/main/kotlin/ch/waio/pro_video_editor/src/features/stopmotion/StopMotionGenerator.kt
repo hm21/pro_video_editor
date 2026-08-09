@@ -102,7 +102,7 @@ class StopMotionGenerator(private val context: Context) {
                 var targetWidth = config.width ?: 0
                 var targetHeight = config.height ?: 0
                 if (targetWidth <= 0 || targetHeight <= 0) {
-                    val probe = ImageOrientation.probe(config.frames[0].imageData)
+                    val probe = ImageOrientation.probe(config.frames[0].image)
                     targetWidth = probe?.width ?: 2
                     targetHeight = probe?.height ?: 2
                 }
@@ -115,7 +115,7 @@ class StopMotionGenerator(private val context: Context) {
                     if (shouldStopPolling.get()) return@Thread
 
                     val bitmap = ImageOrientation
-                        .decode(frame.imageData, targetWidth, targetHeight)
+                        .decode(frame.image, targetWidth, targetHeight)
                         ?: throw IllegalStateException("Failed to decode frame $index")
 
                     val file = File(

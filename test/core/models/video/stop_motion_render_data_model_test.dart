@@ -27,6 +27,16 @@ void main() {
       expect(map['durationUs'], isNull);
     });
 
+    test('toAsyncMap sends a file-backed frame as a path, not bytes', () async {
+      final frame = StopMotionFrame(
+        image: EditorLayerImage.file('/tmp/frame_01.jpg'),
+      );
+      final map = await frame.toAsyncMap();
+
+      expect(map['imagePath'], '/tmp/frame_01.jpg');
+      expect(map.containsKey('imageData'), isFalse);
+    });
+
     test('toMap / fromMap roundtrip preserves data', () {
       final frame = StopMotionFrame(
         image: EditorLayerImage.asset('assets/frame.png'),
@@ -91,6 +101,29 @@ void main() {
         expect(frameMaps, hasLength(2));
         expect((frameMaps.first as Map)['imageData'], isA<Uint8List>());
         expect((frameMaps.last as Map)['durationUs'], 500000);
+      });
+
+      test('keeps file-backed frames out of the channel payload', () async {
+        final data = StopMotionRenderData(
+          frames: [
+            for (var i = 0; i < 3; i++)
+              StopMotionFrame(
+                image: EditorLayerImage.file('/tmp/frame_$i.jpg'),
+              ),
+          ],
+        );
+        final map = await data.toAsyncMap();
+
+        final frameMaps = (map['frames'] as List).cast<Map<String, dynamic>>();
+        expect(frameMaps.map((frame) => frame['imagePath']), [
+          '/tmp/frame_0.jpg',
+          '/tmp/frame_1.jpg',
+          '/tmp/frame_2.jpg',
+        ]);
+        expect(
+          frameMaps.any((frame) => frame.containsKey('imageData')),
+          isFalse,
+        );
       });
 
       test('uses explicit resolution for width/height', () async {
