@@ -223,10 +223,19 @@ class SplitVideo {
     // Serialize against other encodes (split halves + concurrent renders) so
     // they don't starve each other on the hardware encoder. The wait is outside
     // the watchdog below, so queueing never counts as a stall.
-    try await withExportSlot {
-      try await runExportWithTimeout(
-        export, diagnostics: diagnostics, exportTimeout: exportTimeout,
-        stallTimeout: stallTimeout, handle: handle, onProgress: onProgress)
+    do {
+      try await withExportSlot {
+        try await runExportWithTimeout(
+          export, diagnostics: diagnostics, exportTimeout: exportTimeout,
+          stallTimeout: stallTimeout, handle: handle, onProgress: onProgress)
+      }
+    } catch {
+      // The destination is the caller's own path, so a half that stopped
+      // mid-write is indistinguishable from a finished one for anyone who just
+      // checks that the file is there. Nothing downstream cleans it up — the
+      // split reports the failure without saying how far each half got.
+      try? FileManager.default.removeItem(at: outputURL)
+      throw error
     }
   }
 
@@ -247,11 +256,8 @@ class SplitVideo {
       exportTimeout: exportTimeout,
       stallTimeout: stallTimeout,
       onProgress: onProgress,
-      // Not `export.cancelExport()`: a bound tight enough to fire while the
-      // session is still `.unknown` would otherwise cancel a session that never
-      // ran, and the start queued behind it would take the app down. The
-      // diagnostic error this hook precedes unwinds the driver, which stops the
-      // export once it has actually started.
+      // A bound tight enough to fire while the session is still queued must not
+      // cancel it — see `ExportSessionGuard.forceCancel`.
       cancel: { ExportSessionGuard.forceCancel(export) },
       body: { progress in
         try await ExportSessionDriver.run(

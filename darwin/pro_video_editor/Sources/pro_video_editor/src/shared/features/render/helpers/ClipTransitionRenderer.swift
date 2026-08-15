@@ -61,6 +61,11 @@ internal enum ClipTransitionRenderer {
     includeAudio: Bool,
     outputFormat: String
   ) async -> RenderResult? {
+    // Only a *successful* blend reaches the caller, so only a successful blend
+    // can be cleaned up by it. An export that fails or is cancelled mid-write
+    // has to remove its own partial file here, or it stays in the temporary
+    // directory for good.
+    var partialOutput: URL?
     do {
       let outAsset = AVURLAsset(url: URL(fileURLWithPath: outgoingPath))
       let inAsset = AVURLAsset(url: URL(fileURLWithPath: incomingPath))
@@ -158,6 +163,7 @@ internal enum ClipTransitionRenderer {
 
       // Export.
       let outputURL = temporaryURL(for: outputFormat)
+      partialOutput = outputURL
       guard
         let export = AVAssetExportSession(
           asset: composition, presetName: AVAssetExportPresetHighestQuality)
@@ -171,6 +177,8 @@ internal enum ClipTransitionRenderer {
       export.shouldOptimizeForNetworkUse = false
 
       try await runExport(export)
+      // Handed to the caller from here on, which tracks it for cleanup.
+      partialOutput = nil
 
       PluginLog.print(
         "🎞️ Transition pre-render done (\(type)/\(direction)): "
@@ -178,6 +186,9 @@ internal enum ClipTransitionRenderer {
       return RenderResult(outputURL: outputURL, durationUs: dUs)
     } catch {
       PluginLog.print("⚠️ Transition pre-render failed (\(type)): \(error)")
+      if let partialOutput {
+        try? FileManager.default.removeItem(at: partialOutput)
+      }
       return nil
     }
   }
