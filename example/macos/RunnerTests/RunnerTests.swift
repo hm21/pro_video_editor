@@ -1198,3 +1198,110 @@ enum OrientedImageFixture {
     return index
   }
 }
+
+// MARK: - Export session start guard
+
+/// `AVAssetExportSession.export(to:as:)` assigns `outputURL` before it starts,
+/// and AVFoundation answers that assignment on a session that already left
+/// `.unknown` with an Objective-C exception Swift cannot catch — it takes the
+/// host app down with it. These pin the two rules that keep the call from ever
+/// being made: a job cancelled while its export is still queued leaves the
+/// session alone, and the guard refuses to start one that is not startable.
+class ExportSessionGuardTests: XCTestCase {
+  private var temporaryFiles: [URL] = []
+
+  override func tearDown() {
+    for url in temporaryFiles {
+      try? FileManager.default.removeItem(at: url)
+    }
+    temporaryFiles = []
+    super.tearDown()
+  }
+
+  /// A real, runnable passthrough session over a one-second fixture.
+  private func makeSession() throws -> AVAssetExportSession {
+    let source = try ThumbnailTimestampFixture.makeColorVideo(colors: [(215, 40, 40)])
+    let output = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pve_guard_\(UUID().uuidString).mp4")
+    temporaryFiles.append(contentsOf: [source, output])
+
+    guard
+      let export = AVAssetExportSession(
+        asset: AVURLAsset(url: source), presetName: AVAssetExportPresetPassthrough)
+    else {
+      throw NSError(domain: "ExportSessionGuardTests", code: 1)
+    }
+    export.outputURL = output
+    export.outputFileType = .mp4
+    return export
+  }
+
+  func testCancelBeforeTheStartLeavesTheSessionUntouched() throws {
+    let export = try makeSession()
+    let handle = RenderJobHandle()
+    handle.attach(export: export)
+
+    handle.cancel()
+
+    // The crash precondition: force-cancelling here moves the session to
+    // `.cancelled`, which the queued `export(to:as:)` then reads as "already
+    // started" and answers with an uncatchable exception.
+    XCTAssertEqual(export.status, .unknown)
+  }
+
+  func testStartIsRefusedAfterTheJobWasCancelled() async throws {
+    guard #available(iOS 18.0, macOS 15.0, *) else {
+      throw XCTSkip("Requires the async export API")
+    }
+    let export = try makeSession()
+    let handle = RenderJobHandle()
+    handle.attach(export: export)
+
+    handle.cancel()
+
+    do {
+      try await ExportSessionGuard.start(export, handle: handle, label: "Test")
+      XCTFail("A cancelled job must not start its export")
+    } catch is CancellationError {
+      // Expected — cancellation is a normal outcome, not a failure.
+    }
+    XCTAssertEqual(export.status, .unknown, "the export must never have run")
+  }
+
+  func testAnAlreadyCancelledSessionIsRefusedWithoutAHandle() throws {
+    let export = try makeSession()
+    export.cancelExport()
+
+    XCTAssertThrowsError(try ExportSessionGuard.claimStart(export, label: "Test")) { error in
+      XCTAssertTrue(error is CancellationError)
+    }
+  }
+
+  func testAClaimedJobRunsToCompletion() async throws {
+    guard #available(iOS 18.0, macOS 15.0, *) else {
+      throw XCTSkip("Requires the async export API")
+    }
+    let export = try makeSession()
+    let handle = RenderJobHandle()
+    handle.attach(export: export)
+
+    try await ExportSessionGuard.start(export, handle: handle, label: "Test")
+
+    XCTAssertEqual(export.status, .completed)
+  }
+
+  func testStartingASpentSessionTwiceIsAnErrorInsteadOfACrash() async throws {
+    guard #available(iOS 18.0, macOS 15.0, *) else {
+      throw XCTSkip("Requires the async export API")
+    }
+    let export = try makeSession()
+    try await ExportSessionGuard.start(export, label: "Test")
+
+    do {
+      try await ExportSessionGuard.start(export, label: "Test")
+      XCTFail("A spent session must not be started again")
+    } catch let error as NSError {
+      XCTAssertEqual(error.domain, ExportSessionGuard.errorDomain)
+    }
+  }
+}

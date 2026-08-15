@@ -1,3 +1,6 @@
+## 2.11.3
+- **FIX**(iOS, macOS): Cancelling a render or split while its export still waits for the encoder no longer crashes the app. The queued session was cancelled and then started anyway, which AVFoundation answers with an Objective-C exception Swift cannot catch.
+
 ## 2.11.2
 - **PERF**(android, iOS, macOS): A file-backed image is handed to the renderer as a path and opened only while it is decoded, instead of crossing the platform channel as bytes. A few hundred stop-motion frames at 3–4 MB each used to exhaust Android's heap before the first one was decoded. Applies to `StopMotionFrame`, image `VideoLayer`s and `ChromaKey.backgroundImage` built from `EditorLayerImage.file`; other sources still travel as bytes.
 - **PERF**(android): A `VideoRenderData.audioTracks` entry is pre-rendered through a scratch file instead of one in-memory PCM byte array, which reached ~30 MB for a three-minute stereo track.
