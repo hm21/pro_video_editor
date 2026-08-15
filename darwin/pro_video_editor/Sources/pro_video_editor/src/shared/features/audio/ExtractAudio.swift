@@ -213,6 +213,21 @@ class ExtractAudio {
           }
         }
 
+        // A cancel that landed while this session was still queued left it
+        // untouched on purpose, so it is this check — not the session's own
+        // state — that has to stop the start; otherwise the whole extraction is
+        // encoded only for the completion handler below to throw it away.
+        guard !context.isCancelled else {
+          try? FileManager.default.removeItem(at: outputURL)
+          DispatchQueue.main.async {
+            onError(
+              NSError(
+                domain: "ExtractAudio", code: -3,
+                userInfo: [NSLocalizedDescriptionKey: "Extraction was cancelled"]))
+          }
+          return
+        }
+
         session.exportAsynchronously {
           DispatchQueue.main.async {
             context.progressTimer?.invalidate()
@@ -293,7 +308,15 @@ class ExtractAudio {
     return {
       DispatchQueue.main.async {
         context.isCancelled = true
-        context.exportSession?.cancelExport()
+        // Not `cancelExport()`: the session is published to this closure from
+        // the main queue while the worker thread has yet to reach
+        // `exportAsynchronously`, so a cancel landing in between would cancel a
+        // session that never ran and then start it anyway. `forceCancel` leaves
+        // such a session alone; the `isCancelled` check the start makes, and
+        // the one in the completion handler, discard its output either way.
+        if let session = context.exportSession {
+          ExportSessionGuard.forceCancel(session)
+        }
         context.progressTimer?.invalidate()
         context.progressTimer = nil
       }

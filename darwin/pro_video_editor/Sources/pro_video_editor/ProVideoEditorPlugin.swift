@@ -347,12 +347,8 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
         PluginLog.print("❌ Render failed: \(error.localizedDescription)")
         DispatchQueue.main.async {
           let task = self.activeRenderTasks.removeValue(forKey: id)
-          // The pipeline also cancels itself — a watchdog force-cancelling a
-          // stalled session, a guard refusing a start — so a bare
-          // `CancellationError` is a cancellation even when nobody called
-          // `cancel` on this task.
-          let code = (task?.isCanceled == true || error is CancellationError)
-            ? "CANCELED" : "RENDER_ERROR"
+          let code = Self.errorCode(
+            canceled: task?.isCanceled == true, error: error, otherwise: "RENDER_ERROR")
           let flutterError = FlutterError(
             code: code,
             message: error.localizedDescription,
@@ -429,7 +425,8 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
         PluginLog.print("❌ Stop-motion render failed: \(error.localizedDescription)")
         DispatchQueue.main.async {
           let task = self.activeRenderTasks.removeValue(forKey: id)
-          let code = (task?.isCanceled == true) ? "CANCELED" : "RENDER_ERROR"
+          let code = Self.errorCode(
+            canceled: task?.isCanceled == true, error: error, otherwise: "RENDER_ERROR")
           let flutterError = FlutterError(
             code: code,
             message: error.localizedDescription,
@@ -518,8 +515,8 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
         PluginLog.print("❌ Split failed: \(error.localizedDescription)")
         DispatchQueue.main.async {
           let task = self.activeRenderTasks.removeValue(forKey: id)
-          let code = (task?.isCanceled == true || error is CancellationError)
-            ? "CANCELED" : "SPLIT_ERROR"
+          let code = Self.errorCode(
+            canceled: task?.isCanceled == true, error: error, otherwise: "SPLIT_ERROR")
           let flutterError = FlutterError(
             code: code,
             message: error.localizedDescription,
@@ -598,14 +595,9 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
         PluginLog.print("❌ Audio extraction failed: \(error.localizedDescription)")
         DispatchQueue.main.async {
           let task = self.activeAudioTasks.removeValue(forKey: id)
-          let code: String
-          if task?.isCanceled == true {
-            code = "CANCELED"
-          } else if error is NoAudioTrackException {
-            code = "NO_AUDIO"
-          } else {
-            code = "EXTRACT_ERROR"
-          }
+          let code = Self.errorCode(
+            canceled: task?.isCanceled == true, error: error,
+            otherwise: error is NoAudioTrackException ? "NO_AUDIO" : "EXTRACT_ERROR")
           let flutterError = FlutterError(
             code: code,
             message: error.localizedDescription,
@@ -683,7 +675,8 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
         PluginLog.print("❌ Audio merge failed: \(error.localizedDescription)")
         DispatchQueue.main.async {
           let task = self.activeAudioTasks.removeValue(forKey: id)
-          let code = (task?.isCanceled == true) ? "CANCELED" : "MERGE_ERROR"
+          let code = Self.errorCode(
+            canceled: task?.isCanceled == true, error: error, otherwise: "MERGE_ERROR")
           let flutterError = FlutterError(
             code: code, message: error.localizedDescription, details: nil)
           if let task = task {
@@ -907,6 +900,20 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
   }
 
   // MARK: - Helper Methods
+
+  /// The Flutter error code for a failed job.
+  ///
+  /// A pipeline also cancels itself — a watchdog force-cancelling a stalled
+  /// session, `ExportSessionGuard` refusing a start, a `Task.checkCancellation`
+  /// between two stages — so a bare `CancellationError` is a cancellation even
+  /// when nobody called `cancel` on this task. Shared by every handler, so a
+  /// pipeline that adopts `ExportSessionDriver` later cannot report its
+  /// cancellations as failures.
+  private static func errorCode(
+    canceled: Bool, error: Error, otherwise fallback: String
+  ) -> String {
+    (canceled || error is CancellationError) ? "CANCELED" : fallback
+  }
 
   /// Sends progress updates to Flutter via event channel.
   ///
