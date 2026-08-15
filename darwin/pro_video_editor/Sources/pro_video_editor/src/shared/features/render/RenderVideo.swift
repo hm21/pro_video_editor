@@ -414,9 +414,10 @@ class RenderVideo {
                 exportTimeout: 0,
                 stallTimeout: renderStallTimeout,
                 onProgress: onProgress,
-                cancel: { export.cancelExport() },
+                cancel: { ExportSessionGuard.forceCancel(export) },
                 body: { progress in
-                  try await monitorExportProgress(export, onProgress: progress)
+                  try await monitorExportProgress(
+                    export, handle: handle, onProgress: progress)
                 })
             }
           }
@@ -511,7 +512,8 @@ class RenderVideo {
     export.outputFileType = mapFormatToMimeType(format: config.outputFormat)
     export.shouldOptimizeForNetworkUse = config.shouldOptimizeForNetworkUse
     // Attached before the track loads below so a cancel arriving during them
-    // is still honoured; `export()` only starts in `monitorExportProgress`.
+    // is still honoured: the export only starts in `monitorExportProgress`, and
+    // `ExportSessionGuard` refuses that start once the handle is cancelled.
     handle.attach(export: export)
 
     // This fast path skips the composition entirely, so it has to apply the
@@ -529,7 +531,7 @@ class RenderVideo {
     }
 
     do {
-      try await monitorExportProgress(export, onProgress: onProgress)
+      try await monitorExportProgress(export, handle: handle, onProgress: onProgress)
     } catch {
       // Never leave a partial file behind; the fallback re-creates it.
       try? FileManager.default.removeItem(at: outputURL)
@@ -946,11 +948,14 @@ class RenderVideo {
 
   private static func monitorExportProgress(
     _ export: AVAssetExportSession,
+    handle: RenderJobHandle,
     onProgress: @escaping (Double) -> Void
   ) async throws {
     let updateInterval: TimeInterval = 0.2
     if #available(iOS 18.0, macOS 15.0, *) {
-      // Monitor progress in background using new async API
+      // Observes the session; it does not start it. Cancelled on every exit so
+      // a refused or failed start cannot leave it polling a session that will
+      // never run.
       let progressTask = Task {
         for try await state in export.states(updateInterval: updateInterval) {
           if case .exporting(let progress) = state {
@@ -958,14 +963,16 @@ class RenderVideo {
           }
         }
       }
+      defer { progressTask.cancel() }
 
       // Start export using new async API (replaces deprecated exportAsynchronously)
-      try await export.export(to: export.outputURL!, as: export.outputFileType!)
+      try await ExportSessionGuard.start(export, handle: handle, label: "RenderVideo")
 
       // Ensure progress monitoring completes
       try await progressTask.value
     } else {
       let intervalNs = UInt64(updateInterval * 1_000_000_000)
+      try ExportSessionGuard.claimStart(export, handle: handle, label: "RenderVideo")
       export.exportAsynchronously {}
       while export.status == .waiting || export.status == .exporting {
         if export.status == .exporting {
@@ -976,6 +983,10 @@ class RenderVideo {
       }
 
       guard export.status == .completed else {
+        // A cancelled export is a normal outcome, not a failure.
+        if export.status == .cancelled {
+          throw CancellationError()
+        }
         throw export.error
           ?? NSError(
             domain: "RenderVideo", code: 4,
@@ -994,19 +1005,29 @@ class RenderVideo {
   }
 }
 
-final class RenderJobHandle {
+/// `@unchecked Sendable`: every mutable field is guarded by `lock`, and the
+/// handle is passed across isolation boundaries (the render task, the export
+/// body, the cancel callback).
+final class RenderJobHandle: @unchecked Sendable {
   private let lock = NSLock()
   private var exportSession: AVAssetExportSession?
   private var renderTask: Task<Void, Never>?
   private var canceled = false
+  /// Whether ``ExportSessionGuard`` has already claimed the session's one-shot
+  /// start. Until it has, the session is still `.unknown` and must not be
+  /// force-cancelled — see ``cancel()``.
+  private var exportStarted = false
 
+  /// Registers the session this job will export through.
+  ///
+  /// Deliberately does *not* cancel an already-cancelled job's session: the
+  /// session has not started yet, so `cancelExport()` would only move it to
+  /// `.cancelled` and make the pending `export(to:as:)` raise an uncatchable
+  /// ObjC exception. ``beginExport()`` refuses the start instead.
   func attach(export: AVAssetExportSession) {
     lock.lock()
     defer { lock.unlock() }
     exportSession = export
-    if canceled {
-      export.cancelExport()
-    }
   }
 
   func attach(task: Task<Void, Never>) {
@@ -1018,15 +1039,33 @@ final class RenderJobHandle {
     }
   }
 
+  /// Claims the session's one-shot start, or refuses it because the job was
+  /// already cancelled. Called only by ``ExportSessionGuard/claimStart(_:handle:label:)``.
+  func beginExport() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    guard !canceled else { return false }
+    exportStarted = true
+    return true
+  }
+
   func cancel() {
     lock.lock()
     canceled = true
-    let session = exportSession
+    // An export whose start was never claimed is stopped by refusing the start,
+    // not by cancelling the session.
+    let session = exportStarted ? exportSession : nil
     let task = renderTask
     lock.unlock()
 
     task?.cancel()
-    session?.cancelExport()
+    // Between a claimed start and AVFoundation moving the session off
+    // `.unknown` there is a brief window in which `cancelExport()` would still
+    // arm the crash, so `forceCancel` skips it there; the task cancellation
+    // above carries the cancellation instead.
+    if let session {
+      ExportSessionGuard.forceCancel(session)
+    }
   }
 }
 

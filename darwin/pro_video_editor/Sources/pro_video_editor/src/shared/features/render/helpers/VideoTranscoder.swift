@@ -252,8 +252,10 @@ internal class VideoTranscoder {
     // Export execution block
     #if os(macOS)
       if #available(macOS 15.0, *) {
-        try await exportSession.export(to: outputURL, as: .mp4)
+        try await ExportSessionGuard.start(
+          exportSession, to: outputURL, as: .mp4, label: "VideoTranscoder")
       } else {
+        try ExportSessionGuard.claimStart(exportSession, label: "VideoTranscoder")
         await exportSession.export()
         guard exportSession.status == .completed else {
           let errorMessage = exportSession.error?.localizedDescription ?? "Unknown error"
@@ -264,8 +266,10 @@ internal class VideoTranscoder {
       }
     #elseif os(iOS)
       if #available(iOS 18.0, *) {
-        try await exportSession.export(to: outputURL, as: .mp4)
+        try await ExportSessionGuard.start(
+          exportSession, to: outputURL, as: .mp4, label: "VideoTranscoder")
       } else {
+        try ExportSessionGuard.claimStart(exportSession, label: "VideoTranscoder")
         await exportSession.export()
         guard exportSession.status == .completed else {
           let errorMessage = exportSession.error?.localizedDescription ?? "Unknown error"

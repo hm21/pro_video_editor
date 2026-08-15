@@ -223,7 +223,7 @@ class SplitVideo {
     try await withExportSlot {
       try await runExportWithTimeout(
         export, diagnostics: diagnostics, exportTimeout: exportTimeout,
-        stallTimeout: stallTimeout, onProgress: onProgress)
+        stallTimeout: stallTimeout, handle: handle, onProgress: onProgress)
     }
   }
 
@@ -236,6 +236,7 @@ class SplitVideo {
     diagnostics: SplitExportDiagnostics,
     exportTimeout: TimeInterval,
     stallTimeout: TimeInterval,
+    handle: RenderJobHandle,
     onProgress: @escaping (Double) -> Void
   ) async throws {
     try await ExportWatchdog.run(
@@ -243,17 +244,23 @@ class SplitVideo {
       exportTimeout: exportTimeout,
       stallTimeout: stallTimeout,
       onProgress: onProgress,
-      cancel: { export.cancelExport() },
-      body: { progress in try await runExport(export, onProgress: progress) })
+      cancel: { ExportSessionGuard.forceCancel(export) },
+      body: { progress in
+        try await runExport(export, handle: handle, onProgress: progress)
+      })
   }
 
   /// Drives the export to completion, reporting fractional progress.
   private static func runExport(
     _ export: AVAssetExportSession,
+    handle: RenderJobHandle,
     onProgress: @escaping (Double) -> Void
   ) async throws {
     let updateInterval: TimeInterval = 0.2
     if #available(iOS 18.0, macOS 15.0, *) {
+      // Observes the session; it does not start it. Cancelled on every exit so
+      // a refused or failed start cannot leave it polling a session that will
+      // never run.
       let progressTask = Task {
         for try await state in export.states(updateInterval: updateInterval) {
           if case .exporting(let progress) = state {
@@ -261,10 +268,13 @@ class SplitVideo {
           }
         }
       }
-      try await export.export(to: export.outputURL!, as: export.outputFileType!)
+      defer { progressTask.cancel() }
+
+      try await ExportSessionGuard.start(export, handle: handle, label: "SplitVideo")
       try await progressTask.value
     } else {
       let intervalNs = UInt64(updateInterval * 1_000_000_000)
+      try ExportSessionGuard.claimStart(export, handle: handle, label: "SplitVideo")
       export.exportAsynchronously {}
       while export.status == .waiting || export.status == .exporting {
         if export.status == .exporting {

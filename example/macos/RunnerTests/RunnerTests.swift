@@ -1198,3 +1198,166 @@ enum OrientedImageFixture {
     return index
   }
 }
+
+// MARK: - Export session start guard
+
+/// Stands in for a real ``AVAssetExportSession`` so the guard can be driven
+/// through states an export would otherwise have to run to reach.
+///
+/// Both overridden members are load-bearing: `status` is what the guard reads
+/// to decide whether a start is legal, and `cancelExport()` is the call that
+/// must *not* happen on a session that never started — AVFoundation moves an
+/// unstarted session straight to `.cancelled`, and `export(to:as:)` then
+/// assigns `outputURL` on it and raises an uncatchable ObjC exception.
+private final class StubExportSession: AVAssetExportSession {
+  var stubbedStatus: AVAssetExportSession.Status = .unknown
+  private(set) var cancelExportCallCount = 0
+
+  override var status: AVAssetExportSession.Status { stubbedStatus }
+
+  override func cancelExport() {
+    cancelExportCallCount += 1
+  }
+}
+
+/// Regression cover for the crash in issue #189: a render/split cancelled while
+/// its encode was queued behind the ``ExportGate`` reached `cancelExport()` on a
+/// session that had never started, and the queued `export(to:as:)` then died on
+/// `NSInternalInconsistencyException` — an ObjC exception Swift cannot catch, so
+/// the host app was terminated.
+class ExportSessionGuardTests: XCTestCase {
+  private func makeSession() throws -> StubExportSession {
+    try XCTUnwrap(
+      StubExportSession(
+        asset: AVMutableComposition(), presetName: AVAssetExportPresetPassthrough),
+      "Passthrough export session could not be created for an empty composition")
+  }
+
+  // MARK: claimStart
+
+  func testClaimStartAllowsAnUntouchedSession() throws {
+    let session = try makeSession()
+
+    XCTAssertNoThrow(try ExportSessionGuard.claimStart(session, label: "test"))
+  }
+
+  func testClaimStartReportsACancelledSessionAsCancellation() throws {
+    let session = try makeSession()
+    session.stubbedStatus = .cancelled
+
+    XCTAssertThrowsError(try ExportSessionGuard.claimStart(session, label: "test")) { error in
+      // A cancelled export is a normal outcome, not a failure to report.
+      XCTAssertTrue(
+        error is CancellationError,
+        "expected CancellationError, got \(error)")
+    }
+  }
+
+  func testClaimStartRefusesASessionThatIsAlreadyRunning() throws {
+    let session = try makeSession()
+    session.stubbedStatus = .exporting
+
+    XCTAssertThrowsError(try ExportSessionGuard.claimStart(session, label: "test")) { error in
+      // Not a cancellation: reaching here means some other route started the
+      // session, which is a programming error and must be reported as one.
+      XCTAssertFalse(error is CancellationError)
+      XCTAssertEqual((error as NSError).domain, ExportSessionGuard.errorDomain)
+    }
+  }
+
+  // MARK: forceCancel
+
+  func testForceCancelLeavesAnUnstartedSessionAlone() throws {
+    let session = try makeSession()
+
+    ExportSessionGuard.forceCancel(session)
+
+    XCTAssertEqual(
+      session.cancelExportCallCount, 0,
+      "cancelling an unstarted session is what arms the crash")
+  }
+
+  func testForceCancelStopsARunningSession() throws {
+    let session = try makeSession()
+    session.stubbedStatus = .exporting
+
+    ExportSessionGuard.forceCancel(session)
+
+    XCTAssertEqual(session.cancelExportCallCount, 1)
+  }
+
+  // MARK: RenderJobHandle
+
+  // The reported crash: cancelled while queued behind the export gate. The
+  // session must be left untouched, so the start the gate later grants can be
+  // refused instead of exploding.
+  func testCancelWhileQueuedNeitherTouchesNorStartsTheSession() throws {
+    let session = try makeSession()
+    let handle = RenderJobHandle()
+    handle.attach(export: session)
+
+    handle.cancel()
+
+    XCTAssertEqual(session.cancelExportCallCount, 0)
+    XCTAssertThrowsError(
+      try ExportSessionGuard.claimStart(session, handle: handle, label: "test")
+    ) { error in
+      XCTAssertTrue(error is CancellationError, "expected CancellationError, got \(error)")
+    }
+  }
+
+  // `cancel()` can also land before the render task has attached its session —
+  // the task is spawned and attached separately, so the ordering is not fixed.
+  func testCancelBeforeAttachStillRefusesTheStart() throws {
+    let handle = RenderJobHandle()
+    handle.cancel()
+
+    let session = try makeSession()
+    handle.attach(export: session)
+
+    XCTAssertEqual(session.cancelExportCallCount, 0)
+    XCTAssertThrowsError(
+      try ExportSessionGuard.claimStart(session, handle: handle, label: "test")
+    ) { error in
+      XCTAssertTrue(error is CancellationError, "expected CancellationError, got \(error)")
+    }
+  }
+
+  // Once the start has been claimed the session is real and a cancel must reach
+  // it, otherwise a running encode would keep its gate slot until it finished.
+  func testCancelAfterTheStartWasClaimedStopsTheSession() throws {
+    let session = try makeSession()
+    let handle = RenderJobHandle()
+    handle.attach(export: session)
+
+    XCTAssertTrue(handle.beginExport())
+    session.stubbedStatus = .exporting
+    handle.cancel()
+
+    XCTAssertEqual(session.cancelExportCallCount, 1)
+  }
+
+  func testBeginExportIsRefusedAfterCancel() {
+    let handle = RenderJobHandle()
+
+    XCTAssertTrue(handle.beginExport())
+
+    let cancelled = RenderJobHandle()
+    cancelled.cancel()
+    XCTAssertFalse(cancelled.beginExport())
+  }
+
+  // A cancel arriving between the claim and AVFoundation moving the session off
+  // `.unknown` is deliberately dropped rather than crashing; task cancellation
+  // carries it instead.
+  func testCancelBetweenClaimAndStartIsDroppedRatherThanCrashing() throws {
+    let session = try makeSession()
+    let handle = RenderJobHandle()
+    handle.attach(export: session)
+
+    XCTAssertTrue(handle.beginExport())
+    handle.cancel()  // session is still `.unknown` here
+
+    XCTAssertEqual(session.cancelExportCallCount, 0)
+  }
+}

@@ -343,8 +343,9 @@ internal enum ClipTransitionRenderer {
 
   private static func runExport(_ export: AVAssetExportSession) async throws {
     if #available(iOS 18.0, macOS 15.0, *) {
-      try await export.export(to: export.outputURL!, as: export.outputFileType!)
+      try await ExportSessionGuard.start(export, label: "ClipTransitionRenderer")
     } else {
+      try ExportSessionGuard.claimStart(export, label: "ClipTransitionRenderer")
       try await withCheckedThrowingContinuation {
         (cont: CheckedContinuation<Void, Error>) in
         export.exportAsynchronously {
