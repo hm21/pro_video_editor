@@ -37,6 +37,36 @@ void main() {
         outputFormat: VideoOutputFormat.mp4,
       );
 
+  /// Cancels [id], tolerating the job having finished on its own first — which
+  /// it legitimately does at the long end of every sweep below.
+  Future<void> cancelIgnoringNotFound(String id) async {
+    try {
+      await pve.cancel(id);
+    } on PlatformException catch (e) {
+      if (e.code != 'TASK_NOT_FOUND') rethrow;
+    }
+  }
+
+  /// Awaits [future], and asserts that a failure is a cancellation rather than
+  /// a crash-adjacent platform error. Succeeding is allowed: at the long end of
+  /// a sweep the job is simply already done.
+  Future<void> expectCancelledOrDone(
+    Future<Object?> future,
+    String what,
+  ) async {
+    final error = await future.then<Object?>(
+      (_) => null,
+      onError: (Object e) => e,
+    );
+    if (error != null) {
+      expect(
+        error,
+        isA<RenderCanceledException>(),
+        reason: '$what must fail as a cancellation, not as $error',
+      );
+    }
+  }
+
   testWidgets('concurrent tasks keep progress streams isolated', (
     tester,
   ) async {
@@ -107,48 +137,22 @@ void main() {
     );
 
     final futureA = pve.renderVideo(modelA);
-    final errorA = futureA.then<Object?>((_) => null, onError: (Object e) => e);
+
+    /// Attached before the await below so the cancellation cannot surface as an
+    /// unhandled error while task B is still being awaited.
+    final settledA = expectCancelledOrDone(futureA, 'the cancelled render');
     final futureB = pve.renderVideo(modelB);
 
     await Future<void>.delayed(const Duration(milliseconds: 150));
 
-    try {
-      await pve.cancel(modelA.id);
-    } on PlatformException catch (e) {
-      if (e.code != 'TASK_NOT_FOUND') rethrow;
-    }
+    await cancelIgnoringNotFound(modelA.id);
 
     /// Task B must finish untouched by task A's cancellation.
     final bytesB = await futureB;
     expect(bytesB.lengthInBytes, greaterThan(10000));
 
-    /// Task A was either cancelled (RenderCanceledException) or had already
-    /// finished before the cancel landed on a fast machine.
-    final error = await errorA;
-    if (error != null) {
-      expect(error, isA<RenderCanceledException>());
-    }
+    await settledA;
   }, skip: !supportsCancel);
-
-  /// Awaits [future], returning the error it failed with or null on success,
-  /// and asserts that a failure is a cancellation rather than a crash-adjacent
-  /// platform error.
-  Future<void> expectCancelledOrDone(
-    Future<Object?> future,
-    String what,
-  ) async {
-    final error = await future.then<Object?>(
-      (_) => null,
-      onError: (Object e) => e,
-    );
-    if (error != null) {
-      expect(
-        error,
-        isA<RenderCanceledException>(),
-        reason: '$what must fail as a cancellation, not as $error',
-      );
-    }
-  }
 
   /// Cancel timings swept across the native setup phase — session created,
   /// export not started yet. That window is milliseconds wide and its position
@@ -183,11 +187,7 @@ void main() {
 
         final future = pve.renderVideo(model);
         await Future<void>.delayed(Duration(milliseconds: ms));
-        try {
-          await pve.cancel(model.id);
-        } on PlatformException catch (e) {
-          if (e.code != 'TASK_NOT_FOUND') rethrow;
-        }
+        await cancelIgnoringNotFound(model.id);
 
         await expectCancelledOrDone(future, 'a render cancelled after ${ms}ms');
       }
@@ -241,14 +241,67 @@ void main() {
 
         final future = pve.splitVideo(model);
         await Future<void>.delayed(Duration(milliseconds: ms));
-        try {
-          await pve.cancel(model.id);
-        } on PlatformException catch (e) {
-          if (e.code != 'TASK_NOT_FOUND') rethrow;
-        }
+        await cancelIgnoringNotFound(model.id);
 
         await expectCancelledOrDone(future, 'a split cancelled after ${ms}ms');
       }
+    },
+    skip: !supportsCancel,
+  );
+
+  /// An overlap transition is baked into a short blended clip *before* the main
+  /// composition is built, so a render carrying one unwinds from a stage the
+  /// sweeps above never reach — one where the output file has not been resolved
+  /// yet. Cancelling there used to trap on the unresolved path while cleaning
+  /// up, which is the same dead app by a different route.
+  ///
+  /// The delays run long because each blend is a full export of its own: the
+  /// pre-render stage is where this render spends its first seconds.
+  testWidgets(
+    'a render cancelled during the transition pre-render never kills the app',
+    (tester) async {
+      for (final ms in <int>[50, 150, 300, 600, 1000]) {
+        final model = VideoRenderData(
+          id: 'transition-cancel-$ms',
+          videoSegments: [
+            VideoSegment(
+              video: testVideo,
+              startTime: Duration.zero,
+              endTime: const Duration(seconds: 3),
+              transition: const ClipTransition(
+                type: ClipTransitionType.dissolve,
+                duration: Duration(milliseconds: 800),
+              ),
+            ),
+            VideoSegment(
+              video: testVideo,
+              startTime: const Duration(seconds: 3),
+              endTime: const Duration(seconds: 6),
+            ),
+          ],
+          outputFormat: VideoOutputFormat.mp4,
+        );
+
+        final future = pve.renderVideo(model);
+        await Future<void>.delayed(Duration(milliseconds: ms));
+        await cancelIgnoringNotFound(model.id);
+
+        await expectCancelledOrDone(
+          future,
+          'a transition render cancelled after ${ms}ms',
+        );
+      }
+
+      /// Still alive: a trap in the cleanup path above would have taken the
+      /// test host down long before this line.
+      final bytes = await pve.renderVideo(
+        renderTask(
+          'transition-cancel-survivor',
+          Duration.zero,
+          const Duration(seconds: 2),
+        ),
+      );
+      expect(bytes.lengthInBytes, greaterThan(10000));
     },
     skip: !supportsCancel,
   );

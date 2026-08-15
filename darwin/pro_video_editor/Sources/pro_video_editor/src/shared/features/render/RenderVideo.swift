@@ -142,7 +142,14 @@ class RenderVideo {
         var transitionURLs: [URL] = []
 
         let finalize: () -> Void = {
-          try? cleanup(config.outputPath == nil ? [outputURL] : [])
+          // Read as an optional on purpose: the pre-render stages below can
+          // unwind before `outputURL` is resolved, and taking it as a plain
+          // `URL` here would trade the crash this change prevents for a Swift
+          // one.
+          let renderedFile: URL? = outputURL
+          if config.outputPath == nil, let renderedFile {
+            try? cleanup([renderedFile])
+          }
           // Clean up transcoded files
           VideoTranscoder.cleanupTranscodedFiles(transcodedFiles)
           // Clean up pre-rendered audio temp files
@@ -432,11 +439,8 @@ class RenderVideo {
                 exportTimeout: 0,
                 stallTimeout: renderStallTimeout,
                 onProgress: onProgress,
-                // Not `export.cancelExport()`: a stall detected while the
-                // session is still `.unknown` would otherwise cancel a session
-                // that never ran, and the start queued behind it would take the
-                // app down. The diagnostic error this hook precedes unwinds the
-                // driver, which stops the export once it has actually started.
+                // A stall detected while the session is still queued must not
+                // cancel it — see `ExportSessionGuard.forceCancel`.
                 cancel: { ExportSessionGuard.forceCancel(export) },
                 body: { progress in
                   try await ExportSessionDriver.run(
