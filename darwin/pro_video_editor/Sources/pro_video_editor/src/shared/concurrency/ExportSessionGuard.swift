@@ -17,12 +17,15 @@ import Foundation
 /// through — a render opened and dismissed within a few seconds was enough.
 ///
 /// Two things close it, and both are needed:
-/// - ``RenderJobHandle`` only force-cancels a session whose start was claimed
-///   here and that has actually left `.unknown`; an unstarted session is left
+/// - ``forceCancel(_:)`` — the single route to `cancelExport()` — only cancels
+///   a session that has actually left `.unknown`; an unstarted one is left
 ///   alone, because it has nothing to stop.
 /// - ``claimStart(_:handle:label:)`` re-reads `status` immediately before the
 ///   call, so any *other* route into an already-started session surfaces as a
 ///   Swift error instead of a crash.
+///
+/// The session itself is driven by ``ExportSessionDriver``, which is also what
+/// stops the export ``forceCancel(_:)`` had to skip.
 enum ExportSessionGuard {
   /// Domain of the errors thrown here, so callers can tell a refused start
   /// apart from an AVFoundation export failure.
@@ -60,29 +63,23 @@ enum ExportSessionGuard {
     }
   }
 
-  /// ``claimStart(_:handle:label:)`` followed by the start itself, for the call
-  /// sites that need nothing in between. `url` and `fileType` default to what
-  /// is already configured on the session.
-  @available(iOS 18.0, macOS 15.0, *)
-  static func start(
-    _ export: AVAssetExportSession,
-    to url: URL? = nil,
-    as fileType: AVFileType? = nil,
-    handle: RenderJobHandle? = nil,
-    label: String
-  ) async throws {
-    guard let outputURL = url ?? export.outputURL,
-      let outputFileType = fileType ?? export.outputFileType
-    else {
-      throw NSError(
-        domain: errorDomain, code: 2,
-        userInfo: [
-          NSLocalizedDescriptionKey:
-            "\(label): export session has no output URL or file type"
-        ])
-    }
-
-    try claimStart(export, handle: handle, label: label)
-    try await export.export(to: outputURL, as: outputFileType)
+  /// Force-cancels `export` — but only once it has actually started.
+  ///
+  /// The one place in the plugin that calls `cancelExport()`. On a session that
+  /// never ran the call still moves it to `.cancelled`, and the start queued
+  /// behind it would then trip the uncatchable exception described above.
+  /// `status` leaves `.unknown` only once that start is through, so it is
+  /// exactly the "safe to cancel now" test.
+  ///
+  /// A session skipped here is not left running: the cancellation that asked
+  /// for the stop also unwinds ``ExportSessionDriver``, which force-cancels it
+  /// on the way out — by then the start has happened.
+  ///
+  /// - Returns: whether the session was actually cancelled.
+  @discardableResult
+  static func forceCancel(_ export: AVAssetExportSession) -> Bool {
+    guard export.status != .unknown else { return false }
+    export.cancelExport()
+    return true
   }
 }

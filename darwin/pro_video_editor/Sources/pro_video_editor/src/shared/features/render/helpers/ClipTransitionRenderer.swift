@@ -341,29 +341,13 @@ internal enum ClipTransitionRenderer {
 
   // MARK: - Export
 
+  /// A pre-render is not progress-reported (the blends are short), but it still
+  /// runs through the shared driver: the continuation this used to wait on was
+  /// immune to cancellation, so on pre-iOS 18 a transition kept encoding long
+  /// after its render job had been cancelled.
   private static func runExport(_ export: AVAssetExportSession) async throws {
-    if #available(iOS 18.0, macOS 15.0, *) {
-      try await ExportSessionGuard.start(export, label: "ClipTransition")
-    } else {
-      try ExportSessionGuard.claimStart(export, label: "ClipTransition")
-      try await withCheckedThrowingContinuation {
-        (cont: CheckedContinuation<Void, Error>) in
-        export.exportAsynchronously {
-          if export.status == .completed {
-            cont.resume()
-          } else {
-            cont.resume(
-              throwing: export.error
-                ?? NSError(
-                  domain: "ClipTransitionRenderer", code: 1,
-                  userInfo: [
-                    NSLocalizedDescriptionKey:
-                      "Transition export failed (status \(export.status.rawValue))"
-                  ]))
-          }
-        }
-      }
-    }
+    try await ExportSessionDriver.run(
+      export, label: "ClipTransition", failureDomain: "ClipTransitionRenderer")
   }
 
   // MARK: - Track property loading

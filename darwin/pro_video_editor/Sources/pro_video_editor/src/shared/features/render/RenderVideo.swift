@@ -100,7 +100,15 @@ class RenderVideo {
 
         // Pre-transcode HEVC 10-bit HDR videos to H.264 8-bit SDR
         let inputPaths = config.videoClips.map { $0.inputPath }
-        let transcodeMap = await VideoTranscoder.transcodeClipsIfNeeded(inputPaths)
+        let transcodeMap: [String: String]
+        do {
+          transcodeMap = try await VideoTranscoder.transcodeClipsIfNeeded(inputPaths)
+        } catch {
+          // Only a cancelled job throws here; it cleaned up after itself, and
+          // nothing else exists yet to finalize.
+          onError(error)
+          return
+        }
 
         // Track transcoded files for cleanup
         transcodedFiles = transcodeMap.values.filter { $0.contains("transcoded_") }
@@ -157,22 +165,29 @@ class RenderVideo {
           finalize()
         }
 
-        // Pre-render overlap clip transitions (dissolve/slide/push/wipe) into
-        // short blended clips spliced between the neighbours, so the main
-        // composition still sees plain forward clips. An overlap transition on
-        // the last/only clip wraps into the first clip for a seamless loop and
-        // is baked the same way, so a single clip can also need this stage.
-        if workingConfig.videoClips.contains(where: { $0.transition?.isOverlap == true }) {
-          let (newClips, urls) = await preRenderTransitions(
-            clips: workingConfig.videoClips,
-            enableAudio: workingConfig.enableAudio,
-            outputFormat: workingConfig.outputFormat,
-            globalChromaKey: workingConfig.chromaKey)
-          workingConfig = workingConfig.copyWith(videoClips: newClips)
-          transitionURLs = urls
-        }
-
         do {
+          // Pre-render overlap clip transitions (dissolve/slide/push/wipe) into
+          // short blended clips spliced between the neighbours, so the main
+          // composition still sees plain forward clips. An overlap transition on
+          // the last/only clip wraps into the first clip for a seamless loop and
+          // is baked the same way, so a single clip can also need this stage.
+          //
+          // Inside the `do` so a cancellation unwinds through `handleCompletion`
+          // and `finalize` removes the blends already written.
+          if workingConfig.videoClips.contains(where: { $0.transition?.isOverlap == true }) {
+            let (newClips, urls) = await preRenderTransitions(
+              clips: workingConfig.videoClips,
+              enableAudio: workingConfig.enableAudio,
+              outputFormat: workingConfig.outputFormat,
+              globalChromaKey: workingConfig.chromaKey)
+            workingConfig = workingConfig.copyWith(videoClips: newClips)
+            transitionURLs = urls
+            // `preRenderTransitions` stops early when the job is cancelled and
+            // hands back what it managed to render; unwind here rather than
+            // build the whole composition out of a half-rewritten clip list.
+            try Task.checkCancellation()
+          }
+
           outputURL = resolveOutputURL(
             outputPath: workingConfig.outputPath, format: workingConfig.outputFormat)
 
@@ -417,10 +432,16 @@ class RenderVideo {
                 exportTimeout: 0,
                 stallTimeout: renderStallTimeout,
                 onProgress: onProgress,
-                cancel: { export.cancelExport() },
+                // Not `export.cancelExport()`: a stall detected while the
+                // session is still `.unknown` would otherwise cancel a session
+                // that never ran, and the start queued behind it would take the
+                // app down. The diagnostic error this hook precedes unwinds the
+                // driver, which stops the export once it has actually started.
+                cancel: { ExportSessionGuard.forceCancel(export) },
                 body: { progress in
-                  try await monitorExportProgress(
-                    export, handle: handle, onProgress: progress)
+                  try await ExportSessionDriver.run(
+                    export, handle: handle, label: "Render",
+                    failureDomain: "RenderVideo", onProgress: progress)
                 })
             }
           }
@@ -515,8 +536,8 @@ class RenderVideo {
     export.outputFileType = mapFormatToMimeType(format: config.outputFormat)
     export.shouldOptimizeForNetworkUse = config.shouldOptimizeForNetworkUse
     // Attached before the track loads below so a cancel arriving during them
-    // is still honoured; the start is claimed in `monitorExportProgress` and
-    // a cancel that wins that race keeps the export from ever starting.
+    // is still honoured; the start is claimed inside the driver, and a cancel
+    // that wins that race keeps the export from ever starting.
     handle.attach(export: export)
 
     // This fast path skips the composition entirely, so it has to apply the
@@ -534,7 +555,9 @@ class RenderVideo {
     }
 
     do {
-      try await monitorExportProgress(export, handle: handle, onProgress: onProgress)
+      try await ExportSessionDriver.run(
+        export, handle: handle, label: "Render", failureDomain: "RenderVideo",
+        onProgress: onProgress)
     } catch {
       // Never leave a partial file behind; the fallback re-creates it.
       try? FileManager.default.removeItem(at: outputURL)
@@ -591,6 +614,11 @@ class RenderVideo {
   /// the clip. Falls back to a hard cut when a transition cannot be rendered
   /// (e.g. a neighbour is reversed or has too little content) — those cases are
   /// handled live by the main pipeline.
+  ///
+  /// A cancelled job stops the pass where it stands and returns the clip list
+  /// as far as it got, together with every blend written so far — the caller
+  /// checks for cancellation immediately afterwards and lets `finalize` remove
+  /// them. Returning them rather than throwing is what keeps them from leaking.
   private static func preRenderTransitions(
     clips: [VideoClip], enableAudio: Bool, outputFormat: String,
     globalChromaKey: ChromaKeyConfig?
@@ -620,6 +648,10 @@ class RenderVideo {
     }
 
     while i < work.count {
+      // Each blend is a full export; a cancelled job must not queue the next
+      // one (`ClipTransitionRenderer` reports a refused start as "hard cut",
+      // which would otherwise silently rewrite the whole clip list).
+      if Task.isCancelled { break }
       let current = work[i]
       let next: VideoClip? = (i + 1 < work.count) ? work[i + 1] : nil
       let t = current.transition
@@ -714,7 +746,7 @@ class RenderVideo {
     // head and append it, so any looping player restarts seamlessly. The
     // between-clip pass only inserts blends *between* clips, so result's first
     // and last entries are still the original first/last clips.
-    if let wrap = wrapTransition, !result.isEmpty {
+    if let wrap = wrapTransition, !result.isEmpty, !Task.isCancelled {
       let lastIdx = result.count - 1
       let first = result[0]
       let last = result[lastIdx]
@@ -949,62 +981,6 @@ class RenderVideo {
     return export
   }
 
-  private static func monitorExportProgress(
-    _ export: AVAssetExportSession,
-    handle: RenderJobHandle,
-    onProgress: @escaping (Double) -> Void
-  ) async throws {
-    let updateInterval: TimeInterval = 0.2
-    if #available(iOS 18.0, macOS 15.0, *) {
-      // Monitor progress in background using new async API
-      let progressTask = Task {
-        for try await state in export.states(updateInterval: updateInterval) {
-          if case .exporting(let progress) = state {
-            onProgress(progress.fractionCompleted)
-          }
-        }
-      }
-
-      do {
-        // Start export using new async API (replaces deprecated
-        // exportAsynchronously), but never on a session a cancel already moved
-        // past `.unknown` — that raises an uncatchable ObjC exception.
-        try await ExportSessionGuard.start(export, handle: handle, label: "Render")
-      } catch {
-        progressTask.cancel()
-        throw error
-      }
-
-      // Ensure progress monitoring completes
-      try await progressTask.value
-    } else {
-      let intervalNs = UInt64(updateInterval * 1_000_000_000)
-      try ExportSessionGuard.claimStart(export, handle: handle, label: "Render")
-      export.exportAsynchronously {}
-      while export.status == .waiting || export.status == .exporting {
-        if export.status == .exporting {
-          let normalizedProgress = min(max(export.progress, 0), 1.0)
-          onProgress(Double(normalizedProgress))
-        }
-        try await Task.sleep(nanoseconds: intervalNs)
-      }
-
-      guard export.status == .completed else {
-        // A cancelled export is the caller's own doing, not a render failure.
-        if export.status == .cancelled {
-          throw CancellationError()
-        }
-        throw export.error
-          ?? NSError(
-            domain: "RenderVideo", code: 4,
-            userInfo: [
-              NSLocalizedDescriptionKey:
-                "Export failed with status \(export.status.rawValue)"
-            ])
-      }
-    }
-  }
-
   private static func cleanup(_ urls: [URL]) throws {
     for url in urls {
       try? FileManager.default.removeItem(at: url)
@@ -1072,12 +1048,11 @@ final class RenderJobHandle: @unchecked Sendable {
     task?.cancel()
     // A claimed session may still be a few instructions short of the assignment
     // `export(to:as:)` makes before it starts, and cancelling it in that sliver
-    // would trip the same uncatchable exception. `status` leaves `.unknown`
-    // only once that assignment is through, so it is exactly the "safe to
-    // cancel now" test; the export we skip here unwinds via the task
-    // cancellation above.
-    if let session, session.status != .unknown {
-      session.cancelExport()
+    // would trip the same uncatchable exception — `forceCancel` skips it. Such
+    // a session is stopped instead by the task cancellation above unwinding
+    // ``ExportSessionDriver``, which force-cancels it once the start is through.
+    if let session {
+      ExportSessionGuard.forceCancel(session)
     }
   }
 }

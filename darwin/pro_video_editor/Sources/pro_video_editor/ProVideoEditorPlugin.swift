@@ -347,7 +347,12 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
         PluginLog.print("❌ Render failed: \(error.localizedDescription)")
         DispatchQueue.main.async {
           let task = self.activeRenderTasks.removeValue(forKey: id)
-          let code = (task?.isCanceled == true) ? "CANCELED" : "RENDER_ERROR"
+          // The pipeline also cancels itself — a watchdog force-cancelling a
+          // stalled session, a guard refusing a start — so a bare
+          // `CancellationError` is a cancellation even when nobody called
+          // `cancel` on this task.
+          let code = (task?.isCanceled == true || error is CancellationError)
+            ? "CANCELED" : "RENDER_ERROR"
           let flutterError = FlutterError(
             code: code,
             message: error.localizedDescription,

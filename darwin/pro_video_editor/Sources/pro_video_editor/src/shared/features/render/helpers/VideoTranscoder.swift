@@ -83,18 +83,32 @@ internal class VideoTranscoder {
 
   /// Transcodes multiple video clips if needed.
   ///
+  /// A clip that cannot be transcoded keeps its original path: the render then
+  /// runs on the HDR source, which is worse than a transcode but better than no
+  /// render at all. A *cancelled* job is the one failure that must not degrade
+  /// that way — it would build the whole composition on exactly the source the
+  /// pre-transcode exists to avoid, only to be thrown away — so it throws
+  /// instead, after removing the files already written.
+  ///
   /// - Parameter inputPaths: List of input video paths
   /// - Returns: Dictionary mapping original path to transcoded path (or original if no transcoding needed)
-  static func transcodeClipsIfNeeded(_ inputPaths: [String]) async -> [String: String] {
+  /// - Throws: `CancellationError` if the job was cancelled mid-transcode.
+  static func transcodeClipsIfNeeded(_ inputPaths: [String]) async throws -> [String: String] {
     var result: [String: String] = [:]
+    var produced: [String] = []
 
     for inputPath in inputPaths {
       switch await transcodeToH264(inputPath) {
       case .success(let outputPath):
         result[inputPath] = outputPath
+        produced.append(outputPath)
       case .notNeeded(let originalPath):
         result[inputPath] = originalPath
-      case .error:
+      case .error(let error):
+        if error is CancellationError || Task.isCancelled {
+          cleanupTranscodedFiles(produced)
+          throw CancellationError()
+        }
         PluginLog.print("⚠️ Transcoding failed for \(inputPath), using original")
         result[inputPath] = inputPath
       }
@@ -140,18 +154,6 @@ internal class VideoTranscoder {
     }
 
     exportSession.shouldOptimizeForNetworkUse = true
-
-    #if os(macOS)
-      if #unavailable(macOS 15.0) {
-        exportSession.outputURL = outputURL
-        exportSession.outputFileType = .mp4
-      }
-    #elseif os(iOS)
-      if #unavailable(iOS 18.0) {
-        exportSession.outputURL = outputURL
-        exportSession.outputFileType = .mp4
-      }
-    #endif
 
     // Create video composition for HDR → SDR conversion
     let videoTrack: AVAssetTrack
@@ -249,36 +251,9 @@ internal class VideoTranscoder {
     PluginLog.print("🎬 Transcoding with AVAssetExportSession...")
     PluginLog.print("   Input size: \(naturalSize), Output size: \(renderSize)")
 
-    // Export execution block
-    #if os(macOS)
-      if #available(macOS 15.0, *) {
-        try await ExportSessionGuard.start(
-          exportSession, to: outputURL, as: .mp4, label: "Transcode")
-      } else {
-        try ExportSessionGuard.claimStart(exportSession, label: "Transcode")
-        await exportSession.export()
-        guard exportSession.status == .completed else {
-          let errorMessage = exportSession.error?.localizedDescription ?? "Unknown error"
-          throw NSError(
-            domain: "VideoTranscoder", code: 3,
-            userInfo: [NSLocalizedDescriptionKey: "Export failed: \(errorMessage)"])
-        }
-      }
-    #elseif os(iOS)
-      if #available(iOS 18.0, *) {
-        try await ExportSessionGuard.start(
-          exportSession, to: outputURL, as: .mp4, label: "Transcode")
-      } else {
-        try ExportSessionGuard.claimStart(exportSession, label: "Transcode")
-        await exportSession.export()
-        guard exportSession.status == .completed else {
-          let errorMessage = exportSession.error?.localizedDescription ?? "Unknown error"
-          throw NSError(
-            domain: "VideoTranscoder", code: 3,
-            userInfo: [NSLocalizedDescriptionKey: "Export failed: \(errorMessage)"])
-        }
-      }
-    #endif
+    try await ExportSessionDriver.run(
+      exportSession, to: outputURL, as: .mp4, label: "Transcode",
+      failureDomain: "VideoTranscoder")
 
     PluginLog.print("✅ Transcoding completed successfully")
   }
