@@ -402,6 +402,9 @@ class RenderVideo {
               shouldOptimizeForNetworkUse: workingConfig.shouldOptimizeForNetworkUse
             )
 
+            // Attached before the gate wait below so a cancel arriving while
+            // the job is still queued is honoured; it can only refuse the start
+            // from there, never force-cancel a session that has yet to run.
             handle.attach(export: export)
 
             // Serialize against other encodes (concurrent renders/splits) so
@@ -416,7 +419,8 @@ class RenderVideo {
                 onProgress: onProgress,
                 cancel: { export.cancelExport() },
                 body: { progress in
-                  try await monitorExportProgress(export, onProgress: progress)
+                  try await monitorExportProgress(
+                    export, handle: handle, onProgress: progress)
                 })
             }
           }
@@ -511,7 +515,8 @@ class RenderVideo {
     export.outputFileType = mapFormatToMimeType(format: config.outputFormat)
     export.shouldOptimizeForNetworkUse = config.shouldOptimizeForNetworkUse
     // Attached before the track loads below so a cancel arriving during them
-    // is still honoured; `export()` only starts in `monitorExportProgress`.
+    // is still honoured; the start is claimed in `monitorExportProgress` and
+    // a cancel that wins that race keeps the export from ever starting.
     handle.attach(export: export)
 
     // This fast path skips the composition entirely, so it has to apply the
@@ -529,7 +534,7 @@ class RenderVideo {
     }
 
     do {
-      try await monitorExportProgress(export, onProgress: onProgress)
+      try await monitorExportProgress(export, handle: handle, onProgress: onProgress)
     } catch {
       // Never leave a partial file behind; the fallback re-creates it.
       try? FileManager.default.removeItem(at: outputURL)
@@ -946,6 +951,7 @@ class RenderVideo {
 
   private static func monitorExportProgress(
     _ export: AVAssetExportSession,
+    handle: RenderJobHandle,
     onProgress: @escaping (Double) -> Void
   ) async throws {
     let updateInterval: TimeInterval = 0.2
@@ -959,13 +965,21 @@ class RenderVideo {
         }
       }
 
-      // Start export using new async API (replaces deprecated exportAsynchronously)
-      try await export.export(to: export.outputURL!, as: export.outputFileType!)
+      do {
+        // Start export using new async API (replaces deprecated
+        // exportAsynchronously), but never on a session a cancel already moved
+        // past `.unknown` — that raises an uncatchable ObjC exception.
+        try await ExportSessionGuard.start(export, handle: handle, label: "Render")
+      } catch {
+        progressTask.cancel()
+        throw error
+      }
 
       // Ensure progress monitoring completes
       try await progressTask.value
     } else {
       let intervalNs = UInt64(updateInterval * 1_000_000_000)
+      try ExportSessionGuard.claimStart(export, handle: handle, label: "Render")
       export.exportAsynchronously {}
       while export.status == .waiting || export.status == .exporting {
         if export.status == .exporting {
@@ -976,6 +990,10 @@ class RenderVideo {
       }
 
       guard export.status == .completed else {
+        // A cancelled export is the caller's own doing, not a render failure.
+        if export.status == .cancelled {
+          throw CancellationError()
+        }
         throw export.error
           ?? NSError(
             domain: "RenderVideo", code: 4,
@@ -994,19 +1012,32 @@ class RenderVideo {
   }
 }
 
-final class RenderJobHandle {
+/// Cancellation handle for one render/split job. Safe to use from any thread:
+/// every field is read and written under `lock`.
+final class RenderJobHandle: @unchecked Sendable {
   private let lock = NSLock()
   private var exportSession: AVAssetExportSession?
   private var renderTask: Task<Void, Never>?
   private var canceled = false
+  private var exportClaimed = false
 
+  /// Registers the session that carries this job so a later ``cancel()`` can
+  /// stop it.
+  ///
+  /// A session that is already cancelled is deliberately *not* force-cancelled
+  /// here: `cancelExport()` on a session that never ran still moves it to
+  /// `.cancelled`, and the queued `export(to:as:)` would then raise an
+  /// uncatchable Objective-C exception once the export gate lets it through.
+  /// ``beginExport()`` refuses the start instead.
+  ///
+  /// A job can attach more than one session over its life — the two halves of a
+  /// split, or a passthrough attempt and the full render it falls back to — and
+  /// each of them starts out unclaimed.
   func attach(export: AVAssetExportSession) {
     lock.lock()
     defer { lock.unlock() }
     exportSession = export
-    if canceled {
-      export.cancelExport()
-    }
+    exportClaimed = false
   }
 
   func attach(task: Task<Void, Never>) {
@@ -1018,15 +1049,36 @@ final class RenderJobHandle {
     }
   }
 
+  /// Claims the start of the attached export, returning `false` when the job
+  /// was cancelled while the export was still queued — the caller must then not
+  /// start it at all. Only a claimed session is ever force-cancelled.
+  ///
+  /// Called through ``ExportSessionGuard/claimStart(_:handle:label:)``.
+  func beginExport() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    guard !canceled else { return false }
+    exportClaimed = true
+    return true
+  }
+
   func cancel() {
     lock.lock()
     canceled = true
-    let session = exportSession
+    let session = exportClaimed ? exportSession : nil
     let task = renderTask
     lock.unlock()
 
     task?.cancel()
-    session?.cancelExport()
+    // A claimed session may still be a few instructions short of the assignment
+    // `export(to:as:)` makes before it starts, and cancelling it in that sliver
+    // would trip the same uncatchable exception. `status` leaves `.unknown`
+    // only once that assignment is through, so it is exactly the "safe to
+    // cancel now" test; the export we skip here unwinds via the task
+    // cancellation above.
+    if let session, session.status != .unknown {
+      session.cancelExport()
+    }
   }
 }
 

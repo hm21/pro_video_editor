@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/core/constants/example_constants.dart';
 
@@ -128,4 +129,115 @@ void main() {
       expect(error, isA<RenderCanceledException>());
     }
   }, skip: !supportsCancel);
+
+  /// Awaits [future], returning the error it failed with or null on success,
+  /// and asserts that a failure is a cancellation rather than a crash-adjacent
+  /// platform error.
+  Future<void> expectCancelledOrDone(
+    Future<Object?> future,
+    String what,
+  ) async {
+    final error = await future.then<Object?>(
+      (_) => null,
+      onError: (Object e) => e,
+    );
+    if (error != null) {
+      expect(
+        error,
+        isA<RenderCanceledException>(),
+        reason: '$what must fail as a cancellation, not as $error',
+      );
+    }
+  }
+
+  /// Cancel timings swept across the native setup phase — session created,
+  /// export not started yet. That window is milliseconds wide and its position
+  /// depends on the machine, so a single delay would only sometimes land in it.
+  const cancelDelays = <int>[0, 10, 25, 50, 90, 150, 240, 400];
+
+  /// The window between "export session created" and "export started" used to
+  /// be lethal: a cancel landing in it force-cancelled a session that had never
+  /// run, and the export started anyway a moment later. `export(to:as:)`
+  /// assigns `outputURL` before it starts, which AVFoundation answers on an
+  /// already-cancelled session with an Objective-C exception — uncatchable from
+  /// Swift, so the whole app went down with it (issue #189).
+  ///
+  /// The failure mode is therefore not an assertion but a dead app: without the
+  /// fix this test loses the device connection partway through the sweep.
+  testWidgets(
+    'a render cancelled during export setup never kills the app',
+    (tester) async {
+      for (final ms in cancelDelays) {
+        final model = renderTask(
+          'cancel-window-$ms',
+          Duration.zero,
+          const Duration(seconds: 3),
+        );
+
+        final future = pve.renderVideo(model);
+        await Future<void>.delayed(Duration(milliseconds: ms));
+        try {
+          await pve.cancel(model.id);
+        } on PlatformException catch (e) {
+          if (e.code != 'TASK_NOT_FOUND') rethrow;
+        }
+
+        await expectCancelledOrDone(future, 'a render cancelled after ${ms}ms');
+      }
+
+      /// Still alive and still working — a native crash anywhere in the sweep
+      /// above would have taken the test host with it long before this line.
+      final bytes = await pve.renderVideo(
+        renderTask(
+          'cancel-window-survivor',
+          Duration.zero,
+          const Duration(seconds: 2),
+        ),
+      );
+      expect(bytes.lengthInBytes, greaterThan(10000));
+    },
+    skip: !supportsCancel,
+  );
+
+  /// The same window on the split pipeline, which additionally runs two export
+  /// sessions through a single job handle — the second half is created while
+  /// the job may already be cancelled.
+  testWidgets(
+    'a split cancelled during export setup never kills the app',
+    (tester) async {
+      final directory = await getTemporaryDirectory();
+      final outputs = <String>[];
+
+      for (final ms in cancelDelays) {
+        final stamp = DateTime.now().microsecondsSinceEpoch;
+        final startPath = '${directory.path}/cancel_${stamp}_start.mp4';
+        final endPath = '${directory.path}/cancel_${stamp}_end.mp4';
+        outputs.addAll([startPath, endPath]);
+
+        final model = SplitVideoModel(
+          id: 'split-cancel-window-$ms',
+          video: testVideo,
+          splitPosition: const Duration(seconds: 4),
+          startOutputPath: startPath,
+          endOutputPath: endPath,
+        );
+
+        final future = pve.splitVideo(model);
+        await Future<void>.delayed(Duration(milliseconds: ms));
+        try {
+          await pve.cancel(model.id);
+        } on PlatformException catch (e) {
+          if (e.code != 'TASK_NOT_FOUND') rethrow;
+        }
+
+        await expectCancelledOrDone(future, 'a split cancelled after ${ms}ms');
+      }
+
+      for (final path in outputs) {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      }
+    },
+    skip: !supportsCancel,
+  );
 }
