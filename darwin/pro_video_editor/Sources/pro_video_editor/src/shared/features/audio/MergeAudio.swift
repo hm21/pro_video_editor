@@ -390,22 +390,19 @@ class MergeAudio {
         userInfo: [NSLocalizedDescriptionKey: "Failed to create export session"])
     }
     try? FileManager.default.removeItem(at: outputURL)
-    session.outputURL = outputURL
-    session.outputFileType = fileType
 
-    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-      session.exportAsynchronously {
-        switch session.status {
-        case .completed:
-          cont.resume()
-        default:
-          cont.resume(
-            throwing: session.error
-              ?? NSError(
-                domain: "MergeAudio", code: -8,
-                userInfo: [NSLocalizedDescriptionKey: "Transcode failed"]))
-        }
-      }
+    do {
+      // Through the shared driver rather than a continuation of its own: a
+      // checked continuation is immune to cancellation, so a cancelled merge
+      // used to keep encoding its container to completion.
+      try await ExportSessionDriver.run(
+        session, to: outputURL, as: fileType, label: "MergeAudio",
+        failureDomain: "MergeAudio")
+    } catch {
+      // The path is the caller's, so a container that stopped mid-write must
+      // not be left there looking finished.
+      try? FileManager.default.removeItem(at: outputURL)
+      throw error
     }
   }
 
