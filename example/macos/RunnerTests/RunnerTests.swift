@@ -567,7 +567,7 @@ class ChromaKeyMathTests: XCTestCase {
     smoothness: 0.08,
     spill: 0.5,
     backgroundColor: -1,
-    backgroundImageData: nil
+    backgroundImage: nil
   )
 
   private let tolerance = 1e-4
@@ -577,7 +577,7 @@ class ChromaKeyMathTests: XCTestCase {
     ChromaKeyConfig(
       keyR: config.keyR, keyG: config.keyG, keyB: config.keyB,
       similarity: config.similarity, smoothness: config.smoothness,
-      spill: spill, backgroundColor: -1, backgroundImageData: nil)
+      spill: spill, backgroundColor: -1, backgroundImage: nil)
   }
 
   private struct Golden {
@@ -692,7 +692,7 @@ class ChromaKeyMathTests: XCTestCase {
   func testNeutralKeyColorDisablesDespillInsteadOfDividingByZero() {
     let gray = ChromaKeyConfig(
       keyR: 0.5, keyG: 0.5, keyB: 0.5, similarity: 0.15, smoothness: 0.08,
-      spill: 1.0, backgroundColor: -1, backgroundImageData: nil)
+      spill: 1.0, backgroundColor: -1, backgroundImage: nil)
 
     XCTAssertEqual(gray.keyDirection.cb, 0.0, accuracy: tolerance)
     XCTAssertEqual(gray.keyDirection.cr, 0.0, accuracy: tolerance)
@@ -763,7 +763,7 @@ class ChromaKeyMathTests: XCTestCase {
         keyR: config.keyR, keyG: config.keyG, keyB: config.keyB,
         similarity: config.similarity, smoothness: config.smoothness,
         spill: config.spill, backgroundColor: -1,
-        backgroundImageData: Data(bytes))
+        backgroundImage: .bytes(Data(bytes)))
     }
 
     let a = withBackground(Array(repeating: 0x11, count: 128))
@@ -771,7 +771,7 @@ class ChromaKeyMathTests: XCTestCase {
     bBytes[0] = 0x22
     let b = withBackground(bBytes)
 
-    XCTAssertEqual(a.backgroundImageData?.count, b.backgroundImageData?.count)
+    XCTAssertEqual(a.backgroundImage?.data?.count, b.backgroundImage?.data?.count)
     XCTAssertNotEqual(a.cacheKey, b.cacheKey)
     XCTAssertEqual(a.cacheKey, withBackground(Array(repeating: 0x11, count: 128)).cacheKey)
   }
