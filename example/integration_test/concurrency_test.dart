@@ -155,6 +155,13 @@ void main() {
   /// depends on the machine, so a single delay would only sometimes land in it.
   const cancelDelays = <int>[0, 10, 25, 50, 90, 150, 240, 400];
 
+  /// The same sweep for the split, compressed. Both halves are stream-copied
+  /// (no bitrate, so `AVAssetExportPresetPassthrough`) and finish in
+  /// milliseconds, so the delays above would land after the whole job is
+  /// already done and cancel nothing at all. These stay inside the setup window
+  /// of the first half and of the second one that follows it.
+  const splitCancelDelays = <int>[0, 1, 2, 4, 8, 15, 30, 60];
+
   /// The window between "export session created" and "export started" used to
   /// be lethal: a cancel landing in it force-cancelled a session that had never
   /// run, and the export started anyway a moment later. `export(to:as:)`
@@ -208,7 +215,17 @@ void main() {
       final directory = await getTemporaryDirectory();
       final outputs = <String>[];
 
-      for (final ms in cancelDelays) {
+      /// Registered before the sweep runs: a failed expectation inside it is
+      /// exactly what a regression looks like, and would otherwise leak every
+      /// half written up to that point.
+      addTearDown(() async {
+        for (final path in outputs) {
+          final file = File(path);
+          if (await file.exists()) await file.delete();
+        }
+      });
+
+      for (final ms in splitCancelDelays) {
         final stamp = DateTime.now().microsecondsSinceEpoch;
         final startPath = '${directory.path}/cancel_${stamp}_start.mp4';
         final endPath = '${directory.path}/cancel_${stamp}_end.mp4';
@@ -231,11 +248,6 @@ void main() {
         }
 
         await expectCancelledOrDone(future, 'a split cancelled after ${ms}ms');
-      }
-
-      for (final path in outputs) {
-        final file = File(path);
-        if (await file.exists()) await file.delete();
       }
     },
     skip: !supportsCancel,

@@ -247,60 +247,17 @@ class SplitVideo {
       exportTimeout: exportTimeout,
       stallTimeout: stallTimeout,
       onProgress: onProgress,
-      cancel: { export.cancelExport() },
+      // Not `export.cancelExport()`: a bound tight enough to fire while the
+      // session is still `.unknown` would otherwise cancel a session that never
+      // ran, and the start queued behind it would take the app down. The
+      // diagnostic error this hook precedes unwinds the driver, which stops the
+      // export once it has actually started.
+      cancel: { ExportSessionGuard.forceCancel(export) },
       body: { progress in
-        try await runExport(export, handle: handle, onProgress: progress)
+        try await ExportSessionDriver.run(
+          export, handle: handle, label: "Split", failureDomain: "SplitVideo",
+          onProgress: progress)
       })
-  }
-
-  /// Drives the export to completion, reporting fractional progress.
-  private static func runExport(
-    _ export: AVAssetExportSession,
-    handle: RenderJobHandle,
-    onProgress: @escaping (Double) -> Void
-  ) async throws {
-    let updateInterval: TimeInterval = 0.2
-    if #available(iOS 18.0, macOS 15.0, *) {
-      let progressTask = Task {
-        for try await state in export.states(updateInterval: updateInterval) {
-          if case .exporting(let progress) = state {
-            onProgress(progress.fractionCompleted)
-          }
-        }
-      }
-      do {
-        // Never start a session a cancel already moved past `.unknown`: the
-        // output-URL assignment inside `export(to:as:)` would raise an
-        // uncatchable ObjC exception.
-        try await ExportSessionGuard.start(export, handle: handle, label: "Split")
-      } catch {
-        progressTask.cancel()
-        throw error
-      }
-      try await progressTask.value
-    } else {
-      let intervalNs = UInt64(updateInterval * 1_000_000_000)
-      try ExportSessionGuard.claimStart(export, handle: handle, label: "Split")
-      export.exportAsynchronously {}
-      while export.status == .waiting || export.status == .exporting {
-        if export.status == .exporting {
-          onProgress(Double(min(max(export.progress, 0), 1.0)))
-        }
-        try await Task.sleep(nanoseconds: intervalNs)
-      }
-      guard export.status == .completed else {
-        if export.status == .cancelled {
-          throw CancellationError()
-        }
-        throw export.error
-          ?? NSError(
-            domain: "SplitVideo", code: 4,
-            userInfo: [
-              NSLocalizedDescriptionKey:
-                "Export failed with status \(export.status.rawValue)"
-            ])
-      }
-    }
   }
 
   /// Builds a video-only composition (dropping audio) while preserving the
