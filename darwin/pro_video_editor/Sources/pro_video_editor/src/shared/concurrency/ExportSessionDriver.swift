@@ -5,10 +5,16 @@ import Foundation
 /// through ``ExportSessionGuard``, reports fractional progress, and makes sure
 /// a cancellation actually stops the encoder.
 ///
-/// Every export in the plugin runs through here — the render, both split
-/// halves, the overlap-transition pre-render and the HDR pre-transcode. They
-/// each used to carry their own copy of the same ~40 lines, so a fix to the
-/// start/cancel dance had to be made (and kept in sync) four times.
+/// Every `async` export in the plugin runs through here — the render, both
+/// split halves, the overlap-transition pre-render, the HDR pre-transcode and
+/// the audio-merge container. They each used to carry their own copy of the
+/// same ~40 lines, so a fix to the start/cancel dance had to be made (and kept
+/// in sync) five times.
+///
+/// The one export outside it is ``ExtractAudio``, which is callback- and
+/// timer-driven rather than `async` and so has no task to unwind; it stops its
+/// own start on cancel and routes its cancel through
+/// ``ExportSessionGuard/forceCancel(_:)`` like everything else.
 ///
 /// Two rules it enforces that driving the session by hand does not:
 /// - The progress observer is created only *after* the start is claimed. A
@@ -98,6 +104,11 @@ enum ExportSessionDriver {
       try await export.export(to: url, as: fileType)
     } catch {
       progressTask?.cancel()
+      // Awaited, not just cancelled: the observer holds on to the session, its
+      // composition and the custom compositor, and the caller releases its
+      // ``ExportGate`` slot the moment this throws — the next job would build
+      // its own composition alongside this one.
+      _ = try? await progressTask?.value
       // A watchdog that fired while the session was still `.unknown` left it
       // alone on purpose (see `ExportSessionGuard.forceCancel`); the deferred
       // force-cancel lands here, once the start is through.
@@ -130,7 +141,13 @@ enum ExportSessionDriver {
 
     do {
       let intervalNs = UInt64(progressInterval * 1_000_000_000)
-      while export.status == .waiting || export.status == .exporting {
+      // Driven by the states an export cannot leave, not by the ones it passes
+      // through: `exportAsynchronously` publishes its status change on its own
+      // queue, so the first read here can still see `.unknown`. Waiting for
+      // `.waiting`/`.exporting` instead would exit the loop right then and
+      // report a perfectly healthy export as "failed with status 0" — while
+      // the encoder it never stopped kept running past the gate slot.
+      while !isTerminal(export.status) {
         if export.status == .exporting {
           onProgress?(Double(min(max(export.progress, 0), 1.0)))
         }
@@ -155,6 +172,14 @@ enum ExportSessionDriver {
             NSLocalizedDescriptionKey:
               "\(label): export failed with status \(export.status.rawValue)"
           ])
+    }
+  }
+
+  /// Whether `status` is one an export session never leaves on its own.
+  private static func isTerminal(_ status: AVAssetExportSession.Status) -> Bool {
+    switch status {
+    case .completed, .failed, .cancelled: return true
+    default: return false
     }
   }
 }
