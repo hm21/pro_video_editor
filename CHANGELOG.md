@@ -1,6 +1,8 @@
 ## 2.11.3
 - **FIX**(iOS, macOS): Cancelling a render or split while its export still waits for the encoder no longer crashes the app. The queued session was cancelled and then started anyway, which AVFoundation answers with an Objective-C exception Swift cannot catch.
 - **FIX**(iOS, macOS): A cancelled render now unwinds at the HDR pre-transcode or transition pre-render it is in, instead of building the whole composition first and reporting the cancellation as a render error.
+- **FIX**(iOS, macOS): Cancelling an audio merge now stops its encoder instead of running the container to completion, and a cancelled extraction no longer encodes a result nobody reads.
+- **FIX**(iOS, macOS): A cancelled or failed job no longer leaves a half-written file behind — a split half at the path you gave it, a transition blend, or a merge container.
 
 ## 2.11.2
 - **PERF**(android, iOS, macOS): A file-backed image is handed to the renderer as a path and opened only while it is decoded, instead of crossing the platform channel as bytes. A few hundred stop-motion frames at 3–4 MB each used to exhaust Android's heap before the first one was decoded. Applies to `StopMotionFrame`, image `VideoLayer`s and `ChromaKey.backgroundImage` built from `EditorLayerImage.file`; other sources still travel as bytes.
