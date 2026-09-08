@@ -557,13 +557,15 @@ private fun unpremultiplyAlpha(bitmap: Bitmap): Bitmap {
  *
  * The band keeps the arithmetic on a plain `ByteArray`, which is materially
  * faster than absolute get/put against a direct buffer, so the memory is bought
- * back without paying for it in render time. [bandBytes] is a multiple of four
- * so no band ever splits a pixel; it is a parameter only so tests can force
- * several bands over a small buffer.
+ * back without paying for it in render time. [bandBytes] is rounded down to a
+ * whole number of pixels so no band ever splits one; it is a parameter only so
+ * tests can force several bands over a small buffer.
  *
  * Pixels are ARGB_8888 in raw byte order: R, G, B, A. A fully transparent or
  * fully opaque pixel is left alone: there is nothing to divide out of an opaque
- * one, and `a == 0` carries no colour to recover and would divide by zero.
+ * one, and `a == 0` carries no colour to recover and would divide by zero. A
+ * channel above its own alpha — which premultiplied data should not contain —
+ * saturates instead of wrapping around the byte.
  */
 internal fun unpremultiplyInPlace(
     buf: ByteBuffer,
@@ -574,7 +576,9 @@ internal fun unpremultiplyInPlace(
 
     // Whole pixels only; a trailing partial pixel is not ours to touch.
     val pixelBytes = byteCount - (byteCount % 4)
-    val band = minOf(bandBytes, pixelBytes)
+    // Likewise for the band: one that ended mid-pixel would read past its own
+    // end on the last pixel it started.
+    val band = minOf(bandBytes, pixelBytes).let { it - (it % 4) }.coerceAtLeast(4)
     val scratch = ByteArray(band)
 
     var offset = 0
@@ -588,9 +592,9 @@ internal fun unpremultiplyInPlace(
         while (o < len) {
             val a = scratch[o + 3].toInt() and 0xFF
             if (a in 1..254) {
-                scratch[o] = (((scratch[o].toInt() and 0xFF) * 255) / a).toByte()
-                scratch[o + 1] = (((scratch[o + 1].toInt() and 0xFF) * 255) / a).toByte()
-                scratch[o + 2] = (((scratch[o + 2].toInt() and 0xFF) * 255) / a).toByte()
+                scratch[o] = unpremultiplyChannel(scratch[o], a)
+                scratch[o + 1] = unpremultiplyChannel(scratch[o + 1], a)
+                scratch[o + 2] = unpremultiplyChannel(scratch[o + 2], a)
             }
             o += 4
         }
@@ -601,6 +605,17 @@ internal fun unpremultiplyInPlace(
         offset += len
     }
 }
+
+/**
+ * [channel] divided back out by its own [alpha], saturating at `255`.
+ *
+ * Premultiplied data should never hold a channel above its own alpha, but a
+ * quotient that does not fit a byte used to be truncated to its low 8 bits —
+ * turning a channel that overshot white into a near-black one. Saturating keeps
+ * such a pixel at the end of the range it overshot.
+ */
+private fun unpremultiplyChannel(channel: Byte, alpha: Int): Byte =
+    ((((channel.toInt() and 0xFF) * 255) / alpha).coerceAtMost(255)).toByte()
 
 /**
  * Scratch band [unpremultiplyInPlace] converts through, in bytes.

@@ -56,17 +56,30 @@ internal class UnpremultiplyInPlaceTest {
         assertEquals(listOf(0, 0, 0, 0), buf.bytes())
     }
 
-    /** A channel above its own alpha saturates rather than wrapping negative. */
+    /**
+     * A channel above its own alpha saturates. Premultiplied data should not
+     * contain one, but truncating the quotient to its low 8 bits turned a
+     * channel that overshot white into a near-black one — 255/1 wraps to 1.
+     */
     @Test
-    fun theResultIsClampedByTheByteItFitsIn() {
+    fun aChannelAboveItsAlphaSaturates() {
         val buf = buffer(200, 100, 50, 100)
 
         unpremultiplyInPlace(buf, 4)
 
-        // 200 * 255 / 100 = 510, which does not fit a byte; the cast keeps the
-        // low 8 bits (510 -> 254). Pinned so a future clamp is a deliberate
-        // change rather than a silent one.
-        assertEquals(listOf(254, 255, 127, 100), buf.bytes())
+        // 200 * 255 / 100 = 510 and 100 * 255 / 100 = 255, both past the top of
+        // the byte; 50 * 255 / 100 = 127 fits.
+        assertEquals(listOf(255, 255, 127, 100), buf.bytes())
+    }
+
+    /** The extreme of the same case: the old truncation wrapped this to 1. */
+    @Test
+    fun aChannelFarAboveItsAlphaSaturatesRatherThanWrapping() {
+        val buf = buffer(255, 255, 255, 1)
+
+        unpremultiplyInPlace(buf, 4)
+
+        assertEquals(listOf(255, 255, 255, 1), buf.bytes())
     }
 
     @Test
@@ -113,14 +126,26 @@ internal class UnpremultiplyInPlaceTest {
         assertEquals(List(64) { listOf(127, 63, 31, 128) }.flatten(), manyBands.bytes())
     }
 
-    /** A band that would split a pixel is clamped to whole pixels. */
+    /**
+     * A band is rounded down to whole pixels, then floored at one. A band that
+     * ended mid-pixel would read past its own end on the pixel it started.
+     */
+    @Test
+    fun aBandThatWouldSplitAPixelIsRoundedToWholePixels() {
+        val buf = buffer(64, 32, 16, 128, 200, 100, 50, 100)
+
+        unpremultiplyInPlace(buf, 8, bandBytes = 6)
+
+        assertEquals(listOf(127, 63, 31, 128, 255, 255, 127, 100), buf.bytes())
+    }
+
     @Test
     fun aBandSmallerThanAPixelStillConvertsWholePixels() {
         val buf = buffer(64, 32, 16, 128, 200, 100, 50, 100)
 
-        unpremultiplyInPlace(buf, 8, bandBytes = 4)
+        unpremultiplyInPlace(buf, 8, bandBytes = 1)
 
-        assertEquals(listOf(127, 63, 31, 128, 254, 255, 127, 100), buf.bytes())
+        assertEquals(listOf(127, 63, 31, 128, 255, 255, 127, 100), buf.bytes())
     }
 
     /** A trailing partial pixel is not read past the end of the buffer. */
