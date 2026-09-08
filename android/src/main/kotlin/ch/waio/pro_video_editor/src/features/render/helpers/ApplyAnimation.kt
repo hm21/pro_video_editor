@@ -152,9 +152,11 @@ internal class AnimatedBitmapOverlay(
     /**
      * Undoes an overlay raster cap (see `overlayRasterScale`): the frames may be
      * rastered below the size they are laid out at, and every settings object
-     * this overlay builds has to scale them back up. `1f` when uncapped.
+     * this overlay builds has to scale them back up. Per axis, because the cap
+     * rounds each axis to a whole pixel on its own. `1f` when uncapped.
      */
-    private val rasterScale: Float = 1f
+    private val rasterScaleX: Float = 1f,
+    private val rasterScaleY: Float = 1f
 ) : BitmapOverlay() {
 
     /** Convenience constructor for a single static frame. */
@@ -169,7 +171,8 @@ internal class AnimatedBitmapOverlay(
         layerStartUs: Long,
         layerEndUs: Long,
         animations: List<LayerAnimationConfig>,
-        rasterScale: Float = 1f
+        rasterScaleX: Float = 1f,
+        rasterScaleY: Float = 1f
     ) : this(
         frames = listOf(bitmap),
         frameDurationsUs = listOf(0L),
@@ -183,7 +186,8 @@ internal class AnimatedBitmapOverlay(
         layerEndUs = layerEndUs,
         loop = false,
         animations = animations,
-        rasterScale = rasterScale
+        rasterScaleX = rasterScaleX,
+        rasterScaleY = rasterScaleY
     )
 
     // Cumulative end time of each frame within one playthrough, plus the total.
@@ -216,7 +220,8 @@ internal class AnimatedBitmapOverlay(
         var alpha = 1.0f
         var offsetX = 0f
         var offsetY = 0f
-        var scaleVal = rasterScale
+        var scaleX = rasterScaleX
+        var scaleY = rasterScaleY
 
         // Layer half-size in [-1, 1] units (canvas spans [-1, 1]).
         val halfNormW = imageWidth.toFloat() / videoWidth
@@ -274,14 +279,17 @@ internal class AnimatedBitmapOverlay(
                 }
                 "scale" -> {
                     val scaleFrom = anim.scaleFrom?.toFloat() ?: 0f
-                    scaleVal *= scaleFrom + (1f - scaleFrom) * progress.toFloat()
+                    val factor = scaleFrom + (1f - scaleFrom) * progress.toFloat()
+                    scaleX *= factor
+                    scaleY *= factor
                 }
             }
         }
 
         // Clamp values — elastic/bounce curves can overshoot [0,1]
         val clampedAlpha = alpha.coerceIn(0f, 1f)
-        val clampedScale = scaleVal.coerceAtLeast(0f)
+        val clampedScaleX = scaleX.coerceAtLeast(0f)
+        val clampedScaleY = scaleY.coerceAtLeast(0f)
 
         // Media3 clamps each anchor to [-1, 1], so a fully off-screen slide is
         // split across the background and overlay anchors (see resolveAnchor).
@@ -292,7 +300,7 @@ internal class AnimatedBitmapOverlay(
             .setAlphaScale(clampedAlpha)
             .setBackgroundFrameAnchor(anchorX.backgroundAnchor, anchorY.backgroundAnchor)
             .setOverlayFrameAnchor(anchorX.overlayAnchor, anchorY.overlayAnchor)
-            .setScale(clampedScale, clampedScale)
+            .setScale(clampedScaleX, clampedScaleY)
             .build()
     }
 }

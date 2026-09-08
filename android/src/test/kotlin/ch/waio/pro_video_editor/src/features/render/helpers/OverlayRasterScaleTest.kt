@@ -126,4 +126,25 @@ internal class OverlayRasterScaleTest {
             overlayDecodeSize(layer, 2160, 3840, rasterScale = 0.1f),
         )
     }
+
+    /**
+     * The compensation Media3 is handed must return each axis to the size the
+     * layer was laid out at — read off that axis' own raster, not off the cap.
+     *
+     * The floor and the rounding move the two axes by different amounts: the
+     * thin layer above lands on 1 x 200 for a declared 3 x 2000, so its short
+     * axis needs 3x and its long axis 10x. One shared factor would render it at
+     * a third of its height.
+     */
+    @Test
+    fun theCompensationReturnsEachAxisToItsDisplaySize() {
+        assertEquals(3f, rasterCompensation(displaySize = 3, rasterSize = 1))
+        assertEquals(10f, rasterCompensation(displaySize = 2000, rasterSize = 200))
+    }
+
+    @Test
+    fun anUncappedAxisIsNotCompensated() {
+        assertEquals(1f, rasterCompensation(displaySize = 1080, rasterSize = 1080))
+        assertEquals(1f, rasterCompensation(displaySize = 1080, rasterSize = 0))
+    }
 }

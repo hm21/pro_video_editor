@@ -163,7 +163,8 @@ fun applyTimedImageLayers(
                     layerEndUs = endTimeUs,
                     loop = layer.loop,
                     animations = layer.animations,
-                    rasterScale = first.rasterScale
+                    rasterScaleX = first.rasterScaleX,
+                    rasterScaleY = first.rasterScaleY
                 )
                 Log.d(
                     RENDER_TAG,
@@ -213,7 +214,8 @@ fun applyTimedImageLayers(
                         layerStartUs = startTimeUs,
                         layerEndUs = endTimeUs,
                         animations = layer.animations,
-                        rasterScale = prepared.rasterScale
+                        rasterScaleX = prepared.rasterScaleX,
+                        rasterScaleY = prepared.rasterScaleY
                     )
                 } else {
                     BitmapOverlay.createStaticBitmapOverlay(
@@ -257,8 +259,15 @@ private data class PreparedOverlay(
      */
     val displayWidth: Int,
     val displayHeight: Int,
-    /** Reciprocal of the applied raster cap; `1f` when the raster was not capped. */
-    val rasterScale: Float,
+    /**
+     * Reciprocal of the applied raster cap, per axis; `1f` when uncapped.
+     *
+     * Per axis rather than shared, because [capRaster] rounds each axis to a
+     * whole pixel independently — a thin layer rounds far more coarsely on its
+     * short axis, and one shared factor would then render it out of shape.
+     */
+    val rasterScaleX: Float,
+    val rasterScaleY: Float,
 )
 
 /**
@@ -344,6 +353,20 @@ private fun capRaster(width: Int, height: Int, rasterScale: Float): Pair<Int, In
 }
 
 /**
+ * The factor Media3 has to multiply a [rasterSize]-pixel axis by to land back on
+ * the [displaySize] the layer was laid out at.
+ *
+ * It is the exact ratio rather than the raster scale that produced it, because
+ * [capRaster] rounds and floors each axis on its own: a 3 px axis capped to
+ * `0.1` lands on the one-pixel floor, 3.3x its requested size, while the other
+ * axis lands where it asked to. Reading each axis back off its own raster is
+ * what keeps such a layer in shape.
+ */
+internal fun rasterCompensation(displaySize: Int, rasterSize: Int): Float =
+    if (rasterSize <= 0 || rasterSize == displaySize) 1f
+    else displaySize.toFloat() / rasterSize
+
+/**
  * Scales, positions, unpremultiplies and rotates a single overlay [rawBitmap]
  * according to [layer], returning the final bitmap plus its anchor/settings.
  *
@@ -396,12 +419,9 @@ private fun prepareOverlay(
     } else {
         Pair(displayWidth, displayHeight)
     }
-    // Media3 multiplies the overlay by this, so it must undo the cap exactly.
-    val overlayScale = if (rasterWidth == displayWidth || rasterWidth <= 0) {
-        1f
-    } else {
-        displayWidth.toFloat() / rasterWidth
-    }
+    // Media3 multiplies the overlay by these, so they must undo the cap exactly.
+    val overlayScaleX = rasterCompensation(displayWidth, rasterWidth)
+    val overlayScaleY = rasterCompensation(displayHeight, rasterHeight)
 
     // Scale straight to the raster size. A stretched layer goes to the frame
     // (capped) in one step rather than through its declared size first.
@@ -426,7 +446,7 @@ private fun prepareOverlay(
         overlaySettings = StaticOverlaySettings.Builder()
             .setOverlayFrameAnchor(0f, 0f)
             .setBackgroundFrameAnchor(0f, 0f)
-            .setScale(overlayScale, overlayScale)
+            .setScale(overlayScaleX, overlayScaleY)
             .build()
     } else {
         val x = layer.x ?: 0
@@ -447,7 +467,7 @@ private fun prepareOverlay(
         overlaySettings = StaticOverlaySettings.Builder()
             .setBackgroundFrameAnchor(baseNormX, baseNormY)
             .setOverlayFrameAnchor(0f, 0f)
-            .setScale(overlayScale, overlayScale)
+            .setScale(overlayScaleX, overlayScaleY)
             .build()
     }
 
@@ -462,8 +482,8 @@ private fun prepareOverlay(
     // Rotation grows the bounding box. The display size grows with it, per
     // axis, so a caller laying out from [PreparedOverlay.displayWidth] sees the
     // rotated extent rather than the unrotated one.
-    val grownWidth = (rotatedOverlay.width * overlayScale).roundToInt()
-    val grownHeight = (rotatedOverlay.height * overlayScale).roundToInt()
+    val grownWidth = (rotatedOverlay.width * overlayScaleX).roundToInt()
+    val grownHeight = (rotatedOverlay.height * overlayScaleY).roundToInt()
 
     return PreparedOverlay(
         bitmap = rotatedOverlay,
@@ -472,7 +492,8 @@ private fun prepareOverlay(
         overlaySettings = overlaySettings,
         displayWidth = grownWidth,
         displayHeight = grownHeight,
-        rasterScale = overlayScale,
+        rasterScaleX = overlayScaleX,
+        rasterScaleY = overlayScaleY,
     )
 }
 
