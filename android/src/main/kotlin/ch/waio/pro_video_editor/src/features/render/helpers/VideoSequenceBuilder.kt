@@ -654,7 +654,10 @@ class VideoSequenceBuilder(
         // This makes the images get cropped together with the video
         val hasWithCropping = timedImageLayers.any { it.withCropping }
         if (hasWithCropping && timedImageLayers.isNotEmpty()) {
-            applyTimedImageLayers(clipVideoEffects, timedImageLayers, videoWidth, videoHeight)
+            applyTimedImageLayers(
+                clipVideoEffects, timedImageLayers, videoWidth, videoHeight,
+                outputWidth, outputHeight
+            )
         }
 
         // Apply crop if configured
@@ -679,7 +682,10 @@ class VideoSequenceBuilder(
         // Apply timed image layers AFTER crop if withCropping is disabled (default)
         // This makes the images stretch to the final cropped size
         if (!hasWithCropping && timedImageLayers.isNotEmpty()) {
-            applyTimedImageLayers(clipVideoEffects, timedImageLayers, videoWidth, videoHeight)
+            applyTimedImageLayers(
+                clipVideoEffects, timedImageLayers, videoWidth, videoHeight,
+                outputWidth, outputHeight
+            )
         }
 
         // Apply scale AFTER overlay and crop to match the iOS/macOS pipeline.

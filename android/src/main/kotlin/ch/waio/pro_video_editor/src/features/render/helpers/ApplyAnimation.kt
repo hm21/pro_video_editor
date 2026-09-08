@@ -148,7 +148,13 @@ internal class AnimatedBitmapOverlay(
     private val layerStartUs: Long,
     private val layerEndUs: Long,
     private val loop: Boolean,
-    private val animations: List<LayerAnimationConfig>
+    private val animations: List<LayerAnimationConfig>,
+    /**
+     * Undoes an overlay raster cap (see `overlayRasterScale`): the frames may be
+     * rastered below the size they are laid out at, and every settings object
+     * this overlay builds has to scale them back up. `1f` when uncapped.
+     */
+    private val rasterScale: Float = 1f
 ) : BitmapOverlay() {
 
     /** Convenience constructor for a single static frame. */
@@ -162,7 +168,8 @@ internal class AnimatedBitmapOverlay(
         videoHeight: Int,
         layerStartUs: Long,
         layerEndUs: Long,
-        animations: List<LayerAnimationConfig>
+        animations: List<LayerAnimationConfig>,
+        rasterScale: Float = 1f
     ) : this(
         frames = listOf(bitmap),
         frameDurationsUs = listOf(0L),
@@ -175,7 +182,8 @@ internal class AnimatedBitmapOverlay(
         layerStartUs = layerStartUs,
         layerEndUs = layerEndUs,
         loop = false,
-        animations = animations
+        animations = animations,
+        rasterScale = rasterScale
     )
 
     // Cumulative end time of each frame within one playthrough, plus the total.
@@ -208,7 +216,7 @@ internal class AnimatedBitmapOverlay(
         var alpha = 1.0f
         var offsetX = 0f
         var offsetY = 0f
-        var scaleVal = 1.0f
+        var scaleVal = rasterScale
 
         // Layer half-size in [-1, 1] units (canvas spans [-1, 1]).
         val halfNormW = imageWidth.toFloat() / videoWidth

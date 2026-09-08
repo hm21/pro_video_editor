@@ -9,6 +9,7 @@ import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.OverlayEffect
 import java.io.File
 import java.nio.ByteBuffer
+import kotlin.math.roundToInt
 import androidx.core.graphics.scale
 import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.TimestampWrapper
@@ -96,9 +97,15 @@ fun applyTimedImageLayers(
     videoEffects: MutableList<Effect>,
     imageLayers: List<VideoSequenceBuilder.ImageLayerConfig>,
     videoWidth: Int,
-    videoHeight: Int
+    videoHeight: Int,
+    outputWidth: Int? = null,
+    outputHeight: Int? = null
 ) {
     if (imageLayers.isEmpty()) return
+
+    val rasterScale = overlayRasterScale(
+        videoWidth, videoHeight, outputWidth, outputHeight
+    )
 
     Log.d(
         RENDER_TAG,
@@ -134,7 +141,7 @@ fun applyTimedImageLayers(
                 // Prepare every frame identically so they share dimensions and
                 // anchor; the overlay swaps frames over time.
                 val prepared = gifFrames.map {
-                    prepareOverlay(it.bitmap, layer, videoWidth, videoHeight)
+                    prepareOverlay(it.bitmap, layer, videoWidth, videoHeight, rasterScale)
                 }
                 val first = prepared.first()
                 bitmapOverlay = AnimatedBitmapOverlay(
@@ -142,14 +149,15 @@ fun applyTimedImageLayers(
                     frameDurationsUs = gifFrames.map { it.durationUs },
                     baseNormX = first.baseNormX,
                     baseNormY = first.baseNormY,
-                    imageWidth = first.bitmap.width,
-                    imageHeight = first.bitmap.height,
+                    imageWidth = first.displayWidth,
+                    imageHeight = first.displayHeight,
                     videoWidth = videoWidth,
                     videoHeight = videoHeight,
                     layerStartUs = startTimeUs,
                     layerEndUs = endTimeUs,
                     loop = layer.loop,
-                    animations = layer.animations
+                    animations = layer.animations,
+                    rasterScale = first.rasterScale
                 )
                 Log.d(
                     RENDER_TAG,
@@ -164,7 +172,8 @@ fun applyTimedImageLayers(
                 // decoded no larger than it will end up: a full-resolution decode
                 // of a phone photo costs a second full-resolution copy when the
                 // orientation has to be turned, which is where an overlay OOMs.
-                val (reqWidth, reqHeight) = overlayDecodeSize(layer, videoWidth, videoHeight)
+                val (reqWidth, reqHeight) =
+                    overlayDecodeSize(layer, videoWidth, videoHeight, rasterScale)
                 val layerBitmap = ImageOrientation.decode(
                     image,
                     reqWidth = reqWidth,
@@ -178,7 +187,8 @@ fun applyTimedImageLayers(
                     )
                     continue
                 }
-                val prepared = prepareOverlay(layerBitmap, layer, videoWidth, videoHeight)
+                val prepared =
+                    prepareOverlay(layerBitmap, layer, videoWidth, videoHeight, rasterScale)
 
                 bitmapOverlay = if (hasAnimations) {
                     Log.d(
@@ -190,13 +200,14 @@ fun applyTimedImageLayers(
                         bitmap = prepared.bitmap,
                         baseNormX = prepared.baseNormX,
                         baseNormY = prepared.baseNormY,
-                        imageWidth = prepared.bitmap.width,
-                        imageHeight = prepared.bitmap.height,
+                        imageWidth = prepared.displayWidth,
+                        imageHeight = prepared.displayHeight,
                         videoWidth = videoWidth,
                         videoHeight = videoHeight,
                         layerStartUs = startTimeUs,
                         layerEndUs = endTimeUs,
-                        animations = layer.animations
+                        animations = layer.animations,
+                        rasterScale = prepared.rasterScale
                     )
                 } else {
                     BitmapOverlay.createStaticBitmapOverlay(
@@ -230,7 +241,58 @@ private data class PreparedOverlay(
     val baseNormX: Float,
     val baseNormY: Float,
     val overlaySettings: StaticOverlaySettings,
+    /**
+     * Size the overlay occupies in the composition, in composition pixels.
+     *
+     * Equal to [bitmap]'s dimensions unless the raster was capped by
+     * [overlayRasterScale], in which case the bitmap is smaller and
+     * [overlaySettings] carries the compensating scale. Placement math must use
+     * these rather than the bitmap's own size.
+     */
+    val displayWidth: Int,
+    val displayHeight: Int,
+    /** Reciprocal of the applied raster cap; `1f` when the raster was not capped. */
+    val rasterScale: Float,
 )
+
+/**
+ * How much of an overlay's requested resolution survives to the encoded frame.
+ *
+ * An overlay is laid out in the *composition's* pixel space, which is the source
+ * clip's own resolution. When a custom output resolution is set, every clip is
+ * scaled into it by a `Presentation` effect applied **after** the overlay — so
+ * an overlay rastered above that ratio has its extra pixels thrown away by that
+ * downscale before anything is encoded.
+ *
+ * Rastering it at the surviving size instead is therefore free of visible
+ * detail, and it is the difference between a bitmap the heap can hold and one it
+ * cannot: [unpremultiplyAlpha] needs two full-frame Java-heap buffers per layer
+ * (`ByteBuffer.allocateDirect` plus a `ByteArray`), both counted against
+ * Android's 256 MiB per-app growth limit, and every prepared overlay stays
+ * resident for the whole render. A 4K source exported at 1080p asked for four
+ * times the pixels it could show, per layer.
+ *
+ * Returns `1f` — no capping — when no output resolution was requested, when the
+ * output is not smaller than the composition, or when either is degenerate.
+ */
+internal fun overlayRasterScale(
+    videoWidth: Int,
+    videoHeight: Int,
+    outputWidth: Int?,
+    outputHeight: Int?,
+): Float {
+    if (outputWidth == null || outputHeight == null) return 1f
+    if (videoWidth <= 0 || videoHeight <= 0) return 1f
+    if (outputWidth <= 0 || outputHeight <= 0) return 1f
+
+    // SCALE_TO_FIT preserves aspect ratio, so the frame shrinks by whichever
+    // axis binds first.
+    val scale = minOf(
+        outputWidth.toFloat() / videoWidth,
+        outputHeight.toFloat() / videoHeight,
+    )
+    return if (scale >= 1f) 1f else scale
+}
 
 /**
  * The size [prepareOverlay] will first scale a decoded layer down to, in
@@ -246,12 +308,31 @@ internal fun overlayDecodeSize(
     layer: VideoSequenceBuilder.ImageLayerConfig,
     videoWidth: Int,
     videoHeight: Int,
+    rasterScale: Float = 1f,
 ): Pair<Int, Int> {
     val width = layer.width
     val height = layer.height
-    if (width != null && height != null) return Pair(width.toInt(), height.toInt())
-    if (layer.x == null && layer.y == null) return Pair(videoWidth, videoHeight)
+    if (width != null && height != null) {
+        return capRaster(width.toInt(), height.toInt(), rasterScale)
+    }
+    if (layer.x == null && layer.y == null) {
+        return capRaster(videoWidth, videoHeight, rasterScale)
+    }
     return Pair(0, 0)
+}
+
+/**
+ * [width] × [height] reduced by [rasterScale], never below one pixel per axis.
+ *
+ * A zero or negative input is passed through untouched — [overlayDecodeSize]
+ * uses `0 × 0` to mean "keep the natural size".
+ */
+private fun capRaster(width: Int, height: Int, rasterScale: Float): Pair<Int, Int> {
+    if (rasterScale >= 1f || width <= 0 || height <= 0) return Pair(width, height)
+    return Pair(
+        (width * rasterScale).roundToInt().coerceAtLeast(1),
+        (height * rasterScale).roundToInt().coerceAtLeast(1),
+    )
 }
 
 /**
@@ -268,10 +349,56 @@ private fun prepareOverlay(
     layer: VideoSequenceBuilder.ImageLayerConfig,
     videoWidth: Int,
     videoHeight: Int,
+    rasterScale: Float = 1f,
 ): PreparedOverlay {
-    // Scale to target size if provided
-    val sizedBitmap = if (layer.width != null && layer.height != null) {
-        val scaled = rawBitmap.scale(layer.width.toInt(), layer.height.toInt())
+    // Determine if this layer should stretch or be positioned
+    val isStretched = layer.x == null && layer.y == null
+    val hasExplicitSize = layer.width != null && layer.height != null
+
+    // Size the overlay occupies in the composition. The raster below may be
+    // smaller (see [overlayRasterScale]); placement is laid out from these and
+    // the shortfall is handed back to Media3 as an overlay scale.
+    //
+    // A positioned layer with no explicit size is laid out from its own pixel
+    // dimensions, so [overlayDecodeSize] does not sample it down and the raster
+    // is not capped here either — capping it would shrink the overlay.
+    val displayWidth: Int
+    val displayHeight: Int
+    val cappable: Boolean
+    when {
+        isStretched -> {
+            displayWidth = videoWidth
+            displayHeight = videoHeight
+            cappable = true
+        }
+        hasExplicitSize -> {
+            displayWidth = layer.width!!.toInt()
+            displayHeight = layer.height!!.toInt()
+            cappable = true
+        }
+        else -> {
+            displayWidth = rawBitmap.width
+            displayHeight = rawBitmap.height
+            cappable = false
+        }
+    }
+
+    val (rasterWidth, rasterHeight) = if (cappable) {
+        capRaster(displayWidth, displayHeight, rasterScale)
+    } else {
+        Pair(displayWidth, displayHeight)
+    }
+    // Media3 multiplies the overlay by this, so it must undo the cap exactly.
+    val overlayScale = if (rasterWidth == displayWidth || rasterWidth <= 0) {
+        1f
+    } else {
+        displayWidth.toFloat() / rasterWidth
+    }
+
+    // Scale straight to the raster size. A stretched layer goes to the frame
+    // (capped) in one step rather than through its declared size first.
+    val sizedBitmap = if (isStretched || hasExplicitSize) {
+        val scaled = rawBitmap.scale(rasterWidth, rasterHeight)
         // scale() may return the same object when dimensions already match
         if (scaled !== rawBitmap) rawBitmap.recycle()
         scaled
@@ -279,50 +406,40 @@ private fun prepareOverlay(
         rawBitmap
     }
 
-    // Determine if this layer should stretch or be positioned
-    val isStretched = layer.x == null && layer.y == null
+    val unpremultiplied = unpremultiplyAlpha(sizedBitmap)
+    if (unpremultiplied !== sizedBitmap) sizedBitmap.recycle()
+    val finalOverlay: Bitmap = unpremultiplied
 
-    val finalOverlay: Bitmap
     val overlaySettings: StaticOverlaySettings
     var baseNormX = 0f
     var baseNormY = 0f
 
     if (isStretched) {
-        // Stretch image to fill the entire video frame
-        val scaledOverlay = sizedBitmap.scale(videoWidth, videoHeight)
-        if (scaledOverlay !== sizedBitmap) sizedBitmap.recycle()
-
-        val unpremultiplied = unpremultiplyAlpha(scaledOverlay)
-        if (unpremultiplied !== scaledOverlay) scaledOverlay.recycle()
-        finalOverlay = unpremultiplied
-
         overlaySettings = StaticOverlaySettings.Builder()
             .setOverlayFrameAnchor(0f, 0f)
             .setBackgroundFrameAnchor(0f, 0f)
+            .setScale(overlayScale, overlayScale)
             .build()
     } else {
-        // Position image at specified x/y offset
-        val imageWidth = sizedBitmap.width
-        val imageHeight = sizedBitmap.height
-
-        val unpremultiplied = unpremultiplyAlpha(sizedBitmap)
-        if (unpremultiplied !== sizedBitmap) sizedBitmap.recycle()
-        finalOverlay = unpremultiplied
-
         val x = layer.x ?: 0
         val y = layer.y ?: 0
 
         // Use OverlaySettings for positioning
         // Media3 uses OpenGL coordinates: x[-1,1] left→right, y[-1,1] bottom→top.
         // Input uses top-left origin, so y must be flipped.
-        val centerX = x.toFloat() + imageWidth / 2f
-        val centerY = y.toFloat() + imageHeight / 2f
+        //
+        // Laid out from the display size: a capped raster is scaled back up by
+        // [overlayScale] about its own centre, so that centre is what gets
+        // anchored and it must not move with the cap.
+        val centerX = x.toFloat() + displayWidth / 2f
+        val centerY = y.toFloat() + displayHeight / 2f
         baseNormX = (centerX / videoWidth) * 2f - 1f
         baseNormY = 1f - (centerY / videoHeight) * 2f
 
         overlaySettings = StaticOverlaySettings.Builder()
             .setBackgroundFrameAnchor(baseNormX, baseNormY)
             .setOverlayFrameAnchor(0f, 0f)
+            .setScale(overlayScale, overlayScale)
             .build()
     }
 
@@ -334,7 +451,21 @@ private fun prepareOverlay(
         finalOverlay, Math.toDegrees(layer.rotation).toFloat()
     )
 
-    return PreparedOverlay(rotatedOverlay, baseNormX, baseNormY, overlaySettings)
+    // Rotation grows the bounding box. The display size grows with it, per
+    // axis, so a caller laying out from [PreparedOverlay.displayWidth] sees the
+    // rotated extent rather than the unrotated one.
+    val grownWidth = (rotatedOverlay.width * overlayScale).roundToInt()
+    val grownHeight = (rotatedOverlay.height * overlayScale).roundToInt()
+
+    return PreparedOverlay(
+        bitmap = rotatedOverlay,
+        baseNormX = baseNormX,
+        baseNormY = baseNormY,
+        overlaySettings = overlaySettings,
+        displayWidth = grownWidth,
+        displayHeight = grownHeight,
+        rasterScale = overlayScale,
+    )
 }
 
 /**
