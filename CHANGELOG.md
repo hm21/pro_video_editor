@@ -1,5 +1,6 @@
 ## Unreleased
 - **FIX**(android): An overlay layer no longer takes the app down with an `OutOfMemoryError` when the source clip is higher-resolution than the export. Overlays are laid out in the composition's pixel space — the clip's own resolution — while a custom output resolution is applied after them, so a 4K clip exported at 1080p rastered every layer at four times the pixels it could show, and each one cost two full-frame Java-heap buffers against Android's 256 MiB per-app limit. Each overlay is now rastered at the size that survives to the encoded frame and scaled back by the compositor, which is free of visible detail. An export whose output resolution matches its source is unchanged.
+- **PERF**(android): Converting an overlay's premultiplied alpha no longer allocates a second full-frame buffer. It read the pixels out of the direct `ByteBuffer` into a `ByteArray` and wrote them back; both are Java-heap allocations against the same 256 MiB per-app limit, once per layer. The conversion now runs in place.
 
 ## 2.11.3
 - **FIX**(iOS, macOS): Cancelling a render or split while its export still waits for the encoder no longer crashes the app. The queued session was cancelled and then started anyway, which AVFoundation answers with an Objective-C exception Swift cannot catch.

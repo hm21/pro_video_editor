@@ -266,11 +266,13 @@ private data class PreparedOverlay(
  *
  * Rastering it at the surviving size instead is therefore free of visible
  * detail, and it is the difference between a bitmap the heap can hold and one it
- * cannot: [unpremultiplyAlpha] needs two full-frame Java-heap buffers per layer
- * (`ByteBuffer.allocateDirect` plus a `ByteArray`), both counted against
- * Android's 256 MiB per-app growth limit, and every prepared overlay stays
- * resident for the whole render. A 4K source exported at 1080p asked for four
- * times the pixels it could show, per layer.
+ * cannot: [unpremultiplyAlpha] needs a full-frame Java-heap buffer per layer
+ * (`ByteBuffer.allocateDirect`, which reaches the Dalvik heap through
+ * `newNonMovableArray`) counted against Android's 256 MiB per-app growth limit,
+ * and every prepared overlay stays resident for the whole render — Media3 reads
+ * it back out of `BitmapOverlay.getBitmap` on every frame, so none of them can
+ * be released early. A 4K source exported at 1080p asked for four times the
+ * pixels it could show, per layer.
  *
  * Returns `1f` — no capping — when no output resolution was requested, when the
  * output is not smaller than the composition, or when either is degenerate.
@@ -508,21 +510,37 @@ private fun unpremultiplyAlpha(bitmap: Bitmap): Bitmap {
     val n = w * h * 4
     val buf = ByteBuffer.allocateDirect(n)
     out.copyPixelsToBuffer(buf)
-    val px = ByteArray(n)
-    buf.rewind(); buf.get(px)
 
-    // ARGB_8888 raw byte order: R, G, B, A
-    for (i in 0 until w * h) {
-        val o = i * 4
-        val a = px[o + 3].toInt() and 0xFF
-        if (a in 1..254) {
-            px[o]     = ((px[o].toInt()     and 0xFF) * 255 / a).toByte()
-            px[o + 1] = ((px[o + 1].toInt() and 0xFF) * 255 / a).toByte()
-            px[o + 2] = ((px[o + 2].toInt() and 0xFF) * 255 / a).toByte()
-        }
-    }
+    unpremultiplyInPlace(buf, n)
 
-    buf.rewind(); buf.put(px); buf.rewind()
+    buf.rewind()
     out.copyPixelsFromBuffer(buf)
     return out
+}
+
+/**
+ * Divides the first [byteCount] bytes of [buf] out by their own alpha, in place.
+ *
+ * Mutating the buffer through absolute get/put, rather than reading it out into
+ * a `ByteArray` first, is what keeps the peak at one full-frame buffer instead
+ * of two. Both are Java-heap allocations counted against Android's per-app
+ * growth limit — `ByteBuffer.allocateDirect` reaches it through
+ * `newNonMovableArray` — and a full-frame overlay makes each of them tens of
+ * megabytes, once per layer.
+ *
+ * Pixels are ARGB_8888 in raw byte order: R, G, B, A. A fully transparent or
+ * fully opaque pixel is left alone: there is nothing to divide out of an opaque
+ * one, and `a == 0` carries no colour to recover and would divide by zero.
+ */
+internal fun unpremultiplyInPlace(buf: ByteBuffer, byteCount: Int) {
+    var o = 0
+    while (o + 3 < byteCount) {
+        val a = buf.get(o + 3).toInt() and 0xFF
+        if (a in 1..254) {
+            buf.put(o, (((buf.get(o).toInt() and 0xFF) * 255) / a).toByte())
+            buf.put(o + 1, (((buf.get(o + 1).toInt() and 0xFF) * 255) / a).toByte())
+            buf.put(o + 2, (((buf.get(o + 2).toInt() and 0xFF) * 255) / a).toByte())
+        }
+        o += 4
+    }
 }
