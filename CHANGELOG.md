@@ -1,3 +1,7 @@
+## 2.11.4
+- **FIX**(android): An overlay layer — a drawing, sticker, text or caption — no longer takes the app down with an `OutOfMemoryError` when the source clip is higher-resolution than the export. Each overlay is now rastered at the size that survives to the encoded frame instead of at the source resolution, so a 4K clip exported at 1080p no longer draws every layer at four times the pixels it can show. An export whose output resolution matches its source is unchanged.
+- **PERF**(android): Converting an overlay's premultiplied alpha works through a small scratch band instead of a second full-frame buffer, halving the heap peak of that step without slowing it down.
+
 ## 2.11.3
 - **FIX**(iOS, macOS): Cancelling a render or split while its export still waits for the encoder no longer crashes the app. The queued session was cancelled and then started anyway, which AVFoundation answers with an Objective-C exception Swift cannot catch.
 - **FIX**(iOS, macOS): A cancelled render now unwinds at the HDR pre-transcode or transition pre-render it is in, instead of building the whole composition first and reporting the cancellation as a render error.

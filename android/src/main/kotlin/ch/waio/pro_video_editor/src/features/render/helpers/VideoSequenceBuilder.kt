@@ -654,7 +654,17 @@ class VideoSequenceBuilder(
         // This makes the images get cropped together with the video
         val hasWithCropping = timedImageLayers.any { it.withCropping }
         if (hasWithCropping && timedImageLayers.isNotEmpty()) {
-            applyTimedImageLayers(clipVideoEffects, timedImageLayers, videoWidth, videoHeight)
+            applyTimedImageLayers(
+                clipVideoEffects, timedImageLayers, videoWidth, videoHeight,
+                outputWidth, outputHeight,
+                // The crop below throws away everything outside its rectangle,
+                // so only that rectangle is scaled into the output. The raster
+                // ceiling is the output against the cropped frame, not the full
+                // one — sizing it against the full frame would raster these
+                // overlays below what the export can still show.
+                frameWidth = croppedWidth ?: videoWidth,
+                frameHeight = croppedHeight ?: videoHeight
+            )
         }
 
         // Apply crop if configured
@@ -679,7 +689,10 @@ class VideoSequenceBuilder(
         // Apply timed image layers AFTER crop if withCropping is disabled (default)
         // This makes the images stretch to the final cropped size
         if (!hasWithCropping && timedImageLayers.isNotEmpty()) {
-            applyTimedImageLayers(clipVideoEffects, timedImageLayers, videoWidth, videoHeight)
+            applyTimedImageLayers(
+                clipVideoEffects, timedImageLayers, videoWidth, videoHeight,
+                outputWidth, outputHeight
+            )
         }
 
         // Apply scale AFTER overlay and crop to match the iOS/macOS pipeline.
