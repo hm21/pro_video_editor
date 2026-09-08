@@ -521,26 +521,65 @@ private fun unpremultiplyAlpha(bitmap: Bitmap): Bitmap {
 /**
  * Divides the first [byteCount] bytes of [buf] out by their own alpha, in place.
  *
- * Mutating the buffer through absolute get/put, rather than reading it out into
- * a `ByteArray` first, is what keeps the peak at one full-frame buffer instead
- * of two. Both are Java-heap allocations counted against Android's per-app
- * growth limit — `ByteBuffer.allocateDirect` reaches it through
- * `newNonMovableArray` — and a full-frame overlay makes each of them tens of
- * megabytes, once per layer.
+ * Works through a small reusable scratch band rather than reading the whole
+ * buffer out into a `ByteArray` of its own size. That second full-frame array
+ * was the point: both it and [buf] are Java-heap allocations counted against
+ * Android's per-app growth limit — `ByteBuffer.allocateDirect` reaches it
+ * through `newNonMovableArray` — and a full-frame overlay made each of them tens
+ * of megabytes, once per layer, on the path that was already running out.
+ *
+ * The band keeps the arithmetic on a plain `ByteArray`, which is materially
+ * faster than absolute get/put against a direct buffer, so the memory is bought
+ * back without paying for it in render time. [bandBytes] is a multiple of four
+ * so no band ever splits a pixel; it is a parameter only so tests can force
+ * several bands over a small buffer.
  *
  * Pixels are ARGB_8888 in raw byte order: R, G, B, A. A fully transparent or
  * fully opaque pixel is left alone: there is nothing to divide out of an opaque
  * one, and `a == 0` carries no colour to recover and would divide by zero.
  */
-internal fun unpremultiplyInPlace(buf: ByteBuffer, byteCount: Int) {
-    var o = 0
-    while (o + 3 < byteCount) {
-        val a = buf.get(o + 3).toInt() and 0xFF
-        if (a in 1..254) {
-            buf.put(o, (((buf.get(o).toInt() and 0xFF) * 255) / a).toByte())
-            buf.put(o + 1, (((buf.get(o + 1).toInt() and 0xFF) * 255) / a).toByte())
-            buf.put(o + 2, (((buf.get(o + 2).toInt() and 0xFF) * 255) / a).toByte())
+internal fun unpremultiplyInPlace(
+    buf: ByteBuffer,
+    byteCount: Int,
+    bandBytes: Int = DEFAULT_UNPREMULTIPLY_BAND_BYTES,
+) {
+    if (byteCount < 4) return
+
+    // Whole pixels only; a trailing partial pixel is not ours to touch.
+    val pixelBytes = byteCount - (byteCount % 4)
+    val band = minOf(bandBytes, pixelBytes)
+    val scratch = ByteArray(band)
+
+    var offset = 0
+    while (offset < pixelBytes) {
+        val len = minOf(band, pixelBytes - offset)
+
+        buf.position(offset)
+        buf.get(scratch, 0, len)
+
+        var o = 0
+        while (o < len) {
+            val a = scratch[o + 3].toInt() and 0xFF
+            if (a in 1..254) {
+                scratch[o] = (((scratch[o].toInt() and 0xFF) * 255) / a).toByte()
+                scratch[o + 1] = (((scratch[o + 1].toInt() and 0xFF) * 255) / a).toByte()
+                scratch[o + 2] = (((scratch[o + 2].toInt() and 0xFF) * 255) / a).toByte()
+            }
+            o += 4
         }
-        o += 4
+
+        buf.position(offset)
+        buf.put(scratch, 0, len)
+
+        offset += len
     }
 }
+
+/**
+ * Scratch band [unpremultiplyInPlace] converts through, in bytes.
+ *
+ * 64 KiB is large enough that the per-band bulk copies disappear next to the
+ * per-pixel work, and small enough to be irrelevant beside the frame buffer it
+ * replaced — the whole point of the band.
+ */
+private const val DEFAULT_UNPREMULTIPLY_BAND_BYTES = 64 * 1024

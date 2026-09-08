@@ -95,6 +95,34 @@ internal class UnpremultiplyInPlaceTest {
         assertEquals(listOf(127, 63, 31, 128, 64, 32, 16, 128), buf.bytes())
     }
 
+    /**
+     * Banding must not change the result: the same payload converts identically
+     * whether it fits one band or is split across several, and a band boundary
+     * must never fall inside a pixel.
+     */
+    @Test
+    fun bandingDoesNotChangeTheResult() {
+        val pixels = (0 until 64).flatMap { listOf(64, 32, 16, 128) }.toIntArray()
+        val oneBand = buffer(*pixels)
+        val manyBands = buffer(*pixels)
+
+        unpremultiplyInPlace(oneBand, pixels.size)
+        unpremultiplyInPlace(manyBands, pixels.size, bandBytes = 8)
+
+        assertEquals(oneBand.bytes(), manyBands.bytes())
+        assertEquals(List(64) { listOf(127, 63, 31, 128) }.flatten(), manyBands.bytes())
+    }
+
+    /** A band that would split a pixel is clamped to whole pixels. */
+    @Test
+    fun aBandSmallerThanAPixelStillConvertsWholePixels() {
+        val buf = buffer(64, 32, 16, 128, 200, 100, 50, 100)
+
+        unpremultiplyInPlace(buf, 8, bandBytes = 4)
+
+        assertEquals(listOf(127, 63, 31, 128, 254, 255, 127, 100), buf.bytes())
+    }
+
     /** A trailing partial pixel is not read past the end of the buffer. */
     @Test
     fun aTruncatedTrailingPixelIsSkipped() {
