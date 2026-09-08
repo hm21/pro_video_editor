@@ -656,7 +656,14 @@ class VideoSequenceBuilder(
         if (hasWithCropping && timedImageLayers.isNotEmpty()) {
             applyTimedImageLayers(
                 clipVideoEffects, timedImageLayers, videoWidth, videoHeight,
-                outputWidth, outputHeight
+                outputWidth, outputHeight,
+                // The crop below throws away everything outside its rectangle,
+                // so only that rectangle is scaled into the output. The raster
+                // ceiling is the output against the cropped frame, not the full
+                // one — sizing it against the full frame would raster these
+                // overlays below what the export can still show.
+                frameWidth = croppedWidth ?: videoWidth,
+                frameHeight = croppedHeight ?: videoHeight
             )
         }
 

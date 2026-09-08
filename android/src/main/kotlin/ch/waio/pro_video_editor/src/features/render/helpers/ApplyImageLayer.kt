@@ -91,6 +91,10 @@ internal fun resolveOpenEndedOutAnimations(
  * @param imageLayers List of image layers with timing information
  * @param videoWidth Width of the video frame for positioning
  * @param videoHeight Height of the video frame for positioning
+ * @param frameWidth Width of the frame that actually reaches the output, when a
+ *   crop applied after these overlays shrinks it below [videoWidth]. Only the
+ *   raster ceiling reads it; positioning stays in [videoWidth] x [videoHeight].
+ * @param frameHeight Height counterpart of [frameWidth]
  */
 @UnstableApi
 fun applyTimedImageLayers(
@@ -99,12 +103,14 @@ fun applyTimedImageLayers(
     videoWidth: Int,
     videoHeight: Int,
     outputWidth: Int? = null,
-    outputHeight: Int? = null
+    outputHeight: Int? = null,
+    frameWidth: Int = videoWidth,
+    frameHeight: Int = videoHeight
 ) {
     if (imageLayers.isEmpty()) return
 
     val rasterScale = overlayRasterScale(
-        videoWidth, videoHeight, outputWidth, outputHeight
+        frameWidth, frameHeight, outputWidth, outputHeight
     )
 
     Log.d(
