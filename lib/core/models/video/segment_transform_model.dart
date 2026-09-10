@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:ui';
 
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
+import 'package:pro_video_editor/shared/utils/parser/offset_parser.dart';
 
 /// Defines how a video segment's source frame is scaled into its target
 /// [SegmentTransform.size].
@@ -72,10 +73,7 @@ class SegmentTransform {
   factory SegmentTransform.fromMap(Map<String, dynamic> map) {
     return SegmentTransform(
       offset: map['offset'] != null
-          ? Offset(
-              safeParseDouble((map['offset'] as Map<String, dynamic>)['dx']),
-              safeParseDouble((map['offset'] as Map<String, dynamic>)['dy']),
-            )
+          ? safeParseOffset(map['offset'] as Map<String, dynamic>)
           : null,
       size: map['size'] != null
           ? Size(

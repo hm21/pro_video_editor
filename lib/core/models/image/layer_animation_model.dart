@@ -1,4 +1,9 @@
 // ignore_for_file: public_member_api_docs, sort_constructors_first
+import 'dart:ui';
+
+import 'package:pro_video_editor/shared/utils/parser/offset_parser.dart';
+
+import 'image_layer_model.dart';
 
 /// The type of animation to apply to an image layer.
 enum LayerAnimationType {
@@ -84,8 +89,9 @@ enum AnimationPhase {
 
 /// A single animation applied to an [ImageLayer].
 ///
-/// Multiple animations can be combined on one layer, e.g. a [fade] in
-/// together with a [slide] in from the left.
+/// Multiple animations can be combined on one layer, e.g. a
+/// [LayerAnimationType.fade] in together with a [LayerAnimationType.slide] in
+/// from the left.
 ///
 /// Example:
 /// ```dart
@@ -114,6 +120,19 @@ enum AnimationPhase {
 ///   ],
 /// )
 /// ```
+///
+/// A slide can start from a point of your own instead of a canvas edge — the
+/// layer below comes in diagonally from beyond the top-left corner:
+///
+/// ```dart
+/// LayerAnimation(
+///   type: LayerAnimationType.slide,
+///   phase: AnimationPhase.animateIn,
+///   duration: const Duration(milliseconds: 600),
+///   slideFrom: const Offset(-200, -200),
+///   curve: AnimationCurve.easeOutCubic,
+/// )
+/// ```
 class LayerAnimation {
   /// Creates a [LayerAnimation].
   const LayerAnimation({
@@ -122,10 +141,13 @@ class LayerAnimation {
     required this.duration,
     this.curve = AnimationCurve.linear,
     this.slideDirection,
+    this.slideFrom,
     this.scaleFrom,
   }) : assert(
-         type != LayerAnimationType.slide || slideDirection != null,
-         'slideDirection is required for slide animations',
+         type != LayerAnimationType.slide ||
+             slideDirection != null ||
+             slideFrom != null,
+         'slide animations need either a slideDirection or a slideFrom point',
        );
 
   /// The kind of animation (fade, slide, scale).
@@ -144,8 +166,29 @@ class LayerAnimation {
 
   /// The direction for [LayerAnimationType.slide] animations.
   ///
-  /// Required when [type] is [LayerAnimationType.slide].
+  /// The layer travels between its resting place and the canvas edge in this
+  /// direction, far enough to sit completely outside the frame.
+  ///
+  /// Required when [type] is [LayerAnimationType.slide], unless [slideFrom]
+  /// names a start point instead.
   final SlideDirection? slideDirection;
+
+  /// A custom start point for [LayerAnimationType.slide] animations, in
+  /// pixels.
+  ///
+  /// Uses the same coordinate system as [ImageLayer.offset]: the layer's
+  /// top-left corner measured from the top-left of the video frame. The layer
+  /// starts here and slides to its resting [ImageLayer.offset]
+  /// ([AnimationPhase.animateIn]), or leaves its resting place for this point
+  /// ([AnimationPhase.animateOut]). With [AnimationPhase.animateInOut] the
+  /// point is both: the layer enters from it and leaves back towards it.
+  ///
+  /// Values may sit outside the frame — `Offset(-500, 800)` starts the layer
+  /// 500px past the left edge. A layer without an [ImageLayer.offset] is
+  /// stretched over the frame and rests at `Offset.zero`.
+  ///
+  /// Overrides [slideDirection] when both are set.
+  final Offset? slideFrom;
 
   /// The starting scale factor for [LayerAnimationType.scale] animations.
   ///
@@ -160,6 +203,9 @@ class LayerAnimation {
       'durationUs': duration.inMicroseconds,
       'curve': curve.name,
       'slideDirection': slideDirection?.name,
+      'slideFrom': slideFrom != null
+          ? {'dx': slideFrom!.dx, 'dy': slideFrom!.dy}
+          : null,
       'scaleFrom': scaleFrom,
     };
   }
@@ -175,6 +221,9 @@ class LayerAnimation {
       slideDirection: map['slideDirection'] != null
           ? SlideDirection.values.byName(map['slideDirection'] as String)
           : null,
+      slideFrom: map['slideFrom'] != null
+          ? safeParseOffset(map['slideFrom'] as Map<String, dynamic>)
+          : null,
       scaleFrom: map['scaleFrom'] as double?,
     );
   }
@@ -184,6 +233,7 @@ class LayerAnimation {
     return 'LayerAnimation(type: $type, phase: $phase, '
         'duration: $duration, curve: $curve'
         '${slideDirection != null ? ', slideDirection: $slideDirection' : ''}'
+        '${slideFrom != null ? ', slideFrom: $slideFrom' : ''}'
         '${scaleFrom != null ? ', scaleFrom: $scaleFrom' : ''})';
   }
 
@@ -195,6 +245,7 @@ class LayerAnimation {
         other.duration == duration &&
         other.curve == curve &&
         other.slideDirection == slideDirection &&
+        other.slideFrom == slideFrom &&
         other.scaleFrom == scaleFrom;
   }
 
@@ -205,6 +256,7 @@ class LayerAnimation {
         duration.hashCode ^
         curve.hashCode ^
         slideDirection.hashCode ^
+        slideFrom.hashCode ^
         scaleFrom.hashCode;
   }
 }

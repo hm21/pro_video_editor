@@ -82,6 +82,26 @@ func slideOffset(
   }
 }
 
+/// Computes the slide translation toward a caller-chosen start point instead of
+/// a frame edge (see `slideOffset`).
+///
+/// `slideFrom` and `layerOrigin` are both the layer's top-left corner in frame
+/// pixels with Flutter's top-left origin, so their difference is the distance
+/// the overlay travels — its own size cancels out. The result is in Core
+/// Graphics space (Y bottom-up), which flips the vertical component.
+///
+/// At `invP == 1` the overlay sits on the start point; at `invP == 0` it rests.
+func slideFromOffset(
+  invP: CGFloat,
+  slideFrom: CGPoint,
+  layerOrigin: CGPoint
+) -> CGPoint {
+  CGPoint(
+    x: (slideFrom.x - layerOrigin.x) * invP,
+    y: -(slideFrom.y - layerOrigin.y) * invP
+  )
+}
+
 /// Computes animation transforms and opacity for overlaying an image layer.
 /// Returns (opacity, additionalTransform) to apply to the overlay.
 func computeAnimation(
@@ -139,14 +159,27 @@ func computeAnimation(
       opacity *= p
 
     case "slide":
-      let direction = anim.slideDirection ?? "left"
       let invP = CGFloat(1.0 - p)
-      let off = slideOffset(
-        direction: direction,
-        invP: invP,
-        overlayExtent: overlayExtent,
-        frameExtent: frameExtent
-      )
+      let off: CGPoint
+      // A caller-chosen start point wins over the edge the direction picks.
+      if let slideFrom = anim.slideFrom {
+        // A stretched layer (no x/y) rests on the frame origin.
+        let layerOrigin = CGPoint(x: CGFloat(layer.x ?? 0), y: CGFloat(layer.y ?? 0))
+        off = slideFromOffset(invP: invP, slideFrom: slideFrom, layerOrigin: layerOrigin)
+      } else if let direction = anim.slideDirection {
+        off = slideOffset(
+          direction: direction,
+          invP: invP,
+          overlayExtent: overlayExtent,
+          frameExtent: frameExtent
+        )
+      } else {
+        // Neither a start point nor a direction: nothing to travel along, so
+        // the layer stays put. Matches the Android `slideOffset` fallback —
+        // defaulting to the left edge here would slide a layer the caller
+        // never asked to move.
+        off = .zero
+      }
       animTransform = animTransform.translatedBy(x: off.x, y: off.y)
 
     case "scale":

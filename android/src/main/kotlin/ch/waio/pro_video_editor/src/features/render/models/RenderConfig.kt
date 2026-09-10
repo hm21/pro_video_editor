@@ -345,6 +345,10 @@ data class AudioTrackConfig(
  * @property durationUs Duration of the animation in microseconds
  * @property curve Easing curve name (e.g. "linear", "easeIn", "bounceOut")
  * @property slideDirection Slide direction: "left", "right", "top", or "bottom"
+ * @property slideFromX Custom slide start point, X in pixels from the frame's
+ *   left edge (the layer's top-left corner, like the layer's own position).
+ *   Overrides [slideDirection] when set.
+ * @property slideFromY Y counterpart of [slideFromX], from the frame's top edge
  * @property scaleFrom Starting scale factor for scale animations
  */
 data class LayerAnimationConfig(
@@ -353,16 +357,21 @@ data class LayerAnimationConfig(
     val durationUs: Long,
     val curve: String = "linear",
     val slideDirection: String? = null,
+    val slideFromX: Double? = null,
+    val slideFromY: Double? = null,
     val scaleFrom: Double? = null
 ) {
     companion object {
         fun fromMap(map: Map<String, Any?>): LayerAnimationConfig {
+            val slideFrom = map["slideFrom"] as? Map<*, *>
             return LayerAnimationConfig(
                 type = map["type"] as String,
                 phase = map["phase"] as String,
                 durationUs = (map["durationUs"] as Number).toLong(),
                 curve = map["curve"] as? String ?: "linear",
                 slideDirection = map["slideDirection"] as? String,
+                slideFromX = (slideFrom?.get("dx") as? Number)?.toDouble(),
+                slideFromY = (slideFrom?.get("dy") as? Number)?.toDouble(),
                 scaleFrom = (map["scaleFrom"] as? Number)?.toDouble()
             )
         }

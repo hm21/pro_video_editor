@@ -1502,6 +1502,86 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
     await _renderVideo(data);
   }
 
+  /// Slide from a custom start point.
+  ///
+  /// Instead of naming an edge, this example hands the slide a `slideFrom`
+  /// point in the same pixel coordinates as [ImageLayer.offset]. The first
+  /// sticker comes in diagonally from beyond the top-left corner and leaves
+  /// through a point past the bottom-right one; the second starts from a
+  /// point *inside* the frame, which an edge direction cannot express.
+  Future<void> _layerSlideCustomStart() async {
+    final stickerImage = EditorLayerImage.asset('assets/sticker.png');
+
+    const stickerSize = 200.0;
+    const videoWidth = 1280.0;
+    const videoHeight = 720.0;
+
+    var data = VideoRenderData(
+      videoSegments: [VideoSegment(video: _video)],
+      imageLayers: [
+        ImageLayer(
+          image: stickerImage,
+          offset: const Offset(
+            (videoWidth - stickerSize) / 2,
+            (videoHeight - stickerSize) / 2,
+          ),
+          size: const Size(stickerSize, stickerSize),
+          startTime: const Duration(seconds: 1),
+          endTime: const Duration(seconds: 7),
+          animations: [
+            const LayerAnimation(
+              type: LayerAnimationType.slide,
+              phase: AnimationPhase.animateIn,
+              duration: Duration(milliseconds: 800),
+              // The frame's top-left corner, one sticker further out.
+              slideFrom: Offset(-stickerSize, -stickerSize),
+              curve: AnimationCurve.easeOutCubic,
+            ),
+            const LayerAnimation(
+              type: LayerAnimationType.slide,
+              phase: AnimationPhase.animateOut,
+              duration: Duration(milliseconds: 600),
+              // Out past the bottom-right corner.
+              slideFrom: Offset(videoWidth, videoHeight),
+              curve: AnimationCurve.easeIn,
+            ),
+          ],
+        ),
+        ImageLayer(
+          image: stickerImage,
+          offset: const Offset(
+            videoWidth / 2 + stickerSize,
+            videoHeight / 2 + stickerSize / 2,
+          ),
+          size: const Size(stickerSize, stickerSize),
+          startTime: const Duration(seconds: 3),
+          endTime: const Duration(seconds: 12),
+          animations: [
+            const LayerAnimation(
+              type: LayerAnimationType.slide,
+              phase: AnimationPhase.animateIn,
+              duration: Duration(milliseconds: 2000),
+              // A start point inside the frame: the sticker drifts up and
+              // across from here rather than entering from off-screen.
+              slideFrom: Offset(300, 300),
+              curve: AnimationCurve.easeOutCubic,
+            ),
+            const LayerAnimation(
+              type: LayerAnimationType.slide,
+              phase: AnimationPhase.animateOut,
+              duration: Duration(milliseconds: 600),
+              // Out past the bottom-right corner.
+              slideFrom: Offset(videoWidth, videoHeight),
+              curve: AnimationCurve.easeIn,
+            ),
+          ],
+        ),
+      ],
+    );
+
+    await _renderVideo(data);
+  }
+
   /// Combined animations on image layer.
   ///
   /// This example combines fade, slide, and scale animations on a single
@@ -2202,6 +2282,12 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           subtitle: const Text(
             'Centered sticker slides fully off-screen: L → R → T → B',
           ),
+        ),
+        ListTile(
+          onTap: _layerSlideCustomStart,
+          leading: const Icon(Icons.control_camera_outlined),
+          title: const Text('Slide From Custom Point'),
+          subtitle: const Text('Diagonal in from top-left, out bottom-right'),
         ),
         ListTile(
           onTap: _layerCombinedAnimations,
