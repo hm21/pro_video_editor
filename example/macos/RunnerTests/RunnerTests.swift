@@ -89,6 +89,40 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(off.y, 0, accuracy: 1e-6)
   }
 
+  // MARK: - Custom slide start point
+
+  func testCustomSlideStartPointTravelsThePixelDelta() {
+    // The layer rests with its top-left at (400, 200) in Flutter coordinates
+    // (Y down); the start point sits 300px left and 150px above it.
+    let off = slideFromOffset(
+      invP: 1, slideFrom: CGPoint(x: 100, y: 50), layerOrigin: CGPoint(x: 400, y: 200))
+
+    XCTAssertEqual(off.x, -300, accuracy: 1e-6)
+    // Core Graphics counts Y upwards, so a smaller Flutter Y moves up.
+    XCTAssertEqual(off.y, 150, accuracy: 1e-6)
+  }
+
+  func testCustomSlideStartPointIsZeroAtRestAndLinearInInvP() {
+    let from = CGPoint(x: 100, y: 50)
+    let origin = CGPoint(x: 400, y: 200)
+
+    let rest = slideFromOffset(invP: 0, slideFrom: from, layerOrigin: origin)
+    XCTAssertEqual(rest.x, 0, accuracy: 1e-6)
+    XCTAssertEqual(rest.y, 0, accuracy: 1e-6)
+
+    let full = slideFromOffset(invP: 1, slideFrom: from, layerOrigin: origin)
+    let half = slideFromOffset(invP: 0.5, slideFrom: from, layerOrigin: origin)
+    XCTAssertEqual(half.x, full.x / 2, accuracy: 1e-6)
+    XCTAssertEqual(half.y, full.y / 2, accuracy: 1e-6)
+  }
+
+  func testCustomSlideStartPointOnTheRestingCornerNeverMoves() {
+    let origin = CGPoint(x: 400, y: 200)
+    let off = slideFromOffset(invP: 1, slideFrom: origin, layerOrigin: origin)
+    XCTAssertEqual(off.x, 0, accuracy: 1e-6)
+    XCTAssertEqual(off.y, 0, accuracy: 1e-6)
+  }
+
   // MARK: - Engine-detach result delivery
 
   // Before detach a captured FlutterResult delivers normally.

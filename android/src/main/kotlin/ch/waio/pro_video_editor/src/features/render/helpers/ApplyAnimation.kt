@@ -93,6 +93,37 @@ internal fun slideOffset(
 }
 
 /**
+ * Computes the slide translation toward a caller-chosen start point instead of
+ * a canvas edge (see [slideOffset]).
+ *
+ * The start point and the layer's resting position are both top-left corners in
+ * frame pixels with a top-left origin, so their difference is the distance the
+ * layer travels — the layer's own size cancels out and never enters the result.
+ * At [invP] == 1 the layer sits on the start point; at [invP] == 0 it rests.
+ *
+ * @param slideFromX Start point X in pixels from the frame's left edge.
+ * @param slideFromY Start point Y in pixels from the frame's top edge.
+ * @param layerX Resting X of the layer in the same coordinates.
+ * @param layerY Resting Y of the layer in the same coordinates.
+ */
+internal fun slideFromOffset(
+    invP: Float,
+    slideFromX: Float,
+    slideFromY: Float,
+    layerX: Float,
+    layerY: Float,
+    videoWidth: Int,
+    videoHeight: Int,
+): SlideOffset {
+    if (videoWidth <= 0 || videoHeight <= 0) return SlideOffset(0f, 0f)
+    // The canvas spans [-1, 1] over the frame, so a pixel distance is twice its
+    // fraction of the frame. Y is negated because NDC counts upwards.
+    val dx = (slideFromX - layerX) / videoWidth * 2f
+    val dy = -((slideFromY - layerY) / videoHeight * 2f)
+    return SlideOffset(invP * dx, invP * dy)
+}
+
+/**
  * A background-frame anchor paired with an overlay-frame anchor, both in the
  * Media3 [-1, 1] range.
  */
@@ -145,6 +176,13 @@ internal class AnimatedBitmapOverlay(
     private val imageHeight: Int,
     private val videoWidth: Int,
     private val videoHeight: Int,
+    /**
+     * The layer's resting top-left corner in frame pixels — what a
+     * `slideFrom` start point is measured against. `0` for a stretched layer,
+     * which rests on the frame origin.
+     */
+    private val layerX: Float,
+    private val layerY: Float,
     private val layerStartUs: Long,
     private val layerEndUs: Long,
     private val loop: Boolean,
@@ -168,6 +206,8 @@ internal class AnimatedBitmapOverlay(
         imageHeight: Int,
         videoWidth: Int,
         videoHeight: Int,
+        layerX: Float,
+        layerY: Float,
         layerStartUs: Long,
         layerEndUs: Long,
         animations: List<LayerAnimationConfig>,
@@ -182,6 +222,8 @@ internal class AnimatedBitmapOverlay(
         imageHeight = imageHeight,
         videoWidth = videoWidth,
         videoHeight = videoHeight,
+        layerX = layerX,
+        layerY = layerY,
         layerStartUs = layerStartUs,
         layerEndUs = layerEndUs,
         loop = false,
@@ -270,10 +312,23 @@ internal class AnimatedBitmapOverlay(
                 "fade" -> alpha *= progress.toFloat()
                 "slide" -> {
                     val invP = (1.0 - progress).toFloat()
-                    val off = slideOffset(
-                        anim.slideDirection, invP,
-                        baseNormX, baseNormY, halfNormW, halfNormH
-                    )
+                    val slideFromX = anim.slideFromX
+                    val slideFromY = anim.slideFromY
+                    // A caller-chosen start point wins over the edge the
+                    // direction would otherwise pick.
+                    val off = if (slideFromX != null && slideFromY != null) {
+                        slideFromOffset(
+                            invP,
+                            slideFromX.toFloat(), slideFromY.toFloat(),
+                            layerX, layerY,
+                            videoWidth, videoHeight
+                        )
+                    } else {
+                        slideOffset(
+                            anim.slideDirection, invP,
+                            baseNormX, baseNormY, halfNormW, halfNormH
+                        )
+                    }
                     offsetX += off.x
                     offsetY += off.y
                 }

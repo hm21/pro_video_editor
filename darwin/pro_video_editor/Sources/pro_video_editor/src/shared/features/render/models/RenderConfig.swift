@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 #if os(macOS)
@@ -18,6 +19,10 @@ struct LayerAnimationConfig {
   let curve: String
   /// Slide direction: "left", "right", "top", or "bottom". Only for slide animations.
   let slideDirection: String?
+  /// Custom slide start point — the layer's top-left corner in frame pixels
+  /// from the top-left origin, the same coordinates as the layer's own
+  /// position. Overrides `slideDirection` when set.
+  let slideFrom: CGPoint?
   /// Starting scale factor for scale animations (e.g. 0.0 = invisible, 0.5 = half size).
   let scaleFrom: Double?
 
@@ -28,12 +33,21 @@ struct LayerAnimationConfig {
       let durationUs = (args["durationUs"] as? NSNumber)?.int64Value
     else { return nil }
 
+    var slideFrom: CGPoint? = nil
+    if let point = args["slideFrom"] as? [String: Any],
+      let dx = (point["dx"] as? NSNumber)?.doubleValue,
+      let dy = (point["dy"] as? NSNumber)?.doubleValue
+    {
+      slideFrom = CGPoint(x: dx, y: dy)
+    }
+
     return LayerAnimationConfig(
       type: type,
       phase: phase,
       durationUs: durationUs,
       curve: args["curve"] as? String ?? "linear",
       slideDirection: args["slideDirection"] as? String,
+      slideFrom: slideFrom,
       scaleFrom: (args["scaleFrom"] as? NSNumber)?.doubleValue
     )
   }

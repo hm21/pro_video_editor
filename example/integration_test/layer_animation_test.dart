@@ -169,6 +169,96 @@ void main() {
       });
     }
 
+    // ── Custom slide start point ──────────────────────────────
+    testWidgets('slide from a custom start point', (_) async {
+      await testRender(
+        description: 'Slide from a custom start point',
+        renderModel: VideoRenderData(
+          videoSegments: [VideoSegment(video: inputVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            ImageLayer(
+              image: overlayImage,
+              offset: const Offset(200, 200),
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 5),
+              animations: const [
+                // Diagonally in from beyond the top-left corner ...
+                LayerAnimation(
+                  type: LayerAnimationType.slide,
+                  phase: AnimationPhase.animateIn,
+                  duration: Duration(milliseconds: 600),
+                  slideFrom: Offset(-300, -200),
+                  curve: AnimationCurve.easeOutCubic,
+                ),
+                // ... and out to a point still inside the frame.
+                LayerAnimation(
+                  type: LayerAnimationType.slide,
+                  phase: AnimationPhase.animateOut,
+                  duration: Duration(milliseconds: 400),
+                  slideFrom: Offset(20, 350),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    });
+
+    // A start point wins over a direction when both are set.
+    testWidgets('custom start point overrides slideDirection', (_) async {
+      await testRender(
+        description: 'Custom start point overrides slideDirection',
+        renderModel: VideoRenderData(
+          videoSegments: [VideoSegment(video: inputVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            ImageLayer(
+              image: overlayImage,
+              offset: const Offset(150, 150),
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 5),
+              animations: const [
+                LayerAnimation(
+                  type: LayerAnimationType.slide,
+                  phase: AnimationPhase.animateInOut,
+                  duration: Duration(milliseconds: 500),
+                  slideDirection: SlideDirection.left,
+                  slideFrom: Offset(600, 40),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    });
+
+    // A stretched layer (no offset) rests on the frame origin.
+    testWidgets('custom start point on a stretched layer', (_) async {
+      await testRender(
+        description: 'Custom start point on a stretched layer',
+        renderModel: VideoRenderData(
+          videoSegments: [VideoSegment(video: inputVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            ImageLayer(
+              image: overlayImage,
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 5),
+              animations: const [
+                LayerAnimation(
+                  type: LayerAnimationType.slide,
+                  phase: AnimationPhase.animateIn,
+                  duration: Duration(milliseconds: 500),
+                  slideFrom: Offset(0, 400),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    });
+
     // ── Combined animations (all types at once) ───────────────
     testWidgets('combined fade + slide + scale', (_) async {
       await testRender(

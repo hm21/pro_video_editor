@@ -77,6 +77,73 @@ internal class SlideOffsetTest {
         assertEquals(0f, off.y, tol)
     }
 
+    // ── slideFromOffset: travel toward a caller-chosen start point ──
+
+    // Frame 1000x500; the layer rests with its top-left at (400, 200).
+    private val videoW = 1000
+    private val videoH = 500
+    private val layerX = 400f
+    private val layerY = 200f
+
+    @Test
+    fun customStartPointTranslatesPixelDeltaIntoNdc() {
+        // 300px left and 150px up of the resting corner.
+        val off = slideFromOffset(1f, 100f, 50f, layerX, layerY, videoW, videoH)
+        // 300/1000 of the frame is 0.6 in a canvas spanning [-1, 1] ...
+        assertEquals(-0.6f, off.x, tol)
+        // ... and NDC counts upwards, so a smaller Y is a positive offset.
+        assertEquals(0.6f, off.y, tol)
+    }
+
+    @Test
+    fun customStartPointBelowAndRightGoesTheOtherWay() {
+        val off = slideFromOffset(1f, 700f, 450f, layerX, layerY, videoW, videoH)
+        assertEquals(0.6f, off.x, tol)
+        assertEquals(-1f, off.y, tol)
+    }
+
+    @Test
+    fun customStartPointIsZeroAtRestAndLinearInInvP() {
+        val rest = slideFromOffset(0f, 100f, 50f, layerX, layerY, videoW, videoH)
+        assertEquals(0f, rest.x, tol)
+        assertEquals(0f, rest.y, tol)
+
+        val full = slideFromOffset(1f, 100f, 50f, layerX, layerY, videoW, videoH)
+        val half = slideFromOffset(0.5f, 100f, 50f, layerX, layerY, videoW, videoH)
+        assertEquals(full.x / 2f, half.x, tol)
+        assertEquals(full.y / 2f, half.y, tol)
+    }
+
+    @Test
+    fun startPointOnTheRestingCornerNeverMoves() {
+        for (invP in listOf(0f, 0.25f, 0.5f, 1f)) {
+            val off = slideFromOffset(invP, layerX, layerY, layerX, layerY, videoW, videoH)
+            assertEquals(0f, off.x, tol)
+            assertEquals(0f, off.y, tol)
+        }
+    }
+
+    @Test
+    fun degenerateFrameProducesNoOffset() {
+        val off = slideFromOffset(1f, 100f, 50f, layerX, layerY, 0, 0)
+        assertEquals(0f, off.x, tol)
+        assertEquals(0f, off.y, tol)
+    }
+
+    @Test
+    fun startPointFarOutsideTheFrameStillResolvesToLegalAnchors() {
+        // Media3 rejects anchors outside [-1, 1]; a start point way off-canvas
+        // must clamp rather than throw. The layer is invisible out there, so
+        // clamping costs nothing the viewer can see.
+        val baseNormX = 0.5f
+        val baseNormY = -0.3f
+        val off = slideFromOffset(1f, -5000f, 9000f, layerX, layerY, videoW, videoH)
+        val ax = resolveAnchor(baseNormX + off.x, halfNormW)
+        val ay = resolveAnchor(baseNormY + off.y, halfNormH)
+        assertTrue(ax.backgroundAnchor in -1f..1f && ax.overlayAnchor in -1f..1f)
+        assertTrue(ay.backgroundAnchor in -1f..1f && ay.overlayAnchor in -1f..1f)
+    }
+
     // ── resolveAnchor: split a center into background + overlay anchors ──
 
     @Test
