@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:pro_video_editor/shared/models/time_range_mixin.dart';
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
+import 'package:pro_video_editor/shared/utils/parser/offset_parser.dart';
 
 import 'editor_layer_image_model.dart';
 import 'layer_animation_model.dart';
@@ -133,10 +134,7 @@ class ImageLayer with TimeRangeMixin {
           ? Duration(microseconds: safeParseInt(map['endTime']))
           : null,
       offset: map['offset'] != null
-          ? Offset(
-              safeParseDouble((map['offset'] as Map<String, dynamic>)['dx']),
-              safeParseDouble((map['offset'] as Map<String, dynamic>)['dy']),
-            )
+          ? safeParseOffset(map['offset'] as Map<String, dynamic>)
           : null,
       size: map['size'] != null
           ? Size(

@@ -1551,7 +1551,7 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
           image: stickerImage,
           offset: const Offset(
             videoWidth / 2 + stickerSize,
-            videoHeight / 2 + stickerSize,
+            videoHeight / 2 + stickerSize / 2,
           ),
           size: const Size(stickerSize, stickerSize),
           startTime: const Duration(seconds: 3),
@@ -1561,8 +1561,8 @@ class _VideoRendererPageState extends State<VideoRendererPage> {
               type: LayerAnimationType.slide,
               phase: AnimationPhase.animateIn,
               duration: Duration(milliseconds: 2000),
-              // A start point inside the frame: the sticker drifts up from
-              // here rather than entering from off-screen.
+              // A start point inside the frame: the sticker drifts up and
+              // across from here rather than entering from off-screen.
               slideFrom: Offset(300, 300),
               curve: AnimationCurve.easeOutCubic,
             ),

@@ -166,13 +166,19 @@ func computeAnimation(
         // A stretched layer (no x/y) rests on the frame origin.
         let layerOrigin = CGPoint(x: CGFloat(layer.x ?? 0), y: CGFloat(layer.y ?? 0))
         off = slideFromOffset(invP: invP, slideFrom: slideFrom, layerOrigin: layerOrigin)
-      } else {
+      } else if let direction = anim.slideDirection {
         off = slideOffset(
-          direction: anim.slideDirection ?? "left",
+          direction: direction,
           invP: invP,
           overlayExtent: overlayExtent,
           frameExtent: frameExtent
         )
+      } else {
+        // Neither a start point nor a direction: nothing to travel along, so
+        // the layer stays put. Matches the Android `slideOffset` fallback —
+        // defaulting to the left edge here would slide a layer the caller
+        // never asked to move.
+        off = .zero
       }
       animTransform = animTransform.translatedBy(x: off.x, y: off.y)
 

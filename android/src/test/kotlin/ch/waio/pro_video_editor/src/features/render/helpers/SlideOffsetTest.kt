@@ -131,17 +131,34 @@ internal class SlideOffsetTest {
     }
 
     @Test
-    fun startPointFarOutsideTheFrameStillResolvesToLegalAnchors() {
-        // Media3 rejects anchors outside [-1, 1]; a start point way off-canvas
-        // must clamp rather than throw. The layer is invisible out there, so
-        // clamping costs nothing the viewer can see.
-        val baseNormX = 0.5f
-        val baseNormY = -0.3f
+    fun startPointFarOutsideTheFrameStillLandsTheLayerOffCanvas() {
+        // Media3 rejects anchors outside [-1, 1], so a start point way
+        // off-canvas cannot be reached exactly. What must survive the clamp is
+        // that the layer is still *completely* outside the frame — the clamp is
+        // then invisible, because the viewer sees nothing either way.
+        // The 200x100 layer of halfNormW/halfNormH resting at (400, 200) in a
+        // 1000x500 frame is centred on the canvas origin.
+        val baseNormX = 0f
+        val baseNormY = 0f
         val off = slideFromOffset(1f, -5000f, 9000f, layerX, layerY, videoW, videoH)
         val ax = resolveAnchor(baseNormX + off.x, halfNormW)
         val ay = resolveAnchor(baseNormY + off.y, halfNormH)
-        assertTrue(ax.backgroundAnchor in -1f..1f && ax.overlayAnchor in -1f..1f)
-        assertTrue(ay.backgroundAnchor in -1f..1f && ay.overlayAnchor in -1f..1f)
+
+        // Media3 places the layer's center at
+        // background − overlayAnchor * halfNorm (see resolveAnchor).
+        val centerX = ax.backgroundAnchor - ax.overlayAnchor * halfNormW
+        val centerY = ay.backgroundAnchor - ay.overlayAnchor * halfNormH
+
+        // Off to the left and below: the layer's leading edge must sit at or
+        // beyond the canvas edge it left through.
+        assertTrue(
+            centerX + halfNormW <= -1f + tol,
+            "layer still visible horizontally: center=$centerX"
+        )
+        assertTrue(
+            centerY + halfNormH <= -1f + tol,
+            "layer still visible vertically: center=$centerY"
+        )
     }
 
     // ── resolveAnchor: split a center into background + overlay anchors ──

@@ -1,7 +1,9 @@
 // ignore_for_file: public_member_api_docs, sort_constructors_first
 import 'dart:ui';
 
-import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
+import 'package:pro_video_editor/shared/utils/parser/offset_parser.dart';
+
+import 'image_layer_model.dart';
 
 /// The type of animation to apply to an image layer.
 enum LayerAnimationType {
@@ -87,8 +89,9 @@ enum AnimationPhase {
 
 /// A single animation applied to an [ImageLayer].
 ///
-/// Multiple animations can be combined on one layer, e.g. a [fade] in
-/// together with a [slide] in from the left.
+/// Multiple animations can be combined on one layer, e.g. a
+/// [LayerAnimationType.fade] in together with a [LayerAnimationType.slide] in
+/// from the left.
 ///
 /// Example:
 /// ```dart
@@ -177,7 +180,8 @@ class LayerAnimation {
   /// top-left corner measured from the top-left of the video frame. The layer
   /// starts here and slides to its resting [ImageLayer.offset]
   /// ([AnimationPhase.animateIn]), or leaves its resting place for this point
-  /// ([AnimationPhase.animateOut]).
+  /// ([AnimationPhase.animateOut]). With [AnimationPhase.animateInOut] the
+  /// point is both: the layer enters from it and leaves back towards it.
   ///
   /// Values may sit outside the frame — `Offset(-500, 800)` starts the layer
   /// 500px past the left edge. A layer without an [ImageLayer.offset] is
@@ -218,10 +222,7 @@ class LayerAnimation {
           ? SlideDirection.values.byName(map['slideDirection'] as String)
           : null,
       slideFrom: map['slideFrom'] != null
-          ? Offset(
-              safeParseDouble((map['slideFrom'] as Map<String, dynamic>)['dx']),
-              safeParseDouble((map['slideFrom'] as Map<String, dynamic>)['dy']),
-            )
+          ? safeParseOffset(map['slideFrom'] as Map<String, dynamic>)
           : null,
       scaleFrom: map['scaleFrom'] as double?,
     );
