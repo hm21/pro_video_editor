@@ -1,6 +1,11 @@
 include: package:flutter_lints/flutter.yaml
 
 analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - windows/**
+    - linux/**
   language:
     strict-raw-types: true
 
