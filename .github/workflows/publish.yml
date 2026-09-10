@@ -34,8 +34,18 @@ jobs:
           channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
 
+      # `setup-dart` stores the OIDC token as pub.dev credentials, and from then
+      # on pub authenticates *every* pub.dev request — including the package
+      # metadata reads a resolve does. pub.dev answers those with 403 for a
+      # publish-scoped token, which pub reports as the package not existing
+      # ("depends on <first dev dependency> any which doesn't exist
+      # (authorization failed)"). So resolve without credentials, then put them
+      # back for the publish itself.
       - name: Install dependencies
-        run: dart pub get
+        run: |
+          dart pub token remove https://pub.dev || true
+          dart pub get
+          dart pub token add https://pub.dev --env-var PUB_TOKEN
 
       - name: Publish - dry run
         run: dart pub publish --dry-run
