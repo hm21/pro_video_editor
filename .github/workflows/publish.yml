@@ -5,13 +5,43 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+*'
 
+env:
+  # Pinned on purpose. `dart-lang/setup-dart`'s reusable publish workflow takes
+  # no Flutter version and always installs the latest stable, so a Flutter patch
+  # release can break a tagged release without a single commit in this repo —
+  # v2.12.0 failed that way on 3.47.3 while v2.11.4 published fine on 3.47.2.
+  # Publishing is inlined here instead so this version is the one that ships.
+  FLUTTER_VERSION: 3.47.2
+
 jobs:
   publish:
+    name: Publish to pub.dev
+    runs-on: ubuntu-latest
     permissions:
       id-token: write # Required for authentication using OIDC
-    uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1
-    # with:
-    #   working-directory: path/to/package/within/repository
+    steps:
+      - uses: actions/checkout@v4
+
+      # Provisions the OIDC token used for publishing. Its `dart` is shadowed
+      # by the Flutter SDK's below, which publishes both Flutter and pure-Dart
+      # packages.
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Publish - dry run
+        run: dart pub publish --dry-run
+
+      - name: Publish to pub.dev
+        run: dart pub publish -f
 
   github-release:
     needs: publish
