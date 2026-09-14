@@ -135,6 +135,8 @@ class ThumbnailGenerator(private val context: Context) {
         onError: (Exception) -> Unit,
     ): ThumbnailJobHandle {
         val cancelled = AtomicBoolean(false)
+        // Exactly one terminal callback, whichever path reaches it first.
+        val reported = AtomicBoolean(false)
         val job = scope.launch {
             try {
                 require(config.timestampsUs.isNotEmpty()) {
@@ -144,10 +146,21 @@ class ThumbnailGenerator(private val context: Context) {
                 if (cancelled.get()) {
                     throw CancellationException("Thumbnail task was canceled")
                 }
-                onComplete()
+                if (reported.compareAndSet(false, true)) onComplete()
             } catch (e: Exception) {
-                onError(e)
+                if (reported.compareAndSet(false, true)) onError(e)
             }
+        }
+        // A cancel that lands before the dispatcher has started the body
+        // skips the try/catch above entirely (the coroutine never runs), and
+        // an Error thrown by a decoder escapes it; either would leave the
+        // task registered and its stream open forever. Report from the
+        // completion handler in those cases.
+        job.invokeOnCompletion { cause ->
+            if (cause == null || !reported.compareAndSet(false, true)) {
+                return@invokeOnCompletion
+            }
+            onError(cause as? Exception ?: IllegalStateException(cause.message, cause))
         }
         return ThumbnailJobHandle {
             cancelled.set(true)
