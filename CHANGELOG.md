@@ -1,3 +1,7 @@
+## 2.12.1
+- **FIX**(android): An overlay pinched far past the canvas no longer takes the app down with an `OutOfMemoryError`. Its raster is held to four frames' worth of pixels; placement and extent are unchanged, and a layer within that allowance renders exactly as before.
+- **FIX**(android): A render whose overlay still cannot be rastered fails with a `RENDER_ERROR` naming the layer's size instead of killing the process.
+
 ## 2.12.0
 - **FEAT**(android, iOS, macOS): `LayerAnimation.slideFrom` gives a slide animation its own start point instead of a canvas edge. It takes the layer's top-left corner in the same pixel coordinates as `ImageLayer.offset`, may sit outside the frame, and overrides `slideDirection` when both are set.
 
