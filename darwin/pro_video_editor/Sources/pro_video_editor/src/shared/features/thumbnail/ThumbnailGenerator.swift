@@ -121,12 +121,25 @@ class ThumbnailGenerator {
         NSValue(time: CMTime(value: $0, timescale: 1_000_000))
       }
 
+      // A cancel that landed before this body ran has nothing in flight for
+      // `cancelAllCGImageGeneration` to stop; without this check the legacy
+      // path would decode and deliver the whole request first.
+      guard !Task.isCancelled else {
+        onError(CancellationError())
+        return
+      }
+
       _ = await generateThumbnailData(
         generator: generator,
         times: times,
         config: config,
         onProgress: { _ in },
         onFrame: { indices, data, progress in
+          // `Task.isCancelled` only sees this task on the ordered path, which
+          // delivers from inside it. The legacy path delivers from
+          // AVFoundation's own threads, where it is always false — there
+          // `cancelAllCGImageGeneration` is what stops frames, by failing
+          // every outstanding request so `data` arrives nil.
           guard let data = data, !Task.isCancelled else { return }
           onFrame(indices, data, progress)
         }
@@ -327,6 +340,13 @@ class ThumbnailGenerator {
         let shouldResume = completed == distinctCount && !resumed
         if shouldResume { resumed = true }
         let payload = shouldResume ? resultData.map { $0 ?? Data() } : nil
+        // Delivered under the lock: completion handlers fire concurrently, so
+        // outside it frame N+1 could be handed over before frame N (progress
+        // running backwards) and the last frame's handler could resume the
+        // continuation — and with it the stream's `done` — before a sibling
+        // had delivered its frame. The callback only dispatches, so the lock
+        // is held for microseconds.
+        onFrame?(indices, data, progress)
         lock.unlock()
 
         if let data = data {
@@ -337,7 +357,6 @@ class ThumbnailGenerator {
           PluginLog.print("[\(indices.first ?? -1)] ❌ frame failed: \(message)")
         }
 
-        onFrame?(indices, data, progress)
         onProgress(progress)
 
         if let payload = payload {

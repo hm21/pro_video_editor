@@ -525,6 +525,81 @@ class RunnerTests: XCTestCase {
     }
   }
 
+  // The streaming path hands every frame to `onFrame` from the concurrent
+  // completion handlers. Each one must be delivered before the call returns —
+  // the caller reports `done` right after — and in the order the completion
+  // counter assigns, so progress never runs backwards.
+  func testConcurrentPathDeliversEveryFrameInCounterOrderBeforeReturning() throws {
+    let palette = ThumbnailTimestampFixture.palette
+    let videoURL = try ThumbnailTimestampFixture.makeColorVideo(colors: palette)
+    defer { try? FileManager.default.removeItem(at: videoURL) }
+
+    let timestampsUs: [Int64] = (0..<palette.count).flatMap { second in
+      [0.3, 0.5, 0.7].map { Int64(((Double(second) + $0) * 1_000_000).rounded()) }
+    }
+    let config = ThumbnailConfig(
+      id: "concurrent-stream",
+      inputPath: videoURL.path,
+      fileExtension: "mp4",
+      boxFit: "contain",
+      outputFormat: "png",
+      jpegQuality: 100,
+      outputWidth: 80,
+      outputHeight: 45,
+      timestampsUs: timestampsUs,
+      maxOutputFrames: nil,
+      lastFrameTolerance: false
+    )
+    let times = timestampsUs.map {
+      NSValue(time: CMTime(value: $0, timescale: 1_000_000))
+    }
+
+    for iteration in 0..<8 {
+      let generator = AVAssetImageGenerator(asset: AVURLAsset(url: videoURL))
+      generator.appliesPreferredTrackTransform = true
+      generator.requestedTimeToleranceBefore = .zero
+      generator.requestedTimeToleranceAfter = .zero
+
+      let lock = NSLock()
+      var delivered: [(indices: [Int], progress: Double)] = []
+      let done = expectation(description: "concurrent stream completes (iteration \(iteration))")
+      Task {
+        _ = await ThumbnailGenerator.generateThumbnailDataConcurrent(
+          generator: generator,
+          times: times,
+          config: config,
+          onProgress: { _ in },
+          onFrame: { indices, data, progress in
+            XCTAssertNotNil(data, "iteration \(iteration): frame \(indices) failed")
+            lock.lock()
+            delivered.append((indices, progress))
+            lock.unlock()
+          }
+        )
+        // Snapshot under the lock: a handler still delivering after the
+        // return is exactly the bug this guards against.
+        lock.lock()
+        let snapshot = delivered
+        lock.unlock()
+
+        XCTAssertEqual(
+          snapshot.flatMap { $0.indices }.sorted(), Array(timestampsUs.indices),
+          "iteration \(iteration): every frame is delivered before the call returns")
+        for (earlier, later) in zip(snapshot, snapshot.dropFirst()) {
+          XCTAssertLessThanOrEqual(
+            earlier.progress, later.progress,
+            "iteration \(iteration): progress ran backwards")
+        }
+        XCTAssertEqual(
+          snapshot.last?.progress, 1.0,
+          "iteration \(iteration): the last delivered frame carries 1.0")
+        done.fulfill()
+      }
+
+      wait(for: [done], timeout: 30)
+    }
+  }
+
 }
 
 // MARK: - Thumbnail timestamp test fixtures
