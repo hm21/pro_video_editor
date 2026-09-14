@@ -12,6 +12,11 @@ package ch.waio.pro_video_editor.src.shared
  * pending — but its pipeline starts only once the predecessor has reported
  * back.
  *
+ * That holds only as long as every pipeline reports its end after a cancel —
+ * Media3's `Transformer.cancel()` is listener-silent, so a pipeline built on
+ * it has to say so itself once its teardown is through. One that stays quiet
+ * keeps the id's next start waiting for good.
+ *
  * Everything here runs on the main thread, like every other access to the
  * task maps. [cancelJob] is what cancelling one job of this kind means.
  */

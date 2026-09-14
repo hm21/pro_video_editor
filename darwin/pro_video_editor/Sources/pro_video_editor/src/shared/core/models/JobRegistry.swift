@@ -11,6 +11,11 @@ import Foundation
 /// pending — but its pipeline starts only once the predecessor has reported
 /// back.
 ///
+/// That holds only as long as every pipeline reports its end after a cancel —
+/// which each of them does, through the export session's completion or the
+/// task's cancellation unwinding. One that stayed quiet would keep the id's
+/// next start waiting for good.
+///
 /// Everything here runs on the main thread, like every other access to the
 /// task maps.
 final class JobRegistry<Job: ChannelTask> {

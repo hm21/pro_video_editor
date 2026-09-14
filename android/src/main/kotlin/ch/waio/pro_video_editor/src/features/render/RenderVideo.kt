@@ -12,6 +12,7 @@ import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import java.io.File
+import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import mapFormatToMimeType
@@ -352,6 +353,11 @@ class RenderVideo(private val context: Context) {
             if (config.outputPath == null) {
                 outputFileRef.get()?.delete()
             }
+            // The teardown above is the whole of this job's unwinding, and
+            // nothing else will report it: the transformer is silent and its
+            // queued callbacks are gone. Say so — the caller holds a job
+            // restarted under this id until the cancelled one has reported.
+            onError(CancellationException("Render canceled"))
         }
     }
 

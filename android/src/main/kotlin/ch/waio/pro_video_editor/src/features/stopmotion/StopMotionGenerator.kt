@@ -29,6 +29,7 @@ import ch.waio.pro_video_editor.src.features.stopmotion.models.StopMotionConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.ImageOrientation
 import java.io.File
+import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.exp
@@ -204,6 +205,11 @@ class StopMotionGenerator(private val context: Context) {
                 runCatching { transformerRef.get()?.cancel() }
                 cleanupTempFrames()
                 if (config.outputPath == null) runCatching { outputFile.delete() }
+                // Transformer.cancel() is listener-silent and the preparation
+                // thread stops without a word, so this is the job's only
+                // report of its end — the caller holds a job restarted under
+                // this id until it arrives.
+                onError(CancellationException("Stop-motion render canceled"))
             }
         }
     }

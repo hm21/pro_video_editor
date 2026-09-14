@@ -246,11 +246,12 @@ class ExtractAudio(private val context: Context) {
             }
         }.start()
 
-        // Return cancellation handle
+        // Return cancellation handle. The extraction thread notices the flag,
+        // cleans up and reports; the callbacks it has already posted stay
+        // queued — clearing them here could drop that report, and the caller
+        // waits for it before it starts a job under the same id.
         return AudioExtractJobHandle {
             shouldStop.set(true)
-            mainHandler.removeCallbacksAndMessages(null)
-            // File cleanup is handled by the background thread once it detects shouldStop
         }
     }
 
@@ -449,11 +450,12 @@ class ExtractAudio(private val context: Context) {
             }
         }.start()
 
-        // Return cancellation handle
+        // Return cancellation handle. The extraction thread notices the flag,
+        // cleans up and reports; the callbacks it has already posted stay
+        // queued — clearing them here could drop that report, and the caller
+        // waits for it before it starts a job under the same id.
         return AudioExtractJobHandle {
             shouldStop.set(true)
-            mainHandler.removeCallbacksAndMessages(null)
-            // File cleanup is handled by the background thread once it detects shouldStop
         }
     }
 
@@ -616,6 +618,10 @@ class ExtractAudio(private val context: Context) {
             mainHandler.post {
                 transformerRef.get()?.cancel()
                 cleanupOnFailure()
+                // Transformer.cancel() is listener-silent, so this is the
+                // job's only report of its end — the caller holds a job
+                // restarted under this id until it arrives.
+                onError(InterruptedException("Extraction cancelled by user"))
             }
         }
     }

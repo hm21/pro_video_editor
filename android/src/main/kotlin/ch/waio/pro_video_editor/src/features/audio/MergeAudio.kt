@@ -480,7 +480,16 @@ class MergeAudio(private val context: Context) {
                         }
                     })
                     .build()
-                childHandle.set(AudioExtractJobHandle { mainHandler.post { transformer.cancel() } })
+                childHandle.set(AudioExtractJobHandle {
+                    mainHandler.post {
+                        // Transformer.cancel() is listener-silent: nothing
+                        // would release the merge thread waiting below.
+                        transformer.cancel()
+                        output.delete()
+                        errorRef.compareAndSet(null, InterruptedException("Merge cancelled"))
+                        latch.countDown()
+                    }
+                })
                 transformer.start(editedMediaItem, output.absolutePath)
             } catch (e: Exception) {
                 errorRef.set(e)

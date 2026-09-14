@@ -350,7 +350,9 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                         }
                     },
                     onError = { error ->
-                        Log.e(
+                        // A cancelled job reports its end this way too; that
+                        // is not an error worth a stack trace.
+                        if (!task.canceled.get()) Log.e(
                             "RenderVideo",
                             "Error rendering video: ${error::class.java.name}: " +
                                 "${error.message}",
@@ -432,7 +434,9 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                         }
                     },
                     onError = { error ->
-                        Log.e("StopMotion", "Error rendering stop-motion: ${error.message}")
+                        if (!task.canceled.get()) {
+                            Log.e("StopMotion", "Error rendering stop-motion: ${error.message}")
+                        }
                         mainHandler.post {
                             val removedTask = renderTasks.settle(id, task)
                             val code = if (removedTask?.canceled?.get() == true) {
@@ -525,7 +529,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                         }
                     },
                     onError = { error ->
-                        Log.e(
+                        if (!task.canceled.get()) Log.e(
                             "SplitVideo",
                             "Error splitting video: ${error::class.java.name}: ${error.message}",
                             error
@@ -598,7 +602,9 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                         }
                     },
                     onError = { error ->
-                        Log.e("ExtractAudio", "Error extracting audio: ${error.message}")
+                        if (!task.canceled.get()) {
+                            Log.e("ExtractAudio", "Error extracting audio: ${error.message}")
+                        }
                         mainHandler.post {
                             val removedTask = audioTasks.settle(id, task)
                             val code = when {
@@ -666,7 +672,9 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                         }
                     },
                     onError = { error ->
-                        Log.e("MergeAudio", "Error merging audio: ${error.message}")
+                        if (!task.canceled.get()) {
+                            Log.e("MergeAudio", "Error merging audio: ${error.message}")
+                        }
                         mainHandler.post {
                             val removedTask = audioTasks.settle(id, task)
                             val code = if (removedTask?.canceled?.get() == true) "CANCELED" else "MERGE_ERROR"
