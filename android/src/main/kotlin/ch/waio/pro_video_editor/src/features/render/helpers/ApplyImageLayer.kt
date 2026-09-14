@@ -241,11 +241,38 @@ fun applyTimedImageLayers(
                 )
             }
 
+        } catch (e: OutOfMemoryError) {
+            // An Error, so no catch above sees it: it would unwind the
+            // composition thread and take the whole process down. Fail the
+            // render instead — the caller reports it and the user can retry.
+            // Not skipped like a decode failure below: a video quietly missing
+            // its sticker is worse than one that did not export.
+            throw OverlayOutOfMemoryException(layer, e)
         } catch (e: Exception) {
             Log.e(RENDER_TAG, "Failed to decode image layer: ${e.message}")
         }
     }
 }
+
+/**
+ * An overlay could not be rastered because the Java heap could not hold it.
+ *
+ * Raised in place of the `OutOfMemoryError` so the render fails through the
+ * ordinary error path rather than killing the process. [overlayRasterScale]
+ * shrinks a sized layer to what the export can show, so reaching this means a
+ * raster nothing bounded — a layer laid out far larger than the frame, a
+ * naturally sized layer decoded at its own resolution, or a heap already full
+ * of something else.
+ */
+internal class OverlayOutOfMemoryException(
+    layer: VideoSequenceBuilder.ImageLayerConfig,
+    cause: OutOfMemoryError,
+) : RuntimeException(
+    "Out of memory rastering an overlay laid out at " +
+        "${layer.width?.toInt() ?: "natural"} x ${layer.height?.toInt() ?: "natural"} px: " +
+        cause.message,
+    cause,
+)
 
 /** A fully prepared overlay bitmap together with its placement settings. */
 private data class PreparedOverlay(
