@@ -324,20 +324,20 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
             finish();
           },
         );
+        // A consumer that leaves while this call is in flight sends its
+        // `cancelTask` on the same channel, so native handles it after the
+        // start and finds the task — no follow-up cancel is needed here.
         await methodChannel.invokeMethod<void>('startThumbnailStream', {
           'inputPath': inputPath,
           'extension': _getFileExtension(inputPath),
           'nativeLogLevel': nativeLogLevel?.methodValue,
           ...value.toMap(),
         });
-        if (finished) {
-          // The consumer left while the start was in flight; the cancel it
-          // sent found no task yet, so stop the one that just started.
-          unawaited(cancel(value.id).catchError((_) {}));
-        }
-      } on RenderCanceledException {
-        // Cancelled before dispatch: the consumer already left, so there is
-        // nobody to report it to. Just close.
+      } on RenderCanceledException catch (error, stack) {
+        // Cancelled before dispatch. A consumer that left has already closed
+        // the stream; one still listening called [cancel] and is owed the
+        // exception, exactly as it would get it from native.
+        if (!finished) controller.addError(error, stack);
         finish();
       } catch (error, stack) {
         if (finished) return;

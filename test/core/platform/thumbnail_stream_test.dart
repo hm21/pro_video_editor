@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -191,6 +192,70 @@ void main() {
       expect((cancel.arguments as Map)['id'], 'strip-1');
     });
 
+    test('cancel during the start sends a single cancelTask', () async {
+      final started = Completer<void>();
+      messenger.setMockMethodCallHandler(methodChannel, (call) async {
+        calls.add(call);
+        if (call.method == 'startThumbnailStream') await started.future;
+        return null;
+      });
+      final subscription = platform
+          .getThumbnailStream(configs())
+          .listen((_) {});
+      await awaitStart();
+      expect(calls.map((c) => c.method), ['startThumbnailStream']);
+
+      await subscription.cancel();
+      started.complete();
+      await pumpEventQueue();
+
+      // The consumer's cancel follows the start on the same channel, so
+      // native finds the task; a follow-up cancel once the start returns
+      // would only be answered with TASK_NOT_FOUND.
+      expect(calls.map((c) => c.method), [
+        'startThumbnailStream',
+        'cancelTask',
+      ]);
+    });
+
+    test('events that arrive after a consumer cancel are dropped', () async {
+      final events = <ThumbnailFrame>[];
+      final subscription = platform
+          .getThumbnailStream(configs())
+          .listen(events.add);
+      final sink = await awaitStart();
+
+      sink.success({
+        'id': 'strip-1',
+        'indices': [0],
+        'bytes': Uint8List.fromList([1]),
+        'progress': 1 / 3,
+      });
+      await pumpEventQueue();
+      await subscription.cancel();
+
+      // The decoder's last in-flight frame and its CANCELED report still
+      // arrive; neither may reach the closed controller.
+      sink
+        ..success({
+          'id': 'strip-1',
+          'indices': [1],
+          'bytes': Uint8List.fromList([2]),
+          'progress': 2 / 3,
+        })
+        ..success({
+          'id': 'strip-1',
+          'error': 'Thumbnail task was canceled',
+          'errorCode': 'CANCELED',
+        });
+      await pumpEventQueue();
+
+      expect(events.map((f) => f.indices), [
+        [0],
+      ]);
+      expect(calls.where((c) => c.method == 'cancelTask'), hasLength(1));
+    });
+
     test('a cancel before dispatch never starts the native task', () async {
       // Park the start on its first await: an asset source is copied to a
       // temp file first, and a path_provider that never answers keeps the
@@ -216,6 +281,36 @@ void main() {
       expect(calls.where((c) => c.method == 'startThumbnailStream'), isEmpty);
       // The pre-dispatch cancel is handled locally, so native is never asked
       // to cancel a task it does not know.
+      expect(calls.where((c) => c.method == 'cancelTask'), isEmpty);
+    });
+
+    test('cancel() before dispatch surfaces RenderCanceledException', () async {
+      // Hold the start on its first await (the temp directory lookup a
+      // memory source needs before it is written to disk), cancel the task
+      // while it waits there, then let the start proceed to its handoff.
+      const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+      final tempDir = Completer<String>();
+      messenger.setMockMethodCallHandler(pathProvider, (_) => tempDir.future);
+      addTearDown(() => messenger.setMockMethodCallHandler(pathProvider, null));
+      final dir = await Directory.systemTemp.createTemp('pve_thumbnail_stream');
+      addTearDown(() => dir.delete(recursive: true));
+      final blocked = ThumbnailConfigs(
+        id: 'blocked',
+        video: EditorVideo.memory(Uint8List.fromList([0, 1, 2])),
+        outputSize: const Size(48, 54),
+        timestamps: const [Duration(seconds: 1)],
+      );
+
+      final errors = <Object>[];
+      final done = drain(platform.getThumbnailStream(blocked), errors: errors);
+      await pumpEventQueue();
+      await platform.cancel('blocked');
+      tempDir.complete(dir.path);
+      await done;
+
+      // The still-listening consumer is told, and native never saw the task.
+      expect(errors, [isA<RenderCanceledException>()]);
+      expect(calls.where((c) => c.method == 'startThumbnailStream'), isEmpty);
       expect(calls.where((c) => c.method == 'cancelTask'), isEmpty);
     });
 
