@@ -1,3 +1,8 @@
+## 2.13.0
+- **FEAT**(android, iOS, macOS): A failed render, split, audio extraction or merge now says what failed in a form an app can branch on: `NativeFailureDetails.of(error)` reads the platform's error domain, code and cause chain off the `PlatformException`, and `isOutOfStorage` names the one failure a retry cannot fix.
+- **FIX**(iOS, macOS): A cancelled job answers before the cancel does and its id is free from that moment, so a retry that restarts the same id right after cancelling is no longer refused with `TASK_ALREADY_RUNNING`. Same contract as Android.
+- **FIX**(android, iOS, macOS): A job restarted under a cancelled id begins only once the cancelled pipeline has finished unwinding, so the old job's cleanup can no longer delete the retry's output.
+
 ## 2.12.1
 - **FIX**(android): An overlay pinched far past the canvas no longer takes the app down with an `OutOfMemoryError`. Its raster is held to four frames' worth of pixels; placement and extent are unchanged, and a layer within that allowance renders exactly as before.
 - **FIX**(android): A render whose overlay still cannot be rastered fails with a `RENDER_ERROR` naming the layer's size instead of killing the process.

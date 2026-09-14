@@ -573,6 +573,30 @@ if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
 }
 ```
 
+A cancel answers at once, and the cancelled job's future completes before the cancel's does. The job's id is free again from that moment — a retry can start the same id right after cancelling it without being refused as already running. The cancelled pipeline may still be unwinding at that point, so a job restarted under the same id is accepted at once but begins only after that pipeline has finished — its output can never be removed by the old job's cleanup. Reuse the id for a retry to get that guarantee.
+
+#### Find out why a render failed
+
+A render that fails for any other reason throws a `PlatformException` (or, for encoder failures, a `RenderEncoderException`). Its message is the platform's own description of the failure — written for a person, and on iOS/macOS in that person's language, so it is nothing to branch on. `NativeFailureDetails` reads what is: the error's domain and code, and the chain of causes underneath.
+
+```dart
+try {
+  await ProVideoEditor.instance.renderVideoToFile(outputPath, renderModel);
+} on PlatformException catch (e) {
+  final details = NativeFailureDetails.of(e);
+  if (details?.isOutOfStorage ?? false) {
+    // Ask the user to free up space; a retry would hit the same wall.
+  } else {
+    // details?.domain, details?.code, details?.codeName, details?.cause
+  }
+}
+```
+
+| Platform | `domain` | `code` / `codeName` | `cause` |
+|---|---|---|---|
+| iOS, macOS | `NSError.domain`, e.g. `AVFoundationErrorDomain`, `NSPOSIXErrorDomain`, `ExportWatchdog` | `NSError.code` (`-11807` for `AVErrorDiskFull`) | the `NSUnderlyingErrorKey` chain |
+| Android | the outermost throwable's class, e.g. `androidx.media3.transformer.ExportException` | `ExportException.errorCode` and its name, e.g. `ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED` | the Java cause chain |
+
 #### Advanced Example
 ```dart
 /// Every option except videoSegments is optional.

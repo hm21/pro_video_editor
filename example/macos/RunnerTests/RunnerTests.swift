@@ -29,6 +29,163 @@ class RunnerTests: XCTestCase {
     waitForExpectations(timeout: 1)
   }
 
+  // MARK: - Failure details and cancellation
+
+  func testFailureDetailsCarryTheDomainCodeAndUnderlyingChain() {
+    let status = NSError(domain: NSOSStatusErrorDomain, code: -17512)
+    let diskFull = NSError(
+      domain: AVFoundationErrorDomain, code: AVError.diskFull.rawValue,
+      userInfo: [NSUnderlyingErrorKey: status])
+
+    let details = FailureDetails.of(diskFull)
+
+    XCTAssertEqual(details["domain"] as? String, AVFoundationErrorDomain)
+    XCTAssertEqual(details["code"] as? Int, -11807)
+    XCTAssertEqual(
+      details["cause"] as? String,
+      "\(NSOSStatusErrorDomain) -17512: \(status.localizedDescription)")
+  }
+
+  func testFailureDetailsOmitTheCauseWhenThereIsNone() {
+    let details = FailureDetails.of(NSError(domain: "ExportWatchdog", code: 408))
+
+    XCTAssertEqual(details["domain"] as? String, "ExportWatchdog")
+    XCTAssertEqual(details["code"] as? Int, 408)
+    XCTAssertNil(details["cause"])
+  }
+
+  func testFailureDetailsCutTheUnderlyingChainAtTheDepthCap() {
+    var error = NSError(domain: "Test", code: 0)
+    for depth in 1...20 {
+      error = NSError(domain: "Test", code: depth, userInfo: [NSUnderlyingErrorKey: error])
+    }
+
+    let cause = FailureDetails.of(error)["cause"] as? String
+
+    XCTAssertEqual(cause?.components(separatedBy: " <- ").count, 8)
+  }
+
+  // A cancel used to answer before the job it cancelled did: the export
+  // session unwinds asynchronously, and only its completion removed the task,
+  // so a caller that cancelled and immediately started the same id again — a
+  // retry after a stalled export — was refused with TASK_ALREADY_RUNNING.
+  func testCancelledJobAnswersBeforeItsCancelDoesAndFreesItsId() throws {
+    let videoURL = try ThumbnailTimestampFixture.makeColorVideo(
+      colors: Array(ThumbnailTimestampFixture.palette.prefix(3)))
+    defer { try? FileManager.default.removeItem(at: videoURL) }
+    let plugin = ProVideoEditorPlugin()
+    let id = "cancel-then-restart"
+    let render = FlutterMethodCall(
+      methodName: "renderVideo",
+      arguments: [
+        "id": id,
+        "videoClips": [["inputPath": videoURL.path]],
+        "outputFormat": "mp4",
+      ])
+
+    let firstAnswered = expectation(description: "the cancelled render answers exactly once")
+    firstAnswered.assertForOverFulfill = true
+    var firstAnswer: Any?
+    plugin.handle(render) { result in
+      firstAnswer = result
+      firstAnswered.fulfill()
+    }
+
+    // Everything below runs before the main queue gets to drain, so the
+    // pipeline's own unwinding cannot have answered yet: whatever has been
+    // answered here was answered by the cancel itself.
+    var cancelAnswered = false
+    plugin.handle(FlutterMethodCall(methodName: "cancelTask", arguments: ["id": id])) { _ in
+      cancelAnswered = true
+    }
+    XCTAssertTrue(cancelAnswered)
+    XCTAssertEqual((firstAnswer as? FlutterError)?.code, "CANCELED")
+
+    let secondAnswered = expectation(description: "the restarted render answers")
+    var secondAnswer: Any?
+    plugin.handle(render) { result in
+      secondAnswer = result
+      secondAnswered.fulfill()
+    }
+    XCTAssertNotEqual(
+      (secondAnswer as? FlutterError)?.code, "TASK_ALREADY_RUNNING",
+      "the id is free the moment the cancel has answered")
+    plugin.handle(FlutterMethodCall(methodName: "cancelTask", arguments: ["id": id])) { _ in }
+    wait(for: [firstAnswered, secondAnswered], timeout: 5)
+
+    // The first job's own unwinding must not answer its call a second time;
+    // `assertForOverFulfill` above would trip. Give it time to try.
+    let unwound = expectation(description: "the cancelled sessions had time to unwind")
+    unwound.isInverted = true
+    wait(for: [unwound], timeout: 2)
+  }
+
+  // A cancel answers at once, but the pipeline behind the cancelled job is
+  // still unwinding and may yet remove the output it was writing. A job
+  // restarted under the same id must not run into that.
+  func testAJobRestartedUnderACancelledIdWaitsForItsPredecessorToUnwind() {
+    let registry = JobRegistry<FakeJob>()
+    var started: [String] = []
+    let first = FakeJob()
+    registry.start(first, id: "x") { started.append("first") }
+    XCTAssertEqual(started, ["first"])
+
+    XCTAssertTrue(registry.cancel("x") === first)
+    XCTAssertTrue(first.isCanceled)
+    XCTAssertFalse(registry.isRunning("x"), "the cancel frees the id at once")
+
+    let second = FakeJob()
+    registry.start(second, id: "x") { started.append("second") }
+    XCTAssertTrue(registry.isRunning("x"))
+    XCTAssertEqual(started, ["first"], "the restart waits for the cancelled pipeline")
+
+    registry.settle(first, id: "x")
+    XCTAssertEqual(started, ["first", "second"])
+    XCTAssertTrue(registry.isRunning("x"), "the cancelled job's report leaves the restart alone")
+
+    registry.settle(first, id: "x")
+    XCTAssertEqual(started, ["first", "second"], "a duplicate report starts nothing twice")
+
+    registry.settle(second, id: "x")
+    XCTAssertFalse(registry.isRunning("x"))
+  }
+
+  func testAJobCancelledWhileWaitingNeverStartsAndDoesNotBlockTheNext() {
+    let registry = JobRegistry<FakeJob>()
+    var started: [String] = []
+    let first = FakeJob()
+    registry.start(first, id: "x") { started.append("first") }
+    _ = registry.cancel("x")
+
+    let second = FakeJob()
+    registry.start(second, id: "x") { started.append("second") }
+    XCTAssertTrue(registry.cancel("x") === second)
+    XCTAssertTrue(second.isCanceled)
+
+    let third = FakeJob()
+    registry.start(third, id: "x") { started.append("third") }
+    XCTAssertEqual(started, ["first"], "the first job is still unwinding")
+
+    registry.settle(first, id: "x")
+    XCTAssertEqual(started, ["first", "third"], "the cancelled second job never starts")
+  }
+
+  func testCancelAllDropsWhatWasWaiting() {
+    let registry = JobRegistry<FakeJob>()
+    var started: [String] = []
+    let first = FakeJob()
+    registry.start(first, id: "x") { started.append("first") }
+    _ = registry.cancel("x")
+    let second = FakeJob()
+    registry.start(second, id: "x") { started.append("second") }
+
+    registry.cancelAll()
+    XCTAssertTrue(second.isCanceled)
+    registry.settle(first, id: "x")
+    XCTAssertEqual(started, ["first"])
+    XCTAssertFalse(registry.isRunning("x"))
+  }
+
   // MARK: - Slide animation geometry
 
   // Frame 1000×500, a small layer (200×100) centered at (400, 200) in
@@ -1231,4 +1388,12 @@ enum OrientedImageFixture {
     }
     return index
   }
+}
+
+/// Stands in for a `RenderTask`/`AudioExtractTask` in the registry tests.
+private final class FakeJob: ChannelTask {
+  private(set) var isCanceled = false
+  func cancel() { isCanceled = true }
+  func sendSuccess(_ payload: Any?) {}
+  func sendError(_ error: FlutterError) {}
 }

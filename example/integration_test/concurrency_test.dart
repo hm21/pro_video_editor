@@ -50,6 +50,10 @@ void main() {
   /// Awaits [future], and asserts that a failure is a cancellation rather than
   /// a crash-adjacent platform error. Succeeding is allowed: at the long end of
   /// a sweep the job is simply already done.
+  ///
+  /// Attach it before cancelling: a cancelled job answers before the cancel
+  /// does, so a handler attached afterwards finds the future already failed
+  /// and the cancellation surfaces as an unhandled error instead.
   Future<void> expectCancelledOrDone(
     Future<Object?> future,
     String what,
@@ -186,10 +190,14 @@ void main() {
         );
 
         final future = pve.renderVideo(model);
+        final settled = expectCancelledOrDone(
+          future,
+          'a render cancelled after ${ms}ms',
+        );
         await Future<void>.delayed(Duration(milliseconds: ms));
         await cancelIgnoringNotFound(model.id);
 
-        await expectCancelledOrDone(future, 'a render cancelled after ${ms}ms');
+        await settled;
       }
 
       /// Still alive and still working — a native crash anywhere in the sweep
@@ -202,6 +210,44 @@ void main() {
         ),
       );
       expect(bytes.lengthInBytes, greaterThan(10000));
+    },
+    skip: !supportsCancel,
+  );
+
+  /// A retry restarts the same id the moment its cancel has answered. The
+  /// cancelled pipeline may still be unwinding then, so the restart is taken
+  /// at once but begins only once that pipeline has reported its end — which
+  /// every pipeline must do on a cancel, or the retry waits for good. Media3's
+  /// `Transformer.cancel()` reports nothing on its own; the render pipeline
+  /// has to say so itself.
+  testWidgets(
+    'a render restarted under a cancelled id runs to completion',
+    (tester) async {
+      for (final ms in cancelDelays) {
+        final model = renderTask(
+          'cancel-restart-$ms',
+          Duration.zero,
+          const Duration(seconds: 3),
+        );
+
+        final cancelled = expectCancelledOrDone(
+          pve.renderVideo(model),
+          'a render cancelled after ${ms}ms',
+        );
+        await Future<void>.delayed(Duration(milliseconds: ms));
+        await cancelIgnoringNotFound(model.id);
+
+        final retried = pve.renderVideo(model);
+        await cancelled;
+        final bytes = await retried.timeout(
+          const Duration(seconds: 90),
+          onTimeout: () => fail(
+            'the render restarted under ${model.id} after ${ms}ms never '
+            'answered: its cancelled predecessor never reported its end',
+          ),
+        );
+        expect(bytes.lengthInBytes, greaterThan(10000));
+      }
     },
     skip: !supportsCancel,
   );
@@ -240,10 +286,14 @@ void main() {
         );
 
         final future = pve.splitVideo(model);
+        final settled = expectCancelledOrDone(
+          future,
+          'a split cancelled after ${ms}ms',
+        );
         await Future<void>.delayed(Duration(milliseconds: ms));
         await cancelIgnoringNotFound(model.id);
 
-        await expectCancelledOrDone(future, 'a split cancelled after ${ms}ms');
+        await settled;
       }
     },
     skip: !supportsCancel,
@@ -283,13 +333,14 @@ void main() {
         );
 
         final future = pve.renderVideo(model);
-        await Future<void>.delayed(Duration(milliseconds: ms));
-        await cancelIgnoringNotFound(model.id);
-
-        await expectCancelledOrDone(
+        final settled = expectCancelledOrDone(
           future,
           'a transition render cancelled after ${ms}ms',
         );
+        await Future<void>.delayed(Duration(milliseconds: ms));
+        await cancelIgnoringNotFound(model.id);
+
+        await settled;
       }
 
       /// Still alive: a trap in the cleanup path above would have taken the
