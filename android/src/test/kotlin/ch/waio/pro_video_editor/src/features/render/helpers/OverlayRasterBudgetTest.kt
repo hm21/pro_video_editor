@@ -158,13 +158,29 @@ internal class OverlayRasterBudgetTest {
     @Test
     fun theOutOfMemoryExceptionNamesTheLayout() {
         val exception = OverlayOutOfMemoryException(
-            sized(10954.0, 13412.0),
+            sized(10954.0, 13412.0), 1080, 1920,
             OutOfMemoryError("Failed to allocate a 587660211 byte allocation"),
         )
 
         assertEquals(
             "Out of memory rastering an overlay laid out at 10954 x 13412 px: " +
                 "Failed to allocate a 587660211 byte allocation",
+            exception.message,
+        )
+    }
+
+    /** A stretched layer is laid out at the frame, and an error may carry no message. */
+    @Test
+    fun theOutOfMemoryExceptionNamesTheFrameForAStretchedLayer() {
+        val stretched = VideoSequenceBuilder.ImageLayerConfig(
+            image = null, scaleX = null, scaleY = null,
+            width = null, height = null, x = null, y = null,
+        )
+
+        val exception = OverlayOutOfMemoryException(stretched, 2160, 3840, OutOfMemoryError())
+
+        assertEquals(
+            "Out of memory rastering an overlay laid out at 2160 x 3840 px (frame): no message",
             exception.message,
         )
     }

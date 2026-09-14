@@ -258,7 +258,7 @@ fun applyTimedImageLayers(
             // render instead — the caller reports it and the user can retry.
             // Not skipped like a decode failure below: a video quietly missing
             // its sticker is worse than one that did not export.
-            throw OverlayOutOfMemoryException(layer, e)
+            throw OverlayOutOfMemoryException(layer, videoWidth, videoHeight, e)
         } catch (e: Exception) {
             Log.e(RENDER_TAG, "Failed to decode image layer: ${e.message}")
         }
@@ -276,13 +276,35 @@ fun applyTimedImageLayers(
  */
 internal class OverlayOutOfMemoryException(
     layer: VideoSequenceBuilder.ImageLayerConfig,
+    videoWidth: Int,
+    videoHeight: Int,
     cause: OutOfMemoryError,
 ) : RuntimeException(
     "Out of memory rastering an overlay laid out at " +
-        "${layer.width?.toInt() ?: "natural"} x ${layer.height?.toInt() ?: "natural"} px: " +
-        cause.message,
+        "${layoutSize(layer, videoWidth, videoHeight)}: ${cause.message ?: "no message"}",
     cause,
-)
+) {
+    private companion object {
+        /**
+         * The size the layer occupies, as [prepareOverlay] lays it out: its
+         * explicit size, else the frame for a stretched layer, else its own
+         * pixels, which are not known until it is decoded.
+         */
+        fun layoutSize(
+            layer: VideoSequenceBuilder.ImageLayerConfig,
+            videoWidth: Int,
+            videoHeight: Int,
+        ): String {
+            val width = layer.width
+            val height = layer.height
+            return when {
+                width != null && height != null -> "${width.toInt()} x ${height.toInt()} px"
+                layer.x == null && layer.y == null -> "$videoWidth x $videoHeight px (frame)"
+                else -> "its natural size"
+            }
+        }
+    }
+}
 
 /** A fully prepared overlay bitmap together with its placement settings. */
 private data class PreparedOverlay(
