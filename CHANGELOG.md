@@ -1,5 +1,5 @@
 ## 2.12.1
-- **FIX**(android): An overlay laid out far larger than the frame — a sticker or title pinched well past the canvas — no longer takes the app down with an `OutOfMemoryError`. Its raster is now held to four frames' worth of pixels (and never more than 4096 × 4096), with the shortfall handed to the compositor as an overlay scale, so placement and extent are unchanged and only a layer more than twice the frame on each axis loses density where it lies outside the frame. Every layer within that allowance is rastered exactly as before.
+- **FIX**(android): An overlay pinched far past the canvas no longer takes the app down with an `OutOfMemoryError`. Its raster is held to four frames' worth of pixels; placement and extent are unchanged, and a layer within that allowance renders exactly as before.
 - **FIX**(android): A render whose overlay still cannot be rastered fails with a `RENDER_ERROR` naming the layer's size instead of killing the process.
 
 ## 2.12.0
