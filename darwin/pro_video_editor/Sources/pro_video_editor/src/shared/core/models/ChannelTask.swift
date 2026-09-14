@@ -13,6 +13,7 @@ import Foundation
 /// needs to settle a job the same way whichever map it lives in.
 protocol ChannelTask: AnyObject {
   var isCanceled: Bool { get }
+  func cancel()
   func sendSuccess(_ payload: Any?)
   func sendError(_ error: FlutterError)
 }

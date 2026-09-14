@@ -97,6 +97,21 @@ void main() {
       );
     });
 
+    test('recognises a full disk reported underneath an export failure', () {
+      // AVFoundation usually answers with the generic AVErrorExportFailed and
+      // puts the real reason in the underlying chain, described in the
+      // device's language.
+      const details = NativeFailureDetails(
+        domain: 'AVFoundationErrorDomain',
+        code: -11800,
+        cause:
+            'NSPOSIXErrorDomain 28: '
+            'Auf dem Volume ist kein Speicherplatz mehr verfügbar.',
+      );
+
+      expect(details.isOutOfStorage, isTrue);
+    });
+
     test("recognises Android's ENOSPC in the muxer's cause", () {
       const details = NativeFailureDetails(
         domain: 'androidx.media3.transformer.ExportException',

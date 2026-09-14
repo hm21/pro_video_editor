@@ -29,8 +29,8 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
   var eventSink: FlutterEventSink?
   var waveformStreamSink: FlutterEventSink?
   var logSink: FlutterEventSink?
-  private var activeRenderTasks: [String: RenderTask] = [:]
-  private var activeAudioTasks: [String: AudioExtractTask] = [:]
+  private let renderTasks = JobRegistry<RenderTask>()
+  private let audioTasks = JobRegistry<AudioExtractTask>()
   private var activeWaveformTasks: [String: WaveformTask] = [:]
 
   /// Guards `engineDetached`. Metadata/thumbnail callbacks may complete off the
@@ -99,11 +99,9 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     engineDetached = true
     engineLock.unlock()
 
-    activeRenderTasks.values.forEach { $0.cancel() }
-    activeAudioTasks.values.forEach { $0.cancel() }
+    renderTasks.cancelAll()
+    audioTasks.cancelAll()
     activeWaveformTasks.values.forEach { $0.cancel() }
-    activeRenderTasks.removeAll()
-    activeAudioTasks.removeAll()
     activeWaveformTasks.removeAll()
 
     eventSink = nil
@@ -308,7 +306,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    if activeRenderTasks[id] != nil {
+    if renderTasks.isRunning(id) {
       result(
         FlutterError(
           code: "TASK_ALREADY_RUNNING", message: "Task with id \(id) is already running",
@@ -326,33 +324,33 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     postProgress(id: id, progress: 0.0)
 
     let task = RenderTask(result: result)
-    activeRenderTasks[id] = task
-
-    let handle = RenderVideo.render(
-      config: config,
-      onProgress: { progress in
-        self.postProgress(id: id, progress: progress)
-      },
-      onComplete: { outputData in
-        DispatchQueue.main.async {
-          self.postProgress(id: id, progress: 1.0)
-          self.settle(task, id: id, in: &self.activeRenderTasks) {
-            $0.sendSuccess(outputData)
+    renderTasks.start(task, id: id) {
+      let handle = RenderVideo.render(
+        config: config,
+        onProgress: { progress in
+          self.postProgress(id: id, progress: progress, for: task)
+        },
+        onComplete: { outputData in
+          DispatchQueue.main.async {
+            self.postProgress(id: id, progress: 1.0, for: task)
+            self.settle(task, id: id, in: self.renderTasks) {
+              $0.sendSuccess(outputData)
+            }
+          }
+        },
+        onError: { error in
+          PluginLog.print("❌ Render failed: \(error.localizedDescription)")
+          DispatchQueue.main.async {
+            self.settle(task, id: id, in: self.renderTasks) {
+              $0.sendError(
+                Self.flutterError(for: error, canceled: $0.isCanceled, otherwise: "RENDER_ERROR"))
+            }
           }
         }
-      },
-      onError: { error in
-        PluginLog.print("❌ Render failed: \(error.localizedDescription)")
-        DispatchQueue.main.async {
-          self.settle(task, id: id, in: &self.activeRenderTasks) {
-            $0.sendError(
-              Self.flutterError(for: error, canceled: $0.isCanceled, otherwise: "RENDER_ERROR"))
-          }
-        }
-      }
-    )
+      )
 
-    task.attachHandle(handle)
+      task.attachHandle(handle)
+    }
   }
 
   /// Starts an asynchronous stop-motion render job.
@@ -375,7 +373,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    if activeRenderTasks[id] != nil {
+    if renderTasks.isRunning(id) {
       result(
         FlutterError(
           code: "TASK_ALREADY_RUNNING", message: "Task with id \(id) is already running",
@@ -393,33 +391,33 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     postProgress(id: id, progress: 0.0)
 
     let task = RenderTask(result: result)
-    activeRenderTasks[id] = task
-
-    let handle = StopMotionGenerator.generate(
-      config: config,
-      onProgress: { progress in
-        self.postProgress(id: id, progress: progress)
-      },
-      onComplete: { outputData in
-        DispatchQueue.main.async {
-          self.postProgress(id: id, progress: 1.0)
-          self.settle(task, id: id, in: &self.activeRenderTasks) {
-            $0.sendSuccess(outputData)
+    renderTasks.start(task, id: id) {
+      let handle = StopMotionGenerator.generate(
+        config: config,
+        onProgress: { progress in
+          self.postProgress(id: id, progress: progress, for: task)
+        },
+        onComplete: { outputData in
+          DispatchQueue.main.async {
+            self.postProgress(id: id, progress: 1.0, for: task)
+            self.settle(task, id: id, in: self.renderTasks) {
+              $0.sendSuccess(outputData)
+            }
+          }
+        },
+        onError: { error in
+          PluginLog.print("❌ Stop-motion render failed: \(error.localizedDescription)")
+          DispatchQueue.main.async {
+            self.settle(task, id: id, in: self.renderTasks) {
+              $0.sendError(
+                Self.flutterError(for: error, canceled: $0.isCanceled, otherwise: "RENDER_ERROR"))
+            }
           }
         }
-      },
-      onError: { error in
-        PluginLog.print("❌ Stop-motion render failed: \(error.localizedDescription)")
-        DispatchQueue.main.async {
-          self.settle(task, id: id, in: &self.activeRenderTasks) {
-            $0.sendError(
-              Self.flutterError(for: error, canceled: $0.isCanceled, otherwise: "RENDER_ERROR"))
-          }
-        }
-      }
-    )
+      )
 
-    task.attachHandle(handle)
+      task.attachHandle(handle)
+    }
   }
 
   /// Splits a single video into two files at a frame-accurate position.
@@ -445,7 +443,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    if activeRenderTasks[id] != nil {
+    if renderTasks.isRunning(id) {
       result(
         FlutterError(
           code: "TASK_ALREADY_RUNNING", message: "Task with id \(id) is already running",
@@ -464,41 +462,41 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     postProgress(id: id, progress: 0.0)
 
     let task = RenderTask(result: result)
-    activeRenderTasks[id] = task
-
-    let handle = SplitVideo.split(
-      inputPath: inputPath,
-      splitUs: splitUs,
-      startOutputPath: startOutputPath,
-      endOutputPath: endOutputPath,
-      outputFormat: outputFormat,
-      bitrate: bitrate,
-      enableAudio: enableAudio,
-      exportTimeout: exportTimeout,
-      stallTimeout: stallTimeout,
-      onProgress: { progress in
-        self.postProgress(id: id, progress: progress)
-      },
-      onComplete: { outputPaths in
-        DispatchQueue.main.async {
-          self.postProgress(id: id, progress: 1.0)
-          self.settle(task, id: id, in: &self.activeRenderTasks) {
-            $0.sendSuccess(outputPaths)
+    renderTasks.start(task, id: id) {
+      let handle = SplitVideo.split(
+        inputPath: inputPath,
+        splitUs: splitUs,
+        startOutputPath: startOutputPath,
+        endOutputPath: endOutputPath,
+        outputFormat: outputFormat,
+        bitrate: bitrate,
+        enableAudio: enableAudio,
+        exportTimeout: exportTimeout,
+        stallTimeout: stallTimeout,
+        onProgress: { progress in
+          self.postProgress(id: id, progress: progress, for: task)
+        },
+        onComplete: { outputPaths in
+          DispatchQueue.main.async {
+            self.postProgress(id: id, progress: 1.0, for: task)
+            self.settle(task, id: id, in: self.renderTasks) {
+              $0.sendSuccess(outputPaths)
+            }
+          }
+        },
+        onError: { error in
+          PluginLog.print("❌ Split failed: \(error.localizedDescription)")
+          DispatchQueue.main.async {
+            self.settle(task, id: id, in: self.renderTasks) {
+              $0.sendError(
+                Self.flutterError(for: error, canceled: $0.isCanceled, otherwise: "SPLIT_ERROR"))
+            }
           }
         }
-      },
-      onError: { error in
-        PluginLog.print("❌ Split failed: \(error.localizedDescription)")
-        DispatchQueue.main.async {
-          self.settle(task, id: id, in: &self.activeRenderTasks) {
-            $0.sendError(
-              Self.flutterError(for: error, canceled: $0.isCanceled, otherwise: "SPLIT_ERROR"))
-          }
-        }
-      }
-    )
+      )
 
-    task.attachHandle(handle)
+      task.attachHandle(handle)
+    }
   }
 
   /// Extracts audio from a video file asynchronously.
@@ -521,7 +519,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    if activeAudioTasks[id] != nil {
+    if audioTasks.isRunning(id) {
       result(
         FlutterError(
           code: "TASK_ALREADY_RUNNING",
@@ -541,35 +539,35 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     postProgress(id: id, progress: 0.0)
 
     let task = AudioExtractTask(result: result)
-    activeAudioTasks[id] = task
-
-    let handle = ExtractAudio.extract(
-      config: config,
-      onProgress: { progress in
-        self.postProgress(id: id, progress: progress)
-      },
-      onComplete: { outputData in
-        DispatchQueue.main.async {
-          self.postProgress(id: id, progress: 1.0)
-          self.settle(task, id: id, in: &self.activeAudioTasks) {
-            $0.sendSuccess(outputData)
+    audioTasks.start(task, id: id) {
+      let handle = ExtractAudio.extract(
+        config: config,
+        onProgress: { progress in
+          self.postProgress(id: id, progress: progress, for: task)
+        },
+        onComplete: { outputData in
+          DispatchQueue.main.async {
+            self.postProgress(id: id, progress: 1.0, for: task)
+            self.settle(task, id: id, in: self.audioTasks) {
+              $0.sendSuccess(outputData)
+            }
+          }
+        },
+        onError: { error in
+          PluginLog.print("❌ Audio extraction failed: \(error.localizedDescription)")
+          DispatchQueue.main.async {
+            self.settle(task, id: id, in: self.audioTasks) {
+              $0.sendError(
+                Self.flutterError(
+                  for: error, canceled: $0.isCanceled,
+                  otherwise: error is NoAudioTrackException ? "NO_AUDIO" : "EXTRACT_ERROR"))
+            }
           }
         }
-      },
-      onError: { error in
-        PluginLog.print("❌ Audio extraction failed: \(error.localizedDescription)")
-        DispatchQueue.main.async {
-          self.settle(task, id: id, in: &self.activeAudioTasks) {
-            $0.sendError(
-              Self.flutterError(
-                for: error, canceled: $0.isCanceled,
-                otherwise: error is NoAudioTrackException ? "NO_AUDIO" : "EXTRACT_ERROR"))
-          }
-        }
-      }
-    )
+      )
 
-    task.attachHandle(handle)
+      task.attachHandle(handle)
+    }
   }
 
   /// Merges the audio of several trimmed clip windows into one file.
@@ -592,7 +590,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    if activeAudioTasks[id] != nil {
+    if audioTasks.isRunning(id) {
       result(
         FlutterError(
           code: "TASK_ALREADY_RUNNING",
@@ -611,33 +609,33 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     postProgress(id: id, progress: 0.0)
 
     let task = AudioExtractTask(result: result)
-    activeAudioTasks[id] = task
-
-    let handle = MergeAudio.merge(
-      config: config,
-      onProgress: { progress in
-        self.postProgress(id: id, progress: progress)
-      },
-      onComplete: { resultMap in
-        DispatchQueue.main.async {
-          self.postProgress(id: id, progress: 1.0)
-          self.settle(task, id: id, in: &self.activeAudioTasks) {
-            $0.sendSuccess(resultMap)
+    audioTasks.start(task, id: id) {
+      let handle = MergeAudio.merge(
+        config: config,
+        onProgress: { progress in
+          self.postProgress(id: id, progress: progress, for: task)
+        },
+        onComplete: { resultMap in
+          DispatchQueue.main.async {
+            self.postProgress(id: id, progress: 1.0, for: task)
+            self.settle(task, id: id, in: self.audioTasks) {
+              $0.sendSuccess(resultMap)
+            }
+          }
+        },
+        onError: { error in
+          PluginLog.print("❌ Audio merge failed: \(error.localizedDescription)")
+          DispatchQueue.main.async {
+            self.settle(task, id: id, in: self.audioTasks) {
+              $0.sendError(
+                Self.flutterError(for: error, canceled: $0.isCanceled, otherwise: "MERGE_ERROR"))
+            }
           }
         }
-      },
-      onError: { error in
-        PluginLog.print("❌ Audio merge failed: \(error.localizedDescription)")
-        DispatchQueue.main.async {
-          self.settle(task, id: id, in: &self.activeAudioTasks) {
-            $0.sendError(
-              Self.flutterError(for: error, canceled: $0.isCanceled, otherwise: "MERGE_ERROR"))
-          }
-        }
-      }
-    )
+      )
 
-    task.attachHandle(handle)
+      task.attachHandle(handle)
+    }
   }
 
   /// Generates waveform data from a video's audio track asynchronously.
@@ -828,16 +826,15 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     // caller that cancels and immediately starts the same id again (a retry
     // after a stalled export) used to be refused with TASK_ALREADY_RUNNING while
     // the old session was still tearing down. The pipeline's own settlement
-    // finds the task gone and answers nothing. Same contract as Android.
-    if let task = activeRenderTasks.removeValue(forKey: id) {
-      task.cancel()
+    // finds the task gone and answers nothing; a job restarted under the id
+    // meanwhile waits in the registry for that. Same contract as Android.
+    if let task = renderTasks.cancel(id) {
       task.sendError(FlutterError(code: "CANCELED", message: "Task was canceled", details: nil))
       result(nil)
       return
     }
 
-    if let task = activeAudioTasks.removeValue(forKey: id) {
-      task.cancel()
+    if let task = audioTasks.cancel(id) {
       task.sendError(FlutterError(code: "CANCELED", message: "Task was canceled", details: nil))
       result(nil)
       return
@@ -880,20 +877,29 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
 
   /// Settles `task` with the outcome its pipeline reported.
   ///
-  /// The task leaves `tasks` only while it is still the one registered under
-  /// `id`: a cancel from Dart has already removed it, and a later job may hold
-  /// the id by now. `deliver` runs through the task, which answers its call at
+  /// The registry frees `id` only while the task is still the one registered
+  /// under it: a cancel from Dart has already removed it, and a later job may
+  /// hold the id by now — one that has been waiting for exactly this report
+  /// starts here. `deliver` runs through the task, which answers its call at
   /// most once, so a job that was already cancelled answers nothing more. After
   /// engine detach nothing is delivered at all — the captured `FlutterResult`
   /// would message an engine that is no longer running.
-  private func settle<Task: ChannelTask>(
-    _ task: Task, id: String, in tasks: inout [String: Task], deliver: (Task) -> Void
+  private func settle<Job: ChannelTask>(
+    _ task: Job, id: String, in registry: JobRegistry<Job>, deliver: (Job) -> Void
   ) {
-    if tasks[id] === task {
-      tasks.removeValue(forKey: id)
-    }
+    registry.settle(task, id: id)
     guard !isEngineDetached else { return }
     deliver(task)
+  }
+
+  /// Progress for a tracked job, dropped once it has been cancelled.
+  ///
+  /// A cancel frees the id at once, so a later job may already own it while
+  /// the cancelled pipeline is still unwinding — its last few reports, and the
+  /// `1.0` a completion posts, would otherwise land on that job's stream.
+  private func postProgress(id: String, progress: Double, for task: ChannelTask) {
+    guard !task.isCanceled else { return }
+    postProgress(id: id, progress: progress)
   }
 
   /// Sends progress updates to Flutter via event channel.

@@ -19,6 +19,7 @@ import ch.waio.pro_video_editor.src.features.split.SplitVideo
 import ch.waio.pro_video_editor.src.features.stopmotion.StopMotionGenerator
 import ch.waio.pro_video_editor.src.features.stopmotion.models.StopMotionConfig
 import ch.waio.pro_video_editor.src.shared.FailureDetails
+import ch.waio.pro_video_editor.src.shared.JobRegistry
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.features.thumbnail.ThumbnailGenerator
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailConfig
@@ -31,6 +32,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * ProVideoEditorPlugin - Main Flutter plugin for advanced video editing capabilities.
@@ -70,8 +72,14 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var waveformGenerator: WaveformGenerator
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val activeRenderTasks = ConcurrentHashMap<String, RenderTask>()
-    private val activeAudioTasks = ConcurrentHashMap<String, AudioExtractTask>()
+    private val renderTasks = JobRegistry<RenderTask> { task ->
+        task.canceled.set(true)
+        task.job?.cancel()
+    }
+    private val audioTasks = JobRegistry<AudioExtractTask> { task ->
+        task.canceled.set(true)
+        task.job?.cancel()
+    }
     private val activeWaveformTasks = ConcurrentHashMap<String, WaveformTask>()
 
     /// Event channel for streaming waveform chunks
@@ -315,7 +323,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             return
         }
 
-        if (activeRenderTasks.containsKey(id)) {
+        if (renderTasks.isRunning(id)) {
             result.error(
                 "TASK_ALREADY_EXISTS",
                 "A render task with id '$id' is already active",
@@ -327,60 +335,59 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         postProgress(id, 0.0)
 
         val task = RenderTask(job = null, result = result)
-        activeRenderTasks[id] = task
+        renderTasks.start(id, task) {
+            try {
+                val renderConfig = RenderConfig.fromMethodCall(call)
 
-        try {
-            val renderConfig = RenderConfig.fromMethodCall(call)
-
-            val jobHandle = renderVideo.render(
-                config = renderConfig,
-                onProgress = { progress -> postProgress(id, progress) },
-                onComplete = { resultBytes ->
-                    mainHandler.post {
-                        postProgress(id, 1.0)
-                        val removedTask = activeRenderTasks.remove(id)
-                        removedTask?.sendSuccess(resultBytes)
-                    }
-                },
-                onError = { error ->
-                    Log.e(
-                        "RenderVideo",
-                        "Error rendering video: ${error::class.java.name}: " +
-                            "${error.message}",
-                        error
-                    )
-                    mainHandler.post {
-                        val removedTask = activeRenderTasks.remove(id)
-                        val code = when {
-                            removedTask?.canceled?.get() == true -> "CANCELED"
-                            // Transient codec-resource pressure gets its own
-                            // code: unlike ENCODER_NOT_SUPPORTED it is worth
-                            // retrying once codec sessions free up.
-                            error is CodecResourceExhaustedException ->
-                                "CODEC_RESOURCE_EXHAUSTED"
-
-                            error is VideoEncoderConfigurationException ->
-                                "ENCODER_NOT_SUPPORTED"
-
-                            else -> "RENDER_ERROR"
+                val jobHandle = renderVideo.render(
+                    config = renderConfig,
+                    onProgress = { progress -> postProgress(id, progress, task.canceled) },
+                    onComplete = { resultBytes ->
+                        mainHandler.post {
+                            postProgress(id, 1.0, task.canceled)
+                            val removedTask = renderTasks.settle(id, task)
+                            removedTask?.sendSuccess(resultBytes)
                         }
-                        val message = error.message
-                            ?: "${error::class.java.simpleName} (no message)"
-                        removedTask?.sendError(code, message, FailureDetails.of(error))
-                    }
-                }
-            )
+                    },
+                    onError = { error ->
+                        Log.e(
+                            "RenderVideo",
+                            "Error rendering video: ${error::class.java.name}: " +
+                                "${error.message}",
+                            error
+                        )
+                        mainHandler.post {
+                            val removedTask = renderTasks.settle(id, task)
+                            val code = when {
+                                removedTask?.canceled?.get() == true -> "CANCELED"
+                                // Transient codec-resource pressure gets its own
+                                // code: unlike ENCODER_NOT_SUPPORTED it is worth
+                                // retrying once codec sessions free up.
+                                error is CodecResourceExhaustedException ->
+                                    "CODEC_RESOURCE_EXHAUSTED"
 
-            task.job = jobHandle
-            if (task.canceled.get()) {
-                jobHandle.cancel()
+                                error is VideoEncoderConfigurationException ->
+                                    "ENCODER_NOT_SUPPORTED"
+
+                                else -> "RENDER_ERROR"
+                            }
+                            val message = error.message
+                                ?: "${error::class.java.simpleName} (no message)"
+                            removedTask?.sendError(code, message, FailureDetails.of(error))
+                        }
+                    }
+                )
+
+                task.job = jobHandle
+                if (task.canceled.get()) {
+                    jobHandle.cancel()
+                }
+            } catch (e: IllegalArgumentException) {
+                renderTasks.settle(id, task)?.sendError("INVALID_ARGUMENTS", e.message)
+            } catch (e: Exception) {
+                renderTasks.settle(id, task)
+                    ?.sendError("RENDER_ERROR", "Failed to start render: ${e.message}")
             }
-        } catch (e: IllegalArgumentException) {
-            activeRenderTasks.remove(id)
-            result.error("INVALID_ARGUMENTS", e.message, null)
-        } catch (e: Exception) {
-            activeRenderTasks.remove(id)
-            result.error("RENDER_ERROR", "Failed to start render: ${e.message}", null)
         }
     }
 
@@ -398,7 +405,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             return
         }
 
-        if (activeRenderTasks.containsKey(id)) {
+        if (renderTasks.isRunning(id)) {
             result.error(
                 "TASK_ALREADY_EXISTS",
                 "A render task with id '$id' is already active",
@@ -410,45 +417,44 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         postProgress(id, 0.0)
 
         val task = RenderTask(job = null, result = result)
-        activeRenderTasks[id] = task
+        renderTasks.start(id, task) {
+            try {
+                val config = StopMotionConfig.fromMethodCall(call)
 
-        try {
-            val config = StopMotionConfig.fromMethodCall(call)
-
-            val jobHandle = stopMotionGenerator.render(
-                config = config,
-                onProgress = { progress -> postProgress(id, progress) },
-                onComplete = { resultBytes ->
-                    mainHandler.post {
-                        postProgress(id, 1.0)
-                        val removedTask = activeRenderTasks.remove(id)
-                        removedTask?.sendSuccess(resultBytes)
-                    }
-                },
-                onError = { error ->
-                    Log.e("StopMotion", "Error rendering stop-motion: ${error.message}")
-                    mainHandler.post {
-                        val removedTask = activeRenderTasks.remove(id)
-                        val code = if (removedTask?.canceled?.get() == true) {
-                            "CANCELED"
-                        } else {
-                            "RENDER_ERROR"
+                val jobHandle = stopMotionGenerator.render(
+                    config = config,
+                    onProgress = { progress -> postProgress(id, progress, task.canceled) },
+                    onComplete = { resultBytes ->
+                        mainHandler.post {
+                            postProgress(id, 1.0, task.canceled)
+                            val removedTask = renderTasks.settle(id, task)
+                            removedTask?.sendSuccess(resultBytes)
                         }
-                        removedTask?.sendError(code, error.message, FailureDetails.of(error))
+                    },
+                    onError = { error ->
+                        Log.e("StopMotion", "Error rendering stop-motion: ${error.message}")
+                        mainHandler.post {
+                            val removedTask = renderTasks.settle(id, task)
+                            val code = if (removedTask?.canceled?.get() == true) {
+                                "CANCELED"
+                            } else {
+                                "RENDER_ERROR"
+                            }
+                            removedTask?.sendError(code, error.message, FailureDetails.of(error))
+                        }
                     }
-                }
-            )
+                )
 
-            task.job = jobHandle
-            if (task.canceled.get()) {
-                jobHandle.cancel()
+                task.job = jobHandle
+                if (task.canceled.get()) {
+                    jobHandle.cancel()
+                }
+            } catch (e: IllegalArgumentException) {
+                renderTasks.settle(id, task)?.sendError("INVALID_ARGUMENTS", e.message)
+            } catch (e: Exception) {
+                renderTasks.settle(id, task)
+                    ?.sendError("RENDER_ERROR", "Failed to start stop-motion render: ${e.message}")
             }
-        } catch (e: IllegalArgumentException) {
-            activeRenderTasks.remove(id)
-            result.error("INVALID_ARGUMENTS", e.message, null)
-        } catch (e: Exception) {
-            activeRenderTasks.remove(id)
-            result.error("RENDER_ERROR", "Failed to start stop-motion render: ${e.message}", null)
         }
     }
 
@@ -466,7 +472,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             return
         }
 
-        if (activeRenderTasks.containsKey(id)) {
+        if (renderTasks.isRunning(id)) {
             result.error(
                 "TASK_ALREADY_EXISTS",
                 "A render task with id '$id' is already active",
@@ -497,58 +503,57 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         postProgress(id, 0.0)
 
         val task = RenderTask(job = null, result = result)
-        activeRenderTasks[id] = task
-
-        try {
-            val jobHandle = splitVideo.split(
-                inputPath = inputPath,
-                splitUs = splitUs,
-                startOutputPath = startOutputPath,
-                endOutputPath = endOutputPath,
-                outputFormat = outputFormat,
-                bitrate = bitrate,
-                enableAudio = enableAudio,
-                mainHandler = mainHandler,
-                exportTimeoutMs = exportTimeoutMs,
-                stallTimeoutMs = stallTimeoutMs,
-                onProgress = { progress -> postProgress(id, progress) },
-                onComplete = { outputPaths ->
-                    mainHandler.post {
-                        postProgress(id, 1.0)
-                        val removedTask = activeRenderTasks.remove(id)
-                        removedTask?.sendSuccess(outputPaths)
-                    }
-                },
-                onError = { error ->
-                    Log.e(
-                        "SplitVideo",
-                        "Error splitting video: ${error::class.java.name}: ${error.message}",
-                        error
-                    )
-                    mainHandler.post {
-                        val removedTask = activeRenderTasks.remove(id)
-                        val code = when {
-                            removedTask?.canceled?.get() == true -> "CANCELED"
-                            error is java.util.concurrent.CancellationException -> "CANCELED"
-                            else -> "SPLIT_ERROR"
+        renderTasks.start(id, task) {
+            try {
+                val jobHandle = splitVideo.split(
+                    inputPath = inputPath,
+                    splitUs = splitUs,
+                    startOutputPath = startOutputPath,
+                    endOutputPath = endOutputPath,
+                    outputFormat = outputFormat,
+                    bitrate = bitrate,
+                    enableAudio = enableAudio,
+                    mainHandler = mainHandler,
+                    exportTimeoutMs = exportTimeoutMs,
+                    stallTimeoutMs = stallTimeoutMs,
+                    onProgress = { progress -> postProgress(id, progress, task.canceled) },
+                    onComplete = { outputPaths ->
+                        mainHandler.post {
+                            postProgress(id, 1.0, task.canceled)
+                            val removedTask = renderTasks.settle(id, task)
+                            removedTask?.sendSuccess(outputPaths)
                         }
-                        val message = error.message
-                            ?: "${error::class.java.simpleName} (no message)"
-                        removedTask?.sendError(code, message, FailureDetails.of(error))
+                    },
+                    onError = { error ->
+                        Log.e(
+                            "SplitVideo",
+                            "Error splitting video: ${error::class.java.name}: ${error.message}",
+                            error
+                        )
+                        mainHandler.post {
+                            val removedTask = renderTasks.settle(id, task)
+                            val code = when {
+                                removedTask?.canceled?.get() == true -> "CANCELED"
+                                error is java.util.concurrent.CancellationException -> "CANCELED"
+                                else -> "SPLIT_ERROR"
+                            }
+                            val message = error.message
+                                ?: "${error::class.java.simpleName} (no message)"
+                            removedTask?.sendError(code, message, FailureDetails.of(error))
+                        }
                     }
-                }
-            )
+                )
 
-            task.job = jobHandle
-            if (task.canceled.get()) {
-                jobHandle.cancel()
+                task.job = jobHandle
+                if (task.canceled.get()) {
+                    jobHandle.cancel()
+                }
+            } catch (e: IllegalArgumentException) {
+                renderTasks.settle(id, task)?.sendError("INVALID_ARGUMENTS", e.message)
+            } catch (e: Exception) {
+                renderTasks.settle(id, task)
+                    ?.sendError("SPLIT_ERROR", "Failed to start split: ${e.message}")
             }
-        } catch (e: IllegalArgumentException) {
-            activeRenderTasks.remove(id)
-            result.error("INVALID_ARGUMENTS", e.message, null)
-        } catch (e: Exception) {
-            activeRenderTasks.remove(id)
-            result.error("SPLIT_ERROR", "Failed to start split: ${e.message}", null)
         }
     }
 
@@ -566,7 +571,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             return
         }
 
-        if (activeAudioTasks.containsKey(id)) {
+        if (audioTasks.isRunning(id)) {
             result.error(
                 "TASK_ALREADY_EXISTS",
                 "An audio extraction task with id '$id' is already active",
@@ -578,45 +583,44 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         postProgress(id, 0.0)
 
         val task = AudioExtractTask(job = null, result = result)
-        activeAudioTasks[id] = task
+        audioTasks.start(id, task) {
+            try {
+                val config = AudioExtractConfig.fromMethodCall(call)
 
-        try {
-            val config = AudioExtractConfig.fromMethodCall(call)
-
-            val jobHandle = extractAudio.extract(
-                config = config,
-                onProgress = { progress -> postProgress(id, progress) },
-                onComplete = { resultBytes ->
-                    mainHandler.post {
-                        postProgress(id, 1.0)
-                        val removedTask = activeAudioTasks.remove(id)
-                        removedTask?.sendSuccess(resultBytes)
-                    }
-                },
-                onError = { error ->
-                    Log.e("ExtractAudio", "Error extracting audio: ${error.message}")
-                    mainHandler.post {
-                        val removedTask = activeAudioTasks.remove(id)
-                        val code = when {
-                            removedTask?.canceled?.get() == true -> "CANCELED"
-                            error is NoAudioTrackException -> "NO_AUDIO"
-                            else -> "EXTRACT_ERROR"
+                val jobHandle = extractAudio.extract(
+                    config = config,
+                    onProgress = { progress -> postProgress(id, progress, task.canceled) },
+                    onComplete = { resultBytes ->
+                        mainHandler.post {
+                            postProgress(id, 1.0, task.canceled)
+                            val removedTask = audioTasks.settle(id, task)
+                            removedTask?.sendSuccess(resultBytes)
                         }
-                        removedTask?.sendError(code, error.message, FailureDetails.of(error))
+                    },
+                    onError = { error ->
+                        Log.e("ExtractAudio", "Error extracting audio: ${error.message}")
+                        mainHandler.post {
+                            val removedTask = audioTasks.settle(id, task)
+                            val code = when {
+                                removedTask?.canceled?.get() == true -> "CANCELED"
+                                error is NoAudioTrackException -> "NO_AUDIO"
+                                else -> "EXTRACT_ERROR"
+                            }
+                            removedTask?.sendError(code, error.message, FailureDetails.of(error))
+                        }
                     }
-                }
-            )
+                )
 
-            task.job = jobHandle
-            if (task.canceled.get()) {
-                jobHandle.cancel()
+                task.job = jobHandle
+                if (task.canceled.get()) {
+                    jobHandle.cancel()
+                }
+            } catch (e: IllegalArgumentException) {
+                audioTasks.settle(id, task)?.sendError("INVALID_ARGUMENTS", e.message)
+            } catch (e: Exception) {
+                audioTasks.settle(id, task)
+                    ?.sendError("EXTRACT_ERROR", "Failed to start audio extraction: ${e.message}")
             }
-        } catch (e: IllegalArgumentException) {
-            activeAudioTasks.remove(id)
-            result.error("INVALID_ARGUMENTS", e.message, null)
-        } catch (e: Exception) {
-            activeAudioTasks.remove(id)
-            result.error("EXTRACT_ERROR", "Failed to start audio extraction: ${e.message}", null)
         }
     }
 
@@ -635,7 +639,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             return
         }
 
-        if (activeAudioTasks.containsKey(id)) {
+        if (audioTasks.isRunning(id)) {
             result.error(
                 "TASK_ALREADY_EXISTS",
                 "An audio task with id '$id' is already active",
@@ -647,41 +651,40 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         postProgress(id, 0.0)
 
         val task = AudioExtractTask(job = null, result = result)
-        activeAudioTasks[id] = task
+        audioTasks.start(id, task) {
+            try {
+                val config = AudioMergeConfig.fromMethodCall(call)
 
-        try {
-            val config = AudioMergeConfig.fromMethodCall(call)
+                val jobHandle = mergeAudio.merge(
+                    config = config,
+                    onProgress = { progress -> postProgress(id, progress, task.canceled) },
+                    onComplete = { resultMap ->
+                        mainHandler.post {
+                            postProgress(id, 1.0, task.canceled)
+                            val removedTask = audioTasks.settle(id, task)
+                            removedTask?.sendValue(resultMap)
+                        }
+                    },
+                    onError = { error ->
+                        Log.e("MergeAudio", "Error merging audio: ${error.message}")
+                        mainHandler.post {
+                            val removedTask = audioTasks.settle(id, task)
+                            val code = if (removedTask?.canceled?.get() == true) "CANCELED" else "MERGE_ERROR"
+                            removedTask?.sendError(code, error.message, FailureDetails.of(error))
+                        }
+                    }
+                )
 
-            val jobHandle = mergeAudio.merge(
-                config = config,
-                onProgress = { progress -> postProgress(id, progress) },
-                onComplete = { resultMap ->
-                    mainHandler.post {
-                        postProgress(id, 1.0)
-                        val removedTask = activeAudioTasks.remove(id)
-                        removedTask?.sendValue(resultMap)
-                    }
-                },
-                onError = { error ->
-                    Log.e("MergeAudio", "Error merging audio: ${error.message}")
-                    mainHandler.post {
-                        val removedTask = activeAudioTasks.remove(id)
-                        val code = if (removedTask?.canceled?.get() == true) "CANCELED" else "MERGE_ERROR"
-                        removedTask?.sendError(code, error.message, FailureDetails.of(error))
-                    }
+                task.job = jobHandle
+                if (task.canceled.get()) {
+                    jobHandle.cancel()
                 }
-            )
-
-            task.job = jobHandle
-            if (task.canceled.get()) {
-                jobHandle.cancel()
+            } catch (e: IllegalArgumentException) {
+                audioTasks.settle(id, task)?.sendError("INVALID_ARGUMENTS", e.message)
+            } catch (e: Exception) {
+                audioTasks.settle(id, task)
+                    ?.sendError("MERGE_ERROR", "Failed to start audio merge: ${e.message}")
             }
-        } catch (e: IllegalArgumentException) {
-            activeAudioTasks.remove(id)
-            result.error("INVALID_ARGUMENTS", e.message, null)
-        } catch (e: Exception) {
-            activeAudioTasks.remove(id)
-            result.error("MERGE_ERROR", "Failed to start audio merge: ${e.message}", null)
         }
     }
 
@@ -862,24 +865,18 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             return
         }
 
-        // Try to find task in render tasks
-        val renderTask = activeRenderTasks[id]
+        // The cancel answers here and frees the id; a job restarted under it
+        // waits in the registry until the cancelled pipeline has reported.
+        val renderTask = renderTasks.cancel(id)
         if (renderTask != null) {
-            renderTask.canceled.set(true)
-            renderTask.job?.cancel()
-            activeRenderTasks.remove(id)
             // Send CANCELED error to complete the Dart render future
             renderTask.sendError("CANCELED", "Task was canceled")
             result.success(true)
             return
         }
 
-        // Try to find task in audio tasks
-        val audioTask = activeAudioTasks[id]
+        val audioTask = audioTasks.cancel(id)
         if (audioTask != null) {
-            audioTask.canceled.set(true)
-            audioTask.job?.cancel()
-            activeAudioTasks.remove(id)
             // Send CANCELED error to complete the Dart audio future
             audioTask.sendError("CANCELED", "Task was canceled")
             result.success(true)
@@ -913,6 +910,17 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                 )
             )
         }
+    }
+
+    /**
+     * Progress for a tracked job, dropped once [canceled] is set.
+     *
+     * A cancel frees the id at once, so a later job may already hold it while
+     * the cancelled pipeline is still unwinding — its last few reports, and
+     * the `1.0` a completion posts, would otherwise land on that job's stream.
+     */
+    private fun postProgress(id: String, progress: Double, canceled: AtomicBoolean) {
+        if (!canceled.get()) postProgress(id, progress)
     }
 
     /**

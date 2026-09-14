@@ -58,6 +58,13 @@ internal class FailureDetailsTest {
     }
 
     @Test
+    fun causeWithoutMessage_isNamedRatherThanNull() {
+        val details = FailureDetails.of(IllegalStateException("render failed", IOException()))
+
+        assertEquals("java.io.IOException: (no message)", details["cause"])
+    }
+
+    @Test
     fun selfReferencingCause_terminates() {
         val looping = object : Throwable("loops onto itself") {
             override val cause: Throwable get() = this

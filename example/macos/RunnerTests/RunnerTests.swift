@@ -120,6 +120,72 @@ class RunnerTests: XCTestCase {
     wait(for: [unwound], timeout: 2)
   }
 
+  // A cancel answers at once, but the pipeline behind the cancelled job is
+  // still unwinding and may yet remove the output it was writing. A job
+  // restarted under the same id must not run into that.
+  func testAJobRestartedUnderACancelledIdWaitsForItsPredecessorToUnwind() {
+    let registry = JobRegistry<FakeJob>()
+    var started: [String] = []
+    let first = FakeJob()
+    registry.start(first, id: "x") { started.append("first") }
+    XCTAssertEqual(started, ["first"])
+
+    XCTAssertTrue(registry.cancel("x") === first)
+    XCTAssertTrue(first.isCanceled)
+    XCTAssertFalse(registry.isRunning("x"), "the cancel frees the id at once")
+
+    let second = FakeJob()
+    registry.start(second, id: "x") { started.append("second") }
+    XCTAssertTrue(registry.isRunning("x"))
+    XCTAssertEqual(started, ["first"], "the restart waits for the cancelled pipeline")
+
+    registry.settle(first, id: "x")
+    XCTAssertEqual(started, ["first", "second"])
+    XCTAssertTrue(registry.isRunning("x"), "the cancelled job's report leaves the restart alone")
+
+    registry.settle(first, id: "x")
+    XCTAssertEqual(started, ["first", "second"], "a duplicate report starts nothing twice")
+
+    registry.settle(second, id: "x")
+    XCTAssertFalse(registry.isRunning("x"))
+  }
+
+  func testAJobCancelledWhileWaitingNeverStartsAndDoesNotBlockTheNext() {
+    let registry = JobRegistry<FakeJob>()
+    var started: [String] = []
+    let first = FakeJob()
+    registry.start(first, id: "x") { started.append("first") }
+    _ = registry.cancel("x")
+
+    let second = FakeJob()
+    registry.start(second, id: "x") { started.append("second") }
+    XCTAssertTrue(registry.cancel("x") === second)
+    XCTAssertTrue(second.isCanceled)
+
+    let third = FakeJob()
+    registry.start(third, id: "x") { started.append("third") }
+    XCTAssertEqual(started, ["first"], "the first job is still unwinding")
+
+    registry.settle(first, id: "x")
+    XCTAssertEqual(started, ["first", "third"], "the cancelled second job never starts")
+  }
+
+  func testCancelAllDropsWhatWasWaiting() {
+    let registry = JobRegistry<FakeJob>()
+    var started: [String] = []
+    let first = FakeJob()
+    registry.start(first, id: "x") { started.append("first") }
+    _ = registry.cancel("x")
+    let second = FakeJob()
+    registry.start(second, id: "x") { started.append("second") }
+
+    registry.cancelAll()
+    XCTAssertTrue(second.isCanceled)
+    registry.settle(first, id: "x")
+    XCTAssertEqual(started, ["first"])
+    XCTAssertFalse(registry.isRunning("x"))
+  }
+
   // MARK: - Slide animation geometry
 
   // Frame 1000×500, a small layer (200×100) centered at (400, 200) in
@@ -1322,4 +1388,12 @@ enum OrientedImageFixture {
     }
     return index
   }
+}
+
+/// Stands in for a `RenderTask`/`AudioExtractTask` in the registry tests.
+private final class FakeJob: ChannelTask {
+  private(set) var isCanceled = false
+  func cancel() { isCanceled = true }
+  func sendSuccess(_ payload: Any?) {}
+  func sendError(_ error: FlutterError) {}
 }

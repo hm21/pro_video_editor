@@ -20,7 +20,8 @@ import androidx.media3.transformer.ExportException
  *   (`ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED`) from the first
  *   [ExportException] in the chain; absent when there is none.
  * - `cause`: every throwable below the outermost one, outermost first, as
- *   `<class>: <message>`. Absent when there is none.
+ *   `<class>: <message>` (`(no message)` for a throwable without one).
+ *   Absent when there is none.
  */
 @UnstableApi
 object FailureDetails {
@@ -37,7 +38,9 @@ object FailureDetails {
             details["code"] = export.errorCode
             details["codeName"] = export.errorCodeName
         }
-        val cause = chain.drop(1).joinToString(" <- ") { "${it.javaClass.name}: ${it.message}" }
+        val cause = chain.drop(1).joinToString(" <- ") {
+            "${it.javaClass.name}: ${it.message ?: "(no message)"}"
+        }
         if (cause.isNotEmpty()) details["cause"] = cause
         return details
     }

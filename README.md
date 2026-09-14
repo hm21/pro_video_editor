@@ -573,7 +573,7 @@ if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
 }
 ```
 
-A cancel answers at once, and the cancelled job's future completes before the cancel's does. The job's id is free again from that moment — a retry can start the same id right after cancelling it without being refused as already running.
+A cancel answers at once, and the cancelled job's future completes before the cancel's does. The job's id is free again from that moment — a retry can start the same id right after cancelling it without being refused as already running. The cancelled pipeline may still be unwinding at that point, so a job restarted under the same id is accepted at once but begins only after that pipeline has finished — its output can never be removed by the old job's cleanup. Reuse the id for a retry to get that guarantee.
 
 #### Find out why a render failed
 

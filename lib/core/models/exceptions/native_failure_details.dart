@@ -66,14 +66,29 @@ class NativeFailureDetails {
   /// output.
   ///
   /// `AVErrorDiskFull`, `ENOSPC` and `NSFileWriteOutOfSpaceError` on Apple
-  /// platforms; on Android Media3 reports the muxer's `IOException`, whose
-  /// message carries the `ENOSPC` errno.
-  bool get isOutOfStorage => switch ((domain, code)) {
-    ('AVFoundationErrorDomain', avErrorDiskFull) => true,
-    ('NSPOSIXErrorDomain', posixErrorNoSpace) => true,
-    ('NSCocoaErrorDomain', cocoaErrorWriteOutOfSpace) => true,
-    _ => cause?.contains('ENOSPC') ?? false,
-  };
+  /// platforms — reported directly, or underneath a generic export failure
+  /// such as `AVErrorExportFailed`, which is where AVFoundation usually puts
+  /// them; on Android Media3 reports the muxer's `IOException`, whose message
+  /// carries the `ENOSPC` errno.
+  bool get isOutOfStorage {
+    switch ((domain, code)) {
+      case ('AVFoundationErrorDomain', avErrorDiskFull):
+      case ('NSPOSIXErrorDomain', posixErrorNoSpace):
+      case ('NSCocoaErrorDomain', cocoaErrorWriteOutOfSpace):
+        return true;
+    }
+    final cause = this.cause;
+    return cause != null && _outOfStorageCauses.any(cause.contains);
+  }
+
+  /// What a full disk looks like inside [cause]: an Apple entry is
+  /// `<domain> <code>: <description>`, an Android one carries the errno name.
+  static const List<String> _outOfStorageCauses = [
+    'AVFoundationErrorDomain $avErrorDiskFull:',
+    'NSPOSIXErrorDomain $posixErrorNoSpace:',
+    'NSCocoaErrorDomain $cocoaErrorWriteOutOfSpace:',
+    'ENOSPC',
+  ];
 
   /// `AVError.Code.diskFull`.
   static const int avErrorDiskFull = -11807;
