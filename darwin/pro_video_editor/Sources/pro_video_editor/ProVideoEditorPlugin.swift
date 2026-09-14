@@ -336,28 +336,17 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       onComplete: { outputData in
         DispatchQueue.main.async {
           self.postProgress(id: id, progress: 1.0)
-          if let task = self.activeRenderTasks.removeValue(forKey: id) {
-            task.sendSuccess(outputData)
-          } else {
-            self.deliverResult(result, outputData)
+          self.settle(task, id: id, in: &self.activeRenderTasks) {
+            $0.sendSuccess(outputData)
           }
         }
       },
       onError: { error in
         PluginLog.print("❌ Render failed: \(error.localizedDescription)")
         DispatchQueue.main.async {
-          let task = self.activeRenderTasks.removeValue(forKey: id)
-          let code = Self.errorCode(
-            canceled: task?.isCanceled == true, error: error, otherwise: "RENDER_ERROR")
-          let flutterError = FlutterError(
-            code: code,
-            message: error.localizedDescription,
-            details: nil
-          )
-          if let task = task {
-            task.sendError(flutterError)
-          } else {
-            self.deliverResult(result, flutterError)
+          self.settle(task, id: id, in: &self.activeRenderTasks) {
+            $0.sendError(
+              Self.flutterError(for: error, canceled: $0.isCanceled, otherwise: "RENDER_ERROR"))
           }
         }
       }
@@ -414,28 +403,17 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       onComplete: { outputData in
         DispatchQueue.main.async {
           self.postProgress(id: id, progress: 1.0)
-          if let task = self.activeRenderTasks.removeValue(forKey: id) {
-            task.sendSuccess(outputData)
-          } else {
-            self.deliverResult(result, outputData)
+          self.settle(task, id: id, in: &self.activeRenderTasks) {
+            $0.sendSuccess(outputData)
           }
         }
       },
       onError: { error in
         PluginLog.print("❌ Stop-motion render failed: \(error.localizedDescription)")
         DispatchQueue.main.async {
-          let task = self.activeRenderTasks.removeValue(forKey: id)
-          let code = Self.errorCode(
-            canceled: task?.isCanceled == true, error: error, otherwise: "RENDER_ERROR")
-          let flutterError = FlutterError(
-            code: code,
-            message: error.localizedDescription,
-            details: nil
-          )
-          if let task = task {
-            task.sendError(flutterError)
-          } else {
-            self.deliverResult(result, flutterError)
+          self.settle(task, id: id, in: &self.activeRenderTasks) {
+            $0.sendError(
+              Self.flutterError(for: error, canceled: $0.isCanceled, otherwise: "RENDER_ERROR"))
           }
         }
       }
@@ -504,28 +482,17 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       onComplete: { outputPaths in
         DispatchQueue.main.async {
           self.postProgress(id: id, progress: 1.0)
-          if let task = self.activeRenderTasks.removeValue(forKey: id) {
-            task.sendSuccess(outputPaths)
-          } else {
-            self.deliverResult(result, outputPaths)
+          self.settle(task, id: id, in: &self.activeRenderTasks) {
+            $0.sendSuccess(outputPaths)
           }
         }
       },
       onError: { error in
         PluginLog.print("❌ Split failed: \(error.localizedDescription)")
         DispatchQueue.main.async {
-          let task = self.activeRenderTasks.removeValue(forKey: id)
-          let code = Self.errorCode(
-            canceled: task?.isCanceled == true, error: error, otherwise: "SPLIT_ERROR")
-          let flutterError = FlutterError(
-            code: code,
-            message: error.localizedDescription,
-            details: nil
-          )
-          if let task = task {
-            task.sendError(flutterError)
-          } else {
-            self.deliverResult(result, flutterError)
+          self.settle(task, id: id, in: &self.activeRenderTasks) {
+            $0.sendError(
+              Self.flutterError(for: error, canceled: $0.isCanceled, otherwise: "SPLIT_ERROR"))
           }
         }
       }
@@ -584,29 +551,19 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       onComplete: { outputData in
         DispatchQueue.main.async {
           self.postProgress(id: id, progress: 1.0)
-          if let task = self.activeAudioTasks.removeValue(forKey: id) {
-            task.sendSuccess(outputData)
-          } else {
-            self.deliverResult(result, outputData)
+          self.settle(task, id: id, in: &self.activeAudioTasks) {
+            $0.sendSuccess(outputData)
           }
         }
       },
       onError: { error in
         PluginLog.print("❌ Audio extraction failed: \(error.localizedDescription)")
         DispatchQueue.main.async {
-          let task = self.activeAudioTasks.removeValue(forKey: id)
-          let code = Self.errorCode(
-            canceled: task?.isCanceled == true, error: error,
-            otherwise: error is NoAudioTrackException ? "NO_AUDIO" : "EXTRACT_ERROR")
-          let flutterError = FlutterError(
-            code: code,
-            message: error.localizedDescription,
-            details: nil
-          )
-          if let task = task {
-            task.sendError(flutterError)
-          } else {
-            self.deliverResult(result, flutterError)
+          self.settle(task, id: id, in: &self.activeAudioTasks) {
+            $0.sendError(
+              Self.flutterError(
+                for: error, canceled: $0.isCanceled,
+                otherwise: error is NoAudioTrackException ? "NO_AUDIO" : "EXTRACT_ERROR"))
           }
         }
       }
@@ -664,25 +621,17 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       onComplete: { resultMap in
         DispatchQueue.main.async {
           self.postProgress(id: id, progress: 1.0)
-          if let task = self.activeAudioTasks.removeValue(forKey: id) {
-            task.sendSuccess(resultMap)
-          } else {
-            self.deliverResult(result, resultMap)
+          self.settle(task, id: id, in: &self.activeAudioTasks) {
+            $0.sendSuccess(resultMap)
           }
         }
       },
       onError: { error in
         PluginLog.print("❌ Audio merge failed: \(error.localizedDescription)")
         DispatchQueue.main.async {
-          let task = self.activeAudioTasks.removeValue(forKey: id)
-          let code = Self.errorCode(
-            canceled: task?.isCanceled == true, error: error, otherwise: "MERGE_ERROR")
-          let flutterError = FlutterError(
-            code: code, message: error.localizedDescription, details: nil)
-          if let task = task {
-            task.sendError(flutterError)
-          } else {
-            self.deliverResult(result, flutterError)
+          self.settle(task, id: id, in: &self.activeAudioTasks) {
+            $0.sendError(
+              Self.flutterError(for: error, canceled: $0.isCanceled, otherwise: "MERGE_ERROR"))
           }
         }
       }
@@ -874,16 +823,22 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    // Try to find task in render tasks
-    if let task = activeRenderTasks[id] {
+    // A cancelled job answers here, not when its pipeline gets round to
+    // unwinding: AVFoundation cancels an export session asynchronously, so a
+    // caller that cancels and immediately starts the same id again (a retry
+    // after a stalled export) used to be refused with TASK_ALREADY_RUNNING while
+    // the old session was still tearing down. The pipeline's own settlement
+    // finds the task gone and answers nothing. Same contract as Android.
+    if let task = activeRenderTasks.removeValue(forKey: id) {
       task.cancel()
+      task.sendError(FlutterError(code: "CANCELED", message: "Task was canceled", details: nil))
       result(nil)
       return
     }
 
-    // Try to find task in audio tasks
-    if let task = activeAudioTasks[id] {
+    if let task = activeAudioTasks.removeValue(forKey: id) {
       task.cancel()
+      task.sendError(FlutterError(code: "CANCELED", message: "Task was canceled", details: nil))
       result(nil)
       return
     }
@@ -901,7 +856,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
 
   // MARK: - Helper Methods
 
-  /// The Flutter error code for a failed job.
+  /// The Flutter error for a failed job.
   ///
   /// A pipeline also cancels itself — a watchdog force-cancelling a stalled
   /// session, `ExportSessionGuard` refusing a start, a `Task.checkCancellation`
@@ -909,10 +864,36 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
   /// when nobody called `cancel` on this task. Shared by every handler, so a
   /// pipeline that adopts `ExportSessionDriver` later cannot report its
   /// cancellations as failures.
-  private static func errorCode(
-    canceled: Bool, error: Error, otherwise fallback: String
-  ) -> String {
-    (canceled || error is CancellationError) ? "CANCELED" : fallback
+  ///
+  /// A genuine failure carries `FailureDetails`: the message is the platform's
+  /// localized description, which is all a person needs and nothing a caller
+  /// can branch on.
+  private static func flutterError(
+    for error: Error, canceled: Bool, otherwise fallback: String
+  ) -> FlutterError {
+    if canceled || error is CancellationError {
+      return FlutterError(code: "CANCELED", message: error.localizedDescription, details: nil)
+    }
+    return FlutterError(
+      code: fallback, message: error.localizedDescription, details: FailureDetails.of(error))
+  }
+
+  /// Settles `task` with the outcome its pipeline reported.
+  ///
+  /// The task leaves `tasks` only while it is still the one registered under
+  /// `id`: a cancel from Dart has already removed it, and a later job may hold
+  /// the id by now. `deliver` runs through the task, which answers its call at
+  /// most once, so a job that was already cancelled answers nothing more. After
+  /// engine detach nothing is delivered at all — the captured `FlutterResult`
+  /// would message an engine that is no longer running.
+  private func settle<Task: ChannelTask>(
+    _ task: Task, id: String, in tasks: inout [String: Task], deliver: (Task) -> Void
+  ) {
+    if tasks[id] === task {
+      tasks.removeValue(forKey: id)
+    }
+    guard !isEngineDetached else { return }
+    deliver(task)
   }
 
   /// Sends progress updates to Flutter via event channel.

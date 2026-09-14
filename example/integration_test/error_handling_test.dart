@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -137,5 +138,37 @@ void main() {
         reason: 'out-of-bounds crop must throw or produce a clamped output',
       );
     }, skip: kIsWeb);
+
+    testWidgets(
+      'a failed render says what failed, not just how it reads',
+      (tester) async {
+        /// The message is the platform's own wording; the details are what an
+        /// app can branch on. A source that does not exist fails on every
+        /// platform without needing a broken device.
+        Object? error;
+        try {
+          await pve.renderVideo(
+            VideoRenderData(
+              videoSegments: [
+                VideoSegment(
+                  video: EditorVideo.file(
+                    '/nonexistent/${tester.hashCode}.mp4',
+                  ),
+                ),
+              ],
+              outputFormat: VideoOutputFormat.mp4,
+            ),
+          );
+        } catch (e) {
+          error = e;
+        }
+
+        expect(error, isA<PlatformException>());
+        final details = NativeFailureDetails.of(error! as PlatformException);
+        expect(details, isNotNull, reason: 'the platform attaches its details');
+        expect(details!.domain, isNotEmpty);
+      },
+      skip: kIsWeb || isWindows || isLinux,
+    );
   });
 }

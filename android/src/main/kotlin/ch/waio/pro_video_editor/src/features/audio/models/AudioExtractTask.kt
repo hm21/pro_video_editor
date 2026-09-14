@@ -46,9 +46,9 @@ data class AudioExtractTask(
      * Sends error response to Flutter.
      * Only sends if not already replied to prevent crashes.
      */
-    fun sendError(code: String, message: String?) {
+    fun sendError(code: String, message: String?, details: Any? = null) {
         try {
-            result.error(code, message, null)
+            result.error(code, message, details)
         } catch (e: IllegalStateException) {
             // Result already sent, ignore
         }

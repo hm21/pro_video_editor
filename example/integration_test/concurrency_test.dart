@@ -50,6 +50,10 @@ void main() {
   /// Awaits [future], and asserts that a failure is a cancellation rather than
   /// a crash-adjacent platform error. Succeeding is allowed: at the long end of
   /// a sweep the job is simply already done.
+  ///
+  /// Attach it before cancelling: a cancelled job answers before the cancel
+  /// does, so a handler attached afterwards finds the future already failed
+  /// and the cancellation surfaces as an unhandled error instead.
   Future<void> expectCancelledOrDone(
     Future<Object?> future,
     String what,
@@ -186,10 +190,14 @@ void main() {
         );
 
         final future = pve.renderVideo(model);
+        final settled = expectCancelledOrDone(
+          future,
+          'a render cancelled after ${ms}ms',
+        );
         await Future<void>.delayed(Duration(milliseconds: ms));
         await cancelIgnoringNotFound(model.id);
 
-        await expectCancelledOrDone(future, 'a render cancelled after ${ms}ms');
+        await settled;
       }
 
       /// Still alive and still working — a native crash anywhere in the sweep
@@ -240,10 +248,14 @@ void main() {
         );
 
         final future = pve.splitVideo(model);
+        final settled = expectCancelledOrDone(
+          future,
+          'a split cancelled after ${ms}ms',
+        );
         await Future<void>.delayed(Duration(milliseconds: ms));
         await cancelIgnoringNotFound(model.id);
 
-        await expectCancelledOrDone(future, 'a split cancelled after ${ms}ms');
+        await settled;
       }
     },
     skip: !supportsCancel,
@@ -283,13 +295,14 @@ void main() {
         );
 
         final future = pve.renderVideo(model);
-        await Future<void>.delayed(Duration(milliseconds: ms));
-        await cancelIgnoringNotFound(model.id);
-
-        await expectCancelledOrDone(
+        final settled = expectCancelledOrDone(
           future,
           'a transition render cancelled after ${ms}ms',
         );
+        await Future<void>.delayed(Duration(milliseconds: ms));
+        await cancelIgnoringNotFound(model.id);
+
+        await settled;
       }
 
       /// Still alive: a trap in the cleanup path above would have taken the

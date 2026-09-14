@@ -18,6 +18,7 @@ import ch.waio.pro_video_editor.src.features.render.models.VideoEncoderConfigura
 import ch.waio.pro_video_editor.src.features.split.SplitVideo
 import ch.waio.pro_video_editor.src.features.stopmotion.StopMotionGenerator
 import ch.waio.pro_video_editor.src.features.stopmotion.models.StopMotionConfig
+import ch.waio.pro_video_editor.src.shared.FailureDetails
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.features.thumbnail.ThumbnailGenerator
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailConfig
@@ -365,7 +366,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                         }
                         val message = error.message
                             ?: "${error::class.java.simpleName} (no message)"
-                        removedTask?.sendError(code, message)
+                        removedTask?.sendError(code, message, FailureDetails.of(error))
                     }
                 }
             )
@@ -433,7 +434,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                         } else {
                             "RENDER_ERROR"
                         }
-                        removedTask?.sendError(code, error.message)
+                        removedTask?.sendError(code, error.message, FailureDetails.of(error))
                     }
                 }
             )
@@ -533,7 +534,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                         }
                         val message = error.message
                             ?: "${error::class.java.simpleName} (no message)"
-                        removedTask?.sendError(code, message)
+                        removedTask?.sendError(code, message, FailureDetails.of(error))
                     }
                 }
             )
@@ -601,7 +602,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                             error is NoAudioTrackException -> "NO_AUDIO"
                             else -> "EXTRACT_ERROR"
                         }
-                        removedTask?.sendError(code, error.message)
+                        removedTask?.sendError(code, error.message, FailureDetails.of(error))
                     }
                 }
             )
@@ -666,7 +667,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                     mainHandler.post {
                         val removedTask = activeAudioTasks.remove(id)
                         val code = if (removedTask?.canceled?.get() == true) "CANCELED" else "MERGE_ERROR"
-                        removedTask?.sendError(code, error.message)
+                        removedTask?.sendError(code, error.message, FailureDetails.of(error))
                     }
                 }
             )
