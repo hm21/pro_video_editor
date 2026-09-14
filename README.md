@@ -815,16 +815,16 @@ final configs = ThumbnailConfigs(
     timestamps: [
         for (var ms = 0; ms < 6300; ms += 77) Duration(milliseconds: ms),
     ],
-    /// Android decodes with up to three hardware sessions in parallel. When
-    /// a preview player shares the decoder pool, keep it to one.
+    // Android decodes with up to three hardware sessions in parallel. When
+    // a preview player shares the decoder pool, keep it to one.
     maxParallelDecoders: 1,
 );
 
 final frames = List<Uint8List?>.filled(configs.timestamps.length, null);
 
 await for (final frame in ProVideoEditor.instance.getThumbnailStream(configs)) {
-    /// Frames arrive in decode order; `indices` maps each one back onto
-    /// `configs.timestamps`. Several timestamps can share one source frame.
+    // Frames arrive in decode order; `indices` maps each one back onto
+    // `configs.timestamps`. Several timestamps can share one source frame.
     for (final index in frame.indices) {
         frames[index] = frame.bytes;
     }

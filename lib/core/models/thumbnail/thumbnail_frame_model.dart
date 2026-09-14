@@ -66,7 +66,12 @@ class ThumbnailFrame {
   /// The compressed image, in the configured [ThumbnailConfigs.outputFormat].
   final Uint8List bytes;
 
-  /// Share of the requested timestamps attempted so far (0.0 to 1.0).
+  /// Share of the requested timestamps resolved so far (0.0 to 1.0).
+  ///
+  /// Reaches 1.0 only when the last timestamp attempted produced a frame: a
+  /// timestamp that cannot be decoded is skipped rather than delivered, so a
+  /// request whose final timestamps fail closes below 1.0. Treat the stream
+  /// closing as the end of the request, not this value.
   final double progress;
 
   @override

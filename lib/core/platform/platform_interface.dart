@@ -210,6 +210,12 @@ abstract class ProVideoEditor extends PlatformInterface {
   /// the background. [cancel] with [ThumbnailConfigs.id] does the same and
   /// additionally surfaces a [RenderCanceledException] on the stream.
   ///
+  /// The native task keeps its [ThumbnailConfigs.id] until the decoder has
+  /// actually stopped, which is shortly *after* a cancel returns. A caller
+  /// that cancels one stream and immediately starts another must give the
+  /// new request its own id (a fresh [ThumbnailConfigs] does); reusing the
+  /// id in that window fails the new stream with `TASK_ALREADY_RUNNING`.
+  ///
   /// Throws:
   /// - [RenderCanceledException] if cancelled via [cancel]
   /// - [ArgumentError] if configuration is invalid
