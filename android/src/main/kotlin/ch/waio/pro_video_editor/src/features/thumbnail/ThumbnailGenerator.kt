@@ -11,18 +11,22 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.inspector.frame.FrameExtractor
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailConfig
+import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailJobHandle
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import androidx.core.graphics.scale
 
@@ -73,16 +77,15 @@ class ThumbnailGenerator(private val context: Context) {
             try {
                 val result = when {
                     config.timestampsUs.isNotEmpty() -> {
-                        getThumbnailsFromTimestamps(
-                            config.inputPath,
-                            config.outputFormat,
-                            config.jpegQuality,
-                            config.boxFit,
-                            config.outputWidth,
-                            config.outputHeight,
-                            config.timestampsUs,
-                            onProgress
-                        )
+                        // Collected in request order; a timestamp no strategy
+                        // could decode leaves its slot empty and is dropped
+                        // from the returned list.
+                        val frames = arrayOfNulls<ByteArray>(config.timestampsUs.size)
+                        extractTimestamps(config, isCancelled = { false }) { indices, bytes, progress ->
+                            indices.forEach { frames[it] = bytes }
+                            onProgress(progress)
+                        }
+                        frames.filterNotNull()
                     }
 
                     config.maxOutputFrames != null -> {
@@ -108,68 +111,135 @@ class ThumbnailGenerator(private val context: Context) {
     }
 
     /**
-     * Extracts frames from video at specific timestamp positions.
+     * Streams thumbnails for every timestamp in [config] as they are decoded.
      *
-     * Tries the fastest strategy first and falls back on failure:
-     * 1. [extractFramesSinglePass]: one hardware decoder decodes forward
-     *    through the stream once, collecting all requested frames (API 29+).
+     * Unlike [getThumbnails], which hands over the whole set once the last
+     * frame is compressed, [onFrame] is invoked on the decoding thread for
+     * each frame the moment it is ready — with the indices into
+     * [ThumbnailConfig.timestampsUs] that resolve to it (several requested
+     * timestamps can map to the same frame), the compressed bytes, and the
+     * overall progress (0.0 to 1.0). Delivery order follows decode order, not
+     * request order.
+     *
+     * [onComplete] fires once every timestamp has been attempted; [onError]
+     * fires instead when extraction fails or the job is cancelled through the
+     * returned handle (with a [CancellationException]).
+     *
+     * @throws IllegalArgumentException via [onError] when [config] carries no
+     *   timestamps — the keyframe mode is not streamable.
+     */
+    fun streamThumbnails(
+        config: ThumbnailConfig,
+        onFrame: (indices: List<Int>, bytes: ByteArray, progress: Double) -> Unit,
+        onComplete: () -> Unit,
+        onError: (Exception) -> Unit,
+    ): ThumbnailJobHandle {
+        val cancelled = AtomicBoolean(false)
+        val job = scope.launch {
+            try {
+                require(config.timestampsUs.isNotEmpty()) {
+                    "Streaming thumbnails need at least one timestamp"
+                }
+                extractTimestamps(config, isCancelled = { cancelled.get() }, onFrame)
+                if (cancelled.get()) {
+                    throw CancellationException("Thumbnail task was canceled")
+                }
+                onComplete()
+            } catch (e: Exception) {
+                onError(e)
+            }
+        }
+        return ThumbnailJobHandle {
+            cancelled.set(true)
+            job.cancel()
+        }
+    }
+
+    /**
+     * Extracts frames from video at every timestamp in [config], delivering
+     * each one through [onFrame] as soon as it is compressed.
+     *
+     * Tries the fastest strategy first and falls back on failure — but only
+     * for the timestamps that have not been delivered yet, so a strategy that
+     * fails halfway never re-decodes (or re-delivers) the frames it already
+     * produced:
+     * 1. [extractFramesSinglePass]: hardware decoders decode forward through
+     *    the stream once, collecting all requested frames (API 29+).
      * 2. [extractFramesWithFrameExtractor]: Media3 FrameExtractor with one
      *    reused hardware decoder session, one exact seek per frame. Also
      *    covers HDR input via GL tone-mapping.
-     * 3. [getThumbnailsFromTimestampsLegacy]: MediaMetadataRetriever.
+     * 3. [extractFramesLegacy]: MediaMetadataRetriever.
      *
-     * @param inputPath Absolute path to the video file
-     * @param outputFormat Image format (jpeg, png, webp)
-     * @param boxFit Scaling mode (contain or cover)
-     * @param outputWidth Target thumbnail width in pixels
-     * @param outputHeight Target thumbnail height in pixels
-     * @param timestampsUs List of timestamps in microseconds where frames should be extracted
-     * @param onProgress Callback for progress updates
-     * @return List of compressed image bytes, one per successful extraction
+     * [isCancelled] is polled between frames by every strategy; a true result
+     * ends extraction with a [CancellationException].
+     *
+     * [onFrame] receives the indices into [ThumbnailConfig.timestampsUs] that
+     * resolve to the frame, the compressed bytes, and the overall progress.
+     * It is invoked on a decoding thread.
      */
-    private suspend fun getThumbnailsFromTimestamps(
-        inputPath: String,
-        outputFormat: String,
-        jpegQuality: Int,
-        boxFit: String,
-        outputWidth: Int,
-        outputHeight: Int,
-        timestampsUs: List<Long>,
-        onProgress: (Double) -> Unit,
-    ): List<ByteArray> = withContext(Dispatchers.IO) {
+    private suspend fun extractTimestamps(
+        config: ThumbnailConfig,
+        isCancelled: () -> Boolean,
+        onFrame: (indices: List<Int>, bytes: ByteArray, progress: Double) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        val total = config.timestampsUs.size
+        val delivered = BooleanArray(total)
+        var completed = 0
+        // A cancelled coroutine must stop the blocking decode loops too.
+        val cancelled = { isCancelled() || !isActive }
+        // Counting and delivering happen under one lock so the progress a
+        // listener sees never runs backwards: parallel decoder sessions would
+        // otherwise hand over frame N+1 before frame N.
+        val deliver: (List<Int>, ByteArray) -> Unit = { indices, bytes ->
+            synchronized(delivered) {
+                indices.forEach { delivered[it] = true }
+                completed += indices.size
+                onFrame(indices, bytes, completed.toDouble() / total)
+            }
+        }
+
         try {
-            return@withContext extractFramesSinglePass(
-                inputPath, outputFormat, jpegQuality, boxFit,
-                outputWidth, outputHeight, timestampsUs, onProgress
-            )
+            extractFramesSinglePass(config, config.timestampsUs.indices.toList(), cancelled, deliver)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(
                 THUMBNAIL_TAG,
                 "Single-pass decoder failed (${e.message}), trying FrameExtractor"
             )
         }
+        var remaining = undeliveredIndices(delivered)
+        if (remaining.isEmpty()) return@withContext
+        throwIfCancelled(cancelled)
         try {
-            extractFramesWithFrameExtractor(
-                inputPath, outputFormat, jpegQuality, boxFit,
-                outputWidth, outputHeight, timestampsUs, onProgress
-            )
+            extractFramesWithFrameExtractor(config, remaining, cancelled, deliver)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(
                 THUMBNAIL_TAG,
                 "FrameExtractor failed (${e.message}), falling back to MediaMetadataRetriever"
             )
-            getThumbnailsFromTimestampsLegacy(
-                inputPath, outputFormat, jpegQuality, boxFit,
-                outputWidth, outputHeight, timestampsUs, onProgress
-            )
         }
+        remaining = undeliveredIndices(delivered)
+        if (remaining.isEmpty()) return@withContext
+        throwIfCancelled(cancelled)
+        extractFramesLegacy(config, remaining, cancelled, deliver)
+    }
+
+    private fun undeliveredIndices(delivered: BooleanArray): List<Int> =
+        synchronized(delivered) { delivered.indices.filter { !delivered[it] } }
+
+    private fun throwIfCancelled(isCancelled: () -> Boolean) {
+        if (isCancelled()) throw CancellationException("Thumbnail task was canceled")
     }
 
     /**
-     * Extracts all [timestampsUs] in forward decode passes with hardware
-     * decoders via [SequentialFrameDecoder].
+     * Extracts the timestamps at [targetIndices] in forward decode passes with
+     * hardware decoders via [SequentialFrameDecoder].
      *
-     * The time-sorted timestamps are split into up to [MAX_PARALLEL_DECODERS]
+     * The time-sorted targets are split into up to
+     * [ThumbnailConfig.maxParallelDecoders] (default [MAX_PARALLEL_DECODERS])
      * contiguous chunks, each decoded by its own hardware session in
      * parallel: contiguous ranges keep every session decoding forward
      * without GOP re-decodes, while parallel sessions overlap decode work
@@ -181,20 +251,14 @@ class ThumbnailGenerator(private val context: Context) {
      *   caller can fall back to another strategy.
      */
     private suspend fun extractFramesSinglePass(
-        inputPath: String,
-        outputFormat: String,
-        jpegQuality: Int,
-        boxFit: String,
-        outputWidth: Int,
-        outputHeight: Int,
-        timestampsUs: List<Long>,
-        onProgress: (Double) -> Unit,
-    ): List<ByteArray> = coroutineScope {
-        val thumbnails = MutableList<ByteArray?>(timestampsUs.size) { null }
-        val completed = AtomicInteger(0)
-
-        val scan = SequentialFrameDecoder.scan(inputPath)
-        val sortedIndices = timestampsUs.indices.sortedBy { timestampsUs[it] }
+        config: ThumbnailConfig,
+        targetIndices: List<Int>,
+        isCancelled: () -> Boolean,
+        onFrame: (indices: List<Int>, bytes: ByteArray) -> Unit,
+    ) = coroutineScope {
+        val timestampsUs = config.timestampsUs
+        val scan = SequentialFrameDecoder.scan(config.inputPath)
+        val sortedIndices = targetIndices.sortedBy { timestampsUs[it] }
 
         // Group the time-sorted targets by the GOP their decode starts in.
         // Chunks are split only at GOP boundaries so no two decoder sessions
@@ -211,40 +275,42 @@ class ThumbnailGenerator(private val context: Context) {
         }
 
         val chunkCount = minOf(
-            MAX_PARALLEL_DECODERS,
+            config.maxParallelDecoders ?: MAX_PARALLEL_DECODERS,
             gopGroups.size,
-            maxOf(1, (timestampsUs.size + 2) / 3),
+            maxOf(1, (sortedIndices.size + 2) / 3),
         )
         val chunks = partitionByDecodeCost(gopGroups, chunkCount, scan, timestampsUs)
+        val decodedAny = AtomicBoolean(false)
 
         val jobs = chunks.map { chunkIndices ->
             async(Dispatchers.IO) {
                 val chunkTimestamps = chunkIndices.map { timestampsUs[it] }
-                SequentialFrameDecoder(inputPath).decode(
-                    chunkTimestamps, outputWidth, outputHeight, boxFit, scan
+                SequentialFrameDecoder(config.inputPath).decode(
+                    chunkTimestamps,
+                    config.outputWidth,
+                    config.outputHeight,
+                    config.boxFit,
+                    scan,
+                    // A failing sibling chunk cancels this one through the
+                    // enclosing scope; the decode loop only notices via this
+                    // poll.
+                    isCancelled = { isCancelled() || !isActive },
                 ) { localIndices, bitmap ->
-                    try {
-                        val bytes = compressBitmap(bitmap, outputFormat, jpegQuality)
-                        localIndices.forEach { thumbnails[chunkIndices[it]] = bytes }
-                        Log.d(
-                            THUMBNAIL_TAG,
-                            "✅ ${localIndices.map { chunkIndices[it] }} " +
-                                    "Generated (${bytes.size} bytes)"
-                        )
+                    val bytes = try {
+                        compressBitmap(bitmap, config.outputFormat, config.jpegQuality)
                     } finally {
                         bitmap.recycle()
                     }
-                    val done = completed.addAndGet(localIndices.size)
-                    onProgress(done.toDouble() / timestampsUs.size)
+                    val indices = localIndices.map { chunkIndices[it] }
+                    Log.d(THUMBNAIL_TAG, "✅ $indices Generated (${bytes.size} bytes)")
+                    decodedAny.set(true)
+                    onFrame(indices, bytes)
                 }
             }
         }
         jobs.awaitAll()
 
-        check(thumbnails.any { it != null } || timestampsUs.isEmpty()) {
-            "No frames could be decoded"
-        }
-        thumbnails.filterNotNull()
+        check(decodedAny.get() || targetIndices.isEmpty()) { "No frames could be decoded" }
     }
 
     /**
@@ -296,32 +362,30 @@ class ThumbnailGenerator(private val context: Context) {
     }
 
     /**
-     * Extraction of all [timestampsUs] with Media3's [FrameExtractor]: one
-     * reused hardware decoder session, one exact seek per frame. Timestamps
-     * are processed in ascending order while results keep the order of
-     * [timestampsUs].
+     * Extraction of the timestamps at [targetIndices] with Media3's
+     * [FrameExtractor]: one reused hardware decoder session, one exact seek
+     * per frame. Timestamps are processed in ascending order.
      *
+     * @throws CancellationException when [isCancelled] reports true between
+     *   frames.
      * @throws Exception when no frame could be extracted at all, so the
      *   caller can retry with the legacy path.
      */
     private fun extractFramesWithFrameExtractor(
-        inputPath: String,
-        outputFormat: String,
-        jpegQuality: Int,
-        boxFit: String,
-        outputWidth: Int,
-        outputHeight: Int,
-        timestampsUs: List<Long>,
-        onProgress: (Double) -> Unit,
-    ): List<ByteArray> {
-        val mediaItem = MediaItem.fromUri(Uri.fromFile(File(inputPath)))
-        val thumbnails = MutableList<ByteArray?>(timestampsUs.size) { null }
-        val sortedIndices = timestampsUs.indices.sortedBy { timestampsUs[it] }
+        config: ThumbnailConfig,
+        targetIndices: List<Int>,
+        isCancelled: () -> Boolean,
+        onFrame: (indices: List<Int>, bytes: ByteArray) -> Unit,
+    ) {
+        val timestampsUs = config.timestampsUs
+        val mediaItem = MediaItem.fromUri(Uri.fromFile(File(config.inputPath)))
+        val sortedIndices = targetIndices.sortedBy { timestampsUs[it] }
 
         val extractor = FrameExtractor.Builder(context, mediaItem).build()
         try {
             var failures = 0
-            sortedIndices.forEachIndexed { completed, index ->
+            for (index in sortedIndices) {
+                throwIfCancelled(isCancelled)
                 val timeUs = timestampsUs[index]
                 val startTime = System.currentTimeMillis()
                 try {
@@ -329,20 +393,21 @@ class ThumbnailGenerator(private val context: Context) {
                         .getFrame((timeUs + 500) / 1000)
                         .get(30, TimeUnit.SECONDS)
                     val bitmap = frame.bitmap
-                    val resized =
-                        resizeBitmapKeepingAspect(bitmap, outputWidth, outputHeight, boxFit)
-                    try {
-                        val bytes = compressBitmap(resized, outputFormat, jpegQuality)
-                        thumbnails[index] = bytes
-                        val duration = System.currentTimeMillis() - startTime
-                        Log.d(
-                            THUMBNAIL_TAG,
-                            "✅ [$index]  Generated in $duration ms (${bytes.size} bytes)"
-                        )
+                    val resized = resizeBitmapKeepingAspect(
+                        bitmap, config.outputWidth, config.outputHeight, config.boxFit
+                    )
+                    val bytes = try {
+                        compressBitmap(resized, config.outputFormat, config.jpegQuality)
                     } finally {
                         if (resized !== bitmap) bitmap.recycle()
                         resized.recycle()
                     }
+                    val duration = System.currentTimeMillis() - startTime
+                    Log.d(
+                        THUMBNAIL_TAG,
+                        "✅ [$index]  Generated in $duration ms (${bytes.size} bytes)"
+                    )
+                    onFrame(listOf(index), bytes)
                 } catch (e: Exception) {
                     failures++
                     Log.w(
@@ -350,42 +415,37 @@ class ThumbnailGenerator(private val context: Context) {
                         "[$index] ❌ Frame failed at ${timeUs / 1000} ms: ${e.message}"
                     )
                 }
-                onProgress((completed + 1).toDouble() / timestampsUs.size)
             }
-            if (failures == timestampsUs.size && timestampsUs.isNotEmpty()) {
-                throw IllegalStateException("All ${timestampsUs.size} frames failed to extract")
+            if (failures == sortedIndices.size && sortedIndices.isNotEmpty()) {
+                throw IllegalStateException("All ${sortedIndices.size} frames failed to extract")
             }
         } finally {
             extractor.close()
         }
-        return thumbnails.filterNotNull()
     }
 
     /**
-     * Legacy timestamp extraction via MediaMetadataRetriever.
+     * Legacy extraction of the timestamps at [targetIndices] via
+     * MediaMetadataRetriever.
      *
      * Uses OPTION_CLOSEST to find the nearest frame to each timestamp, one
      * retriever per frame in parallel. Slower than [extractFramesSinglePass]
      * (software decoding, no decoder reuse) but kept as a fallback for videos
-     * the Media3 pipeline cannot handle.
+     * the Media3 pipeline cannot handle. A frame that fails here is dropped.
      */
-    private suspend fun getThumbnailsFromTimestampsLegacy(
-        inputPath: String,
-        outputFormat: String,
-        jpegQuality: Int,
-        boxFit: String,
-        outputWidth: Int,
-        outputHeight: Int,
-        timestampsUs: List<Long>,
-        onProgress: (Double) -> Unit,
-    ): List<ByteArray> = withContext(Dispatchers.IO) {
-        val tempVideoFile = File(inputPath)
-        val thumbnails = MutableList<ByteArray?>(timestampsUs.size) { null }
-        val completed = AtomicInteger(0)
+    private suspend fun extractFramesLegacy(
+        config: ThumbnailConfig,
+        targetIndices: List<Int>,
+        isCancelled: () -> Boolean,
+        onFrame: (indices: List<Int>, bytes: ByteArray) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        val tempVideoFile = File(config.inputPath)
 
         // Process all timestamps in parallel
-        val jobs = timestampsUs.mapIndexed { index, timeUs ->
+        val jobs = targetIndices.map { index ->
             async {
+                if (isCancelled()) return@async
+                val timeUs = config.timestampsUs[index]
                 val startTime = System.currentTimeMillis()
                 var retriever: MediaMetadataRetriever? = null
                 try {
@@ -397,20 +457,21 @@ class ThumbnailGenerator(private val context: Context) {
                     val bitmap =
                         extractFrame(retriever, timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
                     if (bitmap != null) {
-                        val resized =
-                            resizeBitmapKeepingAspect(bitmap, outputWidth, outputHeight, boxFit)
-                        try {
-                            val bytes = compressBitmap(resized, outputFormat, jpegQuality)
-                            thumbnails[index] = bytes
-                            val duration = System.currentTimeMillis() - startTime
-                            Log.d(
-                                THUMBNAIL_TAG,
-                                "✅ [$index]  Generated in $duration ms (${bytes.size} bytes)"
-                            )
+                        val resized = resizeBitmapKeepingAspect(
+                            bitmap, config.outputWidth, config.outputHeight, config.boxFit
+                        )
+                        val bytes = try {
+                            compressBitmap(resized, config.outputFormat, config.jpegQuality)
                         } finally {
                             if (resized !== bitmap) bitmap.recycle()
                             resized.recycle()
                         }
+                        val duration = System.currentTimeMillis() - startTime
+                        Log.d(
+                            THUMBNAIL_TAG,
+                            "✅ [$index]  Generated in $duration ms (${bytes.size} bytes)"
+                        )
+                        onFrame(listOf(index), bytes)
                     } else {
                         Log.w(THUMBNAIL_TAG, "[$index] ❌ Null frame at ${timeUs / 1000} ms")
                     }
@@ -421,14 +482,12 @@ class ThumbnailGenerator(private val context: Context) {
                     )
                 } finally {
                     retriever?.release()
-                    val progress = completed.incrementAndGet().toDouble() / timestampsUs.size
-                    onProgress(progress)
                 }
             }
         }
 
         jobs.awaitAll()
-        thumbnails.filterNotNull()
+        throwIfCancelled(isCancelled)
     }
 
     /**

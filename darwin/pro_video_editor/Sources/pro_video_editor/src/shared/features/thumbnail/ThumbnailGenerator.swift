@@ -40,30 +40,14 @@ class ThumbnailGenerator {
     onError: @escaping (Error) -> Void
   ) {
     Task {
-      let videoURL = URL(fileURLWithPath: config.inputPath)
-      if !FileManager.default.fileExists(atPath: config.inputPath) {
-        let error = NSError(
-          domain: "ThumbnailGenerator", code: 404,
-          userInfo: [NSLocalizedDescriptionKey: "Video file not found at path: \(config.inputPath)"]
-        )
+      let generator: AVAssetImageGenerator
+      do {
+        generator = try makeGenerator(config: config)
+      } catch {
         onError(error)
         return
       }
-      let asset = AVURLAsset(url: videoURL)
-
-      let generator = AVAssetImageGenerator(asset: asset)
-      generator.appliesPreferredTrackTransform = true
-
-      if config.lastFrameTolerance {
-        // Use a small tolerance so AVFoundation decodes the
-        // nearest frame instead of jumping to a distant keyframe.
-        generator.requestedTimeToleranceBefore = CMTime(
-          seconds: 0.1, preferredTimescale: 1_000_000)
-        generator.requestedTimeToleranceAfter = .zero
-      } else {
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
-      }
+      let asset = generator.asset
 
       let times: [NSValue]
       if !config.timestampsUs.isEmpty {
@@ -94,6 +78,105 @@ class ThumbnailGenerator {
     }
   }
 
+  /// Streams thumbnails for every timestamp in `config` as they are decoded.
+  ///
+  /// Unlike `getThumbnails`, which hands over the whole set once the last frame
+  /// is compressed, `onFrame` is invoked for each frame the moment it is ready —
+  /// with the indices into `config.timestampsUs` that resolve to it (several
+  /// requested timestamps can map to the same frame), the compressed bytes, and
+  /// the overall progress (0.0 to 1.0). Delivery order follows decode order,
+  /// not request order. A frame that fails to decode is skipped.
+  ///
+  /// `onComplete` fires once every timestamp has been attempted; `onError`
+  /// fires instead when extraction fails or the job is cancelled through the
+  /// returned handle (with a `CancellationError`).
+  ///
+  /// The keyframe mode (`maxOutputFrames`) is not streamable: a config without
+  /// timestamps is reported through `onError`.
+  static func streamThumbnails(
+    config: ThumbnailConfig,
+    onFrame: @escaping (_ indices: [Int], _ data: Data, _ progress: Double) -> Void,
+    onComplete: @escaping () -> Void,
+    onError: @escaping (Error) -> Void
+  ) -> ThumbnailJobHandle {
+    let generator: AVAssetImageGenerator
+    do {
+      generator = try makeGenerator(config: config)
+    } catch {
+      onError(error)
+      return ThumbnailJobHandle(cancel: {})
+    }
+
+    let task = Task {
+      guard !config.timestampsUs.isEmpty else {
+        onError(
+          NSError(
+            domain: "ThumbnailGenerator", code: 400,
+            userInfo: [
+              NSLocalizedDescriptionKey: "timestamps are required for a thumbnail stream"
+            ]))
+        return
+      }
+      let times = config.timestampsUs.map {
+        NSValue(time: CMTime(value: $0, timescale: 1_000_000))
+      }
+
+      _ = await generateThumbnailData(
+        generator: generator,
+        times: times,
+        config: config,
+        onProgress: { _ in },
+        onFrame: { indices, data, progress in
+          guard let data = data, !Task.isCancelled else { return }
+          onFrame(indices, data, progress)
+        }
+      )
+
+      if Task.isCancelled {
+        onError(CancellationError())
+      } else {
+        onComplete()
+      }
+    }
+
+    return ThumbnailJobHandle {
+      task.cancel()
+      // Stops the in-flight generation on both the legacy and the async path;
+      // outstanding legacy callbacks then fire with `.cancelled` so the
+      // continuation still resumes.
+      generator.cancelAllCGImageGeneration()
+    }
+  }
+
+  /// Builds the image generator for `config`, configured with the frame
+  /// tolerance the request asks for.
+  ///
+  /// - Throws: A 404 error when the file at `config.inputPath` does not exist.
+  private static func makeGenerator(config: ThumbnailConfig) throws -> AVAssetImageGenerator {
+    if !FileManager.default.fileExists(atPath: config.inputPath) {
+      throw NSError(
+        domain: "ThumbnailGenerator", code: 404,
+        userInfo: [NSLocalizedDescriptionKey: "Video file not found at path: \(config.inputPath)"]
+      )
+    }
+    let asset = AVURLAsset(url: URL(fileURLWithPath: config.inputPath))
+
+    let generator = AVAssetImageGenerator(asset: asset)
+    generator.appliesPreferredTrackTransform = true
+
+    if config.lastFrameTolerance {
+      // Use a small tolerance so AVFoundation decodes the
+      // nearest frame instead of jumping to a distant keyframe.
+      generator.requestedTimeToleranceBefore = CMTime(
+        seconds: 0.1, preferredTimescale: 1_000_000)
+      generator.requestedTimeToleranceAfter = .zero
+    } else {
+      generator.requestedTimeToleranceBefore = .zero
+      generator.requestedTimeToleranceAfter = .zero
+    }
+    return generator
+  }
+
   // MARK: - Frame extraction
 
   /// Decodes every requested frame and returns the compressed thumbnails aligned
@@ -104,11 +187,17 @@ class ThumbnailGenerator {
   /// when that frame failed or was cancelled. This positional, stable
   /// representation lets the caller map `result[i]` to `timestamps[i]` without
   /// any reordering or compaction.
+  ///
+  /// `onFrame`, when given, is invoked once per decoded frame with the indices
+  /// it resolves to, its compressed bytes (`nil` when the frame failed or was
+  /// cancelled) and the overall progress — before the frame is written into
+  /// the returned array.
   private static func generateThumbnailData(
     generator: AVAssetImageGenerator,
     times: [NSValue],
     config: ThumbnailConfig,
-    onProgress: @escaping (Double) -> Void
+    onProgress: @escaping (Double) -> Void,
+    onFrame: ThumbnailFrameCallback? = nil
   ) async -> [Data] {
     // An empty request must resolve immediately; feeding an empty array to the
     // generator would never invoke a completion handler and hang the caller.
@@ -116,12 +205,19 @@ class ThumbnailGenerator {
 
     if #available(iOS 16.0, macOS 13.0, *) {
       return await generateThumbnailDataOrdered(
-        generator: generator, times: times, config: config, onProgress: onProgress)
+        generator: generator, times: times, config: config, onProgress: onProgress,
+        onFrame: onFrame)
     }
 
     return await generateThumbnailDataConcurrent(
-      generator: generator, times: times, config: config, onProgress: onProgress)
+      generator: generator, times: times, config: config, onProgress: onProgress,
+      onFrame: onFrame)
   }
+
+  /// Per-frame delivery used by the streaming path: the result indices the
+  /// frame resolves to, its compressed bytes (`nil` on failure), and the
+  /// overall progress.
+  typealias ThumbnailFrameCallback = (_ indices: [Int], _ data: Data?, _ progress: Double) -> Void
 
   /// Modern path (iOS 16+/macOS 13+): consume the ordered
   /// `AVAssetImageGenerator.images(for:)` async sequence.
@@ -134,7 +230,8 @@ class ThumbnailGenerator {
     generator: AVAssetImageGenerator,
     times: [NSValue],
     config: ThumbnailConfig,
-    onProgress: @escaping (Double) -> Void
+    onProgress: @escaping (Double) -> Void,
+    onFrame: ThumbnailFrameCallback? = nil
   ) async -> [Data] {
     let (distinct, indicesByKey) = distinctTimesAndIndexMap(times)
     var resultData = [Data?](repeating: nil, count: times.count)
@@ -142,6 +239,9 @@ class ThumbnailGenerator {
     let start = Date().timeIntervalSince1970
 
     for await frame in generator.images(for: distinct.map { $0.timeValue }) {
+      // A cancelled stream stops at the next frame instead of decoding the
+      // rest; `cancelAllCGImageGeneration` usually ends the sequence first.
+      if Task.isCancelled { break }
       let indices = indicesByKey[timeKey(frame.requestedTime)] ?? []
 
       var data: Data?
@@ -162,7 +262,9 @@ class ThumbnailGenerator {
       }
 
       completed += 1
-      onProgress(Double(completed) / Double(distinct.count))
+      let progress = Double(completed) / Double(distinct.count)
+      onFrame?(indices, data, progress)
+      onProgress(progress)
     }
 
     return resultData.map { $0 ?? Data() }
@@ -190,7 +292,8 @@ class ThumbnailGenerator {
     generator: AVAssetImageGenerator,
     times: [NSValue],
     config: ThumbnailConfig,
-    onProgress: @escaping (Double) -> Void
+    onProgress: @escaping (Double) -> Void,
+    onFrame: ThumbnailFrameCallback? = nil
   ) async -> [Data] {
     let (distinct, indicesByKey) = distinctTimesAndIndexMap(times)
     let distinctCount = distinct.count
@@ -234,6 +337,7 @@ class ThumbnailGenerator {
           PluginLog.print("[\(indices.first ?? -1)] ❌ frame failed: \(message)")
         }
 
+        onFrame?(indices, data, progress)
         onProgress(progress)
 
         if let payload = payload {

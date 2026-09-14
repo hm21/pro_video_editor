@@ -15,6 +15,7 @@ import '/core/models/platform/native_log_level.dart';
 import '/core/models/thumbnail/key_frames_configs_model.dart';
 import '/core/models/thumbnail/single_thumbnail_configs_model.dart';
 import '/core/models/thumbnail/thumbnail_configs_model.dart';
+import '/core/models/thumbnail/thumbnail_frame_model.dart';
 import '/core/models/video/editor_video_model.dart';
 import '/core/models/video/split_video_model.dart';
 import '/core/models/video/video_metadata_model.dart';
@@ -88,6 +89,23 @@ class ProVideoEditorWeb extends ProVideoEditor {
       value,
       onProgress: (progress) => _updateProgress(value.id, progress),
     );
+  }
+
+  @override
+  Stream<ThumbnailFrame> getThumbnailStream(
+    ThumbnailConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async* {
+    // The web generator decodes in one go, so the stream degrades to the
+    // complete set delivered frame by frame.
+    final frames = await getThumbnails(value, nativeLogLevel: nativeLogLevel);
+    for (var i = 0; i < frames.length; i++) {
+      yield ThumbnailFrame(
+        indices: [i],
+        bytes: frames[i],
+        progress: (i + 1) / frames.length,
+      );
+    }
   }
 
   @override

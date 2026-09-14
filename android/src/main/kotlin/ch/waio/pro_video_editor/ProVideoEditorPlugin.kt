@@ -23,6 +23,7 @@ import ch.waio.pro_video_editor.src.shared.JobRegistry
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.features.thumbnail.ThumbnailGenerator
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailConfig
+import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailTask
 import ch.waio.pro_video_editor.src.features.waveform.WaveformGenerator
 import ch.waio.pro_video_editor.src.features.waveform.models.WaveformConfig
 import ch.waio.pro_video_editor.src.features.waveform.models.WaveformTask
@@ -52,6 +53,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Communication protocol:
  * - Method channel: "pro_video_editor" for commands and responses
  * - Event channel: "pro_video_editor_progress" for progress updates
+ * - Event channel: "pro_video_editor_waveform_stream" for streaming waveform chunks
+ * - Event channel: "pro_video_editor_thumbnail_stream" for streaming thumbnail frames
  */
 class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var methodChannel: MethodChannel
@@ -81,10 +84,15 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         task.job?.cancel()
     }
     private val activeWaveformTasks = ConcurrentHashMap<String, WaveformTask>()
+    private val activeThumbnailTasks = ConcurrentHashMap<String, ThumbnailTask>()
 
     /// Event channel for streaming waveform chunks
     private lateinit var waveformStreamChannel: EventChannel
     private var waveformStreamSink: EventChannel.EventSink? = null
+
+    /// Event channel for streaming thumbnail frames
+    private lateinit var thumbnailStreamChannel: EventChannel
+    private var thumbnailStreamSink: EventChannel.EventSink? = null
 
     /**
      * Called when the plugin is attached to a Flutter engine.
@@ -100,6 +108,8 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             EventChannel(flutterPluginBinding.binaryMessenger, "pro_video_editor_progress")
         waveformStreamChannel =
             EventChannel(flutterPluginBinding.binaryMessenger, "pro_video_editor_waveform_stream")
+        thumbnailStreamChannel =
+            EventChannel(flutterPluginBinding.binaryMessenger, "pro_video_editor_thumbnail_stream")
         logChannel =
             EventChannel(flutterPluginBinding.binaryMessenger, "pro_video_editor_logs")
 
@@ -121,6 +131,16 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
 
             override fun onCancel(arguments: Any?) {
                 waveformStreamSink = null
+            }
+        })
+
+        thumbnailStreamChannel.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                thumbnailStreamSink = events
+            }
+
+            override fun onCancel(arguments: Any?) {
+                thumbnailStreamSink = null
             }
         })
 
@@ -160,6 +180,10 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         methodChannel.setMethodCallHandler(null)
         eventChannel.setStreamHandler(null)
         waveformStreamChannel.setStreamHandler(null)
+        thumbnailStreamChannel.setStreamHandler(null)
+        thumbnailStreamSink = null
+        activeThumbnailTasks.values.forEach { it.cancel() }
+        activeThumbnailTasks.clear()
         logChannel.setStreamHandler(null)
         Log.sink = null
         logSink = null
@@ -172,11 +196,12 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
      * - getPlatformVersion: Returns Android version
      * - getMetadata: Extracts video metadata
      * - getThumbnails: Generates thumbnails
+     * - startThumbnailStream: Streams thumbnails frame by frame
      * - renderVideo: Renders video with effects
      * - extractAudio: Extracts audio from video
      * - getWaveform: Generates complete waveform data
      * - startWaveformStream: Starts streaming waveform generation
-     * - cancelTask: Cancels active render or audio extraction task
+     * - cancelTask: Cancels an active render, audio, waveform or thumbnail stream task
      */
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         applyInlineNativeLogLevel(call)
@@ -186,6 +211,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             "getMetadata" -> handleGetMetadata(call, result)
             "hasAudioTrack" -> handleHasAudioTrack(call, result)
             "getThumbnails" -> handleGetThumbnails(call, result)
+            "startThumbnailStream" -> handleStartThumbnailStream(call, result)
             "renderVideo" -> handleRenderVideo(call, result)
             "renderStopMotion" -> handleRenderStopMotion(call, result)
             "splitVideo" -> handleSplitVideo(call, result)
@@ -306,6 +332,92 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             )
         } catch (e: IllegalArgumentException) {
             result.error("INVALID_ARGUMENTS", e.message, null)
+        }
+    }
+
+    /**
+     * Starts streaming thumbnail generation.
+     *
+     * Unlike [handleGetThumbnails], which answers the method call with the
+     * whole set, this method returns immediately and emits one event per
+     * decoded frame on the thumbnail stream channel, followed by a `done`
+     * event. Tracked by id so [handleCancelTask] can stop it.
+     */
+    private fun handleStartThumbnailStream(call: MethodCall, result: MethodChannel.Result) {
+        val id = call.argument<String>("id") ?: ""
+        if (id.isBlank()) {
+            result.error("INVALID_ARGUMENTS", "Task id is required and cannot be empty", null)
+            return
+        }
+
+        if (activeThumbnailTasks.containsKey(id)) {
+            result.error(
+                "TASK_ALREADY_RUNNING",
+                "A thumbnail stream with id '$id' is already running",
+                null
+            )
+            return
+        }
+
+        val task = ThumbnailTask()
+        activeThumbnailTasks[id] = task
+
+        try {
+            val config = ThumbnailConfig.fromMethodCall(call)
+            if (config.timestampsUs.isEmpty()) {
+                throw IllegalArgumentException("timestamps are required for a thumbnail stream")
+            }
+
+            val jobHandle = thumbnailGenerator.streamThumbnails(
+                config = config,
+                onFrame = { indices, bytes, progress ->
+                    mainHandler.post {
+                        thumbnailStreamSink?.success(
+                            mapOf(
+                                "id" to id,
+                                "indices" to indices,
+                                "bytes" to bytes,
+                                "progress" to progress,
+                            )
+                        )
+                    }
+                },
+                onComplete = {
+                    mainHandler.post {
+                        activeThumbnailTasks.remove(id)
+                        thumbnailStreamSink?.success(mapOf("id" to id, "done" to true))
+                    }
+                },
+                onError = { error ->
+                    mainHandler.post {
+                        activeThumbnailTasks.remove(id)
+                        // Use the captured task: handleCancelTask may have already
+                        // removed it from the map, so the map lookup can be null.
+                        val code = if (task.isCanceled) "CANCELED" else "THUMBNAIL_ERROR"
+                        thumbnailStreamSink?.success(
+                            mapOf(
+                                "id" to id,
+                                "error" to (error.message ?: "Thumbnail stream failed"),
+                                "errorCode" to code,
+                            )
+                        )
+                    }
+                },
+            )
+            task.attach(jobHandle)
+
+            // Return immediately - frames will be sent via event channel
+            result.success(null)
+        } catch (e: IllegalArgumentException) {
+            activeThumbnailTasks.remove(id)
+            result.error("INVALID_ARGUMENTS", e.message, null)
+        } catch (e: Exception) {
+            activeThumbnailTasks.remove(id)
+            result.error(
+                "THUMBNAIL_ERROR",
+                "Failed to start thumbnail stream: ${e.message}",
+                null
+            )
         }
     }
 
@@ -896,6 +1008,16 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         if (waveformTask != null) {
             waveformTask.cancel()
             activeWaveformTasks.remove(id)
+            result.success(true)
+            return
+        }
+
+        // Try to find task in thumbnail stream tasks. The task stays in the
+        // map until its onError reports CANCELED, so the id is not reusable
+        // for a fresh stream until that event has gone out.
+        val thumbnailTask = activeThumbnailTasks[id]
+        if (thumbnailTask != null) {
+            thumbnailTask.cancel()
             result.success(true)
             return
         }
