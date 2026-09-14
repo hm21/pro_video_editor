@@ -241,6 +241,43 @@ void main() {
       );
     });
 
+    testWidgets('a stretched overlay cropped along keeps its full resolution', (
+      _,
+    ) async {
+      // The same crop, under a layer laid out over the whole composition —
+      // the shape of every drawing stroke. The raster budget is measured
+      // against the composition the layer covers, not the 160x90 the crop
+      // keeps of it; four crop rectangles would hold a 1280x720 stroke to a
+      // quarter on each axis. Two-pixel stripes so that quarter lands a whole
+      // period on one raster pixel and averages it to grey, where a four-pixel
+      // stripe can round-trip a bilinear quarter exactly.
+      final overlay = ImageLayer(
+        image: EditorLayerImage.memory(
+          await _stripedImage(1280, 720, stripe: 2),
+        ),
+      );
+
+      final frame = await renderAndDecode(
+        [overlay],
+        output: const Size(160, 90),
+        withCropping: true,
+        transform: const ExportTransform(
+          width: 160,
+          height: 90,
+          x: 560,
+          y: 315,
+        ),
+      );
+
+      expect(
+        _rowContrast(frame, 45, 10, 150),
+        greaterThan(120),
+        reason:
+            'the stripes were averaged away by a raster budget measured '
+            'against the crop instead of the composition',
+      );
+    });
+
     testWidgets('an overlay far larger than the frame keeps its centre', (
       _,
     ) async {

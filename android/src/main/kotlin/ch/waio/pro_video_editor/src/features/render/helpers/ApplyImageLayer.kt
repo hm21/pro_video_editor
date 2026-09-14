@@ -113,7 +113,11 @@ fun applyTimedImageLayers(
     val rasterScale = overlayRasterScale(
         frameWidth, frameHeight, outputWidth, outputHeight
     )
-    val rasterBudget = overlayRasterBudget(frameWidth, frameHeight, rasterScale)
+    // Budgeted against the composition the layers are laid out in, not the
+    // [frameWidth] x [frameHeight] slice a crop keeps of it: a stretched
+    // drawing stroke covers the whole composition, and holding it to four
+    // crop rectangles would raster it below what the crop still shows.
+    val rasterBudget = overlayRasterBudget(videoWidth, videoHeight, rasterScale)
 
     Log.d(
         RENDER_TAG,
@@ -391,7 +395,10 @@ internal fun overlayDecodeSize(
  *
  * So a raster is also held to [OVERLAY_RASTER_BUDGET_FRAMES] frames' worth of
  * pixels — the frame as it is rastered, after [rasterScale] — and to
- * [OVERLAY_RASTER_MAX_PIXELS] whatever the frame. [capRaster] shrinks a raster
+ * [OVERLAY_RASTER_MAX_PIXELS] whatever the frame. The frame is the composition
+ * the layers are laid out in; when a crop is applied after them it is the whole
+ * source, not the crop rectangle, or a stretched stroke would be held to four
+ * crop rectangles and lose density inside the crop. [capRaster] shrinks a raster
  * over budget on both axes alike and [rasterCompensation] hands the shortfall to
  * Media3 as an overlay scale, exactly as for the ratio cap, so placement and
  * extent do not move. Only a layer more than [OVERLAY_RASTER_BUDGET_FRAMES]
