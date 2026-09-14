@@ -61,6 +61,31 @@ class WaveformStreamHandler: NSObject, FlutterStreamHandler {
   }
 }
 
+/// FlutterStreamHandler for thumbnail streaming events.
+///
+/// Manages the event channel for streaming thumbnail frames.
+/// Frames are streamed to Flutter as they are decoded.
+class ThumbnailStreamHandler: NSObject, FlutterStreamHandler {
+  private weak var plugin: ProVideoEditorPlugin?
+
+  init(plugin: ProVideoEditorPlugin) {
+    self.plugin = plugin
+    super.init()
+  }
+
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink)
+    -> FlutterError?
+  {
+    plugin?.thumbnailStreamSink = events
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    plugin?.thumbnailStreamSink = nil
+    return nil
+  }
+}
+
 /// FlutterStreamHandler for native log events.
 ///
 /// Manages the event channel that forwards native log entries to Dart and

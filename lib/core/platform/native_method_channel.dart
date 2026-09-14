@@ -18,6 +18,7 @@ import '/core/models/thumbnail/key_frames_configs_model.dart';
 import '/core/models/thumbnail/single_thumbnail_configs_model.dart';
 import '/core/models/thumbnail/thumbnail_base_abstract.dart';
 import '/core/models/thumbnail/thumbnail_configs_model.dart';
+import '/core/models/thumbnail/thumbnail_frame_model.dart';
 import '/core/models/video/editor_video_model.dart';
 import '/core/models/video/progress_model.dart';
 import '/core/models/video/split_video_model.dart';
@@ -92,6 +93,25 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   final _waveformStreamChannel = const EventChannel(
     'pro_video_editor_waveform_stream',
   );
+
+  /// Event channel for receiving thumbnail frames during streaming.
+  ///
+  /// Emits one event per decoded frame for every running
+  /// [getThumbnailStream] task, tagged with the task id.
+  final _thumbnailStreamChannel = const EventChannel(
+    'pro_video_editor_thumbnail_stream',
+  );
+
+  /// The thumbnail event channel's broadcast stream, created once.
+  ///
+  /// Every [getThumbnailStream] call listens to this same stream and filters
+  /// by task id. Calling `receiveBroadcastStream()` per task would give each
+  /// task its own controller, whose first listen and last cancel are sent to
+  /// native as `listen`/`cancel` — so one task finishing would null the native
+  /// sink out from under a task still running. A shared stream reaches native
+  /// only on its first listener and its last cancel.
+  late final Stream<dynamic> _thumbnailEvents = _thumbnailStreamChannel
+      .receiveBroadcastStream();
 
   /// Event channel for receiving log entries forwarded from native code.
   ///
@@ -236,6 +256,113 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     NativeLogLevel? nativeLogLevel,
   }) async {
     return await _extractThumbnails(value, nativeLogLevel: nativeLogLevel);
+  }
+
+  @override
+  Stream<ThumbnailFrame> getThumbnailStream(
+    ThumbnailConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
+    final controller = StreamController<ThumbnailFrame>();
+    StreamSubscription<dynamic>? subscription;
+    // Set once native reported done/error or the consumer cancelled — from
+    // then on nothing is forwarded.
+    var finished = false;
+
+    void finish() {
+      if (finished) return;
+      finished = true;
+      subscription?.cancel();
+      subscription = null;
+      if (!controller.isClosed) controller.close();
+    }
+
+    void onEvent(dynamic event) {
+      if (finished || event is! Map || event['id'] != value.id) return;
+      final error = event['error'] as String?;
+      if (error != null) {
+        final errorCode = event['errorCode'] as String?;
+        controller.addError(
+          errorCode == renderCanceledErrorCode
+              ? const RenderCanceledException()
+              : PlatformException(
+                  code: errorCode ?? 'THUMBNAIL_ERROR',
+                  message: error,
+                ),
+        );
+        finish();
+        return;
+      }
+      if (event['done'] == true) {
+        finish();
+        return;
+      }
+      try {
+        controller.add(ThumbnailFrame.fromMap(event));
+      } catch (e, stack) {
+        debugPrint('Error parsing thumbnail frame: $e\n$stack');
+        controller.addError(e, stack);
+      }
+    }
+
+    Future<void> start() async {
+      // Registered before the first await so a cancel that lands while the
+      // path is still resolving aborts the start instead of launching an
+      // un-cancellable native task.
+      _beginDispatch(value.id);
+      try {
+        final inputPath = await value.video.safeFilePath();
+        _handoffToNative(value.id);
+        if (finished) return;
+        // Subscribe before starting: native emits the first frame as soon as
+        // it is decoded, which can be before `startThumbnailStream` returns.
+        subscription = _thumbnailEvents.listen(
+          onEvent,
+          onError: (Object error, StackTrace stack) {
+            if (finished) return;
+            controller.addError(error, stack);
+            finish();
+          },
+        );
+        // A consumer that leaves while this call is in flight sends its
+        // `cancelTask` on the same channel, so native handles it after the
+        // start and finds the task — no follow-up cancel is needed here.
+        await methodChannel.invokeMethod<void>('startThumbnailStream', {
+          'inputPath': inputPath,
+          'extension': _getFileExtension(inputPath),
+          'nativeLogLevel': nativeLogLevel?.methodValue,
+          ...value.toMap(),
+        });
+      } on RenderCanceledException catch (error, stack) {
+        // Cancelled before dispatch. A consumer that left has already closed
+        // the stream; one still listening called [cancel] and is owed the
+        // exception, exactly as it would get it from native.
+        if (!finished) controller.addError(error, stack);
+        finish();
+      } catch (error, stack) {
+        if (finished) return;
+        controller.addError(error, stack);
+        finish();
+      } finally {
+        _endDispatch(value.id);
+      }
+    }
+
+    controller
+      ..onListen = () {
+        unawaited(start());
+      }
+      ..onCancel = () {
+        // Fires for a consumer cancel and, after close(), for the implicit
+        // cancel of the finished subscription — only the former has a native
+        // task left to stop. Before dispatch [cancel] marks the id so
+        // `_handoffToNative` aborts the start; after it, it stops the task.
+        if (finished) return;
+        finish();
+        unawaited(cancel(value.id).catchError((_) {}));
+      };
+
+    return controller.stream;
   }
 
   @override

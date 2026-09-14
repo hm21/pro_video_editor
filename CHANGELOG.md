@@ -1,4 +1,7 @@
 ## 2.13.0
+- **FEAT**(android, iOS, macOS, web): `ProVideoEditor.getThumbnailStream` delivers a `ThumbnailConfigs` request as a stream of `ThumbnailFrame`s while it decodes — one native pass for the whole request, each frame tagged with the `timestamps` indices it resolves to. Cancelling the subscription (or `cancel(id)`) stops the decoder; web delivers the complete set frame by frame.
+- **FEAT**(android): `ThumbnailConfigs.maxParallelDecoders` caps the hardware decoder sessions a thumbnail request holds at once (default 3); pass `1` next to a live preview player.
+- **FIX**(android): When a `getThumbnails` strategy fails partway, the fallbacks now decode only the missing frames, and frames the first pass could not produce are no longer dropped.
 - **FEAT**(android, iOS, macOS): A failed render, split, audio extraction or merge now says what failed in a form an app can branch on: `NativeFailureDetails.of(error)` reads the platform's error domain, code and cause chain off the `PlatformException`, and `isOutOfStorage` names the one failure a retry cannot fix.
 - **FIX**(iOS, macOS): A cancelled job answers before the cancel does and its id is free from that moment, so a retry that restarts the same id right after cancelling is no longer refused with `TASK_ALREADY_RUNNING`. Same contract as Android.
 - **FIX**(android, iOS, macOS): A job restarted under a cancelled id begins only once the cancelled pipeline has finished unwinding, so the old job's cleanup can no longer delete the retry's output.

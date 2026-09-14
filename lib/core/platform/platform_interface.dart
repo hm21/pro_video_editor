@@ -14,6 +14,7 @@ import '/core/models/platform/native_log_level.dart';
 import '/core/models/thumbnail/key_frames_configs_model.dart';
 import '/core/models/thumbnail/single_thumbnail_configs_model.dart';
 import '/core/models/thumbnail/thumbnail_configs_model.dart';
+import '/core/models/thumbnail/thumbnail_frame_model.dart';
 import '/core/models/video/editor_video_model.dart';
 import '/core/models/video/progress_model.dart';
 import '/core/models/video/split_video_model.dart';
@@ -189,6 +190,59 @@ abstract class ProVideoEditor extends PlatformInterface {
     NativeLogLevel? nativeLogLevel,
   }) {
     throw UnimplementedError('getThumbnails() has not been implemented.');
+  }
+
+  /// Streams thumbnails frame by frame while they are being decoded.
+  ///
+  /// Unlike [getThumbnails], which resolves once the whole set is ready, this
+  /// method emits a [ThumbnailFrame] the moment each frame is compressed, so a
+  /// timeline strip can fill in progressively — and the whole request is one
+  /// native decode pass instead of one pass per batch a caller would otherwise
+  /// split it into.
+  ///
+  /// Frames arrive in **decode order**, not request order; each carries the
+  /// [ThumbnailFrame.indices] into [ThumbnailConfigs.timestamps] it resolves
+  /// to. A timestamp the platform cannot decode is skipped rather than
+  /// reported. The stream closes once every timestamp has been attempted.
+  ///
+  /// Cancelling the subscription cancels the native task, so a caller that
+  /// stops listening stops the decoder too — it does not run to completion in
+  /// the background. [cancel] with [ThumbnailConfigs.id] does the same and
+  /// additionally surfaces a [RenderCanceledException] on the stream.
+  ///
+  /// The native task keeps its [ThumbnailConfigs.id] until the decoder has
+  /// actually stopped, which is shortly *after* a cancel returns. A caller
+  /// that cancels one stream and immediately starts another must give the
+  /// new request its own id (a fresh [ThumbnailConfigs] does); reusing the
+  /// id in that window fails the new stream with `TASK_ALREADY_RUNNING`.
+  ///
+  /// Throws:
+  /// - [RenderCanceledException] if cancelled via [cancel]
+  /// - [ArgumentError] if configuration is invalid
+  /// - [PlatformException] if thumbnail generation fails
+  ///
+  /// Example:
+  /// ```dart
+  /// final configs = ThumbnailConfigs(
+  ///   video: EditorVideo.file('/path/to/video.mp4'),
+  ///   outputSize: const Size(96, 108),
+  ///   timestamps: [for (var s = 0; s < 60; s++) Duration(seconds: s)],
+  ///   maxParallelDecoders: 1, // a preview player shares the decoder pool
+  /// );
+  ///
+  /// final frames = List<Uint8List?>.filled(configs.timestamps.length, null);
+  /// await for (final frame in
+  ///     ProVideoEditor.instance.getThumbnailStream(configs)) {
+  ///   for (final index in frame.indices) {
+  ///     frames[index] = frame.bytes;
+  ///   }
+  /// }
+  /// ```
+  Stream<ThumbnailFrame> getThumbnailStream(
+    ThumbnailConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
+    throw UnimplementedError('getThumbnailStream() has not been implemented.');
   }
 
   /// Extracts key frames from a video at scene changes.
@@ -613,8 +667,9 @@ abstract class ProVideoEditor extends PlatformInterface {
   ///
   /// Attempts to stop the task identified by [taskId]. The task ID comes from:
   /// - [VideoRenderData.id] for render operations
-  /// - [ThumbnailConfigs.id] for thumbnail generation
-  /// - [KeyFramesConfigs.id] for key frame extraction
+  /// - [ThumbnailConfigs.id] for a [getThumbnailStream] task
+  /// - [WaveformConfigs.id] for waveform generation
+  /// - [AudioExtractConfigs.id] / [AudioMergeConfigs.id] for audio tasks
   ///
   /// **Behavior:**
   /// - If the task is running, it will be interrupted and cleaned up

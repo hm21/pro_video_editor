@@ -20,6 +20,7 @@ import android.view.Surface
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.TreeSet
+import java.util.concurrent.CancellationException
 
 /**
  * Decodes frames at arbitrary timestamps with a single hardware MediaCodec
@@ -101,6 +102,12 @@ class SequentialFrameDecoder(private val inputPath: String) {
      * rotation-corrected, already-resized bitmap. The callback owns the
      * bitmap.
      *
+     * [isCancelled] is polled on every pump iteration. Once it returns true
+     * the decoder is torn down and a [CancellationException] is thrown, so a
+     * caller whose coroutine was cancelled stops within one dequeue timeout
+     * instead of decoding the rest of the stream first.
+     *
+     * @throws CancellationException when [isCancelled] reported true.
      * @throws Exception when the video cannot be decoded this way; callers
      *   are expected to fall back to another extraction path.
      */
@@ -110,6 +117,7 @@ class SequentialFrameDecoder(private val inputPath: String) {
         outputHeight: Int,
         boxFit: String,
         scan: MediaScan = scan(inputPath),
+        isCancelled: () -> Boolean = { false },
         onFrame: (indices: List<Int>, bitmap: Bitmap) -> Unit,
     ) {
         val extractor = MediaExtractor()
@@ -263,6 +271,9 @@ class SequentialFrameDecoder(private val inputPath: String) {
             // handling. Only when neither side made progress block briefly on
             // the output side.
             while (pendingPts.isNotEmpty() && !outputDone) {
+                if (isCancelled()) {
+                    throw CancellationException("Frame extraction was cancelled")
+                }
                 var progressed = false
                 while (true) {
                     val outIndex = activeCodec.dequeueOutputBuffer(bufferInfo, 0L)

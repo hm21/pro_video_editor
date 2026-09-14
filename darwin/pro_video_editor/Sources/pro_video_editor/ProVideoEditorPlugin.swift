@@ -25,13 +25,16 @@ import Foundation
 /// - Method channel: "pro_video_editor" for commands and responses
 /// - Event channel: "pro_video_editor_progress" for progress updates
 /// - Event channel: "pro_video_editor_waveform_stream" for streaming waveform chunks
+/// - Event channel: "pro_video_editor_thumbnail_stream" for streaming thumbnail frames
 public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
   var eventSink: FlutterEventSink?
   var waveformStreamSink: FlutterEventSink?
+  var thumbnailStreamSink: FlutterEventSink?
   var logSink: FlutterEventSink?
   private let renderTasks = JobRegistry<RenderTask>()
   private let audioTasks = JobRegistry<AudioExtractTask>()
   private var activeWaveformTasks: [String: WaveformTask] = [:]
+  private var activeThumbnailTasks: [String: ThumbnailTask] = [:]
 
   /// Guards `engineDetached`. Metadata/thumbnail callbacks may complete off the
   /// main thread, so the detach flag is read/written under a lock.
@@ -60,6 +63,8 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
       name: "pro_video_editor_progress", binaryMessenger: messenger)
     let waveformStreamChannel = FlutterEventChannel(
       name: "pro_video_editor_waveform_stream", binaryMessenger: messenger)
+    let thumbnailStreamChannel = FlutterEventChannel(
+      name: "pro_video_editor_thumbnail_stream", binaryMessenger: messenger)
     let logChannel = FlutterEventChannel(
       name: "pro_video_editor_logs", binaryMessenger: messenger)
 
@@ -67,6 +72,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     registrar.addMethodCallDelegate(instance, channel: methodChannel)
     eventChannel.setStreamHandler(instance)
     waveformStreamChannel.setStreamHandler(WaveformStreamHandler(plugin: instance))
+    thumbnailStreamChannel.setStreamHandler(ThumbnailStreamHandler(plugin: instance))
     logChannel.setStreamHandler(LogStreamHandler(plugin: instance))
 
     // Publishing the instance keeps it alive for the registrar and ensures
@@ -102,10 +108,13 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     renderTasks.cancelAll()
     audioTasks.cancelAll()
     activeWaveformTasks.values.forEach { $0.cancel() }
+    activeThumbnailTasks.values.forEach { $0.cancel() }
     activeWaveformTasks.removeAll()
+    activeThumbnailTasks.removeAll()
 
     eventSink = nil
     waveformStreamSink = nil
+    thumbnailStreamSink = nil
     logSink = nil
     PluginLog.sink = nil
   }
@@ -127,9 +136,10 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
   /// - getPlatformVersion: Returns iOS version
   /// - getMetadata: Extracts video metadata
   /// - getThumbnails: Generates thumbnails
+  /// - startThumbnailStream: Streams thumbnails frame by frame
   /// - renderVideo: Renders video with effects
   /// - extractAudio: Extracts audio from video
-  /// - cancelTask: Cancels active render or audio extraction task
+  /// - cancelTask: Cancels an active render, audio, waveform or thumbnail stream task
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     applyInlineNativeLogLevel(call: call)
 
@@ -145,6 +155,9 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
 
     case "getThumbnails":
       handleGetThumbnails(call: call, result: result)
+
+    case "startThumbnailStream":
+      handleStartThumbnailStream(call: call, result: result)
 
     case "renderVideo":
       handleRenderVideo(call: call, result: result)
@@ -284,6 +297,89 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
             code: "THUMBNAIL_ERROR", message: error.localizedDescription, details: nil))
       }
     )
+  }
+
+  /// Starts streaming thumbnail generation.
+  ///
+  /// Unlike `handleGetThumbnails`, which answers the method call with the whole
+  /// set, this method returns immediately and emits one event per decoded frame
+  /// on the thumbnail stream channel, followed by a `done` event. Tracked by id
+  /// so `handleCancelTask` can stop it.
+  private func handleStartThumbnailStream(call: FlutterMethodCall, result: @escaping FlutterResult)
+  {
+    guard let args = call.arguments as? [String: Any],
+      let id = args["id"] as? String
+    else {
+      result(
+        FlutterError(
+          code: "INVALID_ARGUMENTS", message: "Missing parameters", details: nil))
+      return
+    }
+
+    guard !id.isEmpty else {
+      result(FlutterError(code: "INVALID_ARGUMENTS", message: "Missing task id", details: nil))
+      return
+    }
+
+    if activeThumbnailTasks[id] != nil {
+      result(
+        FlutterError(
+          code: "TASK_ALREADY_RUNNING",
+          message: "A thumbnail stream with id \(id) is already running",
+          details: nil))
+      return
+    }
+
+    guard let config = ThumbnailConfig.fromArguments(args), !config.timestampsUs.isEmpty else {
+      result(
+        FlutterError(
+          code: "INVALID_ARGUMENTS",
+          message: "A thumbnail stream needs a valid configuration with timestamps",
+          details: nil))
+      return
+    }
+
+    let task = ThumbnailTask()
+    activeThumbnailTasks[id] = task
+
+    let handle = ThumbnailGenerator.streamThumbnails(
+      config: config,
+      onFrame: { indices, data, progress in
+        DispatchQueue.main.async {
+          self.thumbnailStreamSink?([
+            "id": id,
+            "indices": indices,
+            "bytes": FlutterStandardTypedData(bytes: data),
+            "progress": progress,
+          ])
+        }
+      },
+      onComplete: {
+        DispatchQueue.main.async {
+          self.activeThumbnailTasks.removeValue(forKey: id)
+          self.thumbnailStreamSink?(["id": id, "done": true])
+        }
+      },
+      onError: { error in
+        DispatchQueue.main.async {
+          // Use the captured task: handleCancelTask may have already removed it
+          // from the map.
+          self.activeThumbnailTasks.removeValue(forKey: id)
+          let flutterError = Self.flutterError(
+            for: error, canceled: task.isCanceled, otherwise: "THUMBNAIL_ERROR")
+          self.thumbnailStreamSink?([
+            "id": id,
+            "error": error.localizedDescription,
+            "errorCode": flutterError.code,
+          ])
+        }
+      }
+    )
+
+    task.attachHandle(handle)
+
+    // Return immediately - frames will be sent via event channel
+    result(nil)
   }
 
   /// Starts an asynchronous video render job with effects.
@@ -842,6 +938,15 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
 
     // Try to find task in waveform tasks
     if let task = activeWaveformTasks[id] {
+      task.cancel()
+      result(nil)
+      return
+    }
+
+    // Try to find task in thumbnail stream tasks. The task stays in the map
+    // until its onError reports CANCELED, so the id is not reusable for a
+    // fresh stream until that event has gone out.
+    if let task = activeThumbnailTasks[id] {
       task.cancel()
       result(nil)
       return

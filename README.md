@@ -103,7 +103,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 #### 🎥 Video Editing Capabilities
 
 - 📈 **Metadata**: Extract detailed metadata from the video file.
-- 🖼️ **Thumbnails**: Generate one or multiple thumbnails from the video.
+- 🖼️ **Thumbnails**: Generate one or multiple thumbnails from the video, in one call or streamed frame by frame.
 - 🎞️ **Keyframes**: Retrieve keyframe information from the video.
 - ✂️ **Trim**: Cut the video to a specified start and end time.
 - 🔗 **Merge Videos**: Concatenate multiple video clips into a single output.
@@ -145,6 +145,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 |----------------------------|---------|------|--------|----------|--------|-------|
 | `Metadata`                 | ✅      | ✅  | ✅     | ✅      | ⚠️     | ✅   |
 | `Thumbnails`               | ✅      | ✅  | ✅     | ❌      | ❌     | ✅   |
+| `Thumbnail Streaming`      | ✅      | ✅  | ✅     | ❌      | ❌     | ✅   |
 | `KeyFrames`                | ✅      | ✅  | ✅     | ❌      | ❌     | ✅   |
 | `Rotate`                   | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Flip`                     | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
@@ -797,6 +798,38 @@ List<Uint8List> result = await ProVideoEditor.instance.getThumbnails(
         boxFit: ThumbnailBoxFit.cover,
     ),
 );
+```
+
+#### Thumbnail Stream Example
+
+For a timeline strip — dozens of frames per clip — ask for them all at once and
+consume them as they are decoded. The whole request is a single native decode
+pass, so it is far cheaper than splitting it into small `getThumbnails` calls
+for the sake of progressive fill, and cancelling the subscription stops the
+decoder immediately.
+
+```dart
+final configs = ThumbnailConfigs(
+    video: EditorVideo.file('/path/to/video.mp4'),
+    outputSize: const Size(96, 108),
+    timestamps: [
+        for (var ms = 0; ms < 6300; ms += 77) Duration(milliseconds: ms),
+    ],
+    // Android decodes with up to three hardware sessions in parallel. When
+    // a preview player shares the decoder pool, keep it to one.
+    maxParallelDecoders: 1,
+);
+
+final frames = List<Uint8List?>.filled(configs.timestamps.length, null);
+
+await for (final frame in ProVideoEditor.instance.getThumbnailStream(configs)) {
+    // Frames arrive in decode order; `indices` maps each one back onto
+    // `configs.timestamps`. Several timestamps can share one source frame.
+    for (final index in frame.indices) {
+        frames[index] = frame.bytes;
+    }
+    updateStrip(frames);
+}
 ```
 
 #### Keyframes Example

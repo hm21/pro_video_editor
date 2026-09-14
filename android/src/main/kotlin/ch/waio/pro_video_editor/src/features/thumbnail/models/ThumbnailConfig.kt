@@ -12,7 +12,14 @@ data class ThumbnailConfig(
     val outputWidth: Int,
     val outputHeight: Int,
     val timestampsUs: List<Long>,
-    val maxOutputFrames: Int?
+    val maxOutputFrames: Int?,
+    /**
+     * Upper bound of hardware decoder sessions the timestamp path may run in
+     * parallel, or null for the generator's default. A caller that shares the
+     * device's decoder pool with a live player passes 1 so the extraction
+     * never holds more than one session at a time.
+     */
+    val maxParallelDecoders: Int? = null,
 ) {
     companion object {
         /**
@@ -41,6 +48,10 @@ data class ThumbnailConfig(
             val rawTimestamps = call.argument<List<Number>>("timestamps") ?: emptyList()
             val timestampsUs = rawTimestamps.map { it.toLong() }
             val maxOutputFrames = call.argument<Number>("maxOutputFrames")?.toInt()
+            val maxParallelDecoders = call.argument<Number>("maxParallelDecoders")?.toInt()
+            require(maxParallelDecoders == null || maxParallelDecoders >= 1) {
+                "maxParallelDecoders must be at least 1"
+            }
 
             if (timestampsUs.isEmpty() && maxOutputFrames == null) {
                 throw IllegalArgumentException("Either timestamps or maxOutputFrames must be provided")
@@ -56,7 +67,8 @@ data class ThumbnailConfig(
                 outputWidth = outputWidth,
                 outputHeight = outputHeight,
                 timestampsUs = timestampsUs,
-                maxOutputFrames = maxOutputFrames
+                maxOutputFrames = maxOutputFrames,
+                maxParallelDecoders = maxParallelDecoders,
             )
         }
     }
