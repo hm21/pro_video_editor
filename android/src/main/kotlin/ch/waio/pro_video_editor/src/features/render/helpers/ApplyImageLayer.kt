@@ -10,6 +10,7 @@ import androidx.media3.effect.OverlayEffect
 import java.io.File
 import java.nio.ByteBuffer
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 import androidx.core.graphics.scale
 import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.TimestampWrapper
@@ -112,10 +113,12 @@ fun applyTimedImageLayers(
     val rasterScale = overlayRasterScale(
         frameWidth, frameHeight, outputWidth, outputHeight
     )
+    val rasterBudget = overlayRasterBudget(frameWidth, frameHeight, rasterScale)
 
     Log.d(
         RENDER_TAG,
-        "Applying ${imageLayers.size} time-based image layer(s) to ${videoWidth}x$videoHeight video"
+        "Applying ${imageLayers.size} time-based image layer(s) to ${videoWidth}x$videoHeight video" +
+                " (raster scale $rasterScale, raster budget $rasterBudget px)"
     )
     for (layer in imageLayers) {
         try {
@@ -147,7 +150,9 @@ fun applyTimedImageLayers(
                 // Prepare every frame identically so they share dimensions and
                 // anchor; the overlay swaps frames over time.
                 val prepared = gifFrames.map {
-                    prepareOverlay(it.bitmap, layer, videoWidth, videoHeight, rasterScale)
+                    prepareOverlay(
+                        it.bitmap, layer, videoWidth, videoHeight, rasterScale, rasterBudget
+                    )
                 }
                 val first = prepared.first()
                 bitmapOverlay = AnimatedBitmapOverlay(
@@ -181,8 +186,9 @@ fun applyTimedImageLayers(
                 // decoded no larger than it will end up: a full-resolution decode
                 // of a phone photo costs a second full-resolution copy when the
                 // orientation has to be turned, which is where an overlay OOMs.
-                val (reqWidth, reqHeight) =
-                    overlayDecodeSize(layer, videoWidth, videoHeight, rasterScale)
+                val (reqWidth, reqHeight) = overlayDecodeSize(
+                    layer, videoWidth, videoHeight, rasterScale, rasterBudget
+                )
                 val layerBitmap = ImageOrientation.decode(
                     image,
                     reqWidth = reqWidth,
@@ -196,8 +202,9 @@ fun applyTimedImageLayers(
                     )
                     continue
                 }
-                val prepared =
-                    prepareOverlay(layerBitmap, layer, videoWidth, videoHeight, rasterScale)
+                val prepared = prepareOverlay(
+                    layerBitmap, layer, videoWidth, videoHeight, rasterScale, rasterBudget
+                )
 
                 bitmapOverlay = if (hasAnimations) {
                     Log.d(
@@ -258,11 +265,10 @@ fun applyTimedImageLayers(
  * An overlay could not be rastered because the Java heap could not hold it.
  *
  * Raised in place of the `OutOfMemoryError` so the render fails through the
- * ordinary error path rather than killing the process. [overlayRasterScale]
- * shrinks a sized layer to what the export can show, so reaching this means a
- * raster nothing bounded — a layer laid out far larger than the frame, a
- * naturally sized layer decoded at its own resolution, or a heap already full
- * of something else.
+ * ordinary error path rather than killing the process. [overlayRasterBudget]
+ * keeps a sized layer well inside the heap, so reaching this means an
+ * unbounded raster — a naturally sized layer decoded at its own resolution, or
+ * a heap already full of something else.
  */
 internal class OverlayOutOfMemoryException(
     layer: VideoSequenceBuilder.ImageLayerConfig,
@@ -284,9 +290,9 @@ private data class PreparedOverlay(
      * Size the overlay occupies in the composition, in composition pixels.
      *
      * Equal to [bitmap]'s dimensions unless the raster was capped by
-     * [overlayRasterScale], in which case the bitmap is smaller and
-     * [overlaySettings] carries the compensating scale. Placement math must use
-     * these rather than the bitmap's own size.
+     * [overlayRasterScale] or held under [overlayRasterBudget], in which case
+     * the bitmap is smaller and [overlaySettings] carries the compensating
+     * scale. Placement math must use these rather than the bitmap's own size.
      */
     val displayWidth: Int,
     val displayHeight: Int,
@@ -357,29 +363,98 @@ internal fun overlayDecodeSize(
     videoWidth: Int,
     videoHeight: Int,
     rasterScale: Float = 1f,
+    rasterBudget: Long = Long.MAX_VALUE,
 ): Pair<Int, Int> {
     val width = layer.width
     val height = layer.height
     if (width != null && height != null) {
-        return capRaster(width.toInt(), height.toInt(), rasterScale)
+        return capRaster(width.toInt(), height.toInt(), rasterScale, rasterBudget)
     }
     if (layer.x == null && layer.y == null) {
-        return capRaster(videoWidth, videoHeight, rasterScale)
+        return capRaster(videoWidth, videoHeight, rasterScale, rasterBudget)
     }
     return Pair(0, 0)
 }
 
 /**
- * [width] × [height] reduced by [rasterScale], never below one pixel per axis.
+ * Pixels one overlay raster may hold at most, on a frame of the given size.
+ *
+ * [overlayRasterScale] bounds an overlay by the *ratio* the frame is scaled by.
+ * That is exact for a layer no larger than the frame — it removes only pixels
+ * the downscale would discard — and says nothing about a layer larger than the
+ * frame itself. A sticker or a title scaled far past the canvas is laid out at
+ * that size, five or ten times the frame on each axis is a pinch away, and only
+ * the slice inside the frame is ever visible; the whole of it was rastered
+ * regardless. An 11 000 x 13 000 layer asks for 570 MB against a heap that
+ * grows to 256 MiB. Every fatal `unpremultiplyAlpha` OOM in the downstream
+ * crash data was one such layer, at 32 to 147 million pixels.
+ *
+ * So a raster is also held to [OVERLAY_RASTER_BUDGET_FRAMES] frames' worth of
+ * pixels — the frame as it is rastered, after [rasterScale] — and to
+ * [OVERLAY_RASTER_MAX_PIXELS] whatever the frame. [capRaster] shrinks a raster
+ * over budget on both axes alike and [rasterCompensation] hands the shortfall to
+ * Media3 as an overlay scale, exactly as for the ratio cap, so placement and
+ * extent do not move. Only a layer more than [OVERLAY_RASTER_BUDGET_FRAMES]
+ * times the frame's area loses density, in proportion to how much of it lies
+ * outside the frame.
+ *
+ * A degenerate frame leaves only the absolute ceiling.
+ */
+internal fun overlayRasterBudget(
+    frameWidth: Int,
+    frameHeight: Int,
+    rasterScale: Float,
+): Long {
+    if (frameWidth <= 0 || frameHeight <= 0) return OVERLAY_RASTER_MAX_PIXELS
+    val (rasteredWidth, rasteredHeight) = capRaster(frameWidth, frameHeight, rasterScale)
+    val framePixels = rasteredWidth.toLong() * rasteredHeight
+    return minOf(framePixels * OVERLAY_RASTER_BUDGET_FRAMES, OVERLAY_RASTER_MAX_PIXELS)
+}
+
+/**
+ * Frames' worth of pixels one overlay raster may hold; see [overlayRasterBudget].
+ *
+ * Four keeps every layer up to twice the frame on each axis at full density — a
+ * title pushed past the edges, a sticker used as a backdrop — while the largest
+ * raster a 1080p export can produce is four of its 8.3 MB frames.
+ */
+internal const val OVERLAY_RASTER_BUDGET_FRAMES = 4L
+
+/**
+ * Absolute ceiling on one overlay raster, in pixels, whatever the frame.
+ *
+ * 4096 x 4096 is 64 MiB of RGBA_8888. [unpremultiplyAlpha] holds one direct
+ * buffer of the raster's size on the Java heap, and a quarter of the 256 MiB
+ * growth limit leaves the rest of the process room to stay alive; a 4K export's
+ * four-frame budget would otherwise reach 133 MB.
+ */
+internal const val OVERLAY_RASTER_MAX_PIXELS = 4096L * 4096L
+
+/**
+ * [width] × [height] reduced by [rasterScale], then held under [budget] pixels,
+ * never below one pixel per axis.
+ *
+ * The budget shrinks both axes by one factor so the raster keeps its shape;
+ * rounding each axis to a whole pixel can leave the product a row over, which
+ * is fine for a memory bound.
  *
  * A zero or negative input is passed through untouched — [overlayDecodeSize]
  * uses `0 × 0` to mean "keep the natural size".
  */
-private fun capRaster(width: Int, height: Int, rasterScale: Float): Pair<Int, Int> {
-    if (rasterScale >= 1f || width <= 0 || height <= 0) return Pair(width, height)
+private fun capRaster(
+    width: Int,
+    height: Int,
+    rasterScale: Float,
+    budget: Long = Long.MAX_VALUE,
+): Pair<Int, Int> {
+    if (width <= 0 || height <= 0) return Pair(width, height)
+    var scale = rasterScale.coerceAtMost(1f)
+    val pixels = width.toDouble() * height * scale * scale
+    if (pixels > budget) scale *= sqrt(budget / pixels).toFloat()
+    if (scale >= 1f) return Pair(width, height)
     return Pair(
-        (width * rasterScale).roundToInt().coerceAtLeast(1),
-        (height * rasterScale).roundToInt().coerceAtLeast(1),
+        (width * scale).roundToInt().coerceAtLeast(1),
+        (height * scale).roundToInt().coerceAtLeast(1),
     )
 }
 
@@ -412,14 +487,16 @@ private fun prepareOverlay(
     videoWidth: Int,
     videoHeight: Int,
     rasterScale: Float = 1f,
+    rasterBudget: Long = Long.MAX_VALUE,
 ): PreparedOverlay {
     // Determine if this layer should stretch or be positioned
     val isStretched = layer.x == null && layer.y == null
     val hasExplicitSize = layer.width != null && layer.height != null
 
     // Size the overlay occupies in the composition. The raster below may be
-    // smaller (see [overlayRasterScale]); placement is laid out from these and
-    // the shortfall is handed back to Media3 as an overlay scale.
+    // smaller (see [overlayRasterScale] and [overlayRasterBudget]); placement
+    // is laid out from these and the shortfall is handed back to Media3 as an
+    // overlay scale.
     //
     // A positioned layer with no explicit size is laid out from its own pixel
     // dimensions, so [overlayDecodeSize] does not sample it down and the raster
@@ -446,7 +523,7 @@ private fun prepareOverlay(
     }
 
     val (rasterWidth, rasterHeight) = if (cappable) {
-        capRaster(displayWidth, displayHeight, rasterScale)
+        capRaster(displayWidth, displayHeight, rasterScale, rasterBudget)
     } else {
         Pair(displayWidth, displayHeight)
     }

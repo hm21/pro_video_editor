@@ -241,6 +241,45 @@ void main() {
       );
     });
 
+    testWidgets('an overlay far larger than the frame keeps its centre', (
+      _,
+    ) async {
+      // The shape behind the fatal OOMs: a sticker pinched far past the
+      // canvas, laid out at 5x the composition on each axis — 25x its area —
+      // so only the middle fifth is ever in the frame. The raster budget holds
+      // it to four frames' worth of pixels and hands the rest back as an
+      // overlay scale of its own; that scale, like the ratio cap's, has to be
+      // applied about the overlay centre or the quadrants slide out of frame.
+      final overlay = ImageLayer(
+        image: EditorLayerImage.memory(await _quadrantImage()),
+        offset: const Offset(-2560, -1440),
+        size: const Size(6400, 3600),
+      );
+
+      final frame = await renderAndDecode([
+        overlay,
+      ], output: const Size(640, 360));
+
+      // The overlay's centre is the composition centre, so the frame sits on
+      // the meeting point of the four quadrants.
+      expect(_classify(frame.at(0.25, 0.25)), _Hue.red, reason: 'top left');
+      expect(_classify(frame.at(0.75, 0.25)), _Hue.green, reason: 'top right');
+      expect(_classify(frame.at(0.25, 0.75)), _Hue.blue, reason: 'bottom left');
+      expect(
+        _classify(frame.at(0.75, 0.75)),
+        _Hue.yellow,
+        reason: 'bottom right',
+      );
+      // Every frame pixel is inside the overlay; video showing anywhere means
+      // the compensating scale fell short.
+      expect(_classify(frame.at(0.01, 0.02)), _Hue.red, reason: 'top-left px');
+      expect(
+        _classify(frame.at(0.99, 0.98)),
+        _Hue.yellow,
+        reason: 'bottom-right px',
+      );
+    });
+
     testWidgets('many layers render at a downscaled output', (_) async {
       // The shape of the reported crash: one layer per drawing stroke, every
       // one of them full-frame. Reproducing the OutOfMemoryError itself needs a
