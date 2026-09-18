@@ -82,9 +82,11 @@ enum ClipTransitionDirection {
 ///
 /// **Note for overlap transitions** ([ClipTransitionType.dissolve],
 /// [ClipTransitionType.slide], [ClipTransitionType.push],
-/// [ClipTransitionType.wipe]): the two clips must share the same dimensions
-/// (which split clips from the same source always do). When neighbouring clips
-/// differ in size, the native side falls back to a hard cut.
+/// [ClipTransitionType.wipe]): the two clips must show at the same size
+/// (which split clips from the same source always do). How each is stored
+/// does not matter — a recording kept landscape with a rotation flag blends
+/// with an upright clip of the same picture. When neighbouring clips differ
+/// in display size, the native side falls back to a hard cut.
 ///
 /// Example:
 /// ```dart

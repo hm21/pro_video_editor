@@ -361,9 +361,9 @@ var data = VideoRenderData(
 
 Uint8List result = await ProVideoEditor.instance.renderVideo(data);
 
-/// Note: overlap transitions require the neighbouring clips to share the same
-/// dimensions (split clips from one source always do); otherwise the boundary
-/// falls back to a hard cut.
+/// Note: overlap transitions require the neighbouring clips to show at the
+/// same size (split clips from one source always do; a rotation flag on one
+/// of them is fine); otherwise the boundary falls back to a hard cut.
 ```
 
 #### Composition (Layers) Example
