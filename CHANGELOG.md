@@ -1,3 +1,6 @@
+## 2.13.1
+- **FIX**(android): An overlap transition (dissolve / slide / push / wipe) between a clip stored with a rotation flag (a phone recording is typically coded landscape and flagged 90°/270°) and a clip stored upright no longer degrades to a hard cut; both sides are blended in their display orientation, so only the size a clip shows at has to match.
+
 ## 2.13.0
 - **FEAT**(android, iOS, macOS, web): `ProVideoEditor.getThumbnailStream` delivers a `ThumbnailConfigs` request as a stream of `ThumbnailFrame`s while it decodes — one native pass for the whole request, each frame tagged with the `timestamps` indices it resolves to. Cancelling the subscription (or `cancel(id)`) stops the decoder; web delivers the complete set frame by frame.
 - **FEAT**(android): `ThumbnailConfigs.maxParallelDecoders` caps the hardware decoder sessions a thumbnail request holds at once (default 3); pass `1` next to a live preview player.

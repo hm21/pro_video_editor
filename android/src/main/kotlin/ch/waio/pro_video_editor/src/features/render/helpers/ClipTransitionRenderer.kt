@@ -26,11 +26,12 @@ import kotlin.math.roundToInt
  * forward clip.
  *
  * It decodes the **tail** of the outgoing clip and the **head** of the incoming
- * clip into packed I420 frames, blends them per output frame according to the
- * transition [type]/[direction], and re-encodes the result. The two segments
- * must share the same dimensions (which split clips from one source always do);
- * if they differ the renderer returns `null` so the caller can fall back to a
- * hard cut.
+ * clip into packed I420 frames in their *display* orientation, blends them per
+ * output frame according to the transition [type]/[direction], and re-encodes
+ * the result upright. The two segments must show at the same size; if they
+ * differ the renderer returns `null` so the caller can fall back to a hard cut.
+ * How each clip is stored does not matter: a phone recording kept landscape
+ * with a rotation flag blends with an upright clip of the same picture.
  *
  * This mirrors [VideoReverser]'s MediaCodec decode → encode → mux approach and
  * is intentionally isolated from the main composition so a failure degrades to
@@ -106,7 +107,7 @@ object ClipTransitionRenderer {
             if (outSeg.width != inSeg.width || outSeg.height != inSeg.height) {
                 Log.w(
                     RENDER_TAG,
-                    "Transition: dimension mismatch " +
+                    "Transition: display size mismatch " +
                             "(${outSeg.width}x${outSeg.height} vs ${inSeg.width}x${inSeg.height}); " +
                             "falling back to hard cut"
                 )
@@ -129,25 +130,6 @@ object ClipTransitionRenderer {
                 if (outputDurationUs > 0L) outputDurationUs else tailDurationUs
             val frameDurationUs = (effectiveDurationUs / frameCount).coerceAtLeast(1L)
 
-            // Frames are decoded in their *coded* orientation (decoding to a
-            // ByteBuffer/Image does not apply the container rotation), so the
-            // rotation must be re-attached to the output muxer. Otherwise the
-            // pre-rendered transition clip plays back un-rotated while the
-            // surrounding clips — which the main Media3 pipeline auto-rotates —
-            // stay upright, making the whole transition appear rotated 90°/180°.
-            val rotation = outSeg.rotation
-            if (inSeg.rotation != outSeg.rotation) {
-                Log.w(
-                    RENDER_TAG,
-                    "Transition: clips have different rotations " +
-                            "(${outSeg.rotation}° vs ${inSeg.rotation}°); using ${outSeg.rotation}°"
-                )
-            }
-            // Geometric transitions (wipe/slide/push) are authored in display
-            // space; map the requested direction back into coded space so they
-            // still move the right way after the orientation hint is applied.
-            val blendDirection = rotatedDirection(direction, rotation)
-
             // 2) Pre-encode the cross-faded audio (best effort, no muxer yet).
             var audioPre: AudioPreEncoded? = null
             if (includeAudio) {
@@ -163,10 +145,9 @@ object ClipTransitionRenderer {
                 }
             }
 
-            // 3) Encode the blended video frames into the shared muxer.
+            // 3) Encode the blended video frames into the shared muxer. The
+            //    frames are already upright, so the output carries no rotation.
             val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            // Must be set before muxer.start() (called on INFO_OUTPUT_FORMAT_CHANGED).
-            if (rotation != 0) muxer.setOrientationHint(rotation)
             var muxerStarted = false
             var audioTrackIdx = -1
             var videoTrackIdx = -1
@@ -209,7 +190,7 @@ object ClipTransitionRenderer {
                             readFrame(inRaf, bIdx.coerceIn(0, inSeg.frameCount - 1), inFrameBuf)
                             val blended = blendFrame(
                                 outFrameBuf, inFrameBuf,
-                                width, height, eased, type, blendDirection
+                                width, height, eased, type, direction
                             )
                             val encImage = encoder.getInputImage(inIdx)
                             if (encImage != null) {
@@ -321,12 +302,14 @@ object ClipTransitionRenderer {
 
     /**
      * A decoded transition segment whose frames are **spilled to disk** rather
-     * than held in the heap. Frames are packed I420, each exactly [frameBytes]
-     * long, written sequentially to [framesFile]; frame `i` lives at byte offset
-     * `i * frameBytes`, so the encoder can random-access any frame with a single
-     * seek. This bounds heap use to one frame per side regardless of transition
-     * duration/fps/resolution — the prior in-heap `List<ByteArray>` held every
-     * frame at once and OOM'd on long 1080p transitions.
+     * than held in the heap. Frames are packed I420 in display orientation
+     * ([width]×[height] is the size the clip shows at, not its coded size),
+     * each exactly [frameBytes] long, written sequentially to [framesFile];
+     * frame `i` lives at byte offset `i * frameBytes`, so the encoder can
+     * random-access any frame with a single seek. This bounds heap use to one
+     * frame per side regardless of transition duration/fps/resolution — the
+     * prior in-heap `List<ByteArray>` held every frame at once and OOM'd on
+     * long 1080p transitions.
      */
     private class DecodedSegment(
         val framesFile: File,
@@ -334,36 +317,17 @@ object ClipTransitionRenderer {
         val frameBytes: Int,
         val width: Int,
         val height: Int,
-        /** Container rotation in degrees (0/90/180/270); frames are coded, un-rotated. */
-        val rotation: Int,
     )
-
-    /**
-     * Maps a display-space transition [direction] into the coded
-     * (pre-rotation) frame space, given the container [rotation] that is
-     * re-applied via [MediaMuxer.setOrientationHint] on playback.
-     *
-     * The renderer blends raw coded frames, so a direction the user perceives
-     * in display space must be rotated back (counter-clockwise) by [rotation]
-     * to land on the matching coded axis. Dissolve ignores direction, so this
-     * is a no-op there.
-     */
-    private fun rotatedDirection(direction: String, rotation: Int): String {
-        val steps = (((rotation % 360) + 360) % 360) / 90
-        if (steps == 0) return direction
-        // Inverse (CCW) of the clockwise rotation the orientation hint applies.
-        val ccw = mapOf(
-            "up" to "left", "left" to "down", "down" to "right", "right" to "up",
-        )
-        var d = direction
-        repeat(steps) { d = ccw[d] ?: d }
-        return d
-    }
 
     /**
      * Decodes [path] within [[startUs]..[endUs]] into packed I420 frames,
      * writing each frame sequentially to [framesFile] (one fixed-size frame
      * after another) instead of accumulating them in the heap.
+     *
+     * Decoding to an [Image] does not apply the container rotation, so each
+     * frame is turned upright here. That is what lets a clip stored landscape
+     * with a 90°/270° flag blend with one stored upright, and it means the
+     * blended output needs no orientation hint of its own.
      */
     private fun decodeSegment(
         path: String, startUs: Long, endUs: Long, framesFile: File,
@@ -377,17 +341,23 @@ object ClipTransitionRenderer {
         val mime = inputFormat.getString(MediaFormat.KEY_MIME) ?: run {
             extractor.release(); return null
         }
-        val width = inputFormat.getInteger(MediaFormat.KEY_WIDTH)
-        val height = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
+        val codedWidth = inputFormat.getInteger(MediaFormat.KEY_WIDTH)
+        val codedHeight = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
         val rotation = if (inputFormat.containsKey(MediaFormat.KEY_ROTATION))
             inputFormat.getInteger(MediaFormat.KEY_ROTATION) else 0
+        val (width, height) = I420Rotation.displaySize(codedWidth, codedHeight, rotation)
         val frameBytes = width * height * 3 / 2
+        val quarterTurns = I420Rotation.quarterTurns(rotation)
 
         val decoderFormat = inputFormat.also {
             it.setInteger(
                 MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
             )
+            // The frames are turned upright below, so the decoder must hand
+            // them out as coded (as SequentialFrameDecoder does for the same
+            // reason) rather than apply the container rotation itself.
+            if (rotation != 0) it.setInteger(MediaFormat.KEY_ROTATION, 0)
         }
         val decoder = MediaCodec.createDecoderByType(mime)
         decoder.configure(decoderFormat, null, null, 0)
@@ -396,6 +366,11 @@ object ClipTransitionRenderer {
         // Spill frames to disk as they decode: a long 1080p transition holds
         // hundreds of MB of I420 frames, which OOM'd when kept in a list.
         val framesOut = framesFile.outputStream().buffered()
+        // One packed frame as coded and one turned upright, reused for every
+        // frame so the loop does not churn two multi-MB arrays per frame; an
+        // unrotated clip needs no second buffer.
+        val coded = ByteArray(frameBytes)
+        val upright = if (quarterTurns == 0) coded else ByteArray(frameBytes)
         var frameCount = 0
         val info = MediaCodec.BufferInfo()
         var inputDone = false
@@ -438,9 +413,15 @@ object ClipTransitionRenderer {
                         if (info.size > 0 && info.presentationTimeUs in startUs until endUs) {
                             val image = decoder.getOutputImage(outIdx)
                             if (image != null) {
-                                framesOut.write(imageToI420(image, width, height))
-                                frameCount++
+                                imageToI420(image, codedWidth, codedHeight, coded)
                                 image.close()
+                                if (quarterTurns != 0) {
+                                    I420Rotation.rotate(
+                                        coded, codedWidth, codedHeight, rotation, upright
+                                    )
+                                }
+                                framesOut.write(upright)
+                                frameCount++
                             }
                         }
                         decoder.releaseOutputBuffer(outIdx, false)
@@ -461,7 +442,7 @@ object ClipTransitionRenderer {
             framesFile.delete()
             return null
         }
-        return DecodedSegment(framesFile, frameCount, frameBytes, width, height, rotation)
+        return DecodedSegment(framesFile, frameCount, frameBytes, width, height)
     }
 
     /**
@@ -593,15 +574,16 @@ object ClipTransitionRenderer {
     // I420 <-> Image
     // ---------------------------------------------------------------------
 
-    /** Converts a decoder [Image] (YUV420 flexible) to a packed I420 array. */
-    private fun imageToI420(image: Image, width: Int, height: Int): ByteArray {
-        val out = ByteArray(width * height * 3 / 2)
+    /**
+     * Packs a decoder [Image] (YUV420 flexible) as I420 into [out], which
+     * must hold `width * height * 3 / 2` bytes.
+     */
+    private fun imageToI420(image: Image, width: Int, height: Int, out: ByteArray) {
         val cw = width / 2
         val ch = height / 2
         readPlane(image.planes[0], out, 0, width, height)
         readPlane(image.planes[1], out, width * height, cw, ch)
         readPlane(image.planes[2], out, width * height + cw * ch, cw, ch)
-        return out
     }
 
     private fun readPlane(
