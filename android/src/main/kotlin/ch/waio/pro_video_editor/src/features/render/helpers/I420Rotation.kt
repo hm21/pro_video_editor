@@ -16,31 +16,46 @@ package ch.waio.pro_video_editor.src.features.render.helpers
  */
 internal object I420Rotation {
 
+    /**
+     * The whole clockwise quarter turns [rotation] degrees amount to (0..3).
+     * Negative and overflowing angles wrap; anything between two quarter
+     * turns rounds down, so [displaySize] and [rotate] always agree.
+     */
+    fun quarterTurns(rotation: Int): Int = (((rotation % 360) + 360) % 360) / 90
+
     /** Display width × height of a coded [width]×[height] frame after [rotation]. */
     fun displaySize(width: Int, height: Int, rotation: Int): Pair<Int, Int> =
-        if (normalize(rotation) % 180 == 0) width to height else height to width
+        if (quarterTurns(rotation) % 2 == 0) width to height else height to width
 
     /**
      * Rotates a packed I420 [frame] of coded [width]×[height] clockwise by
      * [rotation] degrees — the container's display rotation, as
-     * `MediaFormat.KEY_ROTATION` reports it. Returns [frame] itself for 0°.
+     * `MediaFormat.KEY_ROTATION` reports it — into [dst] and returns it.
+     * [dst] must hold at least [frame]'s size and, for a real turn, be a
+     * separate array; the caller keeps one per segment so the decode loop
+     * does not allocate per frame. A 0° rotation copies [frame] into [dst].
      *
-     * Both dimensions must be even, as every I420 frame the renderer packs is.
+     * Chroma is handled with the same truncating half-size as the packing
+     * side, so an odd dimension stays consistent with how it was packed.
      */
-    fun rotate(frame: ByteArray, width: Int, height: Int, rotation: Int): ByteArray {
-        val steps = normalize(rotation) / 90
-        if (steps == 0) return frame
-        val out = ByteArray(frame.size)
+    fun rotate(
+        frame: ByteArray, width: Int, height: Int, rotation: Int,
+        dst: ByteArray = ByteArray(frame.size),
+    ): ByteArray {
+        val steps = quarterTurns(rotation)
+        if (steps == 0) {
+            if (dst !== frame) frame.copyInto(dst)
+            return dst
+        }
+        require(dst !== frame) { "a quarter turn cannot run in place" }
         val cw = width / 2
         val ch = height / 2
         val ySize = width * height
-        rotatePlane(frame, 0, out, width, height, steps)
-        rotatePlane(frame, ySize, out, cw, ch, steps)
-        rotatePlane(frame, ySize + cw * ch, out, cw, ch, steps)
-        return out
+        rotatePlane(frame, 0, dst, width, height, steps)
+        rotatePlane(frame, ySize, dst, cw, ch, steps)
+        rotatePlane(frame, ySize + cw * ch, dst, cw, ch, steps)
+        return dst
     }
-
-    private fun normalize(rotation: Int): Int = ((rotation % 360) + 360) % 360
 
     /**
      * Rotates one [w]×[h] plane at [offset] of [src] into the same offset of

@@ -347,12 +347,17 @@ object ClipTransitionRenderer {
             inputFormat.getInteger(MediaFormat.KEY_ROTATION) else 0
         val (width, height) = I420Rotation.displaySize(codedWidth, codedHeight, rotation)
         val frameBytes = width * height * 3 / 2
+        val quarterTurns = I420Rotation.quarterTurns(rotation)
 
         val decoderFormat = inputFormat.also {
             it.setInteger(
                 MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
             )
+            // The frames are turned upright below, so the decoder must hand
+            // them out as coded (as SequentialFrameDecoder does for the same
+            // reason) rather than apply the container rotation itself.
+            if (rotation != 0) it.setInteger(MediaFormat.KEY_ROTATION, 0)
         }
         val decoder = MediaCodec.createDecoderByType(mime)
         decoder.configure(decoderFormat, null, null, 0)
@@ -361,6 +366,11 @@ object ClipTransitionRenderer {
         // Spill frames to disk as they decode: a long 1080p transition holds
         // hundreds of MB of I420 frames, which OOM'd when kept in a list.
         val framesOut = framesFile.outputStream().buffered()
+        // One packed frame as coded and one turned upright, reused for every
+        // frame so the loop does not churn two multi-MB arrays per frame; an
+        // unrotated clip needs no second buffer.
+        val coded = ByteArray(frameBytes)
+        val upright = if (quarterTurns == 0) coded else ByteArray(frameBytes)
         var frameCount = 0
         val info = MediaCodec.BufferInfo()
         var inputDone = false
@@ -403,12 +413,15 @@ object ClipTransitionRenderer {
                         if (info.size > 0 && info.presentationTimeUs in startUs until endUs) {
                             val image = decoder.getOutputImage(outIdx)
                             if (image != null) {
-                                val coded = imageToI420(image, codedWidth, codedHeight)
-                                framesOut.write(
-                                    I420Rotation.rotate(coded, codedWidth, codedHeight, rotation)
-                                )
-                                frameCount++
+                                imageToI420(image, codedWidth, codedHeight, coded)
                                 image.close()
+                                if (quarterTurns != 0) {
+                                    I420Rotation.rotate(
+                                        coded, codedWidth, codedHeight, rotation, upright
+                                    )
+                                }
+                                framesOut.write(upright)
+                                frameCount++
                             }
                         }
                         decoder.releaseOutputBuffer(outIdx, false)
@@ -561,15 +574,16 @@ object ClipTransitionRenderer {
     // I420 <-> Image
     // ---------------------------------------------------------------------
 
-    /** Converts a decoder [Image] (YUV420 flexible) to a packed I420 array. */
-    private fun imageToI420(image: Image, width: Int, height: Int): ByteArray {
-        val out = ByteArray(width * height * 3 / 2)
+    /**
+     * Packs a decoder [Image] (YUV420 flexible) as I420 into [out], which
+     * must hold `width * height * 3 / 2` bytes.
+     */
+    private fun imageToI420(image: Image, width: Int, height: Int, out: ByteArray) {
         val cw = width / 2
         val ch = height / 2
         readPlane(image.planes[0], out, 0, width, height)
         readPlane(image.planes[1], out, width * height, cw, ch)
         readPlane(image.planes[2], out, width * height + cw * ch, cw, ch)
-        return out
     }
 
     private fun readPlane(
