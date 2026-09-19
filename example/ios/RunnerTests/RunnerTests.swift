@@ -775,6 +775,115 @@ enum ThumbnailTimestampFixture {
   }
 }
 
+// MARK: - Concurrent renders
+
+/// Two renders in flight at once must each composite with their own effects.
+///
+/// The compositor used to read its configuration off a type-level static that
+/// every render wrote during setup, so the render whose `setVideoComposition:`
+/// ran last won — the others composited with its overlays and color filters —
+/// and the unsynchronized writes over-released the previous value's arrays,
+/// which surfaced as an `EXC_BAD_ACCESS` under `destroy for
+/// VideoCompositorConfig` in the field.
+final class ConcurrentRenderTests: XCTestCase {
+
+  /// A distinct color filter per render, each a channel permutation of the
+  /// solid red source so its output maps onto a different palette entry:
+  /// identity, red→green, red→blue, red→yellow.
+  private static let filters: [(matrix: [Double], paletteIndex: Int)] = [
+    ([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0], 0),
+    ([0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0], 1),
+    ([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0], 2),
+    ([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0], 3),
+  ]
+
+  func testConcurrentRendersEachCompositeWithTheirOwnEffects() throws {
+    let palette = ThumbnailTimestampFixture.palette
+    let source = try ThumbnailTimestampFixture.makeColorVideo(
+      colors: [palette[0], palette[0]])
+    defer { try? FileManager.default.removeItem(at: source) }
+
+    // Enough renders that their setups overlap regardless of scheduling; the
+    // encodes themselves are serialized by `ExportGate`, the setup is not.
+    let renders = 8
+    var outputs: [URL] = []
+    var expectations: [XCTestExpectation] = []
+    var errors: [Int: Error] = [:]
+    let errorsLock = NSLock()
+
+    for index in 0..<renders {
+      let output = FileManager.default.temporaryDirectory
+        .appendingPathComponent("pve_concurrent_\(UUID().uuidString).mp4")
+      outputs.append(output)
+      let filter = Self.filters[index % Self.filters.count]
+      let config = try XCTUnwrap(
+        RenderConfig.fromArguments([
+          "videoClips": [["inputPath": source.path]],
+          "outputPath": output.path,
+          "outputFormat": "mp4",
+          "enableAudio": false,
+          "colorFilters": [["matrix": filter.matrix.map { NSNumber(value: $0) }]],
+        ]))
+
+      let finished = expectation(description: "render \(index) settles")
+      finished.assertForOverFulfill = true
+      expectations.append(finished)
+      RenderVideo.render(
+        config: config,
+        onProgress: { _ in },
+        onComplete: { _ in finished.fulfill() },
+        onError: { error in
+          errorsLock.lock()
+          errors[index] = error
+          errorsLock.unlock()
+          finished.fulfill()
+        })
+    }
+    wait(for: expectations, timeout: 180)
+    defer {
+      for output in outputs { try? FileManager.default.removeItem(at: output) }
+    }
+
+    XCTAssertTrue(errors.isEmpty, "renders failed: \(errors)")
+    for (index, output) in outputs.enumerated() {
+      let expected = Self.filters[index % Self.filters.count].paletteIndex
+      let color = try XCTUnwrap(Self.frameColor(of: output), "render \(index) has no frame")
+      let classified = ThumbnailTimestampFixture.nearestPaletteIndex(color, palette: palette)
+      XCTAssertEqual(
+        classified, expected,
+        "render \(index) composited with another render's color filter "
+          + "(got \(color), expected palette[\(expected)])")
+    }
+  }
+
+  /// The average color of the frame half a second into `url`.
+  private static func frameColor(of url: URL) -> ThumbnailTimestampFixture.RGB? {
+    let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+    generator.requestedTimeToleranceBefore = .zero
+    generator.requestedTimeToleranceAfter = CMTime(value: 1, timescale: 10)
+    guard
+      let image = try? generator.copyCGImage(
+        at: CMTime(value: 1, timescale: 2), actualTime: nil)
+    else { return nil }
+
+    var pixel = [UInt8](repeating: 0, count: 4)
+    guard
+      let context = CGContext(
+        data: &pixel,
+        width: 1,
+        height: 1,
+        bitsPerComponent: 8,
+        bytesPerRow: 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+      )
+    else { return nil }
+    context.interpolationQuality = .high
+    context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+    return (pixel[0], pixel[1], pixel[2])
+  }
+}
+
 // MARK: - EXIF orientation on caller-supplied images
 
 /// `decodeOrientedImage` must honor the EXIF `Orientation` tag.

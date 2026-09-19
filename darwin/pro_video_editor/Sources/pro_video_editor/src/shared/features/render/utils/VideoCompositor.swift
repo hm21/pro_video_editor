@@ -148,11 +148,39 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// would otherwise accumulate one per combination.
   private let lutCacheLimit = 8
 
-  static var config = VideoCompositorConfig()
-
+  /// AVFoundation constructs the compositor itself through this initializer,
+  /// so a render cannot hand its configuration over here. It travels on the
+  /// render's ``CustomVideoCompositionInstruction`` instead and is applied by
+  /// ``configureIfNeeded(from:)`` when the first request arrives.
   required override init() {
     super.init()
-    apply(Self.config)
+  }
+
+  /// Guards ``isConfigured`` and the fields ``apply(_:)`` writes, in case the
+  /// first requests of a session arrive on more than one thread.
+  private let configurationLock = NSLock()
+  private var isConfigured = false
+
+  /// Applies the configuration carried by [instruction] the first time it is
+  /// called; later calls are no-ops.
+  ///
+  /// Reading it off the instruction — rather than off a type-level slot filled
+  /// in during setup — is what keeps concurrent renders apart: every session
+  /// instantiates the same class, and the only per-render value that reaches
+  /// an instance is the instruction of the request it is serving.
+  ///
+  /// Applying on the first request is not too late: the members AVFoundation
+  /// touches before that (`sourcePixelBufferAttributes`,
+  /// `requiredPixelBufferAttributesForRenderContext`, `renderContextChanged`)
+  /// read no configuration.
+  func configureIfNeeded(from instruction: AVVideoCompositionInstructionProtocol) {
+    configurationLock.lock()
+    defer { configurationLock.unlock() }
+    guard !isConfigured else { return }
+    isConfigured = true
+    guard let config = (instruction as? CustomVideoCompositionInstruction)?.compositorConfig
+    else { return }
+    apply(config)
   }
 
   var videoRotationDegrees: Double = 0.0
@@ -610,6 +638,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   }
 
   func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
+    configureIfNeeded(from: request.videoCompositionInstruction)
+
     var outputImage: CIImage
 
     if let layeredInstruction = request.videoCompositionInstruction
