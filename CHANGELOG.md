@@ -1,3 +1,6 @@
+## 2.13.2
+- **FIX**(iOS, macOS): Two renders in flight at once no longer crash the app (`EXC_BAD_ACCESS`) or composite with each other's crop, color filters and overlays; every render now carries its own compositor configuration.
+
 ## 2.13.1
 - **FIX**(android): An overlap transition (dissolve / slide / push / wipe) between a clip stored with a rotation flag (a phone recording is typically coded landscape and flagged 90°/270°) and a clip stored upright no longer degrades to a hard cut; both sides are blended in their display orientation, so only the size a clip shows at has to match.
 

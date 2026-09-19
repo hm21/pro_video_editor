@@ -148,11 +148,43 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// would otherwise accumulate one per combination.
   private let lutCacheLimit = 8
 
-  static var config = VideoCompositorConfig()
-
+  /// No-argument by AVFoundation's contract; the configuration arrives with
+  /// the first request, see ``configureIfNeeded(from:)``.
   required override init() {
     super.init()
-    apply(Self.config)
+  }
+
+  /// Guards ``isConfigured`` and the fields ``apply(_:)`` writes, in case the
+  /// first requests of a session arrive on more than one thread.
+  private let configurationLock = NSLock()
+  private var isConfigured = false
+
+  /// Applies the configuration carried by [instruction] the first time one is
+  /// seen; later calls are no-ops.
+  ///
+  /// AVFoundation instantiates `customVideoCompositorClass` itself through a
+  /// no-argument `init()`, so a render cannot hand its configuration over
+  /// directly. Reading it off the instruction — rather than off a type-level
+  /// slot filled in during setup — is what keeps concurrent renders apart:
+  /// every session instantiates the same class, and the only per-render value
+  /// that reaches an instance is the instruction of the request it is serving.
+  ///
+  /// Applying on the first request is not too late: the members AVFoundation
+  /// touches before that (`sourcePixelBufferAttributes`,
+  /// `requiredPixelBufferAttributesForRenderContext`, `renderContextChanged`)
+  /// read no configuration.
+  ///
+  /// An instruction without a configuration leaves the compositor unconfigured
+  /// rather than latching it, so a later instruction that carries one still
+  /// takes effect.
+  func configureIfNeeded(from instruction: AVVideoCompositionInstructionProtocol) {
+    configurationLock.lock()
+    defer { configurationLock.unlock() }
+    guard !isConfigured,
+      let config = (instruction as? CustomVideoCompositionInstruction)?.compositorConfig
+    else { return }
+    apply(config)
+    isConfigured = true
   }
 
   var videoRotationDegrees: Double = 0.0
@@ -610,6 +642,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   }
 
   func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
+    configureIfNeeded(from: request.videoCompositionInstruction)
+
     var outputImage: CIImage
 
     if let layeredInstruction = request.videoCompositionInstruction

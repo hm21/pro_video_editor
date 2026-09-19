@@ -369,9 +369,14 @@ class RenderVideo {
           let videoComposition = AVMutableVideoComposition()
           videoComposition.frameDuration = outputFrameDuration
           videoComposition.renderSize = finalRenderSize
+          // The compositor reads its configuration off the instruction it is
+          // serving, so every concurrent render keeps its own — a type-level
+          // slot would be shared by all of them.
+          for instruction in videoCompConfig.instructions {
+            (instruction as? CustomVideoCompositionInstruction)?.compositorConfig = effectsConfig
+          }
           videoComposition.instructions = videoCompConfig.instructions
-          videoComposition.customVideoCompositorClass = makeVideoCompositorSubclass(
-            with: effectsConfig)
+          videoComposition.customVideoCompositorClass = VideoCompositor.self
 
           if let cap = workingConfig.bitrate {
             // A bitrate cap can only be honored by writing the video track
@@ -467,14 +472,6 @@ class RenderVideo {
   }
 
   // MARK: - Helper Methods
-
-  private static func makeVideoCompositorSubclass(with config: VideoCompositorConfig)
-    -> AVVideoCompositing.Type
-  {
-    class CustomCompositor: VideoCompositor {}
-    CustomCompositor.config = config
-    return CustomCompositor.self
-  }
 
   private static func uniqueFilename(prefix: String, extension ext: String) -> String {
     let formatter = DateFormatter()

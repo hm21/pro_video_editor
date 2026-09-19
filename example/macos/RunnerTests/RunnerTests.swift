@@ -772,7 +772,11 @@ enum ThumbnailTimestampFixture {
       let source = CGImageSourceCreateWithData(data as CFData, nil),
       let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
     else { return nil }
+    return averageColor(of: image)
+  }
 
+  /// The average color of `image`, by drawing it into a single pixel.
+  static func averageColor(of image: CGImage) -> RGB? {
     var pixel = [UInt8](repeating: 0, count: 4)
     guard
       let context = CGContext(
@@ -806,6 +810,105 @@ enum ThumbnailTimestampFixture {
       }
     }
     return bestIndex
+  }
+}
+
+// MARK: - Concurrent renders
+
+/// Two renders in flight at once must each composite with their own effects.
+///
+/// The compositor used to read its configuration off a type-level static that
+/// every render wrote during setup, so the render whose `setVideoComposition:`
+/// ran last won — the others composited with its overlays and color filters —
+/// and the unsynchronized writes over-released the previous value's arrays,
+/// which surfaced as an `EXC_BAD_ACCESS` under `destroy for
+/// VideoCompositorConfig` in the field.
+final class ConcurrentRenderTests: XCTestCase {
+
+  /// One color filter per palette entry, each a channel permutation that maps
+  /// the solid red source (R high, G and B low) onto that entry, so every
+  /// render expects a color no other render produces. Rows R, G, B, A; each
+  /// output channel copies the input channel its `1` sits on.
+  private static let filters: [(matrix: [Double], paletteIndex: Int)] = [
+    ([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0], 0),  // red
+    ([0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0], 1),  // green
+    ([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0], 2),  // blue
+    ([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0], 3),  // yellow
+    ([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0], 4),  // magenta
+    ([0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0], 5),  // cyan
+    ([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0], 6),  // white
+    ([0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0], 7),  // dark
+  ]
+
+  func testConcurrentRendersEachCompositeWithTheirOwnEffects() throws {
+    let palette = ThumbnailTimestampFixture.palette
+    let source = try ThumbnailTimestampFixture.makeColorVideo(
+      colors: [palette[0], palette[0]])
+    defer { try? FileManager.default.removeItem(at: source) }
+
+    // Enough renders that their setups overlap regardless of scheduling; the
+    // encodes themselves are serialized by `ExportGate`, the setup is not.
+    let renders = Self.filters.count
+    var outputs: [URL] = []
+    defer {
+      for output in outputs { try? FileManager.default.removeItem(at: output) }
+    }
+    var expectations: [XCTestExpectation] = []
+    var errors: [Int: Error] = [:]
+    let errorsLock = NSLock()
+
+    for index in 0..<renders {
+      let output = FileManager.default.temporaryDirectory
+        .appendingPathComponent("pve_concurrent_\(UUID().uuidString).mp4")
+      outputs.append(output)
+      let filter = Self.filters[index]
+      let config = try XCTUnwrap(
+        RenderConfig.fromArguments([
+          "videoClips": [["inputPath": source.path]],
+          "outputPath": output.path,
+          "outputFormat": "mp4",
+          "enableAudio": false,
+          "colorFilters": [["matrix": filter.matrix.map { NSNumber(value: $0) }]],
+        ]))
+
+      let finished = expectation(description: "render \(index) settles")
+      finished.assertForOverFulfill = true
+      expectations.append(finished)
+      RenderVideo.render(
+        config: config,
+        onProgress: { _ in },
+        onComplete: { _ in finished.fulfill() },
+        onError: { error in
+          errorsLock.lock()
+          errors[index] = error
+          errorsLock.unlock()
+          finished.fulfill()
+        })
+    }
+    wait(for: expectations, timeout: 180)
+
+    XCTAssertTrue(errors.isEmpty, "renders failed: \(errors)")
+    for (index, output) in outputs.enumerated() {
+      let expected = Self.filters[index].paletteIndex
+      let color = try XCTUnwrap(Self.frameColor(of: output), "render \(index) has no frame")
+      let classified = ThumbnailTimestampFixture.nearestPaletteIndex(color, palette: palette)
+      XCTAssertEqual(
+        classified, expected,
+        "render \(index) composited with another render's color filter "
+          + "(got \(color), expected palette[\(expected)])")
+    }
+  }
+
+  /// The average color of the frame half a second into `url`.
+  private static func frameColor(of url: URL) -> ThumbnailTimestampFixture.RGB? {
+    let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+    generator.requestedTimeToleranceBefore = .zero
+    generator.requestedTimeToleranceAfter = CMTime(value: 1, timescale: 10)
+    guard
+      let image = try? generator.copyCGImage(
+        at: CMTime(value: 1, timescale: 2), actualTime: nil)
+    else { return nil }
+    return ThumbnailTimestampFixture.averageColor(of: image)
   }
 }
 

@@ -505,6 +505,13 @@ internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionIn
   let backgroundColor: CGColor?
   let layerInstructions: [AVVideoCompositionLayerInstruction]
 
+  /// The render's compositor configuration, applied by
+  /// `VideoCompositor.configureIfNeeded(from:)` on the session's first request.
+  ///
+  /// Written once during setup, before the composition is handed to
+  /// AVFoundation, and only read from the compositing threads afterwards.
+  var compositorConfig: VideoCompositorConfig?
+
   /// `true` when this instruction composites several overlapping video layers
   /// rather than a single clip.
   let isLayered: Bool
