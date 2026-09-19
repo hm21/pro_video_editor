@@ -148,10 +148,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// would otherwise accumulate one per combination.
   private let lutCacheLimit = 8
 
-  /// AVFoundation constructs the compositor itself through this initializer,
-  /// so a render cannot hand its configuration over here. It travels on the
-  /// render's ``CustomVideoCompositionInstruction`` instead and is applied by
-  /// ``configureIfNeeded(from:)`` when the first request arrives.
+  /// No-argument by AVFoundation's contract; the configuration arrives with
+  /// the first request, see ``configureIfNeeded(from:)``.
   required override init() {
     super.init()
   }
@@ -161,26 +159,32 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   private let configurationLock = NSLock()
   private var isConfigured = false
 
-  /// Applies the configuration carried by [instruction] the first time it is
-  /// called; later calls are no-ops.
+  /// Applies the configuration carried by [instruction] the first time one is
+  /// seen; later calls are no-ops.
   ///
-  /// Reading it off the instruction — rather than off a type-level slot filled
-  /// in during setup — is what keeps concurrent renders apart: every session
-  /// instantiates the same class, and the only per-render value that reaches
-  /// an instance is the instruction of the request it is serving.
+  /// AVFoundation instantiates `customVideoCompositorClass` itself through a
+  /// no-argument `init()`, so a render cannot hand its configuration over
+  /// directly. Reading it off the instruction — rather than off a type-level
+  /// slot filled in during setup — is what keeps concurrent renders apart:
+  /// every session instantiates the same class, and the only per-render value
+  /// that reaches an instance is the instruction of the request it is serving.
   ///
   /// Applying on the first request is not too late: the members AVFoundation
   /// touches before that (`sourcePixelBufferAttributes`,
   /// `requiredPixelBufferAttributesForRenderContext`, `renderContextChanged`)
   /// read no configuration.
+  ///
+  /// An instruction without a configuration leaves the compositor unconfigured
+  /// rather than latching it, so a later instruction that carries one still
+  /// takes effect.
   func configureIfNeeded(from instruction: AVVideoCompositionInstructionProtocol) {
     configurationLock.lock()
     defer { configurationLock.unlock() }
-    guard !isConfigured else { return }
-    isConfigured = true
-    guard let config = (instruction as? CustomVideoCompositionInstruction)?.compositorConfig
+    guard !isConfigured,
+      let config = (instruction as? CustomVideoCompositionInstruction)?.compositorConfig
     else { return }
     apply(config)
+    isConfigured = true
   }
 
   var videoRotationDegrees: Double = 0.0

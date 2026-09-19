@@ -772,7 +772,11 @@ enum ThumbnailTimestampFixture {
       let source = CGImageSourceCreateWithData(data as CFData, nil),
       let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
     else { return nil }
+    return averageColor(of: image)
+  }
 
+  /// The average color of `image`, by drawing it into a single pixel.
+  static func averageColor(of image: CGImage) -> RGB? {
     var pixel = [UInt8](repeating: 0, count: 4)
     guard
       let context = CGContext(
@@ -821,14 +825,19 @@ enum ThumbnailTimestampFixture {
 /// VideoCompositorConfig` in the field.
 final class ConcurrentRenderTests: XCTestCase {
 
-  /// A distinct color filter per render, each a channel permutation of the
-  /// solid red source so its output maps onto a different palette entry:
-  /// identity, red→green, red→blue, red→yellow.
+  /// One color filter per palette entry, each a channel permutation that maps
+  /// the solid red source (R high, G and B low) onto that entry, so every
+  /// render expects a color no other render produces. Rows R, G, B, A; each
+  /// output channel copies the input channel its `1` sits on.
   private static let filters: [(matrix: [Double], paletteIndex: Int)] = [
-    ([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0], 0),
-    ([0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0], 1),
-    ([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0], 2),
-    ([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0], 3),
+    ([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0], 0),  // red
+    ([0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0], 1),  // green
+    ([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0], 2),  // blue
+    ([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0], 3),  // yellow
+    ([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0], 4),  // magenta
+    ([0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0], 5),  // cyan
+    ([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0], 6),  // white
+    ([0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0], 7),  // dark
   ]
 
   func testConcurrentRendersEachCompositeWithTheirOwnEffects() throws {
@@ -839,8 +848,11 @@ final class ConcurrentRenderTests: XCTestCase {
 
     // Enough renders that their setups overlap regardless of scheduling; the
     // encodes themselves are serialized by `ExportGate`, the setup is not.
-    let renders = 8
+    let renders = Self.filters.count
     var outputs: [URL] = []
+    defer {
+      for output in outputs { try? FileManager.default.removeItem(at: output) }
+    }
     var expectations: [XCTestExpectation] = []
     var errors: [Int: Error] = [:]
     let errorsLock = NSLock()
@@ -849,7 +861,7 @@ final class ConcurrentRenderTests: XCTestCase {
       let output = FileManager.default.temporaryDirectory
         .appendingPathComponent("pve_concurrent_\(UUID().uuidString).mp4")
       outputs.append(output)
-      let filter = Self.filters[index % Self.filters.count]
+      let filter = Self.filters[index]
       let config = try XCTUnwrap(
         RenderConfig.fromArguments([
           "videoClips": [["inputPath": source.path]],
@@ -874,13 +886,10 @@ final class ConcurrentRenderTests: XCTestCase {
         })
     }
     wait(for: expectations, timeout: 180)
-    defer {
-      for output in outputs { try? FileManager.default.removeItem(at: output) }
-    }
 
     XCTAssertTrue(errors.isEmpty, "renders failed: \(errors)")
     for (index, output) in outputs.enumerated() {
-      let expected = Self.filters[index % Self.filters.count].paletteIndex
+      let expected = Self.filters[index].paletteIndex
       let color = try XCTUnwrap(Self.frameColor(of: output), "render \(index) has no frame")
       let classified = ThumbnailTimestampFixture.nearestPaletteIndex(color, palette: palette)
       XCTAssertEqual(
@@ -899,22 +908,7 @@ final class ConcurrentRenderTests: XCTestCase {
       let image = try? generator.copyCGImage(
         at: CMTime(value: 1, timescale: 2), actualTime: nil)
     else { return nil }
-
-    var pixel = [UInt8](repeating: 0, count: 4)
-    guard
-      let context = CGContext(
-        data: &pixel,
-        width: 1,
-        height: 1,
-        bitsPerComponent: 8,
-        bytesPerRow: 4,
-        space: CGColorSpaceCreateDeviceRGB(),
-        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-      )
-    else { return nil }
-    context.interpolationQuality = .high
-    context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-    return (pixel[0], pixel[1], pixel[2])
+    return ThumbnailTimestampFixture.averageColor(of: image)
   }
 }
 

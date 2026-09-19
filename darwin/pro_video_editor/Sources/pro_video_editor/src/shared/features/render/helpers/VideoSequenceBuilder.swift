@@ -505,13 +505,10 @@ internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionIn
   let backgroundColor: CGColor?
   let layerInstructions: [AVVideoCompositionLayerInstruction]
 
-  /// The render's compositor configuration.
+  /// The render's compositor configuration, applied by
+  /// `VideoCompositor.configureIfNeeded(from:)` on the session's first request.
   ///
-  /// AVFoundation instantiates `customVideoCompositorClass` itself through a
-  /// no-argument `init()`, so the compositor cannot be handed its configuration
-  /// directly; the instruction is the one per-render value that reaches it, so
-  /// the configuration rides along and the compositor applies it on its first
-  /// request. Written once during setup, before the composition is handed to
+  /// Written once during setup, before the composition is handed to
   /// AVFoundation, and only read from the compositing threads afterwards.
   var compositorConfig: VideoCompositorConfig?
 
