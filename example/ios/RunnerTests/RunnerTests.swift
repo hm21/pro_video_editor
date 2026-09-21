@@ -898,12 +898,9 @@ final class ConcurrentRenderTests: XCTestCase {
 /// hanging, degrading, or holding the gate.
 final class SetupStageWatchdogTests: XCTestCase {
 
-  private var defaultStallTimeout: TimeInterval = 0
-
-  override func setUp() {
-    super.setUp()
-    defaultStallTimeout = SetupStageExport.stallTimeout
-  }
+  /// The production bound, restored after every test; the tests tighten it to
+  /// a value no encode can beat.
+  private let defaultStallTimeout = RenderVideo.renderStallTimeout
 
   override func tearDown() {
     SetupStageExport.stallTimeout = defaultStallTimeout
@@ -916,7 +913,10 @@ final class SetupStageWatchdogTests: XCTestCase {
   }
 
   /// Runs `config` to completion and returns the error it failed with, if any.
-  private func render(_ config: RenderConfig, timeout: TimeInterval) -> Error? {
+  ///
+  /// Awaited rather than blocked on: a `wait(for:)` from an `async` test pins
+  /// the cooperative-pool thread the render's own task may need.
+  private func render(_ config: RenderConfig, timeout: TimeInterval) async -> Error? {
     let settled = expectation(description: "render settles")
     var failure: Error?
     RenderVideo.render(
@@ -927,8 +927,26 @@ final class SetupStageWatchdogTests: XCTestCase {
         failure = error
         settled.fulfill()
       })
-    wait(for: [settled], timeout: timeout)
+    await fulfillment(of: [settled], timeout: timeout)
     return failure
+  }
+
+  /// Fails instead of hanging when `body` never returns — the shape of a
+  /// leaked gate slot, which would otherwise stall the whole test run.
+  private func withTimeout(
+    _ seconds: TimeInterval, _ body: @escaping () async throws -> Void
+  ) async throws {
+    try await withThrowingTaskGroup(of: Void.self) { group in
+      group.addTask { try await body() }
+      group.addTask {
+        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        throw NSError(
+          domain: "SetupStageWatchdogTests", code: 1,
+          userInfo: [NSLocalizedDescriptionKey: "nothing returned within \(seconds)s"])
+      }
+      try await group.next()
+      group.cancelAll()
+    }
   }
 
   func testAStalledSetupStageEncodeFailsWithinTheBoundAndFreesTheGate() async throws {
@@ -972,13 +990,15 @@ final class SetupStageWatchdogTests: XCTestCase {
     let later = try XCTUnwrap(
       AVAssetExportSession(
         asset: AVURLAsset(url: source), presetName: AVAssetExportPresetPassthrough))
-    try await SetupStageExport.run(
-      later, to: laterOutput, as: .mp4, diagnostics: diagnostics,
-      label: "Test", failureDomain: "Test")
+    try await withTimeout(30) {
+      try await SetupStageExport.run(
+        later, to: laterOutput, as: .mp4, diagnostics: diagnostics,
+        label: "Test", failureDomain: "Test")
+    }
     XCTAssertTrue(FileManager.default.fileExists(atPath: laterOutput.path))
   }
 
-  func testAStalledTransitionPreRenderFailsTheRenderInsteadOfCuttingHard() throws {
+  func testAStalledTransitionPreRenderFailsTheRenderInsteadOfCuttingHard() async throws {
     let palette = ThumbnailTimestampFixture.palette
     let outgoing = try ThumbnailTimestampFixture.makeColorVideo(colors: [palette[0], palette[0]])
     let incoming = try ThumbnailTimestampFixture.makeColorVideo(colors: [palette[1], palette[1]])
@@ -1004,7 +1024,7 @@ final class SetupStageWatchdogTests: XCTestCase {
       ]))
 
     SetupStageExport.stallTimeout = 0.001
-    let failure = render(config, timeout: 60)
+    let failure = await render(config, timeout: 60)
 
     // Not a hard cut that completes, not a hang: the job fails with the stall
     // and never reaches its output.
@@ -1016,7 +1036,8 @@ final class SetupStageWatchdogTests: XCTestCase {
     // And the pipeline is whole afterwards: the same job renders through under
     // the real bound, so the stall neither wedged the gate nor the sessions.
     SetupStageExport.stallTimeout = defaultStallTimeout
-    XCTAssertNil(render(config, timeout: 120))
+    let rerun = await render(config, timeout: 120)
+    XCTAssertNil(rerun)
     XCTAssertTrue(FileManager.default.fileExists(atPath: output.path))
   }
 
@@ -1054,7 +1075,7 @@ final class SetupStageWatchdogTests: XCTestCase {
       ]))
 
     SetupStageExport.stallTimeout = 0.001
-    let failure = render(config, timeout: 60)
+    let failure = await render(config, timeout: 60)
 
     // Not a render of the HDR source, not a hang: the job fails with the stall
     // and never reaches its output.
@@ -1064,7 +1085,8 @@ final class SetupStageWatchdogTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
 
     SetupStageExport.stallTimeout = defaultStallTimeout
-    XCTAssertNil(render(config, timeout: 120))
+    let rerun = await render(config, timeout: 120)
+    XCTAssertNil(rerun)
     XCTAssertTrue(FileManager.default.fileExists(atPath: output.path))
   }
 }

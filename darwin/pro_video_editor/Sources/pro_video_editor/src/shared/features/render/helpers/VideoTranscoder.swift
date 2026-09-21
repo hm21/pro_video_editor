@@ -59,8 +59,13 @@ internal class VideoTranscoder {
       "🎬 Starting HEVC 10-bit HDR → H.264 8-bit SDR transcoding for: \(videoPath)")
 
     let inputURL = URL(fileURLWithPath: videoPath)
+    // A random suffix on top of the timestamp: concurrent renders pick their
+    // names before the gate serializes their encodes, and two that land in
+    // the same millisecond would otherwise share one — the second export then
+    // fails on the existing file and the clip renders from the HDR source.
     let outputURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("transcoded_\(Int(Date().timeIntervalSince1970 * 1000)).mp4")
+      .appendingPathComponent(
+        "transcoded_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString).mp4")
 
     do {
       try await transcodeVideo(from: inputURL, to: outputURL)
@@ -103,6 +108,10 @@ internal class VideoTranscoder {
     var produced: [String] = []
 
     for inputPath in inputPaths {
+      // A source that several clips share is transcoded once: a second pass
+      // would re-encode the same file and overwrite its entry in `result`,
+      // leaving the first output with nothing to clean it up.
+      if result[inputPath] != nil { continue }
       switch await transcodeToH264(inputPath) {
       case .success(let outputPath):
         result[inputPath] = outputPath

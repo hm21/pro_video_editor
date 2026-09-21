@@ -419,7 +419,7 @@ struct TransitionExportDiagnostics: ExportDiagnostics {
   /// e.g. `[progress=0.00 type=dissolve direction=left duration=500ms]`
   func context(progress: Double) -> String {
     String(
-      format: "[progress=%.2f type=%@ direction=%@ duration=%dms]",
+      format: "[progress=%.2f type=%@ direction=%@ duration=%ldms]",
       progress, type, direction, Int(durationUs / 1000))
   }
 
