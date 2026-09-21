@@ -21,7 +21,10 @@ import Foundation
 ///
 /// Mirrors the Android `ClipTransitionRenderer` pre-render strategy and keeps
 /// the main composition pipeline single-track. Returns `nil` on failure so the
-/// caller can fall back to a hard cut.
+/// caller can fall back to a hard cut — except for a stalled encode
+/// (``SetupStageExport/isStall(_:)``), which is thrown: it says the encoder is
+/// starved or wedged, not that the blend cannot be rendered, and a hard cut
+/// cached in its place would outlive the stall.
 internal enum ClipTransitionRenderer {
 
   /// Lower bound on the piecewise steps used to approximate an easing curve in
@@ -60,11 +63,11 @@ internal enum ClipTransitionRenderer {
     curve: String,
     includeAudio: Bool,
     outputFormat: String
-  ) async -> RenderResult? {
+  ) async throws -> RenderResult? {
     // Only a *successful* blend reaches the caller, so only a successful blend
-    // can be cleaned up by it. An export that fails or is cancelled mid-write
-    // has to remove its own partial file here, or it stays in the temporary
-    // directory for good.
+    // can be cleaned up by it. An export that fails, stalls or is cancelled
+    // mid-write has to remove its own partial file here, or it stays in the
+    // temporary directory for good.
     var partialOutput: URL?
     do {
       let outAsset = AVURLAsset(url: URL(fileURLWithPath: outgoingPath))
@@ -176,7 +179,10 @@ internal enum ClipTransitionRenderer {
       }
       export.shouldOptimizeForNetworkUse = false
 
-      try await runExport(export)
+      try await runExport(
+        export,
+        diagnostics: TransitionExportDiagnostics(
+          type: type, direction: direction, durationUs: dUs))
       // Handed to the caller from here on, which tracks it for cleanup.
       partialOutput = nil
 
@@ -189,6 +195,7 @@ internal enum ClipTransitionRenderer {
       if let partialOutput {
         try? FileManager.default.removeItem(at: partialOutput)
       }
+      if SetupStageExport.isStall(error) { throw error }
       return nil
     }
   }
@@ -352,13 +359,18 @@ internal enum ClipTransitionRenderer {
 
   // MARK: - Export
 
-  /// A pre-render is not progress-reported (the blends are short), but it still
-  /// runs through the shared driver: the continuation this used to wait on was
-  /// immune to cancellation, so on pre-iOS 18 a transition kept encoding long
-  /// after its render job had been cancelled.
-  private static func runExport(_ export: AVAssetExportSession) async throws {
-    try await ExportSessionDriver.run(
-      export, label: "ClipTransition", failureDomain: "ClipTransitionRenderer")
+  /// A pre-render is not progress-reported to the caller (the blends are
+  /// short), but it runs through the shared driver — the continuation this
+  /// used to wait on was immune to cancellation, so on pre-iOS 18 a transition
+  /// kept encoding long after its render job had been cancelled — and, being a
+  /// hardware encode of its own, inside the gate slot and under the stall
+  /// watchdog like the main encode (#201).
+  private static func runExport(
+    _ export: AVAssetExportSession, diagnostics: TransitionExportDiagnostics
+  ) async throws {
+    try await SetupStageExport.run(
+      export, diagnostics: diagnostics, label: "ClipTransition",
+      failureDomain: "ClipTransitionRenderer")
   }
 
   // MARK: - Track property loading
@@ -393,5 +405,30 @@ internal enum ClipTransitionRenderer {
     let ext = format.lowercased() == "mov" ? "mov" : "mp4"
     let name = "transition_\(Int(Date().timeIntervalSince1970 * 1000))_\(UInt32.random(in: 0...UInt32.max)).\(ext)"
     return FileManager.default.temporaryDirectory.appendingPathComponent(name)
+  }
+}
+
+/// Diagnostic context for an overlap-transition pre-render, mirroring
+/// ``RenderExportDiagnostics`` so a stall surfaces the same shape of message
+/// as one on the main encode.
+struct TransitionExportDiagnostics: ExportDiagnostics {
+  let type: String
+  let direction: String
+  let durationUs: Int64
+
+  /// e.g. `[progress=0.00 type=dissolve direction=left duration=500ms]`
+  func context(progress: Double) -> String {
+    String(
+      format: "[progress=%.2f type=%@ direction=%@ duration=%ldms]",
+      progress, type, direction, Int(durationUs / 1000))
+  }
+
+  func timeoutMessage(seconds: Int, progress: Double) -> String {
+    "Transition pre-render timed out after \(seconds)s \(context(progress: progress))"
+  }
+
+  func stallMessage(seconds: Int, progress: Double) -> String {
+    "Transition pre-render stalled after \(seconds)s with no progress "
+      + context(progress: progress)
   }
 }

@@ -1,3 +1,6 @@
+## 2.13.3
+- **FIX**(iOS, macOS): The HDR pre-transcode and the overlap-transition pre-render now run under the same export gate and stall watchdog as the main encode. A stalled setup stage fails the render with an `ExportWatchdog` error instead of hanging it forever or silently degrading to the HDR source / a hard cut, and concurrent renders no longer run every pre-transcode and blend at once.
+
 ## 2.13.2
 - **FIX**(iOS, macOS): Two renders in flight at once no longer crash the app (`EXC_BAD_ACCESS`) or composite with each other's crop, color filters and overlays; every render now carries its own compositor configuration.
 

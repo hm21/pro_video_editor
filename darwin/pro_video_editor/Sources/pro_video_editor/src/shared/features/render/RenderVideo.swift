@@ -104,8 +104,8 @@ class RenderVideo {
         do {
           transcodeMap = try await VideoTranscoder.transcodeClipsIfNeeded(inputPaths)
         } catch {
-          // Only a cancelled job throws here; it cleaned up after itself, and
-          // nothing else exists yet to finalize.
+          // Only a cancelled or stalled job throws here; it cleaned up after
+          // itself, and nothing else exists yet to finalize.
           onError(error)
           return
         }
@@ -182,16 +182,19 @@ class RenderVideo {
           // Inside the `do` so a cancellation unwinds through `handleCompletion`
           // and `finalize` removes the blends already written.
           if workingConfig.videoClips.contains(where: { $0.transition?.isOverlap == true }) {
-            let (newClips, urls) = await preRenderTransitions(
+            let preRender = await preRenderTransitions(
               clips: workingConfig.videoClips,
               enableAudio: workingConfig.enableAudio,
               outputFormat: workingConfig.outputFormat,
               globalChromaKey: workingConfig.chromaKey)
-            workingConfig = workingConfig.copyWith(videoClips: newClips)
-            transitionURLs = urls
-            // `preRenderTransitions` stops early when the job is cancelled and
-            // hands back what it managed to render; unwind here rather than
-            // build the whole composition out of a half-rewritten clip list.
+            workingConfig = workingConfig.copyWith(videoClips: preRender.clips)
+            transitionURLs = preRender.urls
+            // `preRenderTransitions` stops early when the job is cancelled or a
+            // blend stalls and hands back what it managed to render; unwind
+            // here rather than build the whole composition out of a
+            // half-rewritten clip list. The blends are registered above first,
+            // so `finalize` removes them either way.
+            if let stall = preRender.stall { throw stall }
             try Task.checkCancellation()
           }
 
@@ -620,10 +623,12 @@ class RenderVideo {
   /// as far as it got, together with every blend written so far — the caller
   /// checks for cancellation immediately afterwards and lets `finalize` remove
   /// them. Returning them rather than throwing is what keeps them from leaking.
+  /// A blend whose encode stalls stops the pass the same way and comes back as
+  /// `stall`, for the caller to throw once the blends are registered.
   private static func preRenderTransitions(
     clips: [VideoClip], enableAudio: Bool, outputFormat: String,
     globalChromaKey: ChromaKeyConfig?
-  ) async -> ([VideoClip], [URL]) {
+  ) async -> TransitionPreRender {
     // An overlap transition on the last/only clip loops back into the first clip
     // (seamless loop). Captured before the between-clip pass clears it.
     let wrapTransition: ClipTransitionConfig? = {
@@ -706,14 +711,19 @@ class RenderVideo {
 
       let includeAudio =
         enableAudio && (current.volume ?? 1.0) > 0 && (next!.volume ?? 1.0) > 0
-      let rendered = await ClipTransitionRenderer.render(
-        outgoingPath: current.inputPath,
-        outTailStartUs: curEnd - tailSrc, outTailEndUs: curEnd,
-        incomingPath: next!.inputPath,
-        inHeadStartUs: nextStart, inHeadEndUs: nextStart + headSrc,
-        outputDurationUs: plan.outputDurationUs,
-        type: t!.type, direction: t!.direction, curve: t!.curve,
-        includeAudio: includeAudio, outputFormat: outputFormat)
+      let rendered: ClipTransitionRenderer.RenderResult?
+      do {
+        rendered = try await ClipTransitionRenderer.render(
+          outgoingPath: current.inputPath,
+          outTailStartUs: curEnd - tailSrc, outTailEndUs: curEnd,
+          incomingPath: next!.inputPath,
+          inHeadStartUs: nextStart, inHeadEndUs: nextStart + headSrc,
+          outputDurationUs: plan.outputDurationUs,
+          type: t!.type, direction: t!.direction, curve: t!.curve,
+          includeAudio: includeAudio, outputFormat: outputFormat)
+      } catch {
+        return TransitionPreRender(clips: result, urls: urls, stall: error)
+      }
 
       if let rendered = rendered {
         urls.append(rendered.outputURL)
@@ -791,14 +801,19 @@ class RenderVideo {
         let headSrc = plan.incomingHeadSourceUs
         let includeAudio =
           enableAudio && (last.volume ?? 1.0) > 0 && (first.volume ?? 1.0) > 0
-        let rendered = await ClipTransitionRenderer.render(
-          outgoingPath: last.inputPath,
-          outTailStartUs: lastEnd - tailSrc, outTailEndUs: lastEnd,
-          incomingPath: first.inputPath,
-          inHeadStartUs: firstStart, inHeadEndUs: firstStart + headSrc,
-          outputDurationUs: plan.outputDurationUs,
-          type: wrap.type, direction: wrap.direction, curve: wrap.curve,
-          includeAudio: includeAudio, outputFormat: outputFormat)
+        let rendered: ClipTransitionRenderer.RenderResult?
+        do {
+          rendered = try await ClipTransitionRenderer.render(
+            outgoingPath: last.inputPath,
+            outTailStartUs: lastEnd - tailSrc, outTailEndUs: lastEnd,
+            incomingPath: first.inputPath,
+            inHeadStartUs: firstStart, inHeadEndUs: firstStart + headSrc,
+            outputDurationUs: plan.outputDurationUs,
+            type: wrap.type, direction: wrap.direction, curve: wrap.curve,
+            includeAudio: includeAudio, outputFormat: outputFormat)
+        } catch {
+          return TransitionPreRender(clips: result, urls: urls, stall: error)
+        }
 
         if let rendered = rendered {
           urls.append(rendered.outputURL)
@@ -835,7 +850,16 @@ class RenderVideo {
       }
     }
 
-    return (result, urls)
+    return TransitionPreRender(clips: result, urls: urls, stall: nil)
+  }
+
+  /// What the overlap pre-render pass produced: the rewritten clip list, the
+  /// blend files it wrote (the caller owns their cleanup), and the watchdog
+  /// error that stopped the pass, if a blend stalled.
+  struct TransitionPreRender {
+    let clips: [VideoClip]
+    let urls: [URL]
+    let stall: Error?
   }
 
   /// Clears an overlap transition (already consumed / unsupported) so it is not
