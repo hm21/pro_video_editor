@@ -625,20 +625,28 @@ enum ThumbnailTimestampFixture {
   ]
 
   /// Authors an H.264 `.mp4` where second `i` is entirely `colors[i]`.
+  ///
+  /// `codec` and `colorProperties` let a test author the HEVC + BT.2020 shape
+  /// the render pipeline pre-transcodes; the pixels stay 8-bit either way.
   static func makeColorVideo(
     colors: [RGB],
     fps: Int32 = 30,
-    size: CGSize = CGSize(width: 160, height: 90)
+    size: CGSize = CGSize(width: 160, height: 90),
+    codec: AVVideoCodecType = .h264,
+    colorProperties: [String: Any]? = nil
   ) throws -> URL {
     let url = FileManager.default.temporaryDirectory
       .appendingPathComponent("pve_thumb_\(UUID().uuidString).mp4")
 
     let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
-    let settings: [String: Any] = [
-      AVVideoCodecKey: AVVideoCodecType.h264,
+    var settings: [String: Any] = [
+      AVVideoCodecKey: codec,
       AVVideoWidthKey: Int(size.width),
       AVVideoHeightKey: Int(size.height),
     ]
+    if let colorProperties {
+      settings[AVVideoColorPropertiesKey] = colorProperties
+    }
     let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
     input.expectsMediaDataInRealTime = false
 
@@ -875,6 +883,189 @@ final class ConcurrentRenderTests: XCTestCase {
         at: CMTime(value: 1, timescale: 2), actualTime: nil)
     else { return nil }
     return ThumbnailTimestampFixture.averageColor(of: image)
+  }
+}
+
+// MARK: - Setup-stage gate and watchdog (#201)
+
+/// The HDR pre-transcode and the overlap-transition pre-render are hardware
+/// encodes that run before the job reaches its main encode. Until #201 they ran
+/// outside `ExportGate` and `ExportWatchdog`, so a session that stalled there
+/// never returned and the job hung for good. These drive real
+/// `AVAssetExportSession`s under a stall bound too tight for any encode to beat
+/// — the driver reports progress every 200 ms, so a 1 ms bound fires before the
+/// first report — and assert the job fails with the watchdog's error instead of
+/// hanging, degrading, or holding the gate.
+final class SetupStageWatchdogTests: XCTestCase {
+
+  private var defaultStallTimeout: TimeInterval = 0
+
+  override func setUp() {
+    super.setUp()
+    defaultStallTimeout = SetupStageExport.stallTimeout
+  }
+
+  override func tearDown() {
+    SetupStageExport.stallTimeout = defaultStallTimeout
+    super.tearDown()
+  }
+
+  private static func isWatchdogError(_ error: Error?) -> Bool {
+    guard let error else { return false }
+    return (error as NSError).domain == ExportWatchdog.errorDomain
+  }
+
+  /// Runs `config` to completion and returns the error it failed with, if any.
+  private func render(_ config: RenderConfig, timeout: TimeInterval) -> Error? {
+    let settled = expectation(description: "render settles")
+    var failure: Error?
+    RenderVideo.render(
+      config: config,
+      onProgress: { _ in },
+      onComplete: { _ in settled.fulfill() },
+      onError: { error in
+        failure = error
+        settled.fulfill()
+      })
+    wait(for: [settled], timeout: timeout)
+    return failure
+  }
+
+  func testAStalledSetupStageEncodeFailsWithinTheBoundAndFreesTheGate() async throws {
+    let palette = ThumbnailTimestampFixture.palette
+    let source = try ThumbnailTimestampFixture.makeColorVideo(colors: [palette[0], palette[0]])
+    defer { try? FileManager.default.removeItem(at: source) }
+    let stalledOutput = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pve_stage_stalled_\(UUID().uuidString).mp4")
+    let laterOutput = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pve_stage_later_\(UUID().uuidString).mp4")
+    defer {
+      try? FileManager.default.removeItem(at: stalledOutput)
+      try? FileManager.default.removeItem(at: laterOutput)
+    }
+    let diagnostics = TranscodeExportDiagnostics(input: source.lastPathComponent)
+
+    SetupStageExport.stallTimeout = 0.001
+    let stalled = try XCTUnwrap(
+      AVAssetExportSession(
+        asset: AVURLAsset(url: source), presetName: AVAssetExportPresetPassthrough))
+    let started = Date()
+    var failure: Error?
+    do {
+      try await SetupStageExport.run(
+        stalled, to: stalledOutput, as: .mp4, diagnostics: diagnostics,
+        label: "Test", failureDomain: "Test")
+      XCTFail("a stalled encode must not complete")
+    } catch {
+      failure = error
+    }
+    XCTAssertTrue(
+      Self.isWatchdogError(failure),
+      "expected the watchdog's error, got \(String(describing: failure))")
+    XCTAssertLessThan(
+      Date().timeIntervalSince(started), 10,
+      "the stall bound is 1 ms; anything near the 20 s default means the bound was not applied")
+
+    // The slot is released on the way out: an encode under the real bound
+    // runs — it does not sit queued behind the stalled one.
+    SetupStageExport.stallTimeout = defaultStallTimeout
+    let later = try XCTUnwrap(
+      AVAssetExportSession(
+        asset: AVURLAsset(url: source), presetName: AVAssetExportPresetPassthrough))
+    try await SetupStageExport.run(
+      later, to: laterOutput, as: .mp4, diagnostics: diagnostics,
+      label: "Test", failureDomain: "Test")
+    XCTAssertTrue(FileManager.default.fileExists(atPath: laterOutput.path))
+  }
+
+  func testAStalledTransitionPreRenderFailsTheRenderInsteadOfCuttingHard() throws {
+    let palette = ThumbnailTimestampFixture.palette
+    let outgoing = try ThumbnailTimestampFixture.makeColorVideo(colors: [palette[0], palette[0]])
+    let incoming = try ThumbnailTimestampFixture.makeColorVideo(colors: [palette[1], palette[1]])
+    let output = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pve_stage_transition_\(UUID().uuidString).mp4")
+    defer {
+      try? FileManager.default.removeItem(at: outgoing)
+      try? FileManager.default.removeItem(at: incoming)
+      try? FileManager.default.removeItem(at: output)
+    }
+    let config = try XCTUnwrap(
+      RenderConfig.fromArguments([
+        "videoClips": [
+          [
+            "inputPath": outgoing.path,
+            "transition": ["type": "dissolve", "durationUs": NSNumber(value: 500_000)],
+          ],
+          ["inputPath": incoming.path],
+        ],
+        "outputPath": output.path,
+        "outputFormat": "mp4",
+        "enableAudio": false,
+      ]))
+
+    SetupStageExport.stallTimeout = 0.001
+    let failure = render(config, timeout: 60)
+
+    // Not a hard cut that completes, not a hang: the job fails with the stall
+    // and never reaches its output.
+    XCTAssertTrue(
+      Self.isWatchdogError(failure),
+      "expected the watchdog's error, got \(String(describing: failure))")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
+
+    // And the pipeline is whole afterwards: the same job renders through under
+    // the real bound, so the stall neither wedged the gate nor the sessions.
+    SetupStageExport.stallTimeout = defaultStallTimeout
+    XCTAssertNil(render(config, timeout: 120))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: output.path))
+  }
+
+  func testAStalledHdrPreTranscodeFailsTheRenderInsteadOfRenderingTheSource() async throws {
+    let palette = ThumbnailTimestampFixture.palette
+    let source: URL
+    do {
+      // HEVC tagged BT.2020 is what `needsTranscodingForEffects` keys on; the
+      // pixels themselves stay 8-bit.
+      source = try ThumbnailTimestampFixture.makeColorVideo(
+        colors: [palette[0], palette[0]],
+        codec: .hevc,
+        colorProperties: [
+          AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
+          AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_2100_HLG,
+          AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
+        ])
+    } catch {
+      throw XCTSkip("this environment cannot author an HEVC BT.2020 clip: \(error)")
+    }
+    defer { try? FileManager.default.removeItem(at: source) }
+    guard await VideoTranscoder.needsTranscoding(source.path) else {
+      throw XCTSkip(
+        "the authored clip is not detected as HDR, so the transcode stage never runs")
+    }
+    let output = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pve_stage_transcode_\(UUID().uuidString).mp4")
+    defer { try? FileManager.default.removeItem(at: output) }
+    let config = try XCTUnwrap(
+      RenderConfig.fromArguments([
+        "videoClips": [["inputPath": source.path]],
+        "outputPath": output.path,
+        "outputFormat": "mp4",
+        "enableAudio": false,
+      ]))
+
+    SetupStageExport.stallTimeout = 0.001
+    let failure = render(config, timeout: 60)
+
+    // Not a render of the HDR source, not a hang: the job fails with the stall
+    // and never reaches its output.
+    XCTAssertTrue(
+      Self.isWatchdogError(failure),
+      "expected the watchdog's error, got \(String(describing: failure))")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
+
+    SetupStageExport.stallTimeout = defaultStallTimeout
+    XCTAssertNil(render(config, timeout: 120))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: output.path))
   }
 }
 

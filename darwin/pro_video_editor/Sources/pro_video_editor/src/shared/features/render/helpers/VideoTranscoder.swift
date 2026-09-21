@@ -85,14 +85,19 @@ internal class VideoTranscoder {
   ///
   /// A clip that cannot be transcoded keeps its original path: the render then
   /// runs on the HDR source, which is worse than a transcode but better than no
-  /// render at all. A *cancelled* job is the one failure that must not degrade
-  /// that way — it would build the whole composition on exactly the source the
-  /// pre-transcode exists to avoid, only to be thrown away — so it throws
-  /// instead, after removing the files already written.
+  /// render at all. Two failures must not degrade that way and throw instead,
+  /// after removing the files already written: a *cancelled* job, which would
+  /// build the whole composition on exactly the source the pre-transcode
+  /// exists to avoid, only to be thrown away; and a *stalled* encode
+  /// (``SetupStageExport/isStall(_:)``), which says the encoder is starved or
+  /// wedged, not that the clip is untranscodable — rendering the HDR source
+  /// through the compositor on that encoder would produce a wrong or equally
+  /// stalled result the caller would then keep.
   ///
   /// - Parameter inputPaths: List of input video paths
   /// - Returns: Dictionary mapping original path to transcoded path (or original if no transcoding needed)
-  /// - Throws: `CancellationError` if the job was cancelled mid-transcode.
+  /// - Throws: `CancellationError` if the job was cancelled mid-transcode, or
+  ///   the watchdog's error if a transcode stalled.
   static func transcodeClipsIfNeeded(_ inputPaths: [String]) async throws -> [String: String] {
     var result: [String: String] = [:]
     var produced: [String] = []
@@ -108,6 +113,10 @@ internal class VideoTranscoder {
         if error is CancellationError || Task.isCancelled {
           cleanupTranscodedFiles(produced)
           throw CancellationError()
+        }
+        if SetupStageExport.isStall(error) {
+          cleanupTranscodedFiles(produced)
+          throw error
         }
         PluginLog.print("⚠️ Transcoding failed for \(inputPath), using original")
         result[inputPath] = inputPath
@@ -251,9 +260,12 @@ internal class VideoTranscoder {
     PluginLog.print("🎬 Transcoding with AVAssetExportSession...")
     PluginLog.print("   Input size: \(naturalSize), Output size: \(renderSize)")
 
-    try await ExportSessionDriver.run(
-      exportSession, to: outputURL, as: .mp4, label: "Transcode",
-      failureDomain: "VideoTranscoder")
+    // A whole-clip re-encode: gated against every other encode in the process
+    // and bounded by the stall watchdog like the main render (#201).
+    try await SetupStageExport.run(
+      exportSession, to: outputURL, as: .mp4,
+      diagnostics: TranscodeExportDiagnostics(input: inputURL.lastPathComponent),
+      label: "Transcode", failureDomain: "VideoTranscoder")
 
     PluginLog.print("✅ Transcoding completed successfully")
   }
@@ -279,5 +291,26 @@ internal class VideoTranscoder {
 
     // Roughly 0.1 bits per pixel per frame for H.264 High profile
     return max(2_000_000, pixels * fps / 10)
+  }
+}
+
+/// Diagnostic context for the HDR pre-transcode, mirroring
+/// ``RenderExportDiagnostics`` so a stall surfaces the same shape of message
+/// as one on the main encode.
+struct TranscodeExportDiagnostics: ExportDiagnostics {
+  /// File name of the clip being transcoded.
+  let input: String
+
+  /// e.g. `[progress=0.00 input=IMG_0042.MOV]`
+  func context(progress: Double) -> String {
+    String(format: "[progress=%.2f input=%@]", progress, input)
+  }
+
+  func timeoutMessage(seconds: Int, progress: Double) -> String {
+    "Transcode export timed out after \(seconds)s \(context(progress: progress))"
+  }
+
+  func stallMessage(seconds: Int, progress: Double) -> String {
+    "Transcode export stalled after \(seconds)s with no progress \(context(progress: progress))"
   }
 }
