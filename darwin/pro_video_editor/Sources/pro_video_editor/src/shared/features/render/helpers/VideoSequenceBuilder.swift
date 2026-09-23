@@ -483,6 +483,10 @@ internal struct LayerPlacement: Sendable {
   let targetRect: CGRect?
   /// Scale mode within `targetRect`: "fill", "contain" or "cover".
   let fit: String
+  /// Clockwise turn of the whole placed box around its own centre, in radians.
+  /// `targetRect` stays the unrotated rectangle, and the source is clipped to
+  /// it before the turn, so `cover` overflow is cut at the box edge.
+  let rotation: Double
   /// The source track's preferred transform (orientation metadata).
   let preferredTransform: CGAffineTransform
   /// The source display size after applying `preferredTransform`.

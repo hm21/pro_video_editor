@@ -11,6 +11,7 @@ void main() {
       offset: Offset(20, 40),
       size: Size(360, 640),
       fit: SegmentFit.contain,
+      rotation: 0.5,
     );
 
     test('toMap serializes all fields', () {
@@ -19,6 +20,7 @@ void main() {
       expect(map['offset'], {'dx': 20.0, 'dy': 40.0});
       expect(map['size'], {'width': 360.0, 'height': 640.0});
       expect(map['fit'], 'contain');
+      expect(map['rotation'], 0.5);
     });
 
     test('defaults fit to cover', () {
@@ -26,6 +28,22 @@ void main() {
       expect(minimal.fit, SegmentFit.cover);
       expect(minimal.toMap()['offset'], isNull);
       expect(minimal.toMap()['size'], isNull);
+    });
+
+    test('defaults rotation to zero', () {
+      const minimal = SegmentTransform();
+      expect(minimal.rotation, 0.0);
+      expect(minimal.toMap()['rotation'], 0.0);
+    });
+
+    test('fromMap falls back to zero rotation for a legacy map', () {
+      final legacy = SegmentTransform.fromMap(const {
+        'offset': {'dx': 1.0, 'dy': 2.0},
+        'size': {'width': 3.0, 'height': 4.0},
+        'fit': 'cover',
+      });
+
+      expect(legacy.rotation, 0.0);
     });
 
     test('toJson / fromJson roundtrip', () {
@@ -37,6 +55,17 @@ void main() {
       final copy = transform.copyWith(fit: SegmentFit.fill);
       expect(copy.fit, SegmentFit.fill);
       expect(copy.offset, transform.offset);
+      expect(copy.rotation, transform.rotation);
+    });
+
+    test('copyWith updates rotation', () {
+      final copy = transform.copyWith(rotation: -0.25);
+      expect(copy.rotation, -0.25);
+      expect(copy.fit, transform.fit);
+    });
+
+    test('rotation participates in equality', () {
+      expect(transform.copyWith(rotation: 1.25), isNot(transform));
     });
   });
 

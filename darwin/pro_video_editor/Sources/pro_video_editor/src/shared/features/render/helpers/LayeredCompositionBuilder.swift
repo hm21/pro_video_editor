@@ -263,6 +263,7 @@ internal class LayeredCompositionBuilder {
           opacity: clip.opacity,
           targetRect: resolveRect(clip.transformConfig, displaySize: clip.displaySize),
           fit: clip.transformConfig?.fit ?? "fill",
+          rotation: clip.transformConfig?.rotation ?? 0,
           preferredTransform: clip.preferredTransform,
           displaySize: clip.displaySize,
           chromaKey: clip.chromaKey)

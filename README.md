@@ -124,6 +124,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🕐 **Timed Image Layers**: Position image overlays at specific coordinates with optional start/end times.
 - 📐 **Layer Size**: Scale image layers to custom dimensions via the `size` property.
 - 🔄 **Layer Rotation**: Rotate image layers around their center via the `rotation` property (radians).
+- 🔄 **Segment Rotation**: Rotate a composition clip around its own center via `SegmentTransform.rotation` (radians). The `offset`/`size` keep describing the unrotated box, so a `pro_image_editor` layer rotation can be forwarded straight through.
 - 🎞️ **Animated GIF Layers**: Overlay animated GIFs — detected automatically and played frame by frame, with optional `loop`.
 - 🎬 **Layer Animations**: Animate image layers with fade, slide, and scale effects, configurable easing curves, and in/out/inOut phases. A slide travels to a canvas edge or to a start point you pick yourself.
 - 🎞️ **Clip Transitions**: Add transitions between adjacent clips — `dissolve`, `fadeToBlack`, `fadeToWhite`, `slide`, `push`, and `wipe` — with configurable duration, easing curve, and direction.
@@ -391,6 +392,10 @@ var data = VideoRenderData(
                     offset: Offset(700, 60),
                     size: Size(320, 568),
                     fit: SegmentFit.cover,
+                    // Clockwise, in radians (like Transform.rotate). The box
+                    // above stays the unrotated layout box, and `cover`
+                    // overflow is cut at its edge before the turn.
+                    rotation: 0.15,
                 ),
                 clips: [
                     VideoSegment(

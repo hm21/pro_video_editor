@@ -540,7 +540,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   ///
   /// Layers are drawn bottom-to-top over the instruction's background color.
   /// Each layer's source frame is oriented, scaled into its destination rect
-  /// per its fit mode, clipped to that rect, and blended with its opacity.
+  /// per its fit mode, clipped to that rect, turned by the placement's
+  /// rotation, and blended with its opacity.
   private func composeLayered(
     request: AVAsynchronousVideoCompositionRequest,
     instruction: CustomVideoCompositionInstruction
@@ -617,6 +618,12 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
       // 4. Clip to the destination rect so "cover" overflow doesn't bleed.
       img = img.cropped(to: ciRect)
+
+      // 4b. Turn the clipped box around its own centre. After the crop the
+      //     extent *is* ciRect, so the helper's centre is the box centre —
+      //     and because the crop already happened, `cover` overflow stays cut
+      //     at the box edge instead of swinging back into view.
+      img = rotateOverlayAroundCenter(img, radians: placement.rotation)
 
       // 5. Apply opacity and composite over the canvas.
       canvas = compositeOverlay(

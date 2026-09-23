@@ -2,7 +2,6 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import android.content.Context
 import android.opengl.GLES20
-import android.opengl.Matrix
 import androidx.media3.common.VideoFrameProcessingException
 import androidx.media3.common.util.GlProgram
 import androidx.media3.common.util.GlUtil
@@ -31,6 +30,13 @@ import kotlin.math.roundToInt
  * draw is scissored to that box (canvas pixels, top-left origin). This clips
  * `cover` overflow so a scaled-up clip cannot bleed past its target rectangle
  * onto other layers. When the clip box is `null`, no scissor is applied.
+ *
+ * [rotation] turns the placed box clockwise around its own centre (radians,
+ * Flutter's `Transform.rotate` convention). The clip box turns with it, so a
+ * rotated clip is still cut at the box edge — which `glScissor` cannot express,
+ * being axis-aligned. A rotated draw therefore clips in the fragment shader, in
+ * the quad's own unrotated space, instead of scissoring. The scissor is kept
+ * for the unrotated case so nothing about the existing path changes.
  */
 @UnstableApi
 class VideoCompositionTransformation(
@@ -45,7 +51,8 @@ class VideoCompositionTransformation(
     private val clipX: Double? = null,
     private val clipY: Double? = null,
     private val clipWidth: Double? = null,
-    private val clipHeight: Double? = null
+    private val clipHeight: Double? = null,
+    private val rotation: Double = 0.0
 ) : GlEffect {
 
     override fun toGlShaderProgram(context: Context, useHdr: Boolean): GlShaderProgram {
@@ -66,17 +73,31 @@ class VideoCompositionTransformation(
                 "attribute vec4 aFramePosition;\n" +
                 "attribute vec4 aTexSamplingCoord;\n" +
                 "varying vec2 vTexSamplingCoord;\n" +
+                "varying vec2 vQuadCoord;\n" +
                 "uniform mat4 uTransformationMatrix;\n" +
                 "void main() {\n" +
                 "  gl_Position = uTransformationMatrix * aFramePosition;\n" +
                 "  vTexSamplingCoord = aTexSamplingCoord.xy;\n" +
+                "  vQuadCoord = aFramePosition.xy;\n" +
                 "}"
 
+            // uClipHalf is the clip box's half-extent in the quad's own
+            // [-1, 1] space. The draw and clip rectangles are concentric, so
+            // the box is simply a centred sub-rectangle of the quad — and
+            // because this space is pre-rotation, the test stays correct once
+            // the vertex matrix turns the quad. 1.0 (the default) clips
+            // nothing.
             private const val FRAGMENT_SHADER_SOURCE =
                 "precision mediump float;\n" +
                 "uniform sampler2D uTexSampler;\n" +
+                "uniform vec2 uClipHalf;\n" +
                 "varying vec2 vTexSamplingCoord;\n" +
+                "varying vec2 vQuadCoord;\n" +
                 "void main() {\n" +
+                "  if (abs(vQuadCoord.x) > uClipHalf.x ||\n" +
+                "      abs(vQuadCoord.y) > uClipHalf.y) {\n" +
+                "    discard;\n" +
+                "  }\n" +
                 "  gl_FragColor = texture2D(uTexSampler, vTexSamplingCoord);\n" +
                 "}"
         }
@@ -116,39 +137,50 @@ class VideoCompositionTransformation(
                 // which uses glBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA,
                 // ONE, ONE_MINUS_SRC_ALPHA) — correct straight-alpha source-over.
 
-                val glMatrix = FloatArray(16)
-                Matrix.setIdentityM(glMatrix, 0)
-
                 val targetWidth = (effect.width ?: effect.videoWidth.toDouble()).toFloat()
                 val targetHeight = (effect.height ?: effect.videoHeight.toDouble()).toFloat()
 
-                // sx and sy are half-widths in NDC (relative to a 2.0 wide space)
-                val sx = if (effect.renderWidth > 0) targetWidth / effect.renderWidth else 1.0f
-                val sy = if (effect.renderHeight > 0) targetHeight / effect.renderHeight else 1.0f
-
-                // Convert pixel (x, y) to NDC top-left
-                val leftNDC =
-                    if (effect.renderWidth > 0) {
-                        (2f * (effect.x ?: 0.0).toFloat() / effect.renderWidth) - 1f
-                    } else {
-                        -1.0f
-                    }
-                val topNDC =
-                    if (effect.renderHeight > 0) {
-                        1f - (2f * (effect.y ?: 0.0).toFloat() / effect.renderHeight)
-                    } else {
-                        1.0f
-                    }
-
-                // Target center in NDC for a quad that is 2x2 centered at 0,0
-                val centerX = leftNDC + sx
-                val centerY = topNDC - sy
-
-                Matrix.translateM(glMatrix, 0, centerX, centerY, 0f)
-                Matrix.scaleM(glMatrix, 0, sx, sy, 1f)
+                // Placement (and the turn, when there is one) is pure geometry;
+                // see [SegmentPlacementMatrix], which is unit-tested on the JVM.
+                val glMatrix = SegmentPlacementMatrix.build(
+                    x = (effect.x ?: 0.0).toFloat(),
+                    y = (effect.y ?: 0.0).toFloat(),
+                    targetWidth = targetWidth,
+                    targetHeight = targetHeight,
+                    renderWidth = effect.renderWidth,
+                    renderHeight = effect.renderHeight,
+                    rotation = effect.rotation
+                )
 
                 glProgram.setFloatsUniform("uTransformationMatrix", glMatrix)
                 glProgram.setSamplerTexIdUniform("uTexSampler", inputTexId, 0)
+
+                // Clip the draw to the target box so `cover` overflow (a scaled
+                // up clip larger than its rect) can't bleed onto other layers.
+                // An axis-aligned scissor cannot express a *rotated* box, so a
+                // rotated draw is clipped in the fragment shader instead, in the
+                // quad's own pre-rotation space. Both express the same region
+                // when unrotated; the scissor is kept there so the existing
+                // path is untouched.
+                val clipW = effect.clipWidth
+                val clipH = effect.clipHeight
+                val hasClipBox = effect.clipX != null && effect.clipY != null &&
+                    clipW != null && clipH != null && effect.renderHeight > 0
+                val clipInShader = hasClipBox && effect.rotation != 0.0 &&
+                    targetWidth > 0f && targetHeight > 0f
+                // Must be set before bindAttributesAndUniforms(), which is what
+                // actually uploads the recorded uniform values.
+                glProgram.setFloatsUniform(
+                    "uClipHalf",
+                    if (clipInShader) {
+                        floatArrayOf(
+                            (clipW!! / targetWidth).toFloat().coerceAtMost(1f),
+                            (clipH!! / targetHeight).toFloat().coerceAtMost(1f)
+                        )
+                    } else {
+                        floatArrayOf(1f, 1f)
+                    }
+                )
 
                 // Set attribute buffers with robust size detection
                 val vertexData = GlUtil.getNormalizedCoordinateBounds()
@@ -161,12 +193,7 @@ class VideoCompositionTransformation(
 
                 glProgram.bindAttributesAndUniforms()
 
-                // Clip the draw to the target box so `cover` overflow (a scaled
-                // up clip larger than its rect) can't bleed onto other layers.
-                val clipW = effect.clipWidth
-                val clipH = effect.clipHeight
-                val applyScissor = effect.clipX != null && effect.clipY != null &&
-                    clipW != null && clipH != null && effect.renderHeight > 0
+                val applyScissor = hasClipBox && effect.rotation == 0.0
                 if (applyScissor) {
                     // Convert the clip box (canvas px, top-left origin) to GL
                     // scissor space (px, bottom-left origin).
