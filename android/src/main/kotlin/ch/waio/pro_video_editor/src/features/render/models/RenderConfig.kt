@@ -111,13 +111,16 @@ data class VideoClip(
  * @property width Target width in canvas pixels (null = source width)
  * @property height Target height in canvas pixels (null = source height)
  * @property fit Scale mode: "fill", "contain" or "cover"
+ * @property rotation Clockwise rotation of the placed box in radians, around
+ *   its own centre. Offset/size describe the unrotated box.
  */
 data class SegmentTransformConfig(
     val offsetX: Double?,
     val offsetY: Double?,
     val width: Double?,
     val height: Double?,
-    val fit: String
+    val fit: String,
+    val rotation: Double = 0.0
 ) {
     companion object {
         fun fromMap(map: Map<String, Any?>): SegmentTransformConfig {
@@ -130,7 +133,8 @@ data class SegmentTransformConfig(
                 offsetY = (offset?.get("dy") as? Number)?.toDouble(),
                 width = (size?.get("width") as? Number)?.toDouble(),
                 height = (size?.get("height") as? Number)?.toDouble(),
-                fit = map["fit"] as? String ?: "cover"
+                fit = map["fit"] as? String ?: "cover",
+                rotation = (map["rotation"] as? Number)?.toDouble() ?: 0.0
             )
         }
     }

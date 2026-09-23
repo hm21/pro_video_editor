@@ -94,9 +94,15 @@ class LayeredCompositionBuilder(
      * Where a clip is drawn on the canvas. [draw] is the (possibly oversized for
      * `cover`) destination rectangle; [clip] is the target box the draw is
      * scissored to so overflow can't bleed onto other layers. [clip] is `null`
-     * when the clip fills the whole canvas (no clipping needed).
+     * when the clip fills the whole canvas (no clipping needed). [rotation] is
+     * the clockwise turn of the whole placed box around its own centre, in
+     * radians — [draw] and [clip] stay the unrotated rectangles.
      */
-    private data class Placement(val draw: DrawRect, val clip: DrawRect?)
+    private data class Placement(
+        val draw: DrawRect,
+        val clip: DrawRect?,
+        val rotation: Double = 0.0
+    )
 
     fun build(): Composition {
         // Resolve the canvas size up front so transparent gaps can be sized.
@@ -351,7 +357,8 @@ class LayeredCompositionBuilder(
             clipX = clipBox?.x,
             clipY = clipBox?.y,
             clipWidth = clipBox?.w,
-            clipHeight = clipBox?.h
+            clipHeight = clipBox?.h,
+            rotation = placement.rotation
         )
         applyOpacity(effects, opacity)
 
@@ -406,7 +413,7 @@ class LayeredCompositionBuilder(
             }
             else -> box // "fill"
         }
-        return Placement(draw, box)
+        return Placement(draw, box, cfg.rotation)
     }
 
     /**

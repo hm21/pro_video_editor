@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' show Color, Offset, Size, instantiateImageCodec;
 
@@ -626,6 +627,88 @@ void main() {
         reason:
             'cover overflow must be clipped to its rect; the area above '
             'the rect should be background, got $aboveRect',
+      );
+    });
+
+    testWidgets('segment rotation turns the placed box clockwise', (
+      tester,
+    ) async {
+      // A deliberately WIDE box, so a 30 degree turn moves a lot of area and
+      // the two sample points below can only be explained by a real rotation.
+      // Centre (320, 180), half extents (100, 40) on the 640x360 canvas.
+      //
+      // A square box, or a multiple of 90 degrees, would be symmetric under
+      // +/-theta and so could not tell a clockwise turn from a counter
+      // clockwise one. These points can:
+      //
+      //   showsAfter  (250, 130): background upright, background if the turn
+      //                           went counter clockwise, video only when it
+      //                           went CLOCKWISE.
+      //   hidesAfter  (400, 160): video upright, background once turned.
+      Future<Uint8List> render({required double rotation}) => pve.renderVideo(
+        VideoRenderData(
+          composition: VideoComposition(
+            canvasSize: visualCanvas,
+            backgroundColor: red,
+            layers: [
+              VideoLayer(
+                clips: [
+                  VideoSegment(
+                    video: EditorVideo.asset(testAPath),
+                    endTime: const Duration(seconds: 2),
+                  ),
+                ],
+                transform: SegmentTransform(
+                  offset: const Offset(220, 140),
+                  size: const Size(200, 80),
+                  fit: SegmentFit.fill,
+                  rotation: rotation,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      Future<bool> redAt(Uint8List video, double x, double y) async =>
+          isRed(await samplePixel(video, visualCanvas, x / 640, y / 360));
+
+      final upright = await render(rotation: 0);
+      final turned = await render(rotation: math.pi / 6);
+
+      // Upright: the box is the horizontal strip y 140..220.
+      expect(
+        await redAt(upright, 250, 130),
+        isTrue,
+        reason: 'Upright, (250,130) sits above the box: must be background',
+      );
+      expect(
+        await redAt(upright, 400, 160),
+        isFalse,
+        reason: 'Upright, (400,160) sits inside the box: must be video',
+      );
+
+      // Turned 30 degrees clockwise: the strip tilts so its left end lifts
+      // and its right end drops, which swaps both points.
+      expect(
+        await redAt(turned, 250, 130),
+        isFalse,
+        reason:
+            'A clockwise turn must bring (250,130) inside the box. Still '
+            'background means the box did not turn, or turned the wrong way',
+      );
+      expect(
+        await redAt(turned, 400, 160),
+        isTrue,
+        reason: 'A clockwise turn must push (400,160) out of the box',
+      );
+
+      // The turn is around the box centre, so the centre stays covered — and
+      // this doubles as proof the render did not simply come out empty.
+      expect(
+        await redAt(turned, 320, 180),
+        isFalse,
+        reason: 'The box turns around its own centre, which stays video',
       );
     });
 

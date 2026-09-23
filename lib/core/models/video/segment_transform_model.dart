@@ -32,7 +32,12 @@ enum SegmentFit {
 /// it is stretched to fill the entire canvas.
 class SegmentTransform {
   /// Creates a [SegmentTransform].
-  const SegmentTransform({this.offset, this.size, this.fit = SegmentFit.cover});
+  const SegmentTransform({
+    this.offset,
+    this.size,
+    this.fit = SegmentFit.cover,
+    this.rotation = 0.0,
+  });
 
   /// Position of the segment's top-left corner within the canvas, in pixels.
   ///
@@ -51,12 +56,32 @@ class SegmentTransform {
   /// Only relevant when [size] is set. **Default**: [SegmentFit.cover].
   final SegmentFit fit;
 
+  /// Clockwise rotation applied to the placed segment, in **radians**.
+  ///
+  /// The segment is scaled into [size] and clipped to it *first*, then that
+  /// box is rotated around its own centre — so [offset] and [size] keep
+  /// describing the unrotated layout box, and a `cover` overflow is still cut
+  /// at the box edge rather than swinging out with the rotation.
+  ///
+  /// This matches [ImageLayer.rotation] and Flutter's [Transform.rotate]
+  /// convention, which makes it possible to forward a `pro_image_editor` layer
+  /// rotation directly.
+  ///
+  /// **Default**: `0.0` (no rotation).
+  final double rotation;
+
   /// Creates a copy with updated values.
-  SegmentTransform copyWith({Offset? offset, Size? size, SegmentFit? fit}) {
+  SegmentTransform copyWith({
+    Offset? offset,
+    Size? size,
+    SegmentFit? fit,
+    double? rotation,
+  }) {
     return SegmentTransform(
       offset: offset ?? this.offset,
       size: size ?? this.size,
       fit: fit ?? this.fit,
+      rotation: rotation ?? this.rotation,
     );
   }
 
@@ -67,6 +92,7 @@ class SegmentTransform {
           ? {'width': size!.width, 'height': size!.height}
           : null,
       'fit': fit.name,
+      'rotation': rotation,
     };
   }
 
@@ -84,6 +110,9 @@ class SegmentTransform {
       fit: map['fit'] != null
           ? SegmentFit.values.byName(map['fit'] as String)
           : SegmentFit.cover,
+      rotation: map['rotation'] != null
+          ? safeParseDouble(map['rotation'])
+          : 0.0,
     );
   }
 
@@ -94,15 +123,20 @@ class SegmentTransform {
 
   @override
   String toString() =>
-      'SegmentTransform(offset: $offset, size: $size, fit: $fit)';
+      'SegmentTransform(offset: $offset, size: $size, fit: $fit, '
+      'rotation: $rotation)';
 
   @override
   bool operator ==(covariant SegmentTransform other) {
     if (identical(this, other)) return true;
 
-    return other.offset == offset && other.size == size && other.fit == fit;
+    return other.offset == offset &&
+        other.size == size &&
+        other.fit == fit &&
+        other.rotation == rotation;
   }
 
   @override
-  int get hashCode => offset.hashCode ^ size.hashCode ^ fit.hashCode;
+  int get hashCode =>
+      offset.hashCode ^ size.hashCode ^ fit.hashCode ^ rotation.hashCode;
 }

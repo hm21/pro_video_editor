@@ -316,6 +316,9 @@ struct SegmentTransformConfig: Sendable {
   let height: Double?
   /// How the source is scaled into the target size: "fill", "contain", "cover".
   let fit: String
+  /// Clockwise rotation of the placed box around its own centre, in radians.
+  /// The offset/size above keep describing the unrotated box.
+  let rotation: Double
 
   static func fromArguments(_ args: [String: Any]?) -> SegmentTransformConfig? {
     guard let args = args else { return nil }
@@ -326,7 +329,8 @@ struct SegmentTransformConfig: Sendable {
       offsetY: (offset?["dy"] as? NSNumber)?.doubleValue,
       width: (size?["width"] as? NSNumber)?.doubleValue,
       height: (size?["height"] as? NSNumber)?.doubleValue,
-      fit: args["fit"] as? String ?? "cover"
+      fit: args["fit"] as? String ?? "cover",
+      rotation: (args["rotation"] as? NSNumber)?.doubleValue ?? 0.0
     )
   }
 }

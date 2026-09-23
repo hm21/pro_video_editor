@@ -1,3 +1,6 @@
+## 2.14.0
+- **FEAT**(android, iOS, macOS): `SegmentTransform.rotation` turns a composition clip clockwise around its own centre (radians, like `Transform.rotate`). `offset`/`size` keep describing the unrotated layout box and the source is still clipped to it before the turn, so `cover` overflow is cut at the box edge rather than swinging back into view. Web, Windows and Linux ignore the field.
+
 ## 2.13.3
 - **FIX**(iOS, macOS): The HDR pre-transcode and the overlap-transition pre-render now run under the same export gate and stall watchdog as the main encode. A stalled setup stage fails the render with an `ExportWatchdog` error instead of hanging it forever or silently degrading to the HDR source / a hard cut, and concurrent renders no longer run every pre-transcode and blend at once.
 
