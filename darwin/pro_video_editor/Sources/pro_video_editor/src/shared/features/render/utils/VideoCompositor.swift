@@ -619,10 +619,14 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       // 4. Clip to the destination rect so "cover" overflow doesn't bleed.
       img = img.cropped(to: ciRect)
 
-      // 4b. Turn the clipped box around its own centre. After the crop the
-      //     extent *is* ciRect, so the helper's centre is the box centre —
-      //     and because the crop already happened, `cover` overflow stays cut
-      //     at the box edge instead of swinging back into view.
+      // 4b. Turn the clipped box around its own centre. Step 3 centres the
+      //     scaled frame inside ciRect, so whichever rectangle the crop
+      //     leaves behind is concentric with the box — ciRect itself for
+      //     `cover` and `fill`, and for `contain` the smaller frame, since
+      //     `cropped(to:)` returns the intersection rather than the rect it
+      //     is given. Either way the helper's centre is the box centre.
+      //     Turning *after* the crop is what keeps `cover` overflow cut at
+      //     the box edge instead of swinging back into view.
       img = rotateOverlayAroundCenter(img, radians: placement.rotation)
 
       // 5. Apply opacity and composite over the canvas.
