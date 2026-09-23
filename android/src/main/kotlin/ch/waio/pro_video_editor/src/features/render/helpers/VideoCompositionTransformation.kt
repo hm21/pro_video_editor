@@ -2,7 +2,6 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import android.content.Context
 import android.opengl.GLES20
-import android.opengl.Matrix
 import androidx.media3.common.VideoFrameProcessingException
 import androidx.media3.common.util.GlProgram
 import androidx.media3.common.util.GlUtil
@@ -138,61 +137,20 @@ class VideoCompositionTransformation(
                 // which uses glBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA,
                 // ONE, ONE_MINUS_SRC_ALPHA) — correct straight-alpha source-over.
 
-                val glMatrix = FloatArray(16)
-                Matrix.setIdentityM(glMatrix, 0)
-
                 val targetWidth = (effect.width ?: effect.videoWidth.toDouble()).toFloat()
                 val targetHeight = (effect.height ?: effect.videoHeight.toDouble()).toFloat()
 
-                // sx and sy are half-widths in NDC (relative to a 2.0 wide space)
-                val sx = if (effect.renderWidth > 0) targetWidth / effect.renderWidth else 1.0f
-                val sy = if (effect.renderHeight > 0) targetHeight / effect.renderHeight else 1.0f
-
-                // Convert pixel (x, y) to NDC top-left
-                val leftNDC =
-                    if (effect.renderWidth > 0) {
-                        (2f * (effect.x ?: 0.0).toFloat() / effect.renderWidth) - 1f
-                    } else {
-                        -1.0f
-                    }
-                val topNDC =
-                    if (effect.renderHeight > 0) {
-                        1f - (2f * (effect.y ?: 0.0).toFloat() / effect.renderHeight)
-                    } else {
-                        1.0f
-                    }
-
-                // Target center in NDC for a quad that is 2x2 centered at 0,0
-                val centerX = leftNDC + sx
-                val centerY = topNDC - sy
-
-                Matrix.translateM(glMatrix, 0, centerX, centerY, 0f)
-
-                // NDC is not square — one unit spans renderWidth/2 px across
-                // and renderHeight/2 px down — so rotating in it would shear a
-                // non-square canvas. Step into pixel space, turn there, and
-                // step back: M = T * (NDC<-px) * R * (px<-NDC) * S.
-                //
-                // Skipped entirely at zero rotation rather than relying on the
-                // two conversions cancelling, so the unrotated matrix stays
-                // bit-for-bit what it has always been.
-                if (effect.rotation != 0.0) {
-                    val halfW = effect.renderWidth / 2f
-                    val halfH = effect.renderHeight / 2f
-                    if (halfW > 0f && halfH > 0f) {
-                        Matrix.scaleM(glMatrix, 0, 1f / halfW, 1f / halfH, 1f)
-                        // Screen y points down and NDC y points up, so a
-                        // clockwise on-screen angle is a negative turn here.
-                        Matrix.rotateM(
-                            glMatrix, 0,
-                            -Math.toDegrees(effect.rotation).toFloat(),
-                            0f, 0f, 1f
-                        )
-                        Matrix.scaleM(glMatrix, 0, halfW, halfH, 1f)
-                    }
-                }
-
-                Matrix.scaleM(glMatrix, 0, sx, sy, 1f)
+                // Placement (and the turn, when there is one) is pure geometry;
+                // see [SegmentPlacementMatrix], which is unit-tested on the JVM.
+                val glMatrix = SegmentPlacementMatrix.build(
+                    x = (effect.x ?: 0.0).toFloat(),
+                    y = (effect.y ?: 0.0).toFloat(),
+                    targetWidth = targetWidth,
+                    targetHeight = targetHeight,
+                    renderWidth = effect.renderWidth,
+                    renderHeight = effect.renderHeight,
+                    rotation = effect.rotation
+                )
 
                 glProgram.setFloatsUniform("uTransformationMatrix", glMatrix)
                 glProgram.setSamplerTexIdUniform("uTexSampler", inputTexId, 0)
