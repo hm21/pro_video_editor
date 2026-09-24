@@ -91,18 +91,18 @@ class RenderVideo {
           }
         }
 
-        var transcodedFiles: [String] = []
         var workingConfig = config
 
         // HEVC 10-bit HDR videos cause issues with AVFoundation's compositor
         // They must be pre-transcoded to H.264 8-bit SDR for ANY effect processing
         PluginLog.print("🔍 Checking for HEVC 10-bit videos that need transcoding...")
 
-        // Pre-transcode HEVC 10-bit HDR videos to H.264 8-bit SDR
-        let inputPaths = config.videoClips.map { $0.inputPath }
-        let transcodeMap: [String: String]
+        // Pre-transcode HEVC 10-bit HDR videos to H.264 8-bit SDR. A clip that
+        // plays only part of its source comes back reading a shorter file from
+        // its start, so every later stage sees the trimmed window.
+        let preTranscode: VideoTranscoder.PreTranscode
         do {
-          transcodeMap = try await VideoTranscoder.transcodeClipsIfNeeded(inputPaths)
+          preTranscode = try await VideoTranscoder.transcodeClipsIfNeeded(config.videoClips)
         } catch {
           // Only a cancelled or stalled job throws here; it cleaned up after
           // itself, and nothing else exists yet to finalize.
@@ -111,30 +111,12 @@ class RenderVideo {
         }
 
         // Track transcoded files for cleanup
-        transcodedFiles = transcodeMap.values.filter { $0.contains("transcoded_") }
+        let transcodedFiles = preTranscode.producedFiles
 
         if !transcodedFiles.isEmpty {
-          PluginLog.print("✅ Pre-transcoded \(transcodedFiles.count) HEVC 10-bit videos to H.264")
-
-          // Update config with transcoded paths
-          let updatedClips = config.videoClips.map { clip -> VideoClip in
-            if let newPath = transcodeMap[clip.inputPath], newPath != clip.inputPath {
-              return VideoClip(
-                inputPath: newPath,
-                startUs: clip.startUs,
-                endUs: clip.endUs,
-                volume: clip.volume,
-                playbackSpeed: clip.playbackSpeed,
-                reverseVideo: clip.reverseVideo,
-                transition: clip.transition,
-                chromaKey: clip.chromaKey
-              )
-            }
-            return clip
-          }
-
-          // Create new config with updated clips
-          workingConfig = config.copyWith(videoClips: updatedClips)
+          PluginLog.print(
+            "✅ Pre-transcoded \(transcodedFiles.count) HEVC 10-bit sources or windows to H.264")
+          workingConfig = config.copyWith(videoClips: preTranscode.clips)
         }
 
         var outputURL: URL!

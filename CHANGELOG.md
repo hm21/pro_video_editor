@@ -1,3 +1,6 @@
+## 2.14.2
+- **PERF**(iOS, macOS): A trimmed segment of an HDR (HEVC 10-bit) video now pre-transcodes only the part that is exported, so a 10 s export from a one-minute clip no longer re-encodes the whole minute first (#192).
+
 ## 2.14.1
 - **FIX**(iOS, macOS): HDR (HEVC 10-bit) videos no longer render with a color cast. The pre-transcode to SDR wrote the green channel into blue, a regression since 1.17.3.
 

@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
@@ -420,5 +422,70 @@ void main() {
         'too-short clip must fall back to no wrap (full duration)',
       );
     });
+  });
+
+  // ───────────────────────────────────────────────────────────
+  // Trimmed HDR source — iOS/macOS pre-transcode only each segment's window
+  // and blend on the shorter files that come out of it
+  // ───────────────────────────────────────────────────────────
+  group('Clip transitions — trimmed HDR source', () {
+    final hdrVideo = EditorVideo.asset(kVideoEditorExampleHevcPath);
+    // The pre-transcode is Darwin-only; other platforms render HDR directly.
+    final skipPlatform =
+        defaultTargetPlatform != TargetPlatform.iOS &&
+        defaultTargetPlatform != TargetPlatform.macOS;
+    // Tighter than [durationTolerance]: a blend computed on the windows of the
+    // source instead of the trimmed files misses by a second or more.
+    const tolerance = 0.25;
+
+    testWidgets('dissolve between two windows of one source', (_) async {
+      final meta = await render(
+        'hdr-trimmed-dissolve',
+        VideoRenderData(
+          outputFormat: VideoOutputFormat.mp4,
+          videoSegments: [
+            VideoSegment(
+              video: hdrVideo,
+              startTime: const Duration(milliseconds: 500),
+              endTime: const Duration(milliseconds: 2000),
+              transition: const ClipTransition(
+                type: ClipTransitionType.dissolve,
+                duration: Duration(milliseconds: 500),
+              ),
+            ),
+            VideoSegment(
+              video: hdrVideo,
+              startTime: const Duration(milliseconds: 2500),
+              endTime: const Duration(milliseconds: 4000),
+            ),
+          ],
+        ),
+      );
+      // Two 1.5 s windows overlapping by 500 ms → 2.5 s; a hard cut would
+      // keep 3 s.
+      expect(meta.duration.inMilliseconds / 1000, closeTo(2.5, tolerance));
+    }, skip: skipPlatform);
+
+    testWidgets('dissolve wrap on a trimmed segment', (_) async {
+      final meta = await render(
+        'hdr-trimmed-wrap',
+        VideoRenderData(
+          outputFormat: VideoOutputFormat.mp4,
+          videoSegments: [
+            VideoSegment(
+              video: hdrVideo,
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 3),
+              transition: const ClipTransition(
+                type: ClipTransitionType.dissolve,
+                duration: Duration(milliseconds: 500),
+              ),
+            ),
+          ],
+        ),
+      );
+      // A 2 s window whose end wraps into its start by 500 ms → 1.5 s.
+      expect(meta.duration.inMilliseconds / 1000, closeTo(1.5, tolerance));
+    }, skip: skipPlatform);
   });
 }
