@@ -699,12 +699,18 @@ enum ThumbnailTimestampFixture {
   ///
   /// `codec` and `colorProperties` let a test author the HEVC + BT.2020 shape
   /// the render pipeline pre-transcodes; the pixels stay 8-bit either way.
+  /// `timescale` sets the media timescale; phone recordings use a fine one
+  /// such as 90 000, which lets a time range start between two frame
+  /// boundaries instead of snapping to one. One that is no multiple of `fps`
+  /// rounds every frame to its nearest tick, as a remux onto a 1000 timescale
+  /// does: 60 fps then lasts 17, 16, 17 ms.
   static func makeColorVideo(
     colors: [RGB],
     fps: Int32 = 30,
     size: CGSize = CGSize(width: 160, height: 90),
     codec: AVVideoCodecType = .h264,
-    colorProperties: [String: Any]? = nil
+    colorProperties: [String: Any]? = nil,
+    timescale: CMTimeScale? = nil
   ) throws -> URL {
     let url = FileManager.default.temporaryDirectory
       .appendingPathComponent("pve_thumb_\(UUID().uuidString).mp4")
@@ -720,6 +726,8 @@ enum ThumbnailTimestampFixture {
     }
     let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
     input.expectsMediaDataInRealTime = false
+    if let timescale { input.mediaTimeScale = timescale }
+    let scale = timescale ?? fps
 
     let adaptor = AVAssetWriterInputPixelBufferAdaptor(
       assetWriterInput: input,
@@ -745,7 +753,10 @@ enum ThumbnailTimestampFixture {
         while !input.isReadyForMoreMediaData {
           usleep(500)
         }
-        let pts = CMTime(value: CMTimeValue(frameIndex), timescale: fps)
+        let pts = CMTime(
+          value: (CMTimeValue(frameIndex) * CMTimeValue(scale) + CMTimeValue(fps / 2))
+            / CMTimeValue(fps),
+          timescale: scale)
         adaptor.append(buffer, withPresentationTime: pts)
         frameIndex += 1
       }

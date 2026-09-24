@@ -13,14 +13,27 @@ internal class VideoTranscoder {
 
   /// Result of a transcoding operation.
   enum TranscodeResult {
-    /// Transcoding succeeded. `window` is the span of the output the clip
-    /// plays when only part of the source was encoded (see
-    /// ``clipWindow(playing:writtenTrack:)``); `nil` after a whole-source
-    /// transcode, whose timeline matches the source's.
-    case success(outputPath: String, window: SourceRange?)
+    /// Transcoding succeeded. `trimmed` describes an output that holds only
+    /// part of the source: the window the clip plays and its cadence; `nil`
+    /// after a whole-source transcode, whose timeline and frame rate match
+    /// the source's.
+    case success(outputPath: String, trimmed: Trimmed?)
 
     /// Transcoding failed with error
     case error(Error)
+  }
+
+  /// How a clip plays a transcode of only part of its source.
+  struct Trimmed {
+    /// The span of the output the clip plays (see
+    /// ``clipWindow(playing:writtenTrack:)``).
+    let window: SourceRange
+
+    /// The cadence measured from the output's frames, which the render uses
+    /// instead of its `nominalFrameRate` (see ``VideoClip/frameRateOverride``).
+    /// The source's own rate where the frames cannot be read or are too few
+    /// to measure; `nil` when that cannot be read either.
+    let frameRate: Float?
   }
 
   /// What the pre-transcode hands to the render.
@@ -194,7 +207,7 @@ internal class VideoTranscoder {
         "   Output: isHevc=\(outputInfo.isHevc), bitDepth=\(outputInfo.bitDepth), isHdr=\(outputInfo.isHdr)"
       )
 
-      guard let range else { return .success(outputPath: outputURL.path, window: nil) }
+      guard let range else { return .success(outputPath: outputURL.path, trimmed: nil) }
       let asset = AVURLAsset(url: outputURL)
       let track = try await MediaInfoExtractor.loadVideoTrack(from: asset)
       let window = clipWindow(
@@ -206,8 +219,18 @@ internal class VideoTranscoder {
           domain: "VideoTranscoder", code: 3,
           userInfo: [NSLocalizedDescriptionKey: "Trimmed transcode holds no video"])
       }
-      PluginLog.print("   Window: [\(window.startUs)µs, \(window.endUs)µs)")
-      return .success(outputPath: outputURL.path, window: window)
+      // The render times the clip's frames by its rate, which this shorter
+      // file's `nominalFrameRate` misreads; measure it from the frames. Where
+      // that fails, the source's rate is still closer than this file's: the
+      // pre-transcode keeps the source's frame timing.
+      var frameRate = typicalFrameRate(of: track, in: asset)
+      if frameRate == nil {
+        frameRate = await nominalFrameRate(of: inputURL)
+      }
+      let fps = frameRate.map { "\($0)" } ?? "?"
+      PluginLog.print("   Window: [\(window.startUs)µs, \(window.endUs)µs) at \(fps) fps")
+      return .success(
+        outputPath: outputURL.path, trimmed: Trimmed(window: window, frameRate: frameRate))
 
     } catch {
       PluginLog.print("❌ Transcoding failed: \(error.localizedDescription)")
@@ -242,7 +265,7 @@ internal class VideoTranscoder {
   static func transcodeClipsIfNeeded(_ clips: [VideoClip]) async throws -> PreTranscode {
     var rewritten = clips
     var produced: [String] = []
-    var outputs: [TranscodeKey: (path: String, window: SourceRange?)] = [:]
+    var outputs: [TranscodeKey: (path: String, trimmed: Trimmed?)] = [:]
     // Keys whose transcode failed; their clips stay on the source.
     var failed: Set<TranscodeKey> = []
 
@@ -269,8 +292,8 @@ internal class VideoTranscoder {
         // outputs with nothing to clean it up.
         if outputs[key] == nil, !failed.contains(key) {
           switch await transcodeToH264(path, range: range, sourceDurationUs: sourceDurationUs) {
-          case .success(let outputPath, let window):
-            outputs[key] = (outputPath, window)
+          case .success(let outputPath, let trimmed):
+            outputs[key] = (outputPath, trimmed)
             produced.append(outputPath)
           case .error(let error):
             if error is CancellationError || Task.isCancelled {
@@ -288,9 +311,10 @@ internal class VideoTranscoder {
 
         guard let output = outputs[key] else { continue }
         let clip = clips[index]
-        if let window = output.window {
+        if let trimmed = output.trimmed {
           rewritten[index] = clip.reading(
-            output.path, startUs: window.startUs, endUs: window.endUs)
+            output.path, startUs: trimmed.window.startUs, endUs: trimmed.window.endUs,
+            frameRateOverride: trimmed.frameRate)
         } else {
           rewritten[index] = clip.reading(
             output.path, startUs: clip.startUs, endUs: clip.endUs)
@@ -318,6 +342,99 @@ internal class VideoTranscoder {
   }
 
   // MARK: - Private Methods
+
+  /// How many frames ``typicalFrameRate(of:in:)`` reads at most: enough to
+  /// pin the rate down on a coarse timescale, and a window of a long source
+  /// is not read in full just to time it.
+  static let maxTimedFrames = 300
+
+  /// The frame rate `track` actually runs at, measured from its frames (see
+  /// ``typicalFrameRate(ofFrameDurations:)``); `nil` when they cannot be
+  /// read or are too few to tell.
+  ///
+  /// `nominalFrameRate` averages over the whole track, which a short trimmed
+  /// file misreads: a sliver of a frame at its start, or a partial one at its
+  /// end, counts as a whole frame (0.4 s of 30 fps footage reads 33.3).
+  static func typicalFrameRate(of track: AVAssetTrack, in asset: AVAsset) -> Float? {
+    guard let reader = try? AVAssetReader(asset: asset) else { return nil }
+    let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+    output.alwaysCopiesSampleData = false
+    guard reader.canAdd(output) else { return nil }
+    reader.add(output)
+    guard reader.startReading() else { return nil }
+    defer { reader.cancelReading() }
+
+    var frames: [CMSampleTimingInfo] = []
+    while frames.count < maxTimedFrames, let sample = output.copyNextSampleBuffer() {
+      for index in 0..<CMSampleBufferGetNumSamples(sample) {
+        var timing = CMSampleTimingInfo()
+        if CMSampleBufferGetSampleTimingInfo(sample, at: index, timingInfoOut: &timing) == noErr,
+          timing.presentationTimeStamp.isNumeric
+        {
+          frames.append(timing)
+        }
+      }
+    }
+    // Decode order differs from presentation order around B-frames, and only
+    // the first and last *shown* frame can be cut short.
+    frames.sort { CMTimeCompare($0.presentationTimeStamp, $1.presentationTimeStamp) < 0 }
+    return typicalFrameRate(ofFrameDurations: frames.map(\.duration))
+  }
+
+  /// The frame rate of frames lasting `durations`, in presentation order.
+  ///
+  /// Only the first and the last frame of a trimmed file can be cut short: a
+  /// sliver of the frame before the window, and the one the file ends in. The
+  /// rate comes from the frames between them, from those within 5 % of their
+  /// median duration: that leaves out the gap of a dropped frame in
+  /// variable-rate footage, and averaging them undoes a timescale too coarse
+  /// for the cadence, which rounds each frame to a neighbouring tick (16 or
+  /// 17 ms for 60 fps on a 1000 timescale, whose median alone reads 58.8).
+  ///
+  /// A rate within 0.01 of a whole number, or as close as rounding the frames
+  /// to ticks can explain, is taken as that number, since the render cuts it
+  /// down to whole frames per second and 59.99999 would become 59. 59.94
+  /// stays 59.94 on a timescale that tells the two apart. `nil` without a
+  /// whole frame to time, or when the frames are too few for their ticks to
+  /// tell neighbouring whole rates apart.
+  static func typicalFrameRate(ofFrameDurations durations: [CMTime]) -> Float? {
+    guard durations.count > 2 else { return nil }
+    let wholeFrames = durations.dropFirst().dropLast().filter { $0.isNumeric && $0 > .zero }
+    guard let timescale = wholeFrames.map(\.timescale).max(), timescale > 0 else { return nil }
+
+    // In ticks, where the rounding happened; one track shares one timescale.
+    let ticks = wholeFrames.map {
+      CMTimeConvertScale($0, timescale: timescale, method: .roundHalfAwayFromZero).value
+    }.sorted()
+    let median = ticks[ticks.count / 2]
+    let typical = ticks.filter { abs($0 - median) <= max(1, median / 20) }
+    let span = typical.reduce(0.0) { $0 + Double($1) }
+    guard span > 0 else { return nil }
+    let rate = Double(typical.count) * Double(timescale) / span
+    // Rounding every frame to a tick moves the sum of a run of them by less
+    // than one tick.
+    let uncertainty = max(0.01, rate / span)
+    guard rate.isFinite, uncertainty < 0.5 else { return nil }
+    let wholeRate = rate.rounded()
+    return Float(abs(rate - wholeRate) < uncertainty ? wholeRate : rate)
+  }
+
+  /// The `nominalFrameRate` of the video at `url`, snapped to a whole number
+  /// within 0.01 like a measured one; `nil` when it cannot be read.
+  private static func nominalFrameRate(of url: URL) async -> Float? {
+    guard
+      let track = try? await MediaInfoExtractor.loadVideoTrack(from: AVURLAsset(url: url))
+    else { return nil }
+    let rate: Float
+    if #available(iOS 15.0, macOS 13.0, *) {
+      rate = (try? await track.load(.nominalFrameRate)) ?? 0
+    } else {
+      rate = track.nominalFrameRate
+    }
+    guard rate.isFinite, rate > 0 else { return nil }
+    let wholeRate = rate.rounded()
+    return abs(rate - wholeRate) < 0.01 ? wholeRate : rate
+  }
 
   /// The source's duration in microseconds, or 0 when it cannot be read.
   private static func durationUs(of path: String) async -> Int64 {

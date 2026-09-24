@@ -28,6 +28,15 @@ internal struct VideoClip: Sendable {
   /// what a pre-rendered overlap blend needs when the two clips it was composed
   /// from carry different keys. See `RenderVideo.blendChromaKey`.
   let suppressChromaKey: Bool
+  /// The cadence the render uses for this clip instead of its file's
+  /// `nominalFrameRate`, set when `inputPath` is a pre-transcode of only part
+  /// of a source.
+  ///
+  /// Internal, never parsed from the platform channel. `nominalFrameRate` is
+  /// an average over the file, and a short trimmed one misreads it: 0.4 s of
+  /// 30 fps phone footage that opens on a sliver of a frame reads 33.3, and
+  /// the render derives its frame duration from it. `nil` = use the file's.
+  let frameRateOverride: Float?
 
   init(
     inputPath: String,
@@ -40,7 +49,8 @@ internal struct VideoClip: Sendable {
     timelineStartUs: Int64? = nil,
     transform: SegmentTransformConfig? = nil,
     chromaKey: ChromaKeyConfig? = nil,
-    suppressChromaKey: Bool = false
+    suppressChromaKey: Bool = false,
+    frameRateOverride: Float? = nil
   ) {
     self.inputPath = inputPath
     self.startUs = startUs
@@ -53,11 +63,15 @@ internal struct VideoClip: Sendable {
     self.transform = transform
     self.chromaKey = chromaKey
     self.suppressChromaKey = suppressChromaKey
+    self.frameRateOverride = frameRateOverride
   }
 
   /// This clip playing `startUs..<endUs` of `inputPath` instead of its own
-  /// source window; every other setting is kept.
-  func reading(_ inputPath: String, startUs: Int64?, endUs: Int64?) -> VideoClip {
+  /// source window; every other setting is kept. `frameRateOverride` is the
+  /// new file's: a cadence measured on the old one does not carry over.
+  func reading(
+    _ inputPath: String, startUs: Int64?, endUs: Int64?, frameRateOverride: Float? = nil
+  ) -> VideoClip {
     VideoClip(
       inputPath: inputPath,
       startUs: startUs,
@@ -69,7 +83,8 @@ internal struct VideoClip: Sendable {
       timelineStartUs: timelineStartUs,
       transform: transform,
       chromaKey: chromaKey,
-      suppressChromaKey: suppressChromaKey
+      suppressChromaKey: suppressChromaKey,
+      frameRateOverride: frameRateOverride
     )
   }
 

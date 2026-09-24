@@ -129,6 +129,92 @@ final class TranscodePlanTests: XCTestCase {
   }
 }
 
+// MARK: - Cadence of a trimmed pre-transcode (#210)
+
+/// The frame rate the render uses for a clip cut down to its window, measured
+/// from the frames of the shorter file: its `nominalFrameRate` counts a sliver
+/// of a frame as a whole one.
+final class TypicalFrameRateTests: XCTestCase {
+
+  /// `count` frames at `fps` on `timescale`, each rounded to its nearest tick
+  /// the way a muxer stores them.
+  private func frames(_ count: Int, fps: Double, timescale: Int32) -> [CMTime] {
+    (0..<count).map { index in
+      let start = (Double(index) * Double(timescale) / fps).rounded()
+      let end = (Double(index + 1) * Double(timescale) / fps).rounded()
+      return CMTime(value: CMTimeValue(end - start), timescale: timescale)
+    }
+  }
+
+  private func ticks(_ values: [CMTimeValue], _ timescale: Int32) -> [CMTime] {
+    values.map { CMTime(value: $0, timescale: timescale) }
+  }
+
+  private func rate(_ durations: [CMTime]) -> Float? {
+    VideoTranscoder.typicalFrameRate(ofFrameDurations: durations)
+  }
+
+  func testAPartialFirstAndLastFrameDoNotCount() {
+    // A 0.1 ms sliver of the frame before the window, then a last frame the
+    // file cuts short: `nominalFrameRate` reads ~33 fps for 0.4 s of this.
+    let durations = ticks([9], 90_000) + frames(11, fps: 30, timescale: 90_000)
+      + ticks([1_200], 90_000)
+    XCTAssertEqual(rate(durations), 30)
+  }
+
+  func testTheOnlyWholeFrameDecidesBetweenTwoPartialOnes() {
+    // 25 fps: a sliver, a whole frame, and a last frame cut in half. Their
+    // median is the half frame, which reads 50 fps.
+    XCTAssertEqual(rate(ticks([900, 3_600, 1_800], 90_000)), 25)
+  }
+
+  func testACoarseTimescaleIsAveragedBackToTheCadence() {
+    // Every frame of 60 fps on a 1000 timescale lasts 16 or 17 ms; the median
+    // alone reads 58.8, which the render would cut down to 58 fps.
+    XCTAssertEqual(rate(frames(55, fps: 60, timescale: 1_000)), 60)
+    // 8 or 9 ms at 120 fps, whose median reads 125.
+    XCTAssertEqual(rate(frames(109, fps: 120, timescale: 1_000)), 120)
+    XCTAssertEqual(rate(frames(28, fps: 30, timescale: 1_000)), 30)
+  }
+
+  func testAFractionalRateStaysFractional() {
+    // 59.94 fps is 1001 ticks a frame on 60 000: no rounding to undo, so it
+    // is not taken for 60.
+    let ntsc = 60_000.0 / 1_001.0
+    let window = ticks([66], 60_000) + frames(53, fps: ntsc, timescale: 60_000)
+    XCTAssertEqual(rate(window), Float(ntsc))
+    XCTAssertEqual(
+      rate(frames(28, fps: ntsc / 2, timescale: 30_000)), Float(30_000.0 / 1_001.0))
+  }
+
+  func testJitteredTimestampsSnapToTheWholeRate() {
+    // A phone's capture timestamps wander by a few ticks around 3000.
+    let jittered: [CMTimeValue] = [
+      14, 3_000, 3_001, 2_999, 3_000, 3_007, 2_993, 3_000, 3_001, 2_999, 3_004, 2_998, 3_000,
+    ]
+    XCTAssertEqual(rate(ticks(jittered, 90_000)), 30)
+  }
+
+  func testTheGapOfADroppedFrameIsLeftOut() {
+    // 60 fps with every seventh frame dropped: the average is 51.4 fps.
+    var values: [CMTimeValue] = []
+    for index in 0..<48 { values.append(index % 7 == 3 ? 20 : 10) }
+    XCTAssertEqual(rate(ticks(values, 600)), 60)
+  }
+
+  func testTooFewFramesToTellAreNotMeasured() {
+    XCTAssertNil(rate([]))
+    XCTAssertNil(rate(ticks([1_500], 90_000)))
+    // Either could be a partial frame.
+    XCTAssertNil(rate(ticks([1_500, 3_000], 90_000)))
+    // One whole frame of 16 ms: anything from 59 to 66 fps rounds to it.
+    XCTAssertNil(rate(ticks([17, 16, 16], 1_000)))
+    // One whole frame on a fine timescale pins the rate down.
+    XCTAssertEqual(rate(ticks([9, 1_500, 700], 90_000)), 60)
+    XCTAssertNil(rate(ticks([9, 0, 700], 90_000)))
+  }
+}
+
 // MARK: - Trimmed pre-transcode on a real encode (#192)
 
 /// The pre-transcode end to end on an HDR-tagged clip whose every second is a
@@ -137,7 +223,9 @@ final class TrimmedPreTranscodeTests: XCTestCase {
   private static let fps: Int32 = 30
 
   /// Six seconds, one palette color each.
-  private func makeHdrSource() async throws -> URL {
+  private func makeHdrSource(
+    fps: Int32 = TrimmedPreTranscodeTests.fps, timescale: CMTimeScale? = nil
+  ) async throws -> URL {
     let palette = ThumbnailTimestampFixture.palette
     let source: URL
     do {
@@ -145,13 +233,14 @@ final class TrimmedPreTranscodeTests: XCTestCase {
       // pixels themselves stay 8-bit.
       source = try ThumbnailTimestampFixture.makeColorVideo(
         colors: Array(palette[0..<6]),
-        fps: Self.fps,
+        fps: fps,
         codec: .hevc,
         colorProperties: [
           AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
           AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_2100_HLG,
           AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
-        ])
+        ],
+        timescale: timescale)
     } catch {
       throw XCTSkip("this environment cannot author an HEVC BT.2020 clip: \(error)")
     }
@@ -207,6 +296,10 @@ final class TrimmedPreTranscodeTests: XCTestCase {
     XCTAssertEqual(rewritten.startUs, measured.startUs)
     XCTAssertEqual(rewritten.endUs, 1_010_000)
     XCTAssertGreaterThan(measured.endUs, 1_010_000)
+    // A short file's `nominalFrameRate` misreads its cadence, so the clip
+    // carries the one measured from its frames: exactly the fixture's 30.
+    XCTAssertEqual(rewritten.frameRateOverride, Float(Self.fps))
+    XCTAssertNil(whole.clips[0].frameRateOverride)
 
     // It holds the window's frames: the second after 2 s, then the one after
     // 3 s at its very end. Compared against a whole-source transcode so the
@@ -237,6 +330,95 @@ final class TrimmedPreTranscodeTests: XCTestCase {
     XCTAssertEqual(rewritten.endUs, measured.endUs)
     let frameUs = Double(1_000_000) / Double(Self.fps)
     XCTAssertEqual(Double(rewritten.endUs ?? 0), 1_500_000, accuracy: frameUs)
+  }
+
+  /// Renders `startUs..<endUs` of `source` on its own and counts the frames
+  /// of the result and the length of its video track.
+  private func renderWindow(of source: URL, startUs: Int64, endUs: Int64) async throws
+    -> (frames: Int, seconds: Double)
+  {
+    let output = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pve_trim_cadence_\(UUID().uuidString).mp4")
+    defer { try? FileManager.default.removeItem(at: output) }
+    let config = try XCTUnwrap(
+      RenderConfig.fromArguments([
+        "videoClips": [
+          [
+            "inputPath": source.path,
+            "startUs": NSNumber(value: startUs),
+            "endUs": NSNumber(value: endUs),
+          ]
+        ],
+        "outputPath": output.path,
+        "outputFormat": "mp4",
+        "enableAudio": false,
+      ]))
+    let settled = expectation(description: "render settles")
+    var failure: Error?
+    RenderVideo.render(
+      config: config,
+      onProgress: { _ in },
+      onComplete: { _ in settled.fulfill() },
+      onError: { error in
+        failure = error
+        settled.fulfill()
+      })
+    await fulfillment(of: [settled], timeout: 120)
+    XCTAssertNil(failure)
+
+    let asset = AVURLAsset(url: output)
+    let track = try await MediaInfoExtractor.loadVideoTrack(from: asset)
+    let reader = try AVAssetReader(asset: asset)
+    let samples = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+    reader.add(samples)
+    XCTAssertTrue(reader.startReading())
+    var frames = 0
+    while let buffer = samples.copyNextSampleBuffer() {
+      if CMSampleBufferGetNumSamples(buffer) > 0 { frames += 1 }
+    }
+    let seconds = await TrackEndTrimmer.timeRange(of: track).duration.seconds
+    return (frames, seconds)
+  }
+
+  func testARenderOfAShortTrimmedWindowKeepsTheSourceCadence() async throws {
+    // A phone recording's timescale; the fixture's default of 30 would snap
+    // the window below onto the frame boundary.
+    let source = try await makeHdrSource(timescale: 90_000)
+    defer { try? FileManager.default.removeItem(at: source) }
+
+    // 0.4 s starting a tenth of a millisecond before a frame boundary, as
+    // phone footage does: the trimmed file opens on a 0.1 ms sliver of the
+    // previous frame, and AVFoundation reports ~33 fps for it. Rendering at
+    // that rate instead of the footage's 30 fps packed extra frames into the
+    // window and re-timed every one of them.
+    let rendered = try await renderWindow(of: source, startUs: 999_900, endUs: 1_399_900)
+    XCTAssertEqual(rendered.frames, 12, "0.4 s at the source's 30 fps")
+    XCTAssertEqual(rendered.seconds, 0.4, accuracy: 0.001)
+  }
+
+  func testARenderOfAWindowOnACoarseTimescaleKeepsTheSourceCadence() async throws {
+    // 60 fps rounded onto a 1000 timescale, as a remux from Matroska stores
+    // it: every frame lasts 16 or 17 ms. Their median alone reads 58.8 fps,
+    // which the render cut down to 58 and so dropped two frames a second.
+    let source = try await makeHdrSource(fps: 60, timescale: 1_000)
+    defer { try? FileManager.default.removeItem(at: source) }
+
+    let trimmed = try await VideoTranscoder.transcodeClipsIfNeeded([
+      VideoClip(inputPath: source.path, startUs: 1_000_000, endUs: 2_000_000),
+      // The last 30 ms: a partial frame and the last one, and no tail to
+      // encode after them. Too few to time, so the clip takes the source's
+      // rate rather than whatever their durations suggest, which would set
+      // the frame rate of the whole export.
+      VideoClip(inputPath: source.path, startUs: 5_970_000),
+    ])
+    VideoTranscoder.cleanupTranscodedFiles(trimmed.producedFiles)
+    XCTAssertEqual(trimmed.producedFiles.count, 2)
+    XCTAssertEqual(trimmed.clips[0].frameRateOverride, 60)
+    XCTAssertEqual(Double(trimmed.clips[1].frameRateOverride ?? 0), 60, accuracy: 0.5)
+
+    let rendered = try await renderWindow(of: source, startUs: 1_000_000, endUs: 2_000_000)
+    XCTAssertEqual(rendered.frames, 60, "1 s at the source's 60 fps")
+    XCTAssertEqual(rendered.seconds, 1, accuracy: 0.001)
   }
 
   func testClipsOnOneSourceShareATranscodePerWindowAndEachFileIsRemovedOnce() async throws {
