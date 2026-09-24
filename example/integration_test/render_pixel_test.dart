@@ -498,6 +498,54 @@ void main() {
       final identity = _matchSum(out, original, geoPoints, Offset.new);
       expect(mirror, lessThan(identity), reason: 'HEVC flipX not applied');
     }, skip: kIsWeb);
+
+    // The Darwin HDR pre-transcode once fed green into blue, so every frame it
+    // produced had B == G. B - G depends on chroma alone, which 4:2:0
+    // subsampling averages linearly, so the round trip keeps it at codec
+    // noise: with that matrix no pixel of this frame differs by more than 4
+    // (macOS), while the source's yellow and gold areas put ~15% of them past
+    // the tolerance of 8 once blue is blue again.
+    //
+    // The count is weighed against R - G instead of the frame size, because
+    // how saturated a tone-mapped HDR frame comes out varies by device and
+    // scales both differences alike. R - G is untouched by the bug, so a
+    // broken build keeps its colored pixels and can never take the skip below.
+    testWidgets('HEVC render keeps its blue channel', (tester) async {
+      final bytes = await pve.renderVideo(
+        VideoRenderData(
+          videoSegments: [VideoSegment(video: hevcVideo)],
+          outputFormat: VideoOutputFormat.mp4,
+        ),
+      );
+      final out = await tryFrameOf(EditorVideo.memory(bytes));
+      if (out == null) {
+        markTestSkipped('HDR HEVC frame not extractable on this device');
+        return;
+      }
+
+      const tolerance = 8;
+      final total = out.width * out.height;
+      var blueApart = 0, redApart = 0;
+      for (var i = 0; i < total; i++) {
+        final r = out.data.getUint8(i * 4);
+        final g = out.data.getUint8(i * 4 + 1);
+        final b = out.data.getUint8(i * 4 + 2);
+        if ((b - g).abs() > tolerance) blueApart++;
+        if ((r - g).abs() > tolerance) redApart++;
+      }
+      if (redApart < total ~/ 100) {
+        markTestSkipped('HEVC render has no colored pixels on this device');
+        return;
+      }
+      // macOS: 3381 blue vs 5735 red pixels; the broken matrix: 0 vs 5832.
+      expect(
+        blueApart,
+        greaterThan(redApart ~/ 20),
+        reason:
+            'B == G across the frame ($blueApart of $total pixels apart, '
+            '$redApart differ in R): the blue channel was replaced',
+      );
+    }, skip: kIsWeb);
   });
 }
 
