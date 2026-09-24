@@ -58,6 +58,7 @@ internal class ClipFadeOverlay(
      * one-pixel bitmap by the frame's size makes it cover the frame exactly.
      */
     override fun configure(videoSize: Size) {
+        super.configure(videoSize)
         settingsBuilder.setScale(
             max(1, videoSize.width).toFloat(),
             max(1, videoSize.height).toFloat(),
