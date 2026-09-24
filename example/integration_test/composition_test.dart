@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
+import 'package:pro_video_editor_example/core/constants/example_constants.dart';
 
 /// Integration tests for the multi-layer [VideoComposition] render path.
 ///
@@ -26,7 +27,7 @@ void main() {
   // 640x360 flagged -90° like a phone recording, so it shows 360x640.
   const testGPath = 'assets/tests/test_g.mp4';
   // HEVC Main 10, HLG/BT.2020, 1920x1080 flagged -90°, so it shows 1080x1920.
-  const hevcPath = 'assets/hevc.mp4';
+  const hevcPath = kVideoEditorExampleHevcPath;
 
   const durationTolerance = 0.3; // seconds
   const sizeTolerance = 4.0; // pixels (encoders round to even dimensions)
@@ -40,7 +41,8 @@ void main() {
   }
 
   /// Decodes the frame of [video] at [at], or returns null if none could be
-  /// extracted (some devices cannot thumbnail 10-bit HDR HEVC).
+  /// extracted (some devices cannot thumbnail 10-bit HDR HEVC). iOS and macOS
+  /// report such a frame as an empty entry rather than an empty list.
   ///
   /// The frame is requested at [size] with `cover`; with [size] in the video's
   /// own aspect ratio there is no crop, so relative positions map directly onto
@@ -59,7 +61,7 @@ void main() {
         boxFit: ThumbnailBoxFit.cover,
       ),
     );
-    if (frames.isEmpty) return null;
+    if (frames.isEmpty || frames.first.isEmpty) return null;
     final codec = await instantiateImageCodec(frames.first);
     final image = (await codec.getNextFrame()).image;
     final data = await image.toByteData();
@@ -892,6 +894,12 @@ void main() {
         ),
       );
 
+      final source = await tryFrameOf(hevc, sourceSize, at: at);
+      if (source == null) {
+        markTestSkipped('HDR HEVC frame not extractable on this device');
+        return;
+      }
+
       final result = await pve.renderVideo(
         VideoRenderData(
           composition: VideoComposition(
@@ -901,11 +909,6 @@ void main() {
         ),
       );
 
-      final source = await tryFrameOf(hevc, sourceSize, at: at);
-      if (source == null) {
-        markTestSkipped('HDR HEVC frame not extractable on this device');
-        return;
-      }
       final out = await frameOf(
         EditorVideo.memory(result),
         const Size(360, 320),
@@ -965,6 +968,12 @@ void main() {
     }, skip: skipPlatform);
 
     testWidgets('a color filter applies to an HDR layer', (tester) async {
+      final source = await tryFrameOf(hevc, sourceSize, at: at);
+      if (source == null) {
+        markTestSkipped('HDR HEVC frame not extractable on this device');
+        return;
+      }
+
       final result = await pve.renderVideo(
         VideoRenderData(
           composition: VideoComposition(
@@ -984,18 +993,15 @@ void main() {
         ),
       );
 
-      final source = await tryFrameOf(hevc, sourceSize, at: at);
-      if (source == null) {
-        markTestSkipped('HDR HEVC frame not extractable on this device');
-        return;
-      }
       final out = await frameOf(EditorVideo.memory(result), sourceSize, at: at);
 
       // Every pixel, since the sample points land on the gray face: only the
       // red hat and the gold trim have R and B far enough apart to tell.
       // Measured over ~6800 of them: swapped 110k vs kept 869k (macOS), 123k
       // vs 874k (iPad).
-      expect(out.width * out.height, source.width * source.height);
+      // Same index = same pixel only when both frames share their dimensions.
+      expect(out.width, source.width);
+      expect(out.height, source.height);
       var tested = 0, swapError = 0, keepError = 0;
       for (var i = 0; i < source.width * source.height * 4; i += 4) {
         final srcR = source.data.getUint8(i);
