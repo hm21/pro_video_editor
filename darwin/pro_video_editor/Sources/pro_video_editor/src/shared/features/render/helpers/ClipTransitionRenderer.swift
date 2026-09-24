@@ -128,8 +128,9 @@ internal enum ClipTransitionRenderer {
       // only the outgoing clip's fps left the pre-rendered transition below the
       // composition's frame rate (e.g. 25 vs 30 fps), so it was re-timed on
       // insertion and stuttered at the two seams.
-      // A side cut down by the HDR pre-transcode passes its source's rate:
-      // the shorter file's own is noisier (see `VideoClip.frameRateOverride`).
+      // A side cut down by the HDR pre-transcode passes the cadence measured
+      // from its frames: that shorter file's `nominalFrameRate` misreads it
+      // (see `VideoClip.frameRateOverride`).
       let outFps: Float
       if let outgoingFrameRate {
         outFps = outgoingFrameRate
