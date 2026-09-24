@@ -1,3 +1,6 @@
+## 2.14.1
+- **FIX**(iOS, macOS): HDR (HEVC 10-bit) videos no longer render with a color cast. The pre-transcode to SDR wrote the green channel into blue, a regression since 1.17.3.
+
 ## 2.14.0
 - **FEAT**(android, iOS, macOS): `SegmentTransform.rotation` turns a composition clip clockwise around its own centre (radians, like `Transform.rotate`). `offset`/`size` keep describing the unrotated layout box and the source is still clipped to it before the turn, so `cover` overflow is cut at the box edge rather than swinging back into view. Web, Windows and Linux ignore the field.
 

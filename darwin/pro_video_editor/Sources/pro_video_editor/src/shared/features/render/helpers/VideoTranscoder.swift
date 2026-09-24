@@ -221,7 +221,7 @@ internal class VideoTranscoder {
         colorMatrix.setValue(image, forKey: kCIInputImageKey)
         colorMatrix.setValue(CIVector(x: 1, y: 0, z: 0, w: 0), forKey: "inputRVector")
         colorMatrix.setValue(CIVector(x: 0, y: 1, z: 0, w: 0), forKey: "inputGVector")
-        colorMatrix.setValue(CIVector(x: 0, y: 1, z: 0, w: 0), forKey: "inputBVector")
+        colorMatrix.setValue(CIVector(x: 0, y: 0, z: 1, w: 0), forKey: "inputBVector")
         colorMatrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
 
         if let output = colorMatrix.outputImage {
