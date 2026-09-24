@@ -98,8 +98,8 @@ class RenderVideo {
         PluginLog.print("🔍 Checking for HEVC 10-bit videos that need transcoding...")
 
         // Pre-transcode HEVC 10-bit HDR videos to H.264 8-bit SDR. A clip that
-        // plays only part of its source comes back reading the whole of a
-        // shorter file, so every later stage sees the trimmed window.
+        // plays only part of its source comes back reading a shorter file from
+        // its start, so every later stage sees the trimmed window.
         let preTranscode: VideoTranscoder.PreTranscode
         do {
           preTranscode = try await VideoTranscoder.transcodeClipsIfNeeded(config.videoClips)
@@ -114,7 +114,8 @@ class RenderVideo {
         let transcodedFiles = preTranscode.producedFiles
 
         if !transcodedFiles.isEmpty {
-          PluginLog.print("✅ Pre-transcoded \(transcodedFiles.count) HEVC 10-bit videos to H.264")
+          PluginLog.print(
+            "✅ Pre-transcoded \(transcodedFiles.count) HEVC 10-bit sources or windows to H.264")
           workingConfig = config.copyWith(videoClips: preTranscode.clips)
         }
 

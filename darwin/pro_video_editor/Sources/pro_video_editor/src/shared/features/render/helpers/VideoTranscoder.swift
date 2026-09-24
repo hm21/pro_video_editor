@@ -14,9 +14,9 @@ internal class VideoTranscoder {
   /// Result of a transcoding operation.
   enum TranscodeResult {
     /// Transcoding succeeded. `window` is the span of the output the clip
-    /// plays when only part of the source was encoded, measured off the
-    /// written file; `nil` after a whole-source transcode, whose timeline
-    /// matches the source's.
+    /// plays when only part of the source was encoded (see
+    /// ``clipWindow(playing:writtenTrack:)``); `nil` after a whole-source
+    /// transcode, whose timeline matches the source's.
     case success(outputPath: String, window: SourceRange?)
 
     /// Transcoding failed with error
@@ -56,6 +56,20 @@ internal class VideoTranscoder {
   /// little, and several clips that together cover the source share one
   /// transcode instead of re-encoding it piecewise.
   static let trimThreshold = 0.9
+
+  /// How far past a clip window the trimmed pre-transcode encodes, as far as
+  /// the source runs.
+  ///
+  /// A trimmed export ends its audio track tens of milliseconds before its
+  /// video even where the source has sound (42 ms for 1–3 s of `hevc.mp4`).
+  /// `trimToCommonTrackEnd` reads that as a track-end mismatch and cuts it off
+  /// the clip, frames included, which a window inside the source never lost
+  /// on the whole-source transcode. Encoding past the window leaves that
+  /// shortfall behind it. As long as ``TrackEndTrimmer/maxTrackEndMismatch``,
+  /// so no shortfall the trim would act on reaches into the window.
+  static let windowTailUs = CMTimeConvertScale(
+    TrackEndTrimmer.maxTrackEndMismatch, timescale: 1_000_000, method: .default
+  ).value
 
   /// The range of the source each clip window needs encoded, or `nil` for the
   /// whole source; parallel to `windows`.
@@ -100,6 +114,29 @@ internal class VideoTranscoder {
     return SourceRange(startUs: start.value, endUs: end.value)
   }
 
+  /// The part of the source encoded for `window`: the window and up to
+  /// ``windowTailUs`` after it, as far as the source runs.
+  static func encodedRange(for window: SourceRange, sourceDurationUs: Int64) -> SourceRange {
+    SourceRange(
+      startUs: window.startUs,
+      endUs: max(window.endUs, min(sourceDurationUs, window.endUs + windowTailUs)))
+  }
+
+  /// The clip window on the trimmed pre-transcode of `window`, whose video
+  /// track spans `trackRange`.
+  ///
+  /// The output starts where `window` does, so the clip plays the window's
+  /// length of it and stops before the encoded tail. Where the written track
+  /// ends sooner, at the end of the source, which has no tail to encode, the
+  /// window ends with the track: rounded outwards (see
+  /// ``window(covering:)``), since the render cuts the clip hard at it.
+  static func clipWindow(playing window: SourceRange, writtenTrack trackRange: CMTimeRange)
+    -> SourceRange
+  {
+    let track = self.window(covering: trackRange)
+    return SourceRange(startUs: track.startUs, endUs: min(window.durationUs, track.endUs))
+  }
+
   // MARK: - Public Methods
 
   /// Checks if a video needs transcoding for effect compatibility.
@@ -126,12 +163,15 @@ internal class VideoTranscoder {
   ///
   /// - Parameters:
   ///   - videoPath: Path to the input video
-  ///   - range: The part of the source to encode; `nil` encodes all of it.
+  ///   - range: The part of the source the clip plays; `nil` encodes all of
+  ///     it. A tail after it is encoded too (see ``windowTailUs``).
+  ///   - sourceDurationUs: The source's duration, which bounds that tail
   /// - Returns: TranscodeResult indicating success or error
-  static func transcodeToH264(_ videoPath: String, range: SourceRange? = nil) async
-    -> TranscodeResult
-  {
-    let span = range.map { " [\($0.startUs)µs, \($0.endUs)µs)" } ?? ""
+  static func transcodeToH264(
+    _ videoPath: String, range: SourceRange? = nil, sourceDurationUs: Int64 = 0
+  ) async -> TranscodeResult {
+    let encoded = range.map { encodedRange(for: $0, sourceDurationUs: sourceDurationUs) }
+    let span = encoded.map { " [\($0.startUs)µs, \($0.endUs)µs)" } ?? ""
     PluginLog.print(
       "🎬 Starting HEVC 10-bit HDR → H.264 8-bit SDR transcoding for: \(videoPath)\(span)")
 
@@ -145,7 +185,7 @@ internal class VideoTranscoder {
         "transcoded_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString).mp4")
 
     do {
-      try await transcodeVideo(from: inputURL, to: outputURL, range: range)
+      try await transcodeVideo(from: inputURL, to: outputURL, range: encoded)
 
       // Verify output
       let outputInfo = await MediaInfoExtractor.getVideoFormatInfo(outputURL.path)
@@ -154,13 +194,18 @@ internal class VideoTranscoder {
         "   Output: isHevc=\(outputInfo.isHevc), bitDepth=\(outputInfo.bitDepth), isHdr=\(outputInfo.isHdr)"
       )
 
-      // The render cuts the clip hard at its window, so take it from the file
-      // the encode actually wrote rather than assume it kept `range` to the
-      // microsecond.
-      guard range != nil else { return .success(outputPath: outputURL.path, window: nil) }
+      guard let range else { return .success(outputPath: outputURL.path, window: nil) }
       let asset = AVURLAsset(url: outputURL)
       let track = try await MediaInfoExtractor.loadVideoTrack(from: asset)
-      let window = window(covering: await TrackEndTrimmer.timeRange(of: track))
+      let window = clipWindow(
+        playing: range, writtenTrack: await TrackEndTrimmer.timeRange(of: track))
+      // An empty window would drop the clip from the render without a word;
+      // failing here keeps it on the source instead.
+      guard window.durationUs > 0 else {
+        throw NSError(
+          domain: "VideoTranscoder", code: 3,
+          userInfo: [NSLocalizedDescriptionKey: "Trimmed transcode holds no video"])
+      }
       PluginLog.print("   Window: [\(window.startUs)µs, \(window.endUs)µs)")
       return .success(outputPath: outputURL.path, window: window)
 
@@ -175,9 +220,9 @@ internal class VideoTranscoder {
   ///
   /// Each source is checked once. When its clips play only a small part of it
   /// (see ``plannedRanges(for:sourceDurationUs:)``), each distinct window is
-  /// encoded on its own and its clips are rewritten to play the whole output;
-  /// otherwise the source is encoded in full, once, and its clips keep their
-  /// windows.
+  /// encoded on its own and its clips are rewritten to play it from the
+  /// output's start; otherwise the source is encoded in full, once, and its
+  /// clips keep their windows.
   ///
   /// A clip that cannot be transcoded keeps its original path: the render then
   /// runs on the HDR source, which is worse than a transcode but better than no
@@ -212,9 +257,10 @@ internal class VideoTranscoder {
         continue
       }
       let indices = clips.indices.filter { clips[$0].inputPath == path }
+      let sourceDurationUs = await durationUs(of: path)
       let ranges = plannedRanges(
         for: indices.map { (clips[$0].startUs, clips[$0].endUs) },
-        sourceDurationUs: await durationUs(of: path))
+        sourceDurationUs: sourceDurationUs)
 
       for (index, range) in zip(indices, ranges) {
         let key = TranscodeKey(path: path, range: range)
@@ -222,7 +268,7 @@ internal class VideoTranscoder {
         // second pass would re-encode the same range and leave one of the two
         // outputs with nothing to clean it up.
         if outputs[key] == nil, !failed.contains(key) {
-          switch await transcodeToH264(path, range: range) {
+          switch await transcodeToH264(path, range: range, sourceDurationUs: sourceDurationUs) {
           case .success(let outputPath, let window):
             outputs[key] = (outputPath, window)
             produced.append(outputPath)

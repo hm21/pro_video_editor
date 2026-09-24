@@ -94,6 +94,39 @@ final class TranscodePlanTests: XCTestCase {
     XCTAssertEqual(window.startUs, 0)
     XCTAssertEqual(window.endUs, 1_034_367)
   }
+
+  func testAWindowIsEncodedWithATailAsFarAsTheSourceRuns() {
+    let tail = VideoTranscoder.windowTailUs
+    XCTAssertEqual(
+      VideoTranscoder.encodedRange(
+        for: Range(startUs: 2 * second, endUs: 4 * second), sourceDurationUs: 10 * second),
+      Range(startUs: 2 * second, endUs: 4 * second + tail))
+    XCTAssertEqual(
+      VideoTranscoder.encodedRange(
+        for: Range(startUs: 8 * second, endUs: 10 * second - tail / 2),
+        sourceDurationUs: 10 * second),
+      Range(startUs: 8 * second, endUs: 10 * second))
+    // Without a known duration there is no tail, and the window stays whole.
+    XCTAssertEqual(
+      VideoTranscoder.encodedRange(
+        for: Range(startUs: 2 * second, endUs: 4 * second), sourceDurationUs: 0),
+      Range(startUs: 2 * second, endUs: 4 * second))
+  }
+
+  func testATrimmedClipPlaysItsWindowsLengthAndStopsBeforeTheTail() {
+    let window = Range(startUs: 2_010_000, endUs: 4_020_000)
+    let longer = CMTimeRange(
+      start: .zero, duration: CMTime(value: 2_510_000, timescale: 1_000_000))
+    XCTAssertEqual(
+      VideoTranscoder.clipWindow(playing: window, writtenTrack: longer),
+      Range(startUs: 0, endUs: 2_010_000))
+    // At the end of the source nothing follows the window, and a track that
+    // ends sooner ends it, rounded outwards: 31 frames at 29.97 fps.
+    let shorter = CMTimeRange(start: .zero, duration: CMTime(value: 31 * 1001, timescale: 30_000))
+    XCTAssertEqual(
+      VideoTranscoder.clipWindow(playing: window, writtenTrack: shorter),
+      Range(startUs: 0, endUs: 1_034_367))
+  }
 }
 
 // MARK: - Trimmed pre-transcode on a real encode (#192)
@@ -147,7 +180,7 @@ final class TrimmedPreTranscodeTests: XCTestCase {
       color, palette: ThumbnailTimestampFixture.palette)
   }
 
-  func testAShortClipIsTranscodedToItsWindowAndPlaysAllOfTheResult() async throws {
+  func testAShortClipIsTranscodedToItsWindowAndPlaysExactlyItsLength() async throws {
     let source = try await makeHdrSource()
     defer { try? FileManager.default.removeItem(at: source) }
 
@@ -165,17 +198,15 @@ final class TrimmedPreTranscodeTests: XCTestCase {
     let rewritten = trimmed.clips[0]
     XCTAssertEqual(rewritten.inputPath, trimmed.producedFiles.first)
 
-    // The window is the written file's own video track, whatever the encode
-    // rounded it to, since the render cuts the clip hard at it. (On the
-    // macOS/iOS 26 filter path the track ends exactly where it was asked to,
-    // so here the two agree.)
+    // The file starts at the window and runs past it, so the clip plays
+    // exactly the window's length of it; the tail after it is encoded only
+    // so the file's audio does not end inside the window.
     let track = try await videoTrackRange(rewritten.inputPath)
     let measured = VideoTranscoder.window(covering: track)
     XCTAssertEqual(rewritten.startUs, 0)
     XCTAssertEqual(rewritten.startUs, measured.startUs)
-    XCTAssertEqual(rewritten.endUs, measured.endUs)
-    let frameUs = Double(1_000_000) / Double(Self.fps)
-    XCTAssertEqual(Double(rewritten.endUs ?? 0), 1_010_000, accuracy: frameUs)
+    XCTAssertEqual(rewritten.endUs, 1_010_000)
+    XCTAssertGreaterThan(measured.endUs, 1_010_000)
 
     // It holds the window's frames: the second after 2 s, then the one after
     // 3 s at its very end. Compared against a whole-source transcode so the
@@ -186,6 +217,26 @@ final class TrimmedPreTranscodeTests: XCTestCase {
     let tail = try paletteIndex(
       rewritten.inputPath, at: Double(rewritten.endUs ?? 0) / 1_000_000 - 0.001)
     XCTAssertEqual(tail, try paletteIndex(whole.producedFiles[0], at: 3.01))
+  }
+
+  func testAWindowAtTheEndOfTheSourceEndsWithTheWrittenTrack() async throws {
+    let source = try await makeHdrSource()
+    defer { try? FileManager.default.removeItem(at: source) }
+
+    // 4.5 s to the end of the 6 s source: no tail follows it to encode.
+    let result = try await VideoTranscoder.transcodeClipsIfNeeded([
+      VideoClip(inputPath: source.path, startUs: 4_500_000)
+    ])
+    defer { VideoTranscoder.cleanupTranscodedFiles(result.producedFiles) }
+
+    XCTAssertEqual(result.producedFiles.count, 1)
+    let rewritten = result.clips[0]
+    let measured = VideoTranscoder.window(
+      covering: try await videoTrackRange(rewritten.inputPath))
+    XCTAssertEqual(rewritten.startUs, measured.startUs)
+    XCTAssertEqual(rewritten.endUs, measured.endUs)
+    let frameUs = Double(1_000_000) / Double(Self.fps)
+    XCTAssertEqual(Double(rewritten.endUs ?? 0), 1_500_000, accuracy: frameUs)
   }
 
   func testClipsOnOneSourceShareATranscodePerWindowAndEachFileIsRemovedOnce() async throws {

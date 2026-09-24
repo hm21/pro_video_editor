@@ -873,6 +873,35 @@ void main() {
       );
     });
 
+    // iOS/macOS pre-transcode only this window of the source. That export
+    // ends its audio track ~40 ms before its video, which trimToCommonTrackEnd
+    // once cut off the clip, last frame included.
+    testWidgets('trim keeps its length with trimToCommonTrackEnd', (_) async {
+      final result = await ProVideoEditor.instance.renderVideo(
+        VideoRenderData(
+          videoSegments: [
+            VideoSegment(
+              video: hevcVideo,
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 3),
+            ),
+          ],
+          outputFormat: VideoOutputFormat.mp4,
+          trimToCommonTrackEnd: true,
+        ),
+      );
+
+      final meta = await ProVideoEditor.instance.getMetadata(
+        EditorVideo.memory(result),
+      );
+      // One frame is 33 ms.
+      expect(
+        meta.duration.inMilliseconds,
+        closeTo(2000, 10),
+        reason: 'the trimmed HDR window lost its end',
+      );
+    }, skip: !isIOS && !isMacOS);
+
     testWidgets('export with speed change 2x', (_) async {
       final originalMeta = await ProVideoEditor.instance.getMetadata(hevcVideo);
       final result = await ProVideoEditor.instance.renderVideo(
