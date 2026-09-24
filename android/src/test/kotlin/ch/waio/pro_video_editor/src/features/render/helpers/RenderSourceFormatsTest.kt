@@ -65,6 +65,20 @@ internal class RenderSourceFormatsTest {
     }
 
     @Test
+    fun repeatedFormat_isListedOnce() {
+        val hlg = info("video/hevc", bitDepth = 10, transfer = MediaFormat.COLOR_TRANSFER_HLG)
+        val sdr = info("video/avc", transfer = MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+
+        assertEquals(
+            listOf(
+                mapOf("mime" to "video/avc", "transfer" to "sdr"),
+                mapOf("mime" to "video/hevc", "bitDepth" to 10, "transfer" to "hlg"),
+            ),
+            RenderSourceFormats.describeDistinct(List(30) { sdr } + hlg + sdr),
+        )
+    }
+
+    @Test
     fun unreadableSource_isAnEmptyEntry() {
         assertTrue(RenderSourceFormats.describe(info(mime = null)).isEmpty())
     }

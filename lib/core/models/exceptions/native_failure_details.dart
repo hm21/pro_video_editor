@@ -71,14 +71,14 @@ class NativeFailureDetails {
   /// its message. Null when there is none.
   final String? cause;
 
-  /// The video format of every distinct source a failed render read, in
-  /// input order.
+  /// The distinct video formats of the sources a failed render read, in
+  /// input order; sources that share a format are listed once.
   ///
   /// A failure names what broke, not what it was given: "Video frame
   /// processing error" reads the same for an HDR clip as for an SDR one,
   /// although the two take different GPU paths. Android only; null on Apple
   /// platforms, for any job other than a render, and from a plugin before
-  /// 2.15.0.
+  /// 2.16.0.
   final List<NativeSourceFormat>? sources;
 
   /// Whether any of [sources] is HDR. False when [sources] is null.
@@ -130,7 +130,7 @@ class NativeFailureDetails {
       '${sources == null ? '' : ' sources: $sources'})';
 }
 
-/// The video format of one source of a failed render.
+/// The video format of one or more sources of a failed render.
 ///
 /// Read off the file's video track. A source whose track could not be read
 /// has every field null.

@@ -11,6 +11,7 @@ void main() {
   final pve = ProVideoEditor.instance;
   final testVideo = EditorVideo.asset(kVideoEditorExampleH264Path);
 
+  final isAndroid = defaultTargetPlatform == TargetPlatform.android;
   final isWindows = defaultTargetPlatform == TargetPlatform.windows;
   final isLinux = defaultTargetPlatform == TargetPlatform.linux;
   final skipAudioTrack = kIsWeb || isWindows || isLinux;
@@ -166,6 +167,13 @@ void main() {
         final details = NativeFailureDetails.of(error! as PlatformException);
         expect(details, isNotNull, reason: 'the platform attaches its details');
         expect(details!.domain, isNotEmpty);
+        if (isAndroid) {
+          // The probe runs off the main thread after the failure; the error
+          // still arrives, with one entry for the source it could not read.
+          expect(details.sources, hasLength(1));
+          expect(details.sources!.single.mimeType, isNull);
+          expect(details.hasHdrSource, isFalse);
+        }
       },
       skip: kIsWeb || isWindows || isLinux,
     );

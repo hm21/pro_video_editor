@@ -5,7 +5,7 @@ import androidx.media3.common.util.UnstableApi
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 
 /**
- * The video format of every source a render reads, for a failed render's
+ * The video formats of the sources a render reads, for a failed render's
  * error details.
  *
  * A failure names what broke, not what it was given: `Video frame processing
@@ -20,14 +20,28 @@ import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 @UnstableApi
 object RenderSourceFormats {
 
-    /** One entry per distinct source: the clips, then the layers' clips. */
-    fun of(config: RenderConfig): List<Map<String, Any>> = (
-        config.videoClips.map { it.inputPath } +
-            (config.composition?.layers ?: emptyList())
-                .flatMap { layer -> layer.clips.map { it.inputPath } }
-        )
-        .distinct()
-        .map { describe(MediaInfoExtractor.getVideoFormatInfo(it)) }
+    /**
+     * One entry per distinct format among the clips, then the layers' clips.
+     * Opens every source, so it must not run on the main thread.
+     */
+    fun of(config: RenderConfig): List<Map<String, Any>> = describeDistinct(
+        (
+            config.videoClips.map { it.inputPath } +
+                (config.composition?.layers ?: emptyList())
+                    .flatMap { layer -> layer.clips.map { it.inputPath } }
+            )
+            .distinct()
+            .map { MediaInfoExtractor.getVideoFormatInfo(it) }
+    )
+
+    /**
+     * [infos] described in order, a format a previous source already had left
+     * out. Without the path, a repeat says nothing new, and a composition of
+     * dozens of same-format clips would otherwise push `cause` past a crash
+     * reporter's cut.
+     */
+    fun describeDistinct(infos: List<MediaInfoExtractor.VideoFormatInfo>) =
+        infos.map(::describe).distinct()
 
     fun describe(info: MediaInfoExtractor.VideoFormatInfo): Map<String, Any> {
         val mime = info.mime ?: return emptyMap()

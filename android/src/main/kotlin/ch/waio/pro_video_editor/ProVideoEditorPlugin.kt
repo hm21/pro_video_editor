@@ -471,30 +471,37 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                                 "${error.message}",
                             error
                         )
-                        // Probed only for a real failure: a cancel reports
-                        // nothing an app would triage.
-                        val sources = if (task.canceled.get()) null else {
-                            RenderSourceFormats.of(renderConfig)
-                        }
-                        mainHandler.post {
-                            val removedTask = renderTasks.settle(id, task)
-                            val code = when {
-                                removedTask?.canceled?.get() == true -> "CANCELED"
-                                // Transient codec-resource pressure gets its own
-                                // code: unlike ENCODER_NOT_SUPPORTED it is worth
-                                // retrying once codec sessions free up.
-                                error is CodecResourceExhaustedException ->
-                                    "CODEC_RESOURCE_EXHAUSTED"
+                        val report = { sources: List<Map<String, Any>>? ->
+                            mainHandler.post {
+                                val removedTask = renderTasks.settle(id, task)
+                                val code = when {
+                                    removedTask?.canceled?.get() == true -> "CANCELED"
+                                    // Transient codec-resource pressure gets its own
+                                    // code: unlike ENCODER_NOT_SUPPORTED it is worth
+                                    // retrying once codec sessions free up.
+                                    error is CodecResourceExhaustedException ->
+                                        "CODEC_RESOURCE_EXHAUSTED"
 
-                                error is VideoEncoderConfigurationException ->
-                                    "ENCODER_NOT_SUPPORTED"
+                                    error is VideoEncoderConfigurationException ->
+                                        "ENCODER_NOT_SUPPORTED"
 
-                                else -> "RENDER_ERROR"
+                                    else -> "RENDER_ERROR"
+                                }
+                                val message = error.message
+                                    ?: "${error::class.java.simpleName} (no message)"
+                                removedTask?.sendError(
+                                    code, message, FailureDetails.of(error, sources)
+                                )
                             }
-                            val message = error.message
-                                ?: "${error::class.java.simpleName} (no message)"
-                            removedTask?.sendError(code, message, FailureDetails.of(error, sources))
                         }
+                        // Probed only for a real failure: a cancel reports
+                        // nothing an app would triage. Off the main thread,
+                        // which Media3 reports on: every source is a
+                        // MediaExtractor open, and a composition can have
+                        // dozens. A probe that throws still reports the error.
+                        if (task.canceled.get()) report(null) else Thread {
+                            report(runCatching { RenderSourceFormats.of(renderConfig) }.getOrNull())
+                        }.start()
                     }
                 )
 

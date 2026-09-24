@@ -19,8 +19,8 @@ import androidx.media3.transformer.ExportException
  * - `code` / `codeName`: `ExportException.errorCode` and its name
  *   (`ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED`) from the first
  *   [ExportException] in the chain; absent when there is none.
- * - `sources`: for a failed render, the video format of every source it read
- *   (see `RenderSourceFormats`). Absent for every other job.
+ * - `sources`: for a failed render, the distinct video formats of the
+ *   sources it read (see `RenderSourceFormats`). Absent for every other job.
  * - `cause`: every throwable below the outermost one, outermost first, as
  *   `<class>: <message>` (`(no message)` for a throwable without one), each
  *   message cut to its first line. Absent when there is none.
