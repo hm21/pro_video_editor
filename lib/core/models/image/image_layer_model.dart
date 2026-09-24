@@ -91,7 +91,12 @@ class ImageLayer with TimeRangeMixin {
   /// By default an animated layer starts on its first frame. Set this to
   /// continue one animation across several layers: a layer that picks up
   /// where `previous` left off passes
-  /// `previous.animationOffset + (previous.endTime! - previous.startTime!)`.
+  ///
+  /// ```dart
+  /// previous.animationOffset +
+  ///     (previous.endTime! - (previous.startTime ?? Duration.zero))
+  /// ```
+  ///
   /// The offset counts toward [loop], so it wraps around a looping image and
   /// lands on the last frame of one that does not loop.
   ///
