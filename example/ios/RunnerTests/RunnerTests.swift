@@ -1290,6 +1290,117 @@ class DecodeOrientedImageTests: XCTestCase {
   }
 }
 
+// MARK: - Track orientation (preferredTransform) in CoreImage space
+
+/// `applyingAVFoundationTransform` must orient a frame the way AVFoundation
+/// displays it.
+///
+/// A track's `preferredTransform` is written for a y-down space, CoreImage is
+/// y-up: applied as is, a quarter turn goes the other way and a portrait phone
+/// recording in a `VideoComposition` came out upside down. Both compositor paths
+/// orient through this helper, so every orientation a display matrix can
+/// express is pinned here, with and without the translation files carry.
+///
+/// Expected quadrants are worked out in AVFoundation's y-down space, e.g. the
+/// phone turn (x, y) → (h - y, x) sends the stored top-left corner to the top
+/// right.
+class AVFoundationTransformTests: XCTestCase {
+
+  private typealias Corner = OrientedImageFixture.Corner
+
+  /// Stored size: landscape, so a quarter turn shows as a swapped extent.
+  private let width: CGFloat = 32
+  private let height: CGFloat = 16
+
+  private func assertOrients(
+    _ transform: CGAffineTransform,
+    topLeft: Corner, topRight: Corner, bottomLeft: Corner, bottomRight: Corner,
+    swapsSize: Bool,
+    file: StaticString = #filePath, line: UInt = #line
+  ) throws {
+    let jpeg = try XCTUnwrap(
+      OrientedImageFixture.quadrantJpeg(width: Int(width), height: Int(height)),
+      file: file, line: line)
+    let stored = try XCTUnwrap(CIImage(data: jpeg), file: file, line: line)
+
+    let image = applyingAVFoundationTransform(transform, to: stored)
+
+    XCTAssertEqual(image.extent.origin, .zero, file: file, line: line)
+    XCTAssertEqual(image.extent.width, swapsSize ? height : width, file: file, line: line)
+    XCTAssertEqual(image.extent.height, swapsSize ? width : height, file: file, line: line)
+    let quadrants = try XCTUnwrap(
+      OrientedImageFixture.quadrants(of: image), file: file, line: line)
+    XCTAssertEqual(quadrants.topLeft, topLeft, "top left", file: file, line: line)
+    XCTAssertEqual(quadrants.topRight, topRight, "top right", file: file, line: line)
+    XCTAssertEqual(quadrants.bottomLeft, bottomLeft, "bottom left", file: file, line: line)
+    XCTAssertEqual(quadrants.bottomRight, bottomRight, "bottom right", file: file, line: line)
+  }
+
+  /// ffprobe `rotation=-90`, what a portrait phone recording carries.
+  func testPhoneRecordingFlagTurnsClockwise() throws {
+    try assertOrients(
+      CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: height, ty: 0),
+      topLeft: .bottomLeft, topRight: .topLeft, bottomLeft: .bottomRight,
+      bottomRight: .topRight, swapsSize: true)
+  }
+
+  /// ffmpeg's `-display_rotation -90` writes the turn without a translation
+  /// (`test_g.mp4`); only the extent moves, and that is normalized away.
+  func testTheTranslationOfTheMatrixDoesNotMoveTheFrame() throws {
+    for (tx, ty) in [(CGFloat(0), CGFloat(0)), (37, -11)] {
+      try assertOrients(
+        CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: tx, ty: ty),
+        topLeft: .bottomLeft, topRight: .topLeft, bottomLeft: .bottomRight,
+        bottomRight: .topRight, swapsSize: true)
+    }
+  }
+
+  /// ffprobe `rotation=90`.
+  func testCounterClockwiseFlagTurnsCounterClockwise() throws {
+    try assertOrients(
+      CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: width),
+      topLeft: .topRight, topRight: .bottomRight, bottomLeft: .topLeft,
+      bottomRight: .bottomLeft, swapsSize: true)
+  }
+
+  func testHalfTurn() throws {
+    try assertOrients(
+      CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: width, ty: height),
+      topLeft: .bottomRight, topRight: .bottomLeft, bottomLeft: .topRight,
+      bottomRight: .topLeft, swapsSize: false)
+  }
+
+  func testHorizontalMirror() throws {
+    try assertOrients(
+      CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: width, ty: 0),
+      topLeft: .topRight, topRight: .topLeft, bottomLeft: .bottomRight,
+      bottomRight: .bottomLeft, swapsSize: false)
+  }
+
+  func testVerticalMirror() throws {
+    try assertOrients(
+      CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: height),
+      topLeft: .bottomLeft, topRight: .bottomRight, bottomLeft: .topLeft,
+      bottomRight: .topRight, swapsSize: false)
+  }
+
+  /// Mirrored quarter turns, as some front-camera recordings carry. A y-flip
+  /// on only one side of the transform turns these into each other.
+  func testTranspose() throws {
+    try assertOrients(
+      CGAffineTransform(a: 0, b: 1, c: 1, d: 0, tx: 0, ty: 0),
+      topLeft: .topLeft, topRight: .bottomLeft, bottomLeft: .topRight,
+      bottomRight: .bottomRight, swapsSize: true)
+  }
+
+  func testAntiTranspose() throws {
+    try assertOrients(
+      CGAffineTransform(a: 0, b: -1, c: -1, d: 0, tx: height, ty: width),
+      topLeft: .bottomRight, topRight: .topRight, bottomLeft: .bottomLeft,
+      bottomRight: .topLeft, swapsSize: true)
+  }
+}
+
 // MARK: - EXIF orientation test fixtures
 
 /// Builds and reads back the EXIF-orientation fixtures.

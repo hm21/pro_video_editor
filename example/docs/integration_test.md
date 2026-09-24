@@ -17,11 +17,12 @@ specification itself changes.
 | ID | Filename | Primary Purpose |
 |----|---------|-----------------|
 | A | `test_a.mp4` | Baseline / golden reference |
-| B | `test_b.mp4` | Aspect ratio & rotation metadata |
+| B | `test_b.mp4` | Portrait aspect ratio |
 | C | `test_c.mp4` | Frame rate conversion |
 | D | `test_d.mp4` | Missing audio handling |
 | E | `test_e.mp4` | Codec fallback / re-encode |
 | F | `test_f.mp4` | Audio codec and bitrate |
+| G | `test_g.mp4` | Rotation metadata (display matrix) |
 | 4K-A | `test_4k_a.mp4` | Large file / memory stress |
 | 4K-B | `test_4k_b.mp4` | Large file / memory stress |
 
@@ -51,18 +52,19 @@ specification itself changes.
 
 ---
 
-### Test B — Aspect Ratio & Rotation Metadata
+### Test B — Portrait Aspect Ratio
 
 **Purpose**
-- Validate handling of rotation metadata and non-16:9 content
+- Validate handling of non-16:9 (portrait) content
 
 **Configuration**
 - 720×1280 (9:16 portrait)
 - 30 fps
-- H.264 Main
+- H.264 High
 - AAC mono, 44.1 kHz
 - Duration: ~4s
-- Rotation metadata: 90° (not baked)
+- Rotation metadata: none. The pixels are stored portrait; for a clip that
+  carries a rotation flag, see Test G.
 
 **Tests**
 - Correct orientation after merge
@@ -143,6 +145,24 @@ specification itself changes.
 - High bitrate audio handling
 - Proper audio re-encoding when mixing codecs
 - No audio sync issues with different codecs
+
+---
+
+### Test G — Rotation Metadata
+
+**Purpose**
+- Validate that a rotation flag is applied, and in the right direction
+
+**Configuration**
+- 640×360 stored, flagged −90° (ffprobe `rotation=-90`, the convention of a
+  portrait phone recording), so it shows as 360×640
+- 30 fps
+- H.264 High
+- No audio track
+- Duration: 2s (made from `demo.mp4` with `ffmpeg -display_rotation -90`)
+
+**Tests**
+- A `VideoComposition` layer shows it upright, not turned or mirrored
 
 ---
 
