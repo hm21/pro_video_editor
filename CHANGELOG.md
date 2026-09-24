@@ -1,3 +1,7 @@
+## 2.16.0
+- **FEAT**(android): A failed render reports the video formats it read. `NativeFailureDetails.sources` lists MIME type, bit depth and transfer (`sdr`, `hlg`, `pq`), and `hasHdrSource` tells an HDR failure apart from an SDR one. Apple platforms leave it null.
+- **FIX**(android): A render failure's details now fit a crash reporter's message limit: each `cause` entry keeps only the first line of its message, so a GL error no longer carries the whole shader source.
+
 ## 2.15.0
 - **FEAT**(android, iOS, macOS): `ImageLayer.animationOffset` starts an animated layer (GIF) that far into its animation, so one animation can carry on across several layers instead of restarting at each one.
 - **FIX**(android, iOS, macOS): A `fadeToBlack`/`fadeToWhite` transition now dips the whole output frame when a custom resolution letterboxes the clip. Android dipped only a source-sized rectangle, iOS/macOS left the bars out.

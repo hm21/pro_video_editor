@@ -43,6 +43,38 @@ void main() {
       expect(details.cause, isNull);
     });
 
+    test('reads the formats of the sources a failed render read', () {
+      final details = NativeFailureDetails.of(
+        PlatformException(
+          code: 'RENDER_ERROR',
+          details: <Object?, Object?>{
+            'domain': 'androidx.media3.transformer.ExportException',
+            'sources': <Object?>[
+              <Object?, Object?>{
+                'mime': 'video/avc',
+                'bitDepth': 8,
+                'transfer': 'sdr',
+              },
+              <Object?, Object?>{
+                'mime': 'video/hevc',
+                'bitDepth': 10,
+                'transfer': 'hlg',
+              },
+              <Object?, Object?>{},
+            ],
+          },
+        ),
+      );
+
+      final sources = details!.sources!;
+      expect(sources, hasLength(3));
+      expect(sources[1].mimeType, 'video/hevc');
+      expect(sources[1].bitDepth, 10);
+      expect(sources[1].colorTransfer, 'hlg');
+      expect(sources[2].mimeType, isNull, reason: 'an unreadable source');
+      expect(details.hasHdrSource, isTrue);
+    });
+
     test('is null for an error that carries no details', () {
       expect(
         NativeFailureDetails.of(PlatformException(code: 'CANCELED')),
@@ -151,5 +183,34 @@ void main() {
       'NativeFailureDetails(AVFoundationErrorDomain -11807: '
       'NSOSStatusErrorDomain -17512: ...)',
     );
+  });
+
+  group('NativeFailureDetails.hasHdrSource', () {
+    test('is false when every source is SDR or states no transfer', () {
+      const details = NativeFailureDetails(
+        domain: 'androidx.media3.transformer.ExportException',
+        sources: [
+          NativeSourceFormat(mimeType: 'video/avc', colorTransfer: 'sdr'),
+          NativeSourceFormat(mimeType: 'video/hevc', bitDepth: 10),
+        ],
+      );
+
+      expect(details.hasHdrSource, isFalse);
+    });
+
+    test('is false when the platform reported no sources', () {
+      const details = NativeFailureDetails(domain: 'AVFoundationErrorDomain');
+
+      expect(details.hasHdrSource, isFalse);
+    });
+
+    test('counts PQ as HDR', () {
+      const details = NativeFailureDetails(
+        domain: 'androidx.media3.transformer.ExportException',
+        sources: [NativeSourceFormat(colorTransfer: 'pq')],
+      );
+
+      expect(details.hasHdrSource, isTrue);
+    });
   });
 }

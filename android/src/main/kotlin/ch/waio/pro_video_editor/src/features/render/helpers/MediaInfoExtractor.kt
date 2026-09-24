@@ -239,12 +239,21 @@ object MediaInfoExtractor {
      * @property bitDepth Color bit depth (8 or 10)
      * @property isHdr True if video has HDR metadata (HLG, HDR10, etc.)
      * @property profile Codec profile string (e.g., "hvc1.2.4.H120")
+     * @property mime The video track's MIME type, or null when no video track
+     *  could be read
+     * @property colorTransfer The video track's `MediaFormat.KEY_COLOR_TRANSFER`,
+     *  or null when the file does not state one
+     * @property bitDepthStated Whether [bitDepth] was read from the file (its
+     *  bit depth or a Main 10 profile) rather than assumed to be 8
      */
     data class VideoFormatInfo(
         val isHevc: Boolean,
         val bitDepth: Int,
         val isHdr: Boolean,
-        val profile: String?
+        val profile: String?,
+        val mime: String? = null,
+        val colorTransfer: Int? = null,
+        val bitDepthStated: Boolean = false
     ) {
         /**
          * Determines if video requires transcoding to H.264 before applying GPU effects.
@@ -276,12 +285,16 @@ object MediaInfoExtractor {
             var bitDepth = 8
             var isHdr = false
             val profile: String? = null
+            var videoMime: String? = null
+            var colorTransfer: Int? = null
+            var bitDepthStated = false
 
             for (i in 0 until extractor.trackCount) {
                 val format = extractor.getTrackFormat(i)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
 
                 if (mime.startsWith("video/")) {
+                    videoMime = mime
                     // Check if HEVC
                     isHevc = mime == "video/hevc" || mime == "video/h265"
 
@@ -289,6 +302,7 @@ object MediaInfoExtractor {
                     try {
                         if (format.containsKey("color-bit-depth")) {
                             bitDepth = format.getInteger("color-bit-depth")
+                            bitDepthStated = true
                         }
                     } catch (e: Exception) {
                         // Key not available on older devices
@@ -298,6 +312,7 @@ object MediaInfoExtractor {
                     try {
                         if (format.containsKey(MediaFormat.KEY_COLOR_TRANSFER)) {
                             val transfer = format.getInteger(MediaFormat.KEY_COLOR_TRANSFER)
+                            colorTransfer = transfer
                             // HDR transfer functions: HLG (7), PQ/HDR10 (6), Linear HDR (1)
                             isHdr = transfer == 7 || transfer == 6 || transfer == 1
                         }
@@ -338,6 +353,7 @@ object MediaInfoExtractor {
                                 // Main 10 profile = 2
                                 if (profileLevel == 2) {
                                     bitDepth = 10
+                                    bitDepthStated = true
                                 }
                             }
                         } catch (e: Exception) {
@@ -354,7 +370,9 @@ object MediaInfoExtractor {
             }
 
             extractor.release()
-            VideoFormatInfo(isHevc, bitDepth, isHdr, profile)
+            VideoFormatInfo(
+                isHevc, bitDepth, isHdr, profile, videoMime, colorTransfer, bitDepthStated
+            )
         } catch (e: Exception) {
             Log.e(RENDER_TAG, "Failed to get video format info for $videoPath: ${e.message}")
             // Return safe defaults - assume no transcoding needed

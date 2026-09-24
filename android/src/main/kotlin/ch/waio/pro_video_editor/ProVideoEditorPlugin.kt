@@ -11,6 +11,7 @@ import ch.waio.pro_video_editor.src.features.audio.models.AudioMergeConfig
 import ch.waio.pro_video_editor.src.features.metadata.Metadata
 import ch.waio.pro_video_editor.src.features.metadata.models.MetadataConfig
 import ch.waio.pro_video_editor.src.features.render.RenderVideo
+import ch.waio.pro_video_editor.src.features.render.helpers.RenderSourceFormats
 import ch.waio.pro_video_editor.src.features.render.models.CodecResourceExhaustedException
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderTask
@@ -470,6 +471,11 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                                 "${error.message}",
                             error
                         )
+                        // Probed only for a real failure: a cancel reports
+                        // nothing an app would triage.
+                        val sources = if (task.canceled.get()) null else {
+                            RenderSourceFormats.of(renderConfig)
+                        }
                         mainHandler.post {
                             val removedTask = renderTasks.settle(id, task)
                             val code = when {
@@ -487,7 +493,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                             }
                             val message = error.message
                                 ?: "${error::class.java.simpleName} (no message)"
-                            removedTask?.sendError(code, message, FailureDetails.of(error))
+                            removedTask?.sendError(code, message, FailureDetails.of(error, sources))
                         }
                     }
                 )

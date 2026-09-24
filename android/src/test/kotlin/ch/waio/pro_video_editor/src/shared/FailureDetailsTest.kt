@@ -58,6 +58,55 @@ internal class FailureDetailsTest {
     }
 
     @Test
+    fun sources_areAttachedWhenARenderPassesThem() {
+        val sources = listOf(mapOf<String, Any>("mime" to "video/hevc", "transfer" to "hlg"))
+
+        assertEquals(sources, FailureDetails.of(RuntimeException("gl"), sources)["sources"])
+        assertNull(FailureDetails.of(RuntimeException("gl"))["sources"])
+    }
+
+    @Test
+    fun sources_comeBeforeTheCauseChain() {
+        val details = FailureDetails.of(
+            IllegalStateException("render failed", RuntimeException("gl")),
+            listOf(mapOf<String, Any>("mime" to "video/hevc")),
+        )
+
+        // A crash reporter cuts a long message from the end, so the short,
+        // fixed-size entries go first.
+        assertEquals(listOf("domain", "sources", "cause"), details.keys.toList())
+    }
+
+    @Test
+    fun multiLineCause_keepsOnlyItsFirstLine() {
+        // A GL compile error: the problem, then the whole shader source.
+        val gl = RuntimeException(
+            "ERROR: 0:35: 'GL_EXT_YUV_target' : extension is not supported\n" +
+                "ERROR: 0:37: 'uTexSampler' : syntax error\n, source:\n#version 300 es\n"
+        )
+
+        val details = FailureDetails.of(IllegalStateException("render failed", gl))
+
+        assertEquals(
+            "java.lang.RuntimeException: " +
+                "ERROR: 0:35: 'GL_EXT_YUV_target' : extension is not supported",
+            details["cause"],
+        )
+    }
+
+    @Test
+    fun overlongCauseLine_isCut() {
+        val details = FailureDetails.of(
+            IllegalStateException("render failed", RuntimeException("x".repeat(1000)))
+        )
+
+        assertEquals(
+            "java.lang.RuntimeException: " + "x".repeat(240) + "…",
+            details["cause"],
+        )
+    }
+
+    @Test
     fun causeWithoutMessage_isNamedRatherThanNull() {
         val details = FailureDetails.of(IllegalStateException("render failed", IOException()))
 
