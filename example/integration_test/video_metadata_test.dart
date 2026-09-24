@@ -21,7 +21,7 @@ void main() {
   /// A H.264 video without any audio track.
   const mutedVideoPath = 'assets/demo_muted.mp4';
 
-  /// Portrait 720×1280, 30fps, carries rotation metadata.
+  /// Portrait 720×1280, 30fps, stored portrait without a rotation flag.
   const portraitVideoPath = 'assets/tests/test_b.mp4';
 
   /// Carries an AC3 (Dolby Digital) audio track.

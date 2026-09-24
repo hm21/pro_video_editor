@@ -17,7 +17,7 @@ specification itself changes.
 | ID | Filename | Primary Purpose |
 |----|---------|-----------------|
 | A | `test_a.mp4` | Baseline / golden reference |
-| B | `test_b.mp4` | Aspect ratio & rotation metadata |
+| B | `test_b.mp4` | Portrait aspect ratio |
 | C | `test_c.mp4` | Frame rate conversion |
 | D | `test_d.mp4` | Missing audio handling |
 | E | `test_e.mp4` | Codec fallback / re-encode |
@@ -52,15 +52,15 @@ specification itself changes.
 
 ---
 
-### Test B — Aspect Ratio & Rotation Metadata
+### Test B — Portrait Aspect Ratio
 
 **Purpose**
-- Validate handling of rotation metadata and non-16:9 content
+- Validate handling of non-16:9 (portrait) content
 
 **Configuration**
 - 720×1280 (9:16 portrait)
 - 30 fps
-- H.264 Main
+- H.264 High
 - AAC mono, 44.1 kHz
 - Duration: ~4s
 - Rotation metadata: none. The pixels are stored portrait; for a clip that
@@ -162,7 +162,7 @@ specification itself changes.
 - Duration: 2s (made from `demo.mp4` with `ffmpeg -display_rotation -90`)
 
 **Tests**
-- A `VideoComposition` layer shows it upright, not turned half-way
+- A `VideoComposition` layer shows it upright, not turned or mirrored
 
 ---
 
