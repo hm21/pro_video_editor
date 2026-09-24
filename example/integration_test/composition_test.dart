@@ -101,8 +101,8 @@ void main() {
   /// Whether a pixel is clearly the red background (tolerant of YUV rounding).
   bool isRed(List<int> c) => c[0] > 150 && c[1] < 90 && c[2] < 90;
 
-  /// Sample points off both centre axes, where a pixel would map onto itself
-  /// under a half turn or a mirror.
+  /// Sample points off both centre axes and both diagonals, where a pixel
+  /// would map onto itself under a turn or a mirror.
   const offAxisPoints = <Offset>[
     Offset(0.15, 0.2),
     Offset(0.35, 0.2),
@@ -122,10 +122,24 @@ void main() {
     Offset(0.85, 0.8),
   ];
 
+  /// The seven ways a frame can come out wrongly oriented, each as the map
+  /// from a relative output position to the source position it then shows: a
+  /// half turn is what a clip flagged ±90° gives when the flag turns it the
+  /// wrong way, a quarter turn a dropped flag, and a mirror a y-flip on only
+  /// one side of the transform.
+  final wrongOrientations = <String, Offset Function(Offset)>{
+    'turned half-way': (p) => Offset(1 - p.dx, 1 - p.dy),
+    'turned a quarter clockwise': (p) => Offset(p.dy, 1 - p.dx),
+    'turned a quarter counter-clockwise': (p) => Offset(1 - p.dy, p.dx),
+    'mirrored left to right': (p) => Offset(1 - p.dx, p.dy),
+    'mirrored top to bottom': (p) => Offset(p.dx, 1 - p.dy),
+    'transposed': (p) => Offset(p.dy, p.dx),
+    'anti-transposed': (p) => Offset(1 - p.dy, 1 - p.dx),
+  };
+
   /// Expects the strip of [out] from the relative x [left] over [width] to
-  /// show [source] upright: closer to it than to its half turn, which is what
-  /// a clip flagged ±90° shows when the flag turns it the wrong way, and than
-  /// to its mirror image.
+  /// show [source] upright: closer to it than to any of its
+  /// [wrongOrientations].
   void expectUpright(
     _Frame out,
     _Frame source, {
@@ -145,22 +159,16 @@ void main() {
     }
 
     final upright = distance((p) => p);
-    final turned = distance((p) => Offset(1 - p.dx, 1 - p.dy));
-    final mirrored = distance((p) => Offset(1 - p.dx, p.dy));
-    expect(
-      upright,
-      lessThan(turned),
-      reason:
-          'Layer at x=$left is upside down: $turned off its source turned '
-          'half-way, $upright off it upright',
-    );
-    expect(
-      upright,
-      lessThan(mirrored),
-      reason:
-          'Layer at x=$left is mirrored: $mirrored off its source mirrored, '
-          '$upright off it upright',
-    );
+    for (final wrong in wrongOrientations.entries) {
+      final off = distance(wrong.value);
+      expect(
+        upright,
+        lessThan(off),
+        reason:
+            'Layer at x=$left is ${wrong.key}: $off off its source '
+            '${wrong.key}, $upright off it upright',
+      );
+    }
   }
 
   group('Composition - Basics', () {
