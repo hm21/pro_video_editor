@@ -67,8 +67,8 @@ internal struct VideoClip: Sendable {
   }
 
   /// This clip playing `startUs..<endUs` of `inputPath` instead of its own
-  /// source window; every other setting is kept, and `frameRateOverride`
-  /// only replaced when one is given.
+  /// source window; every other setting is kept. `frameRateOverride` is the
+  /// new file's: a cadence measured on the old one does not carry over.
   func reading(
     _ inputPath: String, startUs: Int64?, endUs: Int64?, frameRateOverride: Float? = nil
   ) -> VideoClip {
@@ -84,7 +84,7 @@ internal struct VideoClip: Sendable {
       transform: transform,
       chromaKey: chromaKey,
       suppressChromaKey: suppressChromaKey,
-      frameRateOverride: frameRateOverride ?? self.frameRateOverride
+      frameRateOverride: frameRateOverride
     )
   }
 
