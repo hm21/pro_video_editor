@@ -20,6 +20,7 @@ class NativeFailureDetails {
     this.code,
     this.codeName,
     this.cause,
+    this.sources,
   });
 
   /// Reads the details a native handler attached to [error], or `null` when
@@ -32,11 +33,18 @@ class NativeFailureDetails {
     final code = details['code'];
     final codeName = details['codeName'];
     final cause = details['cause'];
+    final sources = details['sources'];
     return NativeFailureDetails(
       domain: domain,
       code: code is int ? code : null,
       codeName: codeName is String ? codeName : null,
       cause: cause is String ? cause : null,
+      sources: sources is List
+          ? [
+              for (final source in sources)
+                if (source is Map) NativeSourceFormat._fromMap(source),
+            ]
+          : null,
     );
   }
 
@@ -59,8 +67,22 @@ class NativeFailureDetails {
 
   /// The failures underneath the reported one, outermost first, joined with
   /// ` <- `: the `NSUnderlyingErrorKey` chain on Apple platforms, the Java
-  /// cause chain on Android. Null when there is none.
+  /// cause chain on Android, where each entry keeps only the first line of
+  /// its message. Null when there is none.
   final String? cause;
+
+  /// The distinct video formats of the sources a failed render read, in
+  /// input order; sources that share a format are listed once.
+  ///
+  /// A failure names what broke, not what it was given: "Video frame
+  /// processing error" reads the same for an HDR clip as for an SDR one,
+  /// although the two take different GPU paths. Android only; null on Apple
+  /// platforms, for any job other than a render, and from a plugin before
+  /// 2.16.0.
+  final List<NativeSourceFormat>? sources;
+
+  /// Whether any of [sources] is HDR. False when [sources] is null.
+  bool get hasHdrSource => sources?.any((source) => source.isHdr) ?? false;
 
   /// Whether the job failed because the device has no room left for its
   /// output.
@@ -104,5 +126,47 @@ class NativeFailureDetails {
       'NativeFailureDetails($domain'
       '${code == null ? '' : ' $code'}'
       '${codeName == null ? '' : ' $codeName'}'
-      '${cause == null ? '' : ': $cause'})';
+      '${cause == null ? '' : ': $cause'}'
+      '${sources == null ? '' : ' sources: $sources'})';
+}
+
+/// The video format of one or more sources of a failed render.
+///
+/// Read off the file's video track. A source whose track could not be read
+/// has every field null.
+class NativeSourceFormat {
+  /// Creates a source format as the platform reported it.
+  const NativeSourceFormat({this.mimeType, this.bitDepth, this.colorTransfer});
+
+  factory NativeSourceFormat._fromMap(Map<Object?, Object?> map) {
+    final mimeType = map['mime'];
+    final bitDepth = map['bitDepth'];
+    final colorTransfer = map['transfer'];
+    return NativeSourceFormat(
+      mimeType: mimeType is String ? mimeType : null,
+      bitDepth: bitDepth is int ? bitDepth : null,
+      colorTransfer: colorTransfer is String ? colorTransfer : null,
+    );
+  }
+
+  /// The video track's MIME type, e.g. `video/hevc`.
+  final String? mimeType;
+
+  /// Bits per color channel, e.g. 10 for an HDR recording. Null when the
+  /// file does not state it.
+  final int? bitDepth;
+
+  /// The transfer function the file states: `sdr`, `hlg`, `pq`, `linear`, or
+  /// the platform's raw value for any other. Null when the file states none.
+  final String? colorTransfer;
+
+  /// Whether the source is HDR: an HLG or PQ transfer, which is what makes the
+  /// renderer tone-map it.
+  bool get isHdr => colorTransfer == 'hlg' || colorTransfer == 'pq';
+
+  @override
+  String toString() =>
+      '${mimeType ?? 'unreadable'}'
+      '${bitDepth == null ? '' : ' $bitDepth-bit'}'
+      '${colorTransfer == null ? '' : ' $colorTransfer'}';
 }
