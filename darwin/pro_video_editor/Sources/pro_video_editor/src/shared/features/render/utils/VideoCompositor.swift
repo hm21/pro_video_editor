@@ -536,6 +536,33 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     renderContext = newRenderContext
   }
 
+  /// `image` transformed by `transform`, an AVFoundation transform such as a
+  /// track's `preferredTransform`, with its extent moved back to the origin.
+  ///
+  /// AVFoundation transforms assume a top-left origin (y down), CIImage a
+  /// bottom-left one (y up). Applied to a CIImage as is, a rotation turns the
+  /// other way: the 90° of a portrait phone recording becomes -90°, and the
+  /// frame comes out upside down. So the image is flipped into y-down space
+  /// for the transform and flipped back afterwards.
+  private func applyingAVFoundationTransform(
+    _ transform: CGAffineTransform, to image: CIImage
+  ) -> CIImage {
+    let flipY = CGAffineTransform(scaleX: 1, y: -1)
+      .translatedBy(x: 0, y: -image.extent.height)
+    var out = image.transformed(by: flipY.concatenating(transform))
+
+    let flipBack = CGAffineTransform(scaleX: 1, y: -1)
+      .translatedBy(x: 0, y: -out.extent.height)
+    out = out.transformed(by: flipBack)
+
+    let extent = out.extent
+    if extent.origin.x != 0 || extent.origin.y != 0 {
+      out = out.transformed(
+        by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y))
+    }
+    return out
+  }
+
   /// Composites all layers of a layered instruction onto the composition canvas.
   ///
   /// Layers are drawn bottom-to-top over the instruction's background color.
@@ -570,9 +597,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       //    metadata), then normalize the extent back to the origin.
       let preferred = placement.preferredTransform
       if !preferred.isIdentity {
-        img = img.transformed(by: preferred)
-        img = img.transformed(
-          by: CGAffineTransform(translationX: -img.extent.origin.x, y: -img.extent.origin.y))
+        img = applyingAVFoundationTransform(preferred, to: img)
       }
 
       let srcSize = img.extent.size
@@ -733,10 +758,6 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       // This ensures all videos are properly sized and oriented before applying user effects.
       // The layerInstruction contains the preferredTransform which already handles video rotation
       // from portrait to landscape or vice versa, so no additional orientation correction is needed.
-      //
-      // IMPORTANT: AVFoundation uses a top-left origin coordinate system (Y points down),
-      // while CIImage uses a bottom-left origin (Y points up). We need to convert the transform
-      // to work correctly with CIImage's coordinate system.
 
       // Extract layer instruction from CustomVideoCompositionInstruction
       var layerInstruction: AVVideoCompositionLayerInstruction?
@@ -761,42 +782,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         )
 
         if hasTransform && !startTransform.isIdentity {
-          // Convert AVFoundation transform to CIImage coordinate system:
-          // 1. Flip Y axis before transform (go from CIImage coords to AVFoundation coords)
-          // 2. Apply the AVFoundation transform
-          // 3. Flip Y axis after transform (go back to CIImage coords)
-          let imageHeight = outputImage.extent.height
-
-          // Flip Y: translate to top, scale Y by -1
-          let flipY = CGAffineTransform(scaleX: 1, y: -1)
-            .translatedBy(x: 0, y: -imageHeight)
-
-          // Convert transform: flipY * transform * flipY^-1
-          // But since flipY is its own inverse (when combined with translate), we use:
-          // result = flipY * transform * flipY (adjusted for new height after transform)
-          let convertedTransform =
-            flipY
-            .concatenating(startTransform)
-
-          outputImage = outputImage.transformed(by: convertedTransform)
-
-          // After transform, we need to flip back and normalize
-          let transformedExtent = outputImage.extent
-          let newHeight = transformedExtent.height
-          let flipBack = CGAffineTransform(scaleX: 1, y: -1)
-            .translatedBy(x: 0, y: -newHeight)
-
-          outputImage = outputImage.transformed(by: flipBack)
-
-          // Normalize position to origin
-          let finalExtent = outputImage.extent
-          if finalExtent.origin.x != 0 || finalExtent.origin.y != 0 {
-            let translation = CGAffineTransform(
-              translationX: -finalExtent.origin.x,
-              y: -finalExtent.origin.y
-            )
-            outputImage = outputImage.transformed(by: translation)
-          }
+          outputImage = applyingAVFoundationTransform(startTransform, to: outputImage)
         }
       }
     }

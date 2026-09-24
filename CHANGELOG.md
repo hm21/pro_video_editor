@@ -1,3 +1,6 @@
+## 2.14.3
+- **FIX**(iOS, macOS): A clip with a rotation flag, such as any portrait phone recording, no longer renders upside down in a `VideoComposition`.
+
 ## 2.14.2
 - **PERF**(iOS, macOS): A trimmed segment of an HDR (HEVC 10-bit) video now pre-transcodes only the part that is exported, so a 10 s export from a one-minute clip no longer re-encodes the whole minute first (#192).
 
