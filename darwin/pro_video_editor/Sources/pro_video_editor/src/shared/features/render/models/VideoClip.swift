@@ -55,6 +55,24 @@ internal struct VideoClip: Sendable {
     self.suppressChromaKey = suppressChromaKey
   }
 
+  /// This clip playing `startUs..<endUs` of `inputPath` instead of its own
+  /// source window; every other setting is kept.
+  func reading(_ inputPath: String, startUs: Int64?, endUs: Int64?) -> VideoClip {
+    VideoClip(
+      inputPath: inputPath,
+      startUs: startUs,
+      endUs: endUs,
+      volume: volume,
+      playbackSpeed: playbackSpeed,
+      reverseVideo: reverseVideo,
+      transition: transition,
+      timelineStartUs: timelineStartUs,
+      transform: transform,
+      chromaKey: chromaKey,
+      suppressChromaKey: suppressChromaKey
+    )
+  }
+
   /// Parses a clip from a platform-channel map. Used by both the single-track
   /// (`videoClips`) and the layered (`composition`) paths.
   static func fromMap(_ clipMap: [String: Any]) -> VideoClip? {
