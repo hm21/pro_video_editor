@@ -1,3 +1,6 @@
+## 2.14.3
+- **FIX**(android): An HDR clip (10-bit HEVC, as newer phones record) no longer fails every render with `Video frame processing error` on a device whose GPU driver lacks `GL_EXT_YUV_target`, which is common below Android 12. Media3's OpenGL tone-mapper cannot run there, so the clip is read as SDR instead: its colors come out flatter than the source, but the export finishes. Devices that have the extension render exactly as before.
+
 ## 2.14.2
 - **PERF**(iOS, macOS): A trimmed segment of an HDR (HEVC 10-bit) video now pre-transcodes only the part that is exported, so a 10 s export from a one-minute clip no longer re-encodes the whole minute first (#192).
 

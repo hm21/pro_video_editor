@@ -89,6 +89,15 @@ object VideoTranscoder {
             "transcoded_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}.mp4"
         )
 
+        val hdrMode = HdrToneMapping.sdrHdrMode()
+        Log.d(
+            RENDER_TAG, "HDR -> SDR via " + if (HdrToneMapping.isOpenGlToneMapSupported) {
+                "the OpenGL tone-mapper"
+            } else {
+                "reading HDR as SDR (no GL_EXT_YUV_target)"
+            }
+        )
+
         val resultRef = AtomicReference<TranscodeResult>()
         val latch = CountDownLatch(1)
         val mainHandler = Handler(Looper.getMainLooper())
@@ -137,18 +146,16 @@ object VideoTranscoder {
                     .setUri(inputPath)
                     .build()
 
-                // Use HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL to convert HDR to SDR
-                // This forces 8-bit output which then allows H.264 encoding
                 val editedMediaItem = EditedMediaItem.Builder(mediaItem)
                     .setRemoveAudio(false)
                     .setRemoveVideo(false)
                     .build()
 
-                // Build composition with HDR tonemapping enabled
+                // SDR output is what lets the encoder write 8-bit H.264; see
+                // [HdrToneMapping] for why the route there depends on the device.
                 val sequence = EditedMediaItemSequence.Builder(editedMediaItem).build()
                 val composition = Composition.Builder(sequence)
-                    // Force HDR to SDR conversion - this enables H.264 encoding
-                    .setHdrMode(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL)
+                    .setHdrMode(hdrMode)
                     .build()
 
                 transformer.start(composition, outputFile.absolutePath)

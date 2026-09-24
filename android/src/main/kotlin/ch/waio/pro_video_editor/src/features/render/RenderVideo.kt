@@ -23,6 +23,7 @@ import ch.waio.pro_video_editor.src.features.render.helpers.applyComposition
 import ch.waio.pro_video_editor.src.features.render.helpers.VolumeControlAudioMixerFactory
 import ch.waio.pro_video_editor.src.features.render.helpers.ConfigurableInAppMp4Muxer
 import ch.waio.pro_video_editor.src.features.render.helpers.VideoTranscoder
+import ch.waio.pro_video_editor.src.features.render.helpers.HdrToneMapping
 import ch.waio.pro_video_editor.src.features.render.helpers.VideoReverser
 import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionGeometry
 import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionRenderer
@@ -111,6 +112,8 @@ class RenderVideo(private val context: Context) {
      * 1. GPU effects are used with HEVC 10-bit HDR videos
      * 2. Multiple videos are being merged and at least one is HEVC 10-bit
      *    (mixing different codecs in a composition can cause frame processing errors)
+     * 3. The device cannot run Media3's OpenGL tone-mapper and any clip is
+     *    HEVC 10-bit HDR (see [HdrToneMapping])
      */
     private fun needsPreTranscoding(config: RenderConfig): Boolean {
         // Check for GPU effects
@@ -133,8 +136,30 @@ class RenderVideo(private val context: Context) {
             }
         }
 
+        // Whenever Media3 cannot keep HDR (always below API 31) it falls back
+        // to the OpenGL tone-mapper, so on a driver that cannot run it an HDR
+        // clip fails the main render outright. The pre-transcode reads it as
+        // SDR instead. The GL probe runs first: it is cached, and on most
+        // devices it passes, which spares every render a probe of its files.
+        if (!HdrToneMapping.isOpenGlToneMapSupported &&
+            preTranscodeInputPaths(config).any(VideoTranscoder::needsTranscoding)
+        ) {
+            Log.d(
+                RENDER_TAG, "HEVC 10-bit HDR clip on a device without the OpenGL " +
+                        "tone-mapper, pre-transcoding to SDR"
+            )
+            return true
+        }
+
         return false
     }
+
+    /** Every source the pre-transcode stage looks at: the clips and the layers' clips. */
+    private fun preTranscodeInputPaths(config: RenderConfig): List<String> = (
+        config.videoClips.map { it.inputPath } +
+            (config.composition?.layers ?: emptyList())
+                .flatMap { layer -> layer.clips.map { it.inputPath } }
+        ).distinct()
 
     /**
      * Starts an asynchronous video render job.
@@ -228,13 +253,8 @@ class RenderVideo(private val context: Context) {
                         // transcoded too. ChromaKeyEffect is an ES 2.0 SDR
                         // shader and hard-fails on an HDR input, so leaving the
                         // layered clips untouched here aborted the export.
-                        val inputPaths = (
-                            workingConfig.videoClips.map { it.inputPath } +
-                                (workingConfig.composition?.layers ?: emptyList())
-                                    .flatMap { layer -> layer.clips.map { it.inputPath } }
-                            ).distinct()
                         val transcodeMap = VideoTranscoder.transcodeClipsIfNeeded(
-                            context, inputPaths
+                            context, preTranscodeInputPaths(workingConfig)
                         )
                         transcodedFiles = transcodeMap.values
                             .filter { it.contains("transcoded_") }
