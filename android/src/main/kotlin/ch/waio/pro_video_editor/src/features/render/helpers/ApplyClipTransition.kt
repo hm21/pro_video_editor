@@ -1,6 +1,7 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
 import android.graphics.Bitmap
+import androidx.media3.common.util.Size
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.StaticOverlaySettings
@@ -22,12 +23,14 @@ import kotlin.math.max
  * **after** any per-clip [androidx.media3.effect.SpeedChangeEffect] so the
  * windows are expressed in output-local time via [clipDurationUs].
  *
+ * The overlay covers whatever frame it is drawn onto, so it keeps covering
+ * the whole output when a `Presentation` ahead of it letterboxes the clip into
+ * a canvas of another size.
+ *
  * @param dipColor ARGB color the clip dips to/from (e.g. black or white).
  */
 @UnstableApi
 internal class ClipFadeOverlay(
-    videoWidth: Int,
-    videoHeight: Int,
     dipColor: Int,
     private val clipDurationUs: Long,
     private val fadeInUs: Long,
@@ -35,16 +38,31 @@ internal class ClipFadeOverlay(
     private val curve: String,
 ) : BitmapOverlay() {
 
+    /**
+     * A single pixel of the dip color, stretched over the frame by
+     * [settingsBuilder]'s scale. A solid color needs no more, and a frame-sized
+     * bitmap would hold megabytes per dipped clip for the whole render.
+     */
     private val dipBitmap: Bitmap =
-        Bitmap.createBitmap(
-            max(1, videoWidth),
-            max(1, videoHeight),
-            Bitmap.Config.ARGB_8888,
-        ).apply { eraseColor(dipColor) }
+        Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+            .apply { eraseColor(dipColor) }
 
     private val settingsBuilder = StaticOverlaySettings.Builder()
         .setOverlayFrameAnchor(0f, 0f)
         .setBackgroundFrameAnchor(0f, 0f)
+
+    /**
+     * Media3 hands every overlay the size of the frame it is drawn onto before
+     * the first frame, and again whenever that size changes. Media3 lays an
+     * overlay out at its own pixel size relative to that frame, so scaling the
+     * one-pixel bitmap by the frame's size makes it cover the frame exactly.
+     */
+    override fun configure(videoSize: Size) {
+        settingsBuilder.setScale(
+            max(1, videoSize.width).toFloat(),
+            max(1, videoSize.height).toFloat(),
+        )
+    }
 
     /**
      * Smallest presentation timestamp seen so far. Media3 does **not** present

@@ -1015,15 +1015,17 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       outputImage = outputImage.cropped(to: imageRect)
     }
 
-    // Apply dip-to-color (fade-to-black / fade-to-white) clip transitions last,
-    // so the entire composed frame (including overlays) dips uniformly.
-    outputImage = applyFadeDip(to: outputImage, at: request.compositionTime)
-
     // Letterbox into the exact output canvas when a custom resolution was
     // requested: scale to fit (preserving aspect ratio), center, pad with black.
     if let target = outputResolution {
       outputImage = letterbox(outputImage, into: target)
     }
+
+    // Apply dip-to-color (fade-to-black / fade-to-white) clip transitions last,
+    // so the entire composed frame (including overlays and the letterbox bars)
+    // dips uniformly. Before the letterbox, a fade-to-white would leave the bars
+    // black around a white clip.
+    outputImage = applyFadeDip(to: outputImage, at: request.compositionTime)
 
     guard let outputBuffer = request.renderContext.newPixelBuffer() else {
       request.finish(with: NSError(domain: "VideoCompositor", code: -2, userInfo: nil))

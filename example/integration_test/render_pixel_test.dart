@@ -547,6 +547,67 @@ void main() {
       );
     }, skip: kIsWeb);
   });
+
+  group('Dip transition on a letterboxed canvas', () {
+    testWidgets('fadeToWhite dips the whole output frame, bars included', (
+      tester,
+    ) async {
+      // A 16:9 source letterboxed onto a taller 9:16 canvas: the bars above
+      // and below the picture are part of the output frame and must dip too.
+      final bytes = await pve.renderVideo(
+        VideoRenderData(
+          videoSegments: [
+            VideoSegment(
+              video: h264Video,
+              endTime: const Duration(seconds: 2),
+              transition: const ClipTransition(
+                type: ClipTransitionType.fadeToWhite,
+                duration: Duration(seconds: 1),
+              ),
+            ),
+            VideoSegment(
+              video: h264Video,
+              startTime: const Duration(seconds: 2),
+              endTime: const Duration(seconds: 4),
+            ),
+          ],
+          outputFormat: VideoOutputFormat.mp4,
+          qualityConfig: VideoQualityConfig.custom(
+            bitrate: 4000000,
+            resolution: const Size(720, 1280),
+          ),
+        ),
+      );
+      final out = EditorVideo.memory(bytes);
+
+      const bars = [
+        Offset(0.05, 0.05),
+        Offset(0.5, 0.1),
+        Offset(0.95, 0.2),
+        Offset(0.05, 0.8),
+        Offset(0.5, 0.9),
+        Offset(0.95, 0.95),
+      ];
+
+      // Away from the seam the bars are black, so the check below means
+      // something.
+      final calm = await frameOf(out, at: const Duration(milliseconds: 500));
+      expect(
+        _meanLuma(calm, bars),
+        lessThan(40),
+        reason: 'expected black letterbox bars outside the dip',
+      );
+
+      final seam = await frameOf(out, at: const Duration(seconds: 2));
+      for (final p in [...bars, const Offset(0.5, 0.5)]) {
+        expect(
+          _luma(seam.at(p.dx, p.dy)),
+          greaterThan(180),
+          reason: 'pixel ${p.dx},${p.dy} did not dip to white',
+        );
+      }
+    }, skip: kIsWeb);
+  });
 }
 
 // ---------------------------------------------------------------------------

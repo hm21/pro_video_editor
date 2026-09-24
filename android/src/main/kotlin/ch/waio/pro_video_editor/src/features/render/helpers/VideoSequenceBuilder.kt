@@ -742,20 +742,14 @@ class VideoSequenceBuilder(
         }
 
         // Attach the dip (fade-to-black/white) overlay LAST so the entire
-        // composed frame — including any image-layer overlays — dips to the
-        // transition color at the clip boundary. The overlay is added after
-        // scale, so size the solid-color bitmap to cover the post-scale frame
-        // (centered, oversized overflow is clipped by Media3).
+        // composed frame — including any image-layer overlays and the
+        // letterbox a custom output resolution adds — dips to the transition
+        // color at the clip boundary. The overlay sizes itself to the frame it
+        // is drawn onto, whatever scale, crop or Presentation came before it.
         fadeInfo?.let { info ->
-            val sx = scaleX ?: 1f
-            val sy = scaleY ?: 1f
-            val dipW = maxOf(videoWidth, (videoWidth * sx).toInt())
-            val dipH = maxOf(videoHeight, (videoHeight * sy).toInt())
             clipVideoEffects += OverlayEffect(
                 listOf(
                     ClipFadeOverlay(
-                        videoWidth = dipW,
-                        videoHeight = dipH,
                         dipColor = info.dipColor,
                         clipDurationUs = info.clipDurationUs,
                         fadeInUs = info.fadeInUs,
