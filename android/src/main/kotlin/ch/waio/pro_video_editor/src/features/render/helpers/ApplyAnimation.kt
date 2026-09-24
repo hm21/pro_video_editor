@@ -178,7 +178,12 @@ internal fun animatedFrameIndex(
 
     val effectiveStartUs = if (layerStartUs == -1L) 0L else layerStartUs
     val elapsedUs = (presentationTimeUs - effectiveStartUs).coerceAtLeast(0L)
-    val t = (elapsedUs + animationOffsetUs.coerceAtLeast(0L)).let {
+    // Folded into one playthrough before it is added, so a huge offset cannot
+    // overflow the sum; the frame it lands on is the same.
+    val offsetUs = animationOffsetUs.coerceAtLeast(0L).let {
+        if (loop) it % totalDurationUs else it.coerceAtMost(totalDurationUs)
+    }
+    val t = (elapsedUs + offsetUs).let {
         if (loop) it % totalDurationUs else it.coerceAtMost(totalDurationUs - 1)
     }
 

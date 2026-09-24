@@ -59,7 +59,10 @@ func animatedFrameIndex(
   else { return 0 }
   let effectiveStartUs = startUs == -1 ? 0 : startUs
   let elapsedUs = max(0, currentTimeUs - effectiveStartUs)
-  var t = elapsedUs + max(0, animationOffsetUs)
+  // Folded into one playthrough before it is added, so a huge offset cannot
+  // overflow the sum (which traps); the frame it lands on is the same.
+  let offsetUs = max(0, animationOffsetUs)
+  var t = elapsedUs + (loop ? offsetUs % totalDurationUs : min(offsetUs, totalDurationUs))
   t = loop ? t % totalDurationUs : min(t, totalDurationUs - 1)
   for (index, end) in frameEndsUs.enumerated() where t < end {
     return index

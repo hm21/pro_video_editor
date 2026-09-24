@@ -54,6 +54,14 @@ internal class AnimatedFrameIndexTest {
     }
 
     @Test
+    fun aHugeOffset_doesNotOverflow() {
+        // Long.MAX_VALUE µs lands 775_807 µs into a 2 s playthrough, so 250 ms
+        // after the layer appears it is 1_025_807 µs in: frame 2.
+        assertEquals(2, index(1_250_000, offsetUs = Long.MAX_VALUE))
+        assertEquals(3, index(3_000_000, offsetUs = Long.MAX_VALUE, loop = false))
+    }
+
+    @Test
     fun beforeTheLayerAppears_showsTheFrameItOpensOn() {
         assertEquals(2, index(0, offsetUs = 1_000_000))
     }

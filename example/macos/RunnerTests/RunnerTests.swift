@@ -329,6 +329,17 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(gifFrame(at: 0, offsetUs: 1_000_000), 2)
   }
 
+  func testAnimatedLayerFromTheStartOfTheVideoCountsFromZero() {
+    XCTAssertEqual(gifFrame(at: 250_000, startUs: -1, offsetUs: 500_000), 1)
+  }
+
+  // Int64.max µs lands 775_807 µs into a 2 s playthrough. Adding it to the
+  // elapsed time unreduced traps on overflow and takes the app down.
+  func testHugeAnimationOffsetDoesNotOverflow() {
+    XCTAssertEqual(gifFrame(at: 1_250_000, offsetUs: .max), 2)
+    XCTAssertEqual(gifFrame(at: 3_000_000, offsetUs: .max, loop: false), 3)
+  }
+
   func testNegativeAnimationOffsetIsTreatedAsNone() {
     XCTAssertEqual(gifFrame(at: 1_250_000, offsetUs: -700_000), 0)
   }
