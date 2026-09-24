@@ -15,7 +15,7 @@ void main() {
   const testAPath =
       'assets/tests/test_a.mp4'; // Baseline 1920×1080, 30fps, H.264, AAC stereo
   const testBPath =
-      'assets/tests/test_b.mp4'; // Portrait 720×1280, 30fps, rotation metadata
+      'assets/tests/test_b.mp4'; // Portrait 720×1280, 30fps, no rotation flag
   const testCPath = 'assets/tests/test_c.mp4'; // 1920×1080, 60fps
   const testDPath = 'assets/tests/test_d.mp4'; // 1920×1080, 30fps, no audio
   const testEPath = 'assets/tests/test_e.mp4'; // 1920×1080, 30fps, HEVC
@@ -1070,7 +1070,7 @@ void main() {
     testWidgets('Merge video with rotation metadata (B) with baseline (A)', (
       tester,
     ) async {
-      final videoB = EditorVideo.asset(testBPath); // Has rotation metadata
+      final videoB = EditorVideo.asset(testBPath); // Stored portrait
       final videoA = EditorVideo.asset(testAPath);
 
       final metadataB = await ProVideoEditor.instance.getMetadata(videoB);

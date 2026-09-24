@@ -280,6 +280,77 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(off.y, 0, accuracy: 1e-6)
   }
 
+  // MARK: - Animated layer frame lookup
+
+  // Four frames of 500 ms each: one playthrough lasts 2 s.
+  private let gifFrameEndsUs: [Int64] = [500_000, 1_000_000, 1_500_000, 2_000_000]
+
+  private func gifFrame(
+    at timeUs: Int64, startUs: Int64 = 1_000_000, offsetUs: Int64 = 0, loop: Bool = true
+  ) -> Int {
+    animatedFrameIndex(
+      atUs: timeUs, startUs: startUs, animationOffsetUs: offsetUs,
+      frameEndsUs: gifFrameEndsUs, loop: loop)
+  }
+
+  func testAnimatedLayerWithoutAnOffsetOpensOnItsFirstFrame() {
+    XCTAssertEqual(gifFrame(at: 1_000_000), 0)
+    XCTAssertEqual(gifFrame(at: 1_250_000), 0)
+    XCTAssertEqual(gifFrame(at: 1_750_000), 1)
+  }
+
+  func testAnimationOffsetStartsPlaybackThatFarIn() {
+    XCTAssertEqual(gifFrame(at: 1_000_000, offsetUs: 1_000_000), 2)
+    XCTAssertEqual(gifFrame(at: 1_750_000, offsetUs: 1_000_000), 3)
+  }
+
+  func testALayerPickingUpWhereAnotherLeftOffContinuesItsAnimation() {
+    let times = stride(from: Int64(0), to: 3_000_000, by: 40_000)
+    let single = times.map { gifFrame(at: $0, startUs: 0) }
+    let split = times.map {
+      $0 < 1_000_000
+        ? gifFrame(at: $0, startUs: 0)
+        : gifFrame(at: $0, startUs: 1_000_000, offsetUs: 1_000_000)
+    }
+    XCTAssertEqual(single, split)
+  }
+
+  func testAnimationOffsetWrapsAroundALoopingAnimation() {
+    XCTAssertEqual(gifFrame(at: 1_250_000, offsetUs: 2_500_000), 1)
+    XCTAssertEqual(gifFrame(at: 1_000_000, offsetUs: 4_000_000), 0)
+  }
+
+  func testAnimationOffsetPastTheEndHoldsTheLastFrameWithoutLooping() {
+    XCTAssertEqual(gifFrame(at: 1_000_000, offsetUs: 5_000_000, loop: false), 3)
+    XCTAssertEqual(gifFrame(at: 1_000_000, offsetUs: 1_000_000, loop: false), 2)
+  }
+
+  func testAnimatedLayerBeforeItAppearsShowsTheFrameItOpensOn() {
+    XCTAssertEqual(gifFrame(at: 0, offsetUs: 1_000_000), 2)
+  }
+
+  func testAnimatedLayerFromTheStartOfTheVideoCountsFromZero() {
+    XCTAssertEqual(gifFrame(at: 250_000, startUs: -1, offsetUs: 500_000), 1)
+  }
+
+  // Int64.max µs lands 775_807 µs into a 2 s playthrough. Adding it to the
+  // elapsed time unreduced traps on overflow and takes the app down.
+  func testHugeAnimationOffsetDoesNotOverflow() {
+    XCTAssertEqual(gifFrame(at: 1_250_000, offsetUs: .max), 2)
+    XCTAssertEqual(gifFrame(at: 3_000_000, offsetUs: .max, loop: false), 3)
+  }
+
+  func testNegativeAnimationOffsetIsTreatedAsNone() {
+    XCTAssertEqual(gifFrame(at: 1_250_000, offsetUs: -700_000), 0)
+  }
+
+  func testStaticLayerAlwaysShowsItsOnlyFrame() {
+    XCTAssertEqual(
+      animatedFrameIndex(
+        atUs: 5_000_000, startUs: 0, animationOffsetUs: 1_000_000, frameEndsUs: [0], loop: true),
+      0)
+  }
+
   // MARK: - Engine-detach result delivery
 
   // Before detach a captured FlutterResult delivers normally.
@@ -1502,6 +1573,117 @@ class DecodeOrientedImageTests: XCTestCase {
   func testUndecodableBytesReturnNil() {
     XCTAssertNil(decodeOrientedImage(Data([0x00, 0x01, 0x02, 0x03])))
     XCTAssertNil(decodeOrientedImage(Data()))
+  }
+}
+
+// MARK: - Track orientation (preferredTransform) in CoreImage space
+
+/// `applyingAVFoundationTransform` must orient a frame the way AVFoundation
+/// displays it.
+///
+/// A track's `preferredTransform` is written for a y-down space, CoreImage is
+/// y-up: applied as is, a quarter turn goes the other way and a portrait phone
+/// recording in a `VideoComposition` came out upside down. Both compositor paths
+/// orient through this helper, so every orientation a display matrix can
+/// express is pinned here, with and without the translation files carry.
+///
+/// Expected quadrants are worked out in AVFoundation's y-down space, e.g. the
+/// phone turn (x, y) → (h - y, x) sends the stored top-left corner to the top
+/// right.
+class AVFoundationTransformTests: XCTestCase {
+
+  private typealias Corner = OrientedImageFixture.Corner
+
+  /// Stored size: landscape, so a quarter turn shows as a swapped extent.
+  private let width: CGFloat = 32
+  private let height: CGFloat = 16
+
+  private func assertOrients(
+    _ transform: CGAffineTransform,
+    topLeft: Corner, topRight: Corner, bottomLeft: Corner, bottomRight: Corner,
+    swapsSize: Bool,
+    file: StaticString = #filePath, line: UInt = #line
+  ) throws {
+    let jpeg = try XCTUnwrap(
+      OrientedImageFixture.quadrantJpeg(width: Int(width), height: Int(height)),
+      file: file, line: line)
+    let stored = try XCTUnwrap(CIImage(data: jpeg), file: file, line: line)
+
+    let image = applyingAVFoundationTransform(transform, to: stored)
+
+    XCTAssertEqual(image.extent.origin, .zero, file: file, line: line)
+    XCTAssertEqual(image.extent.width, swapsSize ? height : width, file: file, line: line)
+    XCTAssertEqual(image.extent.height, swapsSize ? width : height, file: file, line: line)
+    let quadrants = try XCTUnwrap(
+      OrientedImageFixture.quadrants(of: image), file: file, line: line)
+    XCTAssertEqual(quadrants.topLeft, topLeft, "top left", file: file, line: line)
+    XCTAssertEqual(quadrants.topRight, topRight, "top right", file: file, line: line)
+    XCTAssertEqual(quadrants.bottomLeft, bottomLeft, "bottom left", file: file, line: line)
+    XCTAssertEqual(quadrants.bottomRight, bottomRight, "bottom right", file: file, line: line)
+  }
+
+  /// ffprobe `rotation=-90`, what a portrait phone recording carries.
+  func testPhoneRecordingFlagTurnsClockwise() throws {
+    try assertOrients(
+      CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: height, ty: 0),
+      topLeft: .bottomLeft, topRight: .topLeft, bottomLeft: .bottomRight,
+      bottomRight: .topRight, swapsSize: true)
+  }
+
+  /// ffmpeg's `-display_rotation -90` writes the turn without a translation
+  /// (`test_g.mp4`); only the extent moves, and that is normalized away.
+  func testTheTranslationOfTheMatrixDoesNotMoveTheFrame() throws {
+    for (tx, ty) in [(CGFloat(0), CGFloat(0)), (37, -11)] {
+      try assertOrients(
+        CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: tx, ty: ty),
+        topLeft: .bottomLeft, topRight: .topLeft, bottomLeft: .bottomRight,
+        bottomRight: .topRight, swapsSize: true)
+    }
+  }
+
+  /// ffprobe `rotation=90`.
+  func testCounterClockwiseFlagTurnsCounterClockwise() throws {
+    try assertOrients(
+      CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: width),
+      topLeft: .topRight, topRight: .bottomRight, bottomLeft: .topLeft,
+      bottomRight: .bottomLeft, swapsSize: true)
+  }
+
+  func testHalfTurn() throws {
+    try assertOrients(
+      CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: width, ty: height),
+      topLeft: .bottomRight, topRight: .bottomLeft, bottomLeft: .topRight,
+      bottomRight: .topLeft, swapsSize: false)
+  }
+
+  func testHorizontalMirror() throws {
+    try assertOrients(
+      CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: width, ty: 0),
+      topLeft: .topRight, topRight: .topLeft, bottomLeft: .bottomRight,
+      bottomRight: .bottomLeft, swapsSize: false)
+  }
+
+  func testVerticalMirror() throws {
+    try assertOrients(
+      CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: height),
+      topLeft: .bottomLeft, topRight: .bottomRight, bottomLeft: .topLeft,
+      bottomRight: .topRight, swapsSize: false)
+  }
+
+  /// Mirrored quarter turns, as some front-camera recordings carry. A y-flip
+  /// on only one side of the transform turns these into each other.
+  func testTranspose() throws {
+    try assertOrients(
+      CGAffineTransform(a: 0, b: 1, c: 1, d: 0, tx: 0, ty: 0),
+      topLeft: .topLeft, topRight: .bottomLeft, bottomLeft: .topRight,
+      bottomRight: .bottomRight, swapsSize: true)
+  }
+
+  func testAntiTranspose() throws {
+    try assertOrients(
+      CGAffineTransform(a: 0, b: -1, c: -1, d: 0, tx: height, ty: width),
+      topLeft: .bottomRight, topRight: .topRight, bottomLeft: .bottomLeft,
+      bottomRight: .topLeft, swapsSize: true)
   }
 }
 

@@ -1,4 +1,7 @@
-## 2.14.3
+## 2.15.0
+- **FEAT**(android, iOS, macOS): `ImageLayer.animationOffset` starts an animated layer (GIF) that far into its animation, so one animation can carry on across several layers instead of restarting at each one.
+- **FIX**(android, iOS, macOS): A `fadeToBlack`/`fadeToWhite` transition now dips the whole output frame when a custom resolution letterboxes the clip. Android dipped only a source-sized rectangle, iOS/macOS left the bars out.
+- **FIX**(iOS, macOS): A clip with a rotation flag, such as any portrait phone recording, no longer renders upside down in a `VideoComposition`.
 - **FIX**(iOS, macOS): A trimmed HDR (HEVC 10-bit) segment renders at its footage's frame rate again. Since 2.14.2 a short window of phone footage could come out re-timed, with an extra frame and slightly too long.
 
 ## 2.14.2

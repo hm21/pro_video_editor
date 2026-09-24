@@ -6,12 +6,13 @@ import ImageIO
 struct ImageLayer {
   /// Decoded frames: one for a static image, several for an animated GIF.
   let frames: [CIImage]
-  /// Cumulative end time (µs) of each frame within one playthrough.
+  /// Cumulative end time (µs) of each frame within one playthrough; the last
+  /// entry is one playthrough's length, 0 for a static image.
   let frameEndsUs: [Int64]
-  /// Total duration (µs) of one playthrough; 0 for a static image.
-  let totalDurationUs: Int64
   /// Whether an animated image repeats while the layer is visible.
   let loop: Bool
+  /// How far into the animation playback begins when the layer appears (µs).
+  let animationOffsetUs: Int64
   let startUs: Int64
   let endUs: Int64
   /// x position in pixels. When nil, the image is stretched to fill the video frame.
@@ -33,16 +34,40 @@ struct ImageLayer {
   /// elapsed time (relative to the layer's start) onto the frame timeline,
   /// looping or holding the last frame depending on [loop].
   func currentFrame(atUs currentTimeUs: Int64) -> CIImage {
-    if frames.count <= 1 || totalDurationUs <= 0 { return frames[0] }
-    let effectiveStartUs = startUs == -1 ? 0 : startUs
-    var t = currentTimeUs - effectiveStartUs
-    if t < 0 { t = 0 }
-    t = loop ? t % totalDurationUs : min(t, totalDurationUs - 1)
-    for (index, end) in frameEndsUs.enumerated() where t < end {
-      return frames[index]
-    }
-    return frames[frames.count - 1]
+    frames[
+      animatedFrameIndex(
+        atUs: currentTimeUs, startUs: startUs, animationOffsetUs: animationOffsetUs,
+        frameEndsUs: frameEndsUs, loop: loop)]
   }
+}
+
+/// Index of the animated-image frame on screen at composition time [currentTimeUs].
+///
+/// Playback starts [animationOffsetUs] into the animation when the layer appears
+/// at [startUs] (`-1` = the start of the video), so several layers can carry one
+/// animation on without restarting it. The offset counts toward [loop]: it wraps
+/// around a looping animation and lands on the last frame of one that plays
+/// once. Before the layer appears it shows the frame it will open on.
+///
+/// [frameEndsUs] is each frame's cumulative end within one playthrough,
+/// ascending; its last entry is the playthrough's length.
+func animatedFrameIndex(
+  atUs currentTimeUs: Int64, startUs: Int64, animationOffsetUs: Int64,
+  frameEndsUs: [Int64], loop: Bool
+) -> Int {
+  guard frameEndsUs.count > 1, let totalDurationUs = frameEndsUs.last, totalDurationUs > 0
+  else { return 0 }
+  let effectiveStartUs = startUs == -1 ? 0 : startUs
+  let elapsedUs = max(0, currentTimeUs - effectiveStartUs)
+  // Folded into one playthrough before it is added, so a huge offset cannot
+  // overflow the sum (which traps); the frame it lands on is the same.
+  let offsetUs = max(0, animationOffsetUs)
+  var t = elapsedUs + (loop ? offsetUs % totalDurationUs : min(offsetUs, totalDurationUs))
+  t = loop ? t % totalDurationUs : min(t, totalDurationUs - 1)
+  for (index, end) in frameEndsUs.enumerated() where t < end {
+    return index
+  }
+  return frameEndsUs.count - 1
 }
 
 /// Decodes an animated GIF into its frames and per-frame timeline.
@@ -50,7 +75,7 @@ struct ImageLayer {
 /// Returns nil for non-animated sources (single frame / zero duration) so the
 /// caller can fall back to a plain static decode.
 private func decodeGifFrames(_ image: EncodedImage) -> (
-  frames: [CIImage], frameEndsUs: [Int64], totalUs: Int64
+  frames: [CIImage], frameEndsUs: [Int64]
 )? {
   guard let source = image.imageSource else { return nil }
   let count = CGImageSourceGetCount(source)
@@ -66,7 +91,7 @@ private func decodeGifFrames(_ image: EncodedImage) -> (
     frameEndsUs.append(accUs)
   }
   if frames.count <= 1 || accUs <= 0 { return nil }
-  return (frames, frameEndsUs, accUs)
+  return (frames, frameEndsUs)
 }
 
 /// Reads the on-screen delay (seconds) of GIF frame [index], clamping very
@@ -98,6 +123,35 @@ private func rotateOverlayAroundCenter(_ overlay: CIImage, radians: Double) -> C
     .rotated(by: CGFloat(-radians))
     .translatedBy(x: -cx, y: -cy)
   return overlay.transformed(by: transform)
+}
+
+/// `image` transformed by `transform`, an AVFoundation transform such as a
+/// track's `preferredTransform`, with its extent moved back to the origin.
+///
+/// AVFoundation transforms assume a top-left origin (y down), CIImage a
+/// bottom-left one (y up). Applied to a CIImage as is, a rotation turns the
+/// other way: the 90° of a portrait phone recording becomes -90°, and the
+/// frame comes out upside down. So the image is flipped into y-down space
+/// for the transform and flipped back afterwards.
+///
+/// Internal rather than private so RunnerTests can pin every orientation.
+func applyingAVFoundationTransform(
+  _ transform: CGAffineTransform, to image: CIImage
+) -> CIImage {
+  let flipY = CGAffineTransform(scaleX: 1, y: -1)
+    .translatedBy(x: 0, y: -image.extent.height)
+  var out = image.transformed(by: flipY.concatenating(transform))
+
+  let flipBack = CGAffineTransform(scaleX: 1, y: -1)
+    .translatedBy(x: 0, y: -out.extent.height)
+  out = out.transformed(by: flipBack)
+
+  let extent = out.extent
+  if extent.origin.x != 0 || extent.origin.y != 0 {
+    out = out.transformed(
+      by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y))
+  }
+  return out
 }
 
 class VideoCompositor: NSObject, AVVideoCompositing {
@@ -286,28 +340,25 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     for layer in layers {
       let frames: [CIImage]
       let frameEndsUs: [Int64]
-      let totalDurationUs: Int64
 
       if let gif = decodeGifFrames(layer.image) {
         // Animated GIF: keep every frame and its timeline.
         frames = gif.frames
         frameEndsUs = gif.frameEndsUs
-        totalDurationUs = gif.totalUs
       } else {
         // Static image: decode the single frame, honoring its EXIF orientation
         // so a gallery photo is laid in upright rather than sideways.
         guard let image = decodeOrientedImage(layer.image) else { continue }
         frames = [image]
         frameEndsUs = [0]
-        totalDurationUs = 0
       }
 
       overlayImageLayers.append(
         ImageLayer(
           frames: frames,
           frameEndsUs: frameEndsUs,
-          totalDurationUs: totalDurationUs,
           loop: layer.loop,
+          animationOffsetUs: layer.animationOffsetUs,
           startUs: layer.startUs,
           endUs: layer.endUs,
           x: layer.x,
@@ -570,9 +621,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       //    metadata), then normalize the extent back to the origin.
       let preferred = placement.preferredTransform
       if !preferred.isIdentity {
-        img = img.transformed(by: preferred)
-        img = img.transformed(
-          by: CGAffineTransform(translationX: -img.extent.origin.x, y: -img.extent.origin.y))
+        img = applyingAVFoundationTransform(preferred, to: img)
       }
 
       let srcSize = img.extent.size
@@ -733,10 +782,6 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       // This ensures all videos are properly sized and oriented before applying user effects.
       // The layerInstruction contains the preferredTransform which already handles video rotation
       // from portrait to landscape or vice versa, so no additional orientation correction is needed.
-      //
-      // IMPORTANT: AVFoundation uses a top-left origin coordinate system (Y points down),
-      // while CIImage uses a bottom-left origin (Y points up). We need to convert the transform
-      // to work correctly with CIImage's coordinate system.
 
       // Extract layer instruction from CustomVideoCompositionInstruction
       var layerInstruction: AVVideoCompositionLayerInstruction?
@@ -761,42 +806,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         )
 
         if hasTransform && !startTransform.isIdentity {
-          // Convert AVFoundation transform to CIImage coordinate system:
-          // 1. Flip Y axis before transform (go from CIImage coords to AVFoundation coords)
-          // 2. Apply the AVFoundation transform
-          // 3. Flip Y axis after transform (go back to CIImage coords)
-          let imageHeight = outputImage.extent.height
-
-          // Flip Y: translate to top, scale Y by -1
-          let flipY = CGAffineTransform(scaleX: 1, y: -1)
-            .translatedBy(x: 0, y: -imageHeight)
-
-          // Convert transform: flipY * transform * flipY^-1
-          // But since flipY is its own inverse (when combined with translate), we use:
-          // result = flipY * transform * flipY (adjusted for new height after transform)
-          let convertedTransform =
-            flipY
-            .concatenating(startTransform)
-
-          outputImage = outputImage.transformed(by: convertedTransform)
-
-          // After transform, we need to flip back and normalize
-          let transformedExtent = outputImage.extent
-          let newHeight = transformedExtent.height
-          let flipBack = CGAffineTransform(scaleX: 1, y: -1)
-            .translatedBy(x: 0, y: -newHeight)
-
-          outputImage = outputImage.transformed(by: flipBack)
-
-          // Normalize position to origin
-          let finalExtent = outputImage.extent
-          if finalExtent.origin.x != 0 || finalExtent.origin.y != 0 {
-            let translation = CGAffineTransform(
-              translationX: -finalExtent.origin.x,
-              y: -finalExtent.origin.y
-            )
-            outputImage = outputImage.transformed(by: translation)
-          }
+          outputImage = applyingAVFoundationTransform(startTransform, to: outputImage)
         }
       }
     }
@@ -1015,15 +1025,17 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       outputImage = outputImage.cropped(to: imageRect)
     }
 
-    // Apply dip-to-color (fade-to-black / fade-to-white) clip transitions last,
-    // so the entire composed frame (including overlays) dips uniformly.
-    outputImage = applyFadeDip(to: outputImage, at: request.compositionTime)
-
     // Letterbox into the exact output canvas when a custom resolution was
     // requested: scale to fit (preserving aspect ratio), center, pad with black.
     if let target = outputResolution {
       outputImage = letterbox(outputImage, into: target)
     }
+
+    // Apply dip-to-color (fade-to-black / fade-to-white) clip transitions last,
+    // so the entire composed frame (including overlays and the letterbox bars)
+    // dips uniformly. Before the letterbox, a fade-to-white would leave the bars
+    // black around a white clip.
+    outputImage = applyFadeDip(to: outputImage, at: request.compositionTime)
 
     guard let outputBuffer = request.renderContext.newPixelBuffer() else {
       request.finish(with: NSError(domain: "VideoCompositor", code: -2, userInfo: nil))
