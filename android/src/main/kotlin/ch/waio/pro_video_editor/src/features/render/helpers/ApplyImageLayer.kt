@@ -173,13 +173,15 @@ fun applyTimedImageLayers(
                     layerStartUs = startTimeUs,
                     layerEndUs = endTimeUs,
                     loop = layer.loop,
+                    animationOffsetUs = layer.animationOffsetUs,
                     animations = layer.animations,
                     rasterScaleX = first.rasterScaleX,
                     rasterScaleY = first.rasterScaleY
                 )
                 Log.d(
                     RENDER_TAG,
-                    "Layer: animated GIF with ${gifFrames.size} frame(s), loop=${layer.loop}"
+                    "Layer: animated GIF with ${gifFrames.size} frame(s), loop=${layer.loop}, " +
+                            "animationOffset=${layer.animationOffsetUs}us"
                 )
             } else {
                 // Decoded through ImageOrientation so a gallery photo carrying an

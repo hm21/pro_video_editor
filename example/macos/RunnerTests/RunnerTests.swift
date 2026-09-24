@@ -280,6 +280,77 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(off.y, 0, accuracy: 1e-6)
   }
 
+  // MARK: - Animated layer frame lookup
+
+  // Four frames of 500 ms each: one playthrough lasts 2 s.
+  private let gifFrameEndsUs: [Int64] = [500_000, 1_000_000, 1_500_000, 2_000_000]
+
+  private func gifFrame(
+    at timeUs: Int64, startUs: Int64 = 1_000_000, offsetUs: Int64 = 0, loop: Bool = true
+  ) -> Int {
+    animatedFrameIndex(
+      atUs: timeUs, startUs: startUs, animationOffsetUs: offsetUs,
+      frameEndsUs: gifFrameEndsUs, loop: loop)
+  }
+
+  func testAnimatedLayerWithoutAnOffsetOpensOnItsFirstFrame() {
+    XCTAssertEqual(gifFrame(at: 1_000_000), 0)
+    XCTAssertEqual(gifFrame(at: 1_250_000), 0)
+    XCTAssertEqual(gifFrame(at: 1_750_000), 1)
+  }
+
+  func testAnimationOffsetStartsPlaybackThatFarIn() {
+    XCTAssertEqual(gifFrame(at: 1_000_000, offsetUs: 1_000_000), 2)
+    XCTAssertEqual(gifFrame(at: 1_750_000, offsetUs: 1_000_000), 3)
+  }
+
+  func testALayerPickingUpWhereAnotherLeftOffContinuesItsAnimation() {
+    let times = stride(from: Int64(0), to: 3_000_000, by: 40_000)
+    let single = times.map { gifFrame(at: $0, startUs: 0) }
+    let split = times.map {
+      $0 < 1_000_000
+        ? gifFrame(at: $0, startUs: 0)
+        : gifFrame(at: $0, startUs: 1_000_000, offsetUs: 1_000_000)
+    }
+    XCTAssertEqual(single, split)
+  }
+
+  func testAnimationOffsetWrapsAroundALoopingAnimation() {
+    XCTAssertEqual(gifFrame(at: 1_250_000, offsetUs: 2_500_000), 1)
+    XCTAssertEqual(gifFrame(at: 1_000_000, offsetUs: 4_000_000), 0)
+  }
+
+  func testAnimationOffsetPastTheEndHoldsTheLastFrameWithoutLooping() {
+    XCTAssertEqual(gifFrame(at: 1_000_000, offsetUs: 5_000_000, loop: false), 3)
+    XCTAssertEqual(gifFrame(at: 1_000_000, offsetUs: 1_000_000, loop: false), 2)
+  }
+
+  func testAnimatedLayerBeforeItAppearsShowsTheFrameItOpensOn() {
+    XCTAssertEqual(gifFrame(at: 0, offsetUs: 1_000_000), 2)
+  }
+
+  func testAnimatedLayerFromTheStartOfTheVideoCountsFromZero() {
+    XCTAssertEqual(gifFrame(at: 250_000, startUs: -1, offsetUs: 500_000), 1)
+  }
+
+  // Int64.max µs lands 775_807 µs into a 2 s playthrough. Adding it to the
+  // elapsed time unreduced traps on overflow and takes the app down.
+  func testHugeAnimationOffsetDoesNotOverflow() {
+    XCTAssertEqual(gifFrame(at: 1_250_000, offsetUs: .max), 2)
+    XCTAssertEqual(gifFrame(at: 3_000_000, offsetUs: .max, loop: false), 3)
+  }
+
+  func testNegativeAnimationOffsetIsTreatedAsNone() {
+    XCTAssertEqual(gifFrame(at: 1_250_000, offsetUs: -700_000), 0)
+  }
+
+  func testStaticLayerAlwaysShowsItsOnlyFrame() {
+    XCTAssertEqual(
+      animatedFrameIndex(
+        atUs: 5_000_000, startUs: 0, animationOffsetUs: 1_000_000, frameEndsUs: [0], loop: true),
+      0)
+  }
+
   // MARK: - Engine-detach result delivery
 
   // Before detach a captured FlutterResult delivers normally.

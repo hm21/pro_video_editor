@@ -1,3 +1,7 @@
+## 2.15.0
+- **FEAT**(android, iOS, macOS): `ImageLayer.animationOffset` starts an animated layer (GIF) that far into its animation, so one animation can carry on across several layers instead of restarting at each one.
+- **FIX**(android, iOS, macOS): A `fadeToBlack`/`fadeToWhite` transition now dips the whole output frame when a custom resolution letterboxes the clip. Android dipped only a source-sized rectangle, iOS/macOS left the bars out.
+
 ## 2.14.2
 - **PERF**(iOS, macOS): A trimmed segment of an HDR (HEVC 10-bit) video now pre-transcodes only the part that is exported, so a 10 s export from a one-minute clip no longer re-encodes the whole minute first (#192).
 
