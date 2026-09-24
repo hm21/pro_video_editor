@@ -1,4 +1,5 @@
 ## 2.15.0
+- **FEAT**(android, iOS, macOS): `ImageLayer.animationOffset` starts an animated layer (GIF) that far into its animation, so one animation can carry on across several layers instead of restarting at each one.
 - **FIX**(android, iOS, macOS): A `fadeToBlack`/`fadeToWhite` transition now dips the whole output frame when a custom resolution letterboxes the clip. Android dipped only a source-sized rectangle, iOS/macOS left the bars out.
 
 ## 2.14.2

@@ -548,6 +548,96 @@ void main() {
     }, skip: kIsWeb);
   });
 
+  group('Animated layer offset', () {
+    // Four solid frames of 500 ms each: red, green, blue, white.
+    final steps = EditorLayerImage.asset('assets/tests/color_steps.gif');
+
+    // One layer per quadrant of the 1280x720 source, so a single render
+    // covers every case.
+    ImageLayer quadrant(
+      int column,
+      int row, {
+      required Duration start,
+      Duration end = const Duration(seconds: 3),
+      Duration animationOffset = Duration.zero,
+      bool loop = true,
+    }) {
+      return ImageLayer(
+        image: steps,
+        offset: Offset(column * 640.0, row * 360.0),
+        size: const Size(640, 360),
+        startTime: start,
+        endTime: end,
+        animationOffset: animationOffset,
+        loop: loop,
+      );
+    }
+
+    testWidgets('starts playback at the offset and carries it across layers', (
+      tester,
+    ) async {
+      final bytes = await pve.renderVideo(
+        VideoRenderData(
+          videoSegments: [
+            VideoSegment(video: h264Video, endTime: const Duration(seconds: 3)),
+          ],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            // Top left: no offset, opens on the first frame at 1 s.
+            quadrant(0, 0, start: const Duration(seconds: 1)),
+            // Top right: one animation split over two layers at 1 s.
+            quadrant(
+              1,
+              0,
+              start: Duration.zero,
+              end: const Duration(seconds: 1),
+            ),
+            quadrant(
+              1,
+              0,
+              start: const Duration(seconds: 1),
+              animationOffset: const Duration(seconds: 1),
+            ),
+            // Bottom left: an offset past one playthrough wraps around.
+            quadrant(
+              0,
+              1,
+              start: const Duration(seconds: 1),
+              animationOffset: const Duration(milliseconds: 2500),
+            ),
+            // Bottom right: an offset past the end holds the last frame.
+            quadrant(
+              1,
+              1,
+              start: const Duration(seconds: 1),
+              animationOffset: const Duration(seconds: 5),
+              loop: false,
+            ),
+          ],
+        ),
+      );
+      final out = EditorVideo.memory(bytes);
+
+      Future<List<String>> quadrantsAt(int ms) async {
+        final f = await frameOf(out, at: Duration(milliseconds: ms));
+        return [
+          _colorName(f.at(0.25, 0.25)),
+          _colorName(f.at(0.75, 0.25)),
+          _colorName(f.at(0.25, 0.75)),
+          _colorName(f.at(0.75, 0.75)),
+        ];
+      }
+
+      expect(
+        (await quadrantsAt(750))[1],
+        'green',
+        reason: 'the first layer plays from its first frame',
+      );
+      expect(await quadrantsAt(1250), ['red', 'blue', 'green', 'white']);
+      expect(await quadrantsAt(1750), ['green', 'white', 'blue', 'white']);
+    }, skip: kIsWeb);
+  });
+
   group('Dip transition on a letterboxed canvas', () {
     testWidgets('fadeToWhite dips the whole output frame, bars included', (
       tester,
@@ -694,6 +784,16 @@ int _dist(List<int> a, List<int> b) =>
 
 /// Rec.601 luminance of a pixel.
 double _luma(List<int> c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+
+/// Names a saturated primary or white, loosely enough to survive YUV coding.
+String _colorName(List<int> c) {
+  final r = c[0], g = c[1], b = c[2];
+  if (r > 180 && g > 180 && b > 180) return 'white';
+  if (r > 150 && g < 100 && b < 100) return 'red';
+  if (g > 150 && r < 100 && b < 100) return 'green';
+  if (b > 150 && r < 100 && g < 100) return 'blue';
+  return 'other($r, $g, $b)';
+}
 
 /// Mean luminance across [points].
 double _meanLuma(_Frame f, List<Offset> points) {

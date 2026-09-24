@@ -88,6 +88,8 @@ class VideoSequenceBuilder(
         val rotation: Double = 0.0,
         /** Whether an animated image (GIF) repeats while the layer is visible. */
         val loop: Boolean = true,
+        /** How far into an animated image (GIF) playback begins, in µs. */
+        val animationOffsetUs: Long = 0L,
         val animations: List<LayerAnimationConfig> = emptyList()
     )
 

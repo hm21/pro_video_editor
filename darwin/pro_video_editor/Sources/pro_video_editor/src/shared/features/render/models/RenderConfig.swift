@@ -108,6 +108,9 @@ public struct ImageLayerConfig: Sendable {
   let rotation: Double
   /// Whether an animated image (GIF) repeats while the layer is visible.
   let loop: Bool
+  /// How far into an animated image (GIF) playback begins when the layer
+  /// appears, in microseconds.
+  let animationOffsetUs: Int64
   /// Animations to apply to this layer.
   let animations: [LayerAnimationConfig]
 
@@ -127,6 +130,7 @@ public struct ImageLayerConfig: Sendable {
     let height = (args["height"] as? NSNumber)?.doubleValue
     let rotation = (args["rotation"] as? NSNumber)?.doubleValue ?? 0.0
     let loop = (args["loop"] as? Bool) ?? true
+    let animationOffsetUs = max(0, (args["animationOffsetUs"] as? NSNumber)?.int64Value ?? 0)
 
     // Use -1 as sentinel value for "from start" when startUs is null
     // Use -1 for endUs to signify "until the end of the video"
@@ -140,6 +144,7 @@ public struct ImageLayerConfig: Sendable {
       height: height,
       rotation: rotation,
       loop: loop,
+      animationOffsetUs: animationOffsetUs,
       animations: animations
     )
   }

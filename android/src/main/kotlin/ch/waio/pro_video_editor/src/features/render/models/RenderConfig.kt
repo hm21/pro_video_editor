@@ -394,6 +394,8 @@ data class LayerAnimationConfig(
  * @property height Target height in pixels (null = original height)
  * @property rotation Clockwise rotation around the layer center, in radians
  * @property loop Whether an animated image (GIF) repeats while visible
+ * @property animationOffsetUs How far into an animated image (GIF) playback
+ *   begins when the layer appears, in microseconds
  * @property animations List of animations to apply to this layer
  */
 data class ImageLayer(
@@ -406,6 +408,7 @@ data class ImageLayer(
     val height: Double? = null,
     val rotation: Double = 0.0,
     val loop: Boolean = true,
+    val animationOffsetUs: Long = 0L,
     val animations: List<LayerAnimationConfig> = emptyList()
 )
 
@@ -512,6 +515,8 @@ data class RenderConfig(
                 val height = (layerMap["height"] as? Number)?.toDouble()
                 val rotation = (layerMap["rotation"] as? Number)?.toDouble() ?: 0.0
                 val loop = layerMap["loop"] as? Boolean ?: true
+                val animationOffsetUs =
+                    (layerMap["animationOffsetUs"] as? Number)?.toLong()?.coerceAtLeast(0L) ?: 0L
 
                 // Parse animations
                 @Suppress("UNCHECKED_CAST")
@@ -523,7 +528,7 @@ data class RenderConfig(
                 } else {
                     ImageLayer(
                         image, startUs, endUs, x, y, width, height,
-                        rotation, loop, animations
+                        rotation, loop, animationOffsetUs, animations
                     )
                 }
             } ?: emptyList()

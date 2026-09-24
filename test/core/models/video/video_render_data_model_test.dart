@@ -352,6 +352,19 @@ void main() {
       expect(maps.single.containsKey('imagePath'), isFalse);
     });
 
+    test('sends animationOffset in microseconds', () async {
+      final maps = await layerMaps([
+        ImageLayer(
+          image: EditorLayerImage.memory(Uint8List.fromList([1])),
+          animationOffset: const Duration(milliseconds: 400),
+        ),
+        ImageLayer(image: EditorLayerImage.memory(Uint8List.fromList([1]))),
+      ]);
+
+      expect(maps[0]['animationOffsetUs'], 400000);
+      expect(maps[1]['animationOffsetUs'], 0);
+    });
+
     test('throws naming the path when a layer image is gone', () async {
       final missing = '${tempDir.path}/gone.png';
 
