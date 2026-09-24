@@ -100,6 +100,35 @@ private func rotateOverlayAroundCenter(_ overlay: CIImage, radians: Double) -> C
   return overlay.transformed(by: transform)
 }
 
+/// `image` transformed by `transform`, an AVFoundation transform such as a
+/// track's `preferredTransform`, with its extent moved back to the origin.
+///
+/// AVFoundation transforms assume a top-left origin (y down), CIImage a
+/// bottom-left one (y up). Applied to a CIImage as is, a rotation turns the
+/// other way: the 90° of a portrait phone recording becomes -90°, and the
+/// frame comes out upside down. So the image is flipped into y-down space
+/// for the transform and flipped back afterwards.
+///
+/// Internal rather than private so RunnerTests can pin every orientation.
+func applyingAVFoundationTransform(
+  _ transform: CGAffineTransform, to image: CIImage
+) -> CIImage {
+  let flipY = CGAffineTransform(scaleX: 1, y: -1)
+    .translatedBy(x: 0, y: -image.extent.height)
+  var out = image.transformed(by: flipY.concatenating(transform))
+
+  let flipBack = CGAffineTransform(scaleX: 1, y: -1)
+    .translatedBy(x: 0, y: -out.extent.height)
+  out = out.transformed(by: flipBack)
+
+  let extent = out.extent
+  if extent.origin.x != 0 || extent.origin.y != 0 {
+    out = out.transformed(
+      by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y))
+  }
+  return out
+}
+
 class VideoCompositor: NSObject, AVVideoCompositing {
   var blurSigma: Double = 0.0
   var overlayImageLayers: [ImageLayer] = []
@@ -534,33 +563,6 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
   func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {
     renderContext = newRenderContext
-  }
-
-  /// `image` transformed by `transform`, an AVFoundation transform such as a
-  /// track's `preferredTransform`, with its extent moved back to the origin.
-  ///
-  /// AVFoundation transforms assume a top-left origin (y down), CIImage a
-  /// bottom-left one (y up). Applied to a CIImage as is, a rotation turns the
-  /// other way: the 90° of a portrait phone recording becomes -90°, and the
-  /// frame comes out upside down. So the image is flipped into y-down space
-  /// for the transform and flipped back afterwards.
-  private func applyingAVFoundationTransform(
-    _ transform: CGAffineTransform, to image: CIImage
-  ) -> CIImage {
-    let flipY = CGAffineTransform(scaleX: 1, y: -1)
-      .translatedBy(x: 0, y: -image.extent.height)
-    var out = image.transformed(by: flipY.concatenating(transform))
-
-    let flipBack = CGAffineTransform(scaleX: 1, y: -1)
-      .translatedBy(x: 0, y: -out.extent.height)
-    out = out.transformed(by: flipBack)
-
-    let extent = out.extent
-    if extent.origin.x != 0 || extent.origin.y != 0 {
-      out = out.transformed(
-        by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y))
-    }
-    return out
   }
 
   /// Composites all layers of a layered instruction onto the composition canvas.
