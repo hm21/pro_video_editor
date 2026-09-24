@@ -13,14 +13,26 @@ internal class VideoTranscoder {
 
   /// Result of a transcoding operation.
   enum TranscodeResult {
-    /// Transcoding succeeded. `window` is the span of the output the clip
-    /// plays when only part of the source was encoded (see
-    /// ``clipWindow(playing:writtenTrack:)``); `nil` after a whole-source
-    /// transcode, whose timeline matches the source's.
-    case success(outputPath: String, window: SourceRange?)
+    /// Transcoding succeeded. `trimmed` describes an output that holds only
+    /// part of the source: the window the clip plays and its cadence; `nil`
+    /// after a whole-source transcode, whose timeline and frame rate match
+    /// the source's.
+    case success(outputPath: String, trimmed: Trimmed?)
 
     /// Transcoding failed with error
     case error(Error)
+  }
+
+  /// How a clip plays a transcode of only part of its source.
+  struct Trimmed {
+    /// The span of the output the clip plays (see
+    /// ``clipWindow(playing:writtenTrack:)``).
+    let window: SourceRange
+
+    /// The cadence measured from the output's frames, which the render uses
+    /// instead of its `nominalFrameRate` (see ``VideoClip/frameRateOverride``);
+    /// `nil` when the frames could not be read.
+    let frameRate: Float?
   }
 
   /// What the pre-transcode hands to the render.
@@ -194,7 +206,7 @@ internal class VideoTranscoder {
         "   Output: isHevc=\(outputInfo.isHevc), bitDepth=\(outputInfo.bitDepth), isHdr=\(outputInfo.isHdr)"
       )
 
-      guard let range else { return .success(outputPath: outputURL.path, window: nil) }
+      guard let range else { return .success(outputPath: outputURL.path, trimmed: nil) }
       let asset = AVURLAsset(url: outputURL)
       let track = try await MediaInfoExtractor.loadVideoTrack(from: asset)
       let window = clipWindow(
@@ -206,8 +218,13 @@ internal class VideoTranscoder {
           domain: "VideoTranscoder", code: 3,
           userInfo: [NSLocalizedDescriptionKey: "Trimmed transcode holds no video"])
       }
-      PluginLog.print("   Window: [\(window.startUs)µs, \(window.endUs)µs)")
-      return .success(outputPath: outputURL.path, window: window)
+      // The render times the clip's frames by its rate, which this shorter
+      // file's `nominalFrameRate` misreads; measure it from the frames.
+      let frameRate = typicalFrameRate(of: track, in: asset)
+      let fps = frameRate.map { "\($0)" } ?? "?"
+      PluginLog.print("   Window: [\(window.startUs)µs, \(window.endUs)µs) at \(fps) fps")
+      return .success(
+        outputPath: outputURL.path, trimmed: Trimmed(window: window, frameRate: frameRate))
 
     } catch {
       PluginLog.print("❌ Transcoding failed: \(error.localizedDescription)")
@@ -242,7 +259,7 @@ internal class VideoTranscoder {
   static func transcodeClipsIfNeeded(_ clips: [VideoClip]) async throws -> PreTranscode {
     var rewritten = clips
     var produced: [String] = []
-    var outputs: [TranscodeKey: (path: String, window: SourceRange?)] = [:]
+    var outputs: [TranscodeKey: (path: String, trimmed: Trimmed?)] = [:]
     // Keys whose transcode failed; their clips stay on the source.
     var failed: Set<TranscodeKey> = []
 
@@ -269,8 +286,8 @@ internal class VideoTranscoder {
         // outputs with nothing to clean it up.
         if outputs[key] == nil, !failed.contains(key) {
           switch await transcodeToH264(path, range: range, sourceDurationUs: sourceDurationUs) {
-          case .success(let outputPath, let window):
-            outputs[key] = (outputPath, window)
+          case .success(let outputPath, let trimmed):
+            outputs[key] = (outputPath, trimmed)
             produced.append(outputPath)
           case .error(let error):
             if error is CancellationError || Task.isCancelled {
@@ -288,9 +305,10 @@ internal class VideoTranscoder {
 
         guard let output = outputs[key] else { continue }
         let clip = clips[index]
-        if let window = output.window {
+        if let trimmed = output.trimmed {
           rewritten[index] = clip.reading(
-            output.path, startUs: window.startUs, endUs: window.endUs)
+            output.path, startUs: trimmed.window.startUs, endUs: trimmed.window.endUs,
+            frameRateOverride: trimmed.frameRate)
         } else {
           rewritten[index] = clip.reading(
             output.path, startUs: clip.startUs, endUs: clip.endUs)
@@ -318,6 +336,37 @@ internal class VideoTranscoder {
   }
 
   // MARK: - Private Methods
+
+  /// The frame rate `track` actually runs at, from its median frame duration.
+  ///
+  /// `nominalFrameRate` averages over the whole track, which a short trimmed
+  /// file misreads: a sliver of a frame at its start, or a partial one at its
+  /// end, counts as a whole frame (0.4 s of 30 fps footage reads 33.3). A rate
+  /// within 0.01 of a whole number is taken as that number, since the render
+  /// cuts it down to whole frames per second and 59.99999 would become 59;
+  /// 59.94 stays 59.94. `nil` when the frames cannot be read.
+  static func typicalFrameRate(of track: AVAssetTrack, in asset: AVAsset) -> Float? {
+    guard let reader = try? AVAssetReader(asset: asset) else { return nil }
+    let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+    output.alwaysCopiesSampleData = false
+    guard reader.canAdd(output) else { return nil }
+    reader.add(output)
+    guard reader.startReading() else { return nil }
+    defer { reader.cancelReading() }
+
+    var durations: [Double] = []
+    while let sample = output.copyNextSampleBuffer() {
+      let count = CMSampleBufferGetNumSamples(sample)
+      let duration = CMSampleBufferGetDuration(sample)
+      if count > 0, duration.isNumeric, duration.seconds > 0 {
+        durations.append(duration.seconds / Double(count))
+      }
+    }
+    guard !durations.isEmpty else { return nil }
+    let rate = 1 / durations.sorted()[durations.count / 2]
+    let whole = rate.rounded()
+    return Float(abs(rate - whole) < 0.01 ? whole : rate)
+  }
 
   /// The source's duration in microseconds, or 0 when it cannot be read.
   private static func durationUs(of path: String) async -> Int64 {

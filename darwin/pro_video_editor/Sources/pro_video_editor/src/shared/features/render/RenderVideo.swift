@@ -702,7 +702,9 @@ class RenderVideo {
           inHeadStartUs: nextStart, inHeadEndUs: nextStart + headSrc,
           outputDurationUs: plan.outputDurationUs,
           type: t!.type, direction: t!.direction, curve: t!.curve,
-          includeAudio: includeAudio, outputFormat: outputFormat)
+          includeAudio: includeAudio, outputFormat: outputFormat,
+          outgoingFrameRate: current.frameRateOverride,
+          incomingFrameRate: next!.frameRateOverride)
       } catch {
         return TransitionPreRender(clips: result, urls: urls, stall: error)
       }
@@ -715,7 +717,8 @@ class RenderVideo {
           VideoClip(
             inputPath: current.inputPath, startUs: curStart, endUs: curEnd - tailSrc,
             volume: current.volume, playbackSpeed: current.playbackSpeed,
-            reverseVideo: false, transition: nil, chromaKey: current.chromaKey))
+            reverseVideo: false, transition: nil, chromaKey: current.chromaKey,
+            frameRateOverride: current.frameRateOverride))
         let blend = blendChromaKey(
           current, next!, global: globalChromaKey, boundary: "\(i)")
         result.append(
@@ -727,7 +730,7 @@ class RenderVideo {
           inputPath: next!.inputPath, startUs: nextStart + headSrc, endUs: nextEnd,
           volume: next!.volume, playbackSpeed: next!.playbackSpeed,
           reverseVideo: next!.reverseVideo, transition: next!.transition,
-          chromaKey: next!.chromaKey)
+          chromaKey: next!.chromaKey, frameRateOverride: next!.frameRateOverride)
       } else {
         PluginLog.print("⚠️ Transition render failed at boundary \(i); hard cut")
         appendClip(clearedOverlap(current))
@@ -792,7 +795,9 @@ class RenderVideo {
             inHeadStartUs: firstStart, inHeadEndUs: firstStart + headSrc,
             outputDurationUs: plan.outputDurationUs,
             type: wrap.type, direction: wrap.direction, curve: wrap.curve,
-            includeAudio: includeAudio, outputFormat: outputFormat)
+            includeAudio: includeAudio, outputFormat: outputFormat,
+            outgoingFrameRate: last.frameRateOverride,
+            incomingFrameRate: first.frameRateOverride)
         } catch {
           return TransitionPreRender(clips: result, urls: urls, stall: error)
         }
@@ -806,17 +811,19 @@ class RenderVideo {
               inputPath: first.inputPath, startUs: firstStart + headSrc,
               endUs: lastEnd - tailSrc, volume: first.volume,
               playbackSpeed: first.playbackSpeed, reverseVideo: false, transition: nil,
-              chromaKey: first.chromaKey)
+              chromaKey: first.chromaKey, frameRateOverride: first.frameRateOverride)
           } else {
             result[0] = VideoClip(
               inputPath: first.inputPath, startUs: firstStart + headSrc,
               endUs: first.endUs, volume: first.volume,
               playbackSpeed: first.playbackSpeed, reverseVideo: false,
-              transition: first.transition, chromaKey: first.chromaKey)
+              transition: first.transition, chromaKey: first.chromaKey,
+              frameRateOverride: first.frameRateOverride)
             result[lastIdx] = VideoClip(
               inputPath: last.inputPath, startUs: last.startUs, endUs: lastEnd - tailSrc,
               volume: last.volume, playbackSpeed: last.playbackSpeed,
-              reverseVideo: false, transition: nil, chromaKey: last.chromaKey)
+              reverseVideo: false, transition: nil, chromaKey: last.chromaKey,
+              frameRateOverride: last.frameRateOverride)
           }
           let wrapBlend = blendChromaKey(
             last, first, global: globalChromaKey, boundary: "loop wrap")
@@ -851,7 +858,8 @@ class RenderVideo {
     return VideoClip(
       inputPath: clip.inputPath, startUs: clip.startUs, endUs: clip.endUs,
       volume: clip.volume, playbackSpeed: clip.playbackSpeed,
-      reverseVideo: clip.reverseVideo, transition: nil, chromaKey: clip.chromaKey)
+      reverseVideo: clip.reverseVideo, transition: nil, chromaKey: clip.chromaKey,
+      frameRateOverride: clip.frameRateOverride)
   }
 
   /// The chroma key to apply to a pre-rendered overlap blend.

@@ -147,7 +147,9 @@ internal class VideoSequenceBuilder {
 
       // Get video properties
       let naturalSize = videoTrack.naturalSize
-      let nominalFrameRate = videoTrack.nominalFrameRate
+      // A clip cut down to its window by the HDR pre-transcode carries the
+      // cadence measured from its frames; the short file's average misreads it.
+      let nominalFrameRate = clip.frameRateOverride ?? videoTrack.nominalFrameRate
       let preferredTransform = videoTrack.preferredTransform
 
       // Calculate corrected size (accounting for rotation)

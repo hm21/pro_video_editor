@@ -137,7 +137,7 @@ final class TrimmedPreTranscodeTests: XCTestCase {
   private static let fps: Int32 = 30
 
   /// Six seconds, one palette color each.
-  private func makeHdrSource() async throws -> URL {
+  private func makeHdrSource(timescale: CMTimeScale? = nil) async throws -> URL {
     let palette = ThumbnailTimestampFixture.palette
     let source: URL
     do {
@@ -151,7 +151,8 @@ final class TrimmedPreTranscodeTests: XCTestCase {
           AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
           AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_2100_HLG,
           AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
-        ])
+        ],
+        timescale: timescale)
     } catch {
       throw XCTSkip("this environment cannot author an HEVC BT.2020 clip: \(error)")
     }
@@ -207,6 +208,10 @@ final class TrimmedPreTranscodeTests: XCTestCase {
     XCTAssertEqual(rewritten.startUs, measured.startUs)
     XCTAssertEqual(rewritten.endUs, 1_010_000)
     XCTAssertGreaterThan(measured.endUs, 1_010_000)
+    // A short file's `nominalFrameRate` misreads its cadence, so the clip
+    // carries the one measured from its frames: exactly the fixture's 30.
+    XCTAssertEqual(rewritten.frameRateOverride, Float(Self.fps))
+    XCTAssertNil(whole.clips[0].frameRateOverride)
 
     // It holds the window's frames: the second after 2 s, then the one after
     // 3 s at its very end. Compared against a whole-source transcode so the
@@ -237,6 +242,63 @@ final class TrimmedPreTranscodeTests: XCTestCase {
     XCTAssertEqual(rewritten.endUs, measured.endUs)
     let frameUs = Double(1_000_000) / Double(Self.fps)
     XCTAssertEqual(Double(rewritten.endUs ?? 0), 1_500_000, accuracy: frameUs)
+  }
+
+  func testARenderOfAShortTrimmedWindowKeepsTheSourceCadence() async throws {
+    // A phone recording's timescale; the fixture's default of 30 would snap
+    // the window below onto the frame boundary.
+    let source = try await makeHdrSource(timescale: 90_000)
+    let output = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pve_trim_cadence_\(UUID().uuidString).mp4")
+    defer {
+      try? FileManager.default.removeItem(at: source)
+      try? FileManager.default.removeItem(at: output)
+    }
+
+    // 0.4 s starting a tenth of a millisecond before a frame boundary, as
+    // phone footage does: the trimmed file opens on a 0.1 ms sliver of the
+    // previous frame, and AVFoundation reports ~33 fps for it. Rendering at
+    // that rate instead of the footage's 30 fps packed extra frames into the
+    // window and re-timed every one of them.
+    let config = try XCTUnwrap(
+      RenderConfig.fromArguments([
+        "videoClips": [
+          [
+            "inputPath": source.path,
+            "startUs": NSNumber(value: 999_900),
+            "endUs": NSNumber(value: 1_399_900),
+          ]
+        ],
+        "outputPath": output.path,
+        "outputFormat": "mp4",
+        "enableAudio": false,
+      ]))
+    let settled = expectation(description: "render settles")
+    var failure: Error?
+    RenderVideo.render(
+      config: config,
+      onProgress: { _ in },
+      onComplete: { _ in settled.fulfill() },
+      onError: { error in
+        failure = error
+        settled.fulfill()
+      })
+    await fulfillment(of: [settled], timeout: 120)
+    XCTAssertNil(failure)
+
+    let asset = AVURLAsset(url: output)
+    let track = try await MediaInfoExtractor.loadVideoTrack(from: asset)
+    let reader = try AVAssetReader(asset: asset)
+    let samples = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+    reader.add(samples)
+    XCTAssertTrue(reader.startReading())
+    var frames = 0
+    while let buffer = samples.copyNextSampleBuffer() {
+      if CMSampleBufferGetNumSamples(buffer) > 0 { frames += 1 }
+    }
+    XCTAssertEqual(frames, 12, "0.4 s at the source's 30 fps")
+    let duration = await TrackEndTrimmer.timeRange(of: track).duration.seconds
+    XCTAssertEqual(duration, 0.4, accuracy: 0.001)
   }
 
   func testClipsOnOneSourceShareATranscodePerWindowAndEachFileIsRemovedOnce() async throws {

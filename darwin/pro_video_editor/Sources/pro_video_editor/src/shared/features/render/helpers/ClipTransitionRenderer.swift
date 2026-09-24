@@ -62,7 +62,9 @@ internal enum ClipTransitionRenderer {
     direction: String,
     curve: String,
     includeAudio: Bool,
-    outputFormat: String
+    outputFormat: String,
+    outgoingFrameRate: Float? = nil,
+    incomingFrameRate: Float? = nil
   ) async throws -> RenderResult? {
     // Only a *successful* blend reaches the caller, so only a successful blend
     // can be cleaned up by it. An export that fails, stalls or is cancelled
@@ -126,8 +128,20 @@ internal enum ClipTransitionRenderer {
       // only the outgoing clip's fps left the pre-rendered transition below the
       // composition's frame rate (e.g. 25 vs 30 fps), so it was re-timed on
       // insertion and stuttered at the two seams.
-      let outFps = try await loadFrameRate(outVideo)
-      let inFps = try await loadFrameRate(inVideo)
+      // A side cut down by the HDR pre-transcode passes its source's rate:
+      // the shorter file's own is noisier (see `VideoClip.frameRateOverride`).
+      let outFps: Float
+      if let outgoingFrameRate {
+        outFps = outgoingFrameRate
+      } else {
+        outFps = try await loadFrameRate(outVideo)
+      }
+      let inFps: Float
+      if let incomingFrameRate {
+        inFps = incomingFrameRate
+      } else {
+        inFps = try await loadFrameRate(inVideo)
+      }
       let targetFps = max(30, Int(max(outFps, inFps).rounded()))
       let steps = easingStepCount(durationUs: dUs, fps: targetFps)
 

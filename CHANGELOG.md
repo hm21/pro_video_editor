@@ -1,3 +1,6 @@
+## 2.14.3
+- **FIX**(iOS, macOS): A trimmed HDR (HEVC 10-bit) segment renders at its footage's frame rate again. Since 2.14.2 a short window of phone footage could come out re-timed, with an extra frame and slightly too long.
+
 ## 2.14.2
 - **PERF**(iOS, macOS): A trimmed segment of an HDR (HEVC 10-bit) video now pre-transcodes only the part that is exported, so a 10 s export from a one-minute clip no longer re-encodes the whole minute first (#192).
 
