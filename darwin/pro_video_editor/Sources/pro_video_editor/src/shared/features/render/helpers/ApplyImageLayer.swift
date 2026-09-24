@@ -60,6 +60,7 @@ func resolveOpenEndedOutAnimations(
       x: layer.x, y: layer.y,
       width: layer.width, height: layer.height,
       rotation: layer.rotation, loop: layer.loop,
+      animationOffsetUs: layer.animationOffsetUs,
       animations: layer.animations)
   }
 }

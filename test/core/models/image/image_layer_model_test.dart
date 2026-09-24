@@ -31,6 +31,15 @@ void main() {
         expect(map['loop'], false);
       });
 
+      test('serializes animationOffset in microseconds', () {
+        final layer = ImageLayer(
+          image: image,
+          animationOffset: const Duration(milliseconds: 400),
+        );
+
+        expect(layer.toMap()['animationOffset'], 400000);
+      });
+
       test('serializes null fields as null', () {
         final layer = ImageLayer(image: image);
         final map = layer.toMap();
@@ -41,6 +50,7 @@ void main() {
         expect(map['size'], isNull);
         expect(map['rotation'], 0.0);
         expect(map['loop'], true);
+        expect(map['animationOffset'], 0);
       });
     });
 
@@ -77,6 +87,22 @@ void main() {
         expect(restored.size, isNull);
         expect(restored.rotation, 0.0);
         expect(restored.loop, true);
+      });
+
+      test('restores animationOffset', () {
+        final layer = ImageLayer(
+          image: image,
+          animationOffset: const Duration(milliseconds: 1250),
+        );
+        final restored = ImageLayer.fromMap(layer.toMap());
+
+        expect(restored.animationOffset, const Duration(milliseconds: 1250));
+      });
+
+      test('defaults animationOffset to zero when absent from map', () {
+        final restored = ImageLayer.fromMap({'image': image.toMap()});
+
+        expect(restored.animationOffset, Duration.zero);
       });
 
       test('defaults loop to true when absent from map', () {
@@ -159,6 +185,44 @@ void main() {
         expect(copy.rotation, 1.2);
         expect(copy.loop, false);
       });
+
+      test('overrides and keeps animationOffset', () {
+        final layer = ImageLayer(
+          image: image,
+          animationOffset: const Duration(seconds: 1),
+        );
+
+        final overridden = layer.copyWith(
+          animationOffset: const Duration(seconds: 2),
+        );
+        final kept = layer.copyWith(loop: false);
+
+        expect(overridden.animationOffset, const Duration(seconds: 2));
+        expect(kept.animationOffset, const Duration(seconds: 1));
+      });
+    });
+
+    group('equality', () {
+      test('tells layers apart by animationOffset', () {
+        final a = ImageLayer(image: image);
+        final b = ImageLayer(
+          image: image,
+          animationOffset: const Duration(milliseconds: 1),
+        );
+
+        expect(a == b, isFalse);
+        expect(a, ImageLayer(image: image));
+      });
+    });
+
+    test('rejects a negative animationOffset', () {
+      expect(
+        () => ImageLayer(
+          image: image,
+          animationOffset: const Duration(milliseconds: -1),
+        ),
+        throwsA(isA<AssertionError>()),
+      );
     });
 
     test('toString contains class name', () {

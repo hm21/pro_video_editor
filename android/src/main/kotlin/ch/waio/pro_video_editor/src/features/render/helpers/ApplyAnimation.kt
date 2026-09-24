@@ -155,6 +155,46 @@ internal fun resolveAnchor(targetCenter: Float, halfNorm: Float): OverlayAnchors
 }
 
 /**
+ * Index of the animated-image frame on screen at [presentationTimeUs].
+ *
+ * Playback starts [animationOffsetUs] into the animation when the layer appears
+ * at [layerStartUs] (`-1` = the start of the video), so several layers can carry
+ * one animation on without restarting it. The offset counts toward [loop]: it
+ * wraps around a looping animation and lands on the last frame of one that
+ * plays once. Before the layer appears it shows the frame it will open on.
+ *
+ * [frameEndsUs] is each frame's cumulative end within one playthrough, ascending;
+ * its last entry is the playthrough's length.
+ */
+internal fun animatedFrameIndex(
+    presentationTimeUs: Long,
+    layerStartUs: Long,
+    animationOffsetUs: Long,
+    frameEndsUs: LongArray,
+    loop: Boolean,
+): Int {
+    val totalDurationUs = frameEndsUs.lastOrNull() ?: 0L
+    if (frameEndsUs.size <= 1 || totalDurationUs <= 0L) return 0
+
+    val effectiveStartUs = if (layerStartUs == -1L) 0L else layerStartUs
+    val elapsedUs = (presentationTimeUs - effectiveStartUs).coerceAtLeast(0L)
+    // Folded into one playthrough before it is added, so a huge offset cannot
+    // overflow the sum; the frame it lands on is the same.
+    val offsetUs = animationOffsetUs.coerceAtLeast(0L).let {
+        if (loop) it % totalDurationUs else it.coerceAtMost(totalDurationUs)
+    }
+    val t = (elapsedUs + offsetUs).let {
+        if (loop) it % totalDurationUs else it.coerceAtMost(totalDurationUs - 1)
+    }
+
+    // The first end strictly greater than t identifies the active frame.
+    for (i in frameEndsUs.indices) {
+        if (t < frameEndsUs[i]) return i
+    }
+    return frameEndsUs.size - 1
+}
+
+/**
  * Custom BitmapOverlay that computes per-frame overlay settings for animations
  * and, for animated images (GIF), returns the correct frame for the current
  * presentation time.
@@ -186,6 +226,8 @@ internal class AnimatedBitmapOverlay(
     private val layerStartUs: Long,
     private val layerEndUs: Long,
     private val loop: Boolean,
+    /** How far into the animation playback begins; see [animatedFrameIndex]. */
+    private val animationOffsetUs: Long = 0L,
     private val animations: List<LayerAnimationConfig>,
     /**
      * Undoes an overlay raster cap (see `overlayRasterScale`): the frames may be
@@ -232,7 +274,7 @@ internal class AnimatedBitmapOverlay(
         rasterScaleY = rasterScaleY
     )
 
-    // Cumulative end time of each frame within one playthrough, plus the total.
+    // Cumulative end time of each frame within one playthrough.
     private val frameEndsUs: LongArray = LongArray(frames.size).also { ends ->
         var acc = 0L
         for (i in frames.indices) {
@@ -240,23 +282,12 @@ internal class AnimatedBitmapOverlay(
             ends[i] = acc
         }
     }
-    private val totalDurationUs: Long = frameEndsUs.lastOrNull() ?: 0L
 
-    override fun getBitmap(presentationTimeUs: Long): Bitmap {
-        if (frames.size == 1 || totalDurationUs <= 0L) return frames[0]
-
-        val effectiveStartUs = if (layerStartUs == -1L) 0L else layerStartUs
-        var t = presentationTimeUs - effectiveStartUs
-        if (t < 0L) t = 0L
-        t = if (loop) t % totalDurationUs else t.coerceAtMost(totalDurationUs - 1)
-
-        // frameEndsUs is ascending, so the first end strictly greater than t
-        // identifies the active frame.
-        for (i in frames.indices) {
-            if (t < frameEndsUs[i]) return frames[i]
-        }
-        return frames.last()
-    }
+    override fun getBitmap(presentationTimeUs: Long): Bitmap = frames[
+        animatedFrameIndex(
+            presentationTimeUs, layerStartUs, animationOffsetUs, frameEndsUs, loop
+        )
+    ]
 
     override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings {
         var alpha = 1.0f

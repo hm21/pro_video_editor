@@ -23,10 +23,15 @@ class ImageLayer with TimeRangeMixin {
     this.size,
     this.rotation = 0.0,
     this.loop = true,
+    this.animationOffset = Duration.zero,
     this.animations = const [],
   }) : assert(
          startTime == null || endTime == null || startTime < endTime,
          'startTime must be before endTime',
+       ),
+       assert(
+         animationOffset >= Duration.zero,
+         'animationOffset must not be negative',
        );
 
   /// The image to overlay on the video.
@@ -80,6 +85,26 @@ class ImageLayer with TimeRangeMixin {
   /// Has no effect on static images.
   final bool loop;
 
+  /// How far into an animated [image] (e.g. GIF) playback begins when the
+  /// layer appears at [startTime].
+  ///
+  /// By default an animated layer starts on its first frame. Set this to
+  /// continue one animation across several layers: a layer that picks up
+  /// where `previous` left off passes
+  ///
+  /// ```dart
+  /// previous.animationOffset +
+  ///     (previous.endTime! - (previous.startTime ?? Duration.zero))
+  /// ```
+  ///
+  /// The offset counts toward [loop], so it wraps around a looping image and
+  /// lands on the last frame of one that does not loop.
+  ///
+  /// Has no effect on static images.
+  ///
+  /// **Default**: [Duration.zero].
+  final Duration animationOffset;
+
   /// Animations to apply to this layer (e.g. fade, slide, scale).
   ///
   /// Multiple animations can be combined. Each animation specifies its
@@ -95,6 +120,7 @@ class ImageLayer with TimeRangeMixin {
     Size? size,
     double? rotation,
     bool? loop,
+    Duration? animationOffset,
     List<LayerAnimation>? animations,
   }) {
     return ImageLayer(
@@ -105,6 +131,7 @@ class ImageLayer with TimeRangeMixin {
       size: size ?? this.size,
       rotation: rotation ?? this.rotation,
       loop: loop ?? this.loop,
+      animationOffset: animationOffset ?? this.animationOffset,
       animations: animations ?? this.animations,
     );
   }
@@ -120,6 +147,7 @@ class ImageLayer with TimeRangeMixin {
           : null,
       'rotation': rotation,
       'loop': loop,
+      'animationOffset': animationOffset.inMicroseconds,
       'animations': animations.map((a) => a.toMap()).toList(),
     };
   }
@@ -146,6 +174,9 @@ class ImageLayer with TimeRangeMixin {
           ? safeParseDouble(map['rotation'])
           : 0.0,
       loop: map['loop'] as bool? ?? true,
+      animationOffset: map['animationOffset'] != null
+          ? Duration(microseconds: safeParseInt(map['animationOffset']))
+          : Duration.zero,
       animations:
           (map['animations'] as List<dynamic>?)
               ?.map((a) => LayerAnimation.fromMap(a as Map<String, dynamic>))
@@ -169,6 +200,7 @@ class ImageLayer with TimeRangeMixin {
         'size: $size, '
         'rotation: $rotation, '
         'loop: $loop, '
+        'animationOffset: $animationOffset, '
         'animations: $animations'
         ')';
   }
@@ -184,6 +216,7 @@ class ImageLayer with TimeRangeMixin {
         other.size == size &&
         other.rotation == rotation &&
         other.loop == loop &&
+        other.animationOffset == animationOffset &&
         listEquals(other.animations, animations);
   }
 
@@ -196,6 +229,7 @@ class ImageLayer with TimeRangeMixin {
         size.hashCode ^
         rotation.hashCode ^
         loop.hashCode ^
+        animationOffset.hashCode ^
         animations.hashCode;
   }
 }
