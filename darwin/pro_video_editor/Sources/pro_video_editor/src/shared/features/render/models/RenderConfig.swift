@@ -292,6 +292,10 @@ struct AudioTrackConfig {
   let startUs: Int64
   /// When to stop playing in the composition timeline. -1 means until the end.
   let endUs: Int64
+  /// How long the track rises from silence to `volume` after it starts, in microseconds.
+  let fadeInUs: Int64
+  /// How long the track falls to silence before its audio ends, in microseconds.
+  let fadeOutUs: Int64
 
   static func fromArguments(_ args: [String: Any]?) -> AudioTrackConfig? {
     guard let args = args,
@@ -304,7 +308,9 @@ struct AudioTrackConfig {
       audioStartUs: (args["audioStartUs"] as? NSNumber)?.int64Value,
       audioEndUs: (args["audioEndUs"] as? NSNumber)?.int64Value,
       startUs: (args["startUs"] as? NSNumber)?.int64Value ?? -1,
-      endUs: (args["endUs"] as? NSNumber)?.int64Value ?? -1
+      endUs: (args["endUs"] as? NSNumber)?.int64Value ?? -1,
+      fadeInUs: (args["fadeInUs"] as? NSNumber)?.int64Value ?? 0,
+      fadeOutUs: (args["fadeOutUs"] as? NSNumber)?.int64Value ?? 0
     )
   }
 }

@@ -16,6 +16,9 @@ import kotlin.test.assertTrue
  * the WAV header declares exactly that number, and a header that disagrees with
  * the body by even one frame makes the file unreadable.
  *
+ * It also pins the fade baked into the body: a linear ramp from and to silence
+ * at the edges of the audio, which is what the editor preview plays too.
+ *
  * Scope: a JVM unit test over plain file I/O. Decoding itself needs `MediaCodec`
  * and is covered on-device by the example integration tests.
  */
@@ -23,6 +26,11 @@ internal class AudioPreRendererTest {
 
     /** 16-bit stereo, i.e. one frame is four bytes. */
     private val bytesPerFrame = 4
+
+    private companion object {
+        /** The level the fade tests start from; a quarter step is exact. */
+        const val LEVEL = 10000
+    }
 
     /**
      * `render` documents that a non-looping track "plays once and any remaining
@@ -109,6 +117,165 @@ internal class AudioPreRendererTest {
         assertEquals(0xFFFF_FFFFL, readUInt32(pastRiffLimit, 4))
         assertEquals(0xFFFF_FFFFL, readUInt32(pastRiffLimit, 40))
     }
+
+    /**
+     * A fade in starts from silence and reaches the track's own level exactly
+     * where it ends; the frames after it are left as they were.
+     */
+    @Test
+    fun aFadeInRisesLinearlyFromSilence() {
+        val samples = fadedBody(frames = 8, fadeInFrames = 4, fadeOutFrames = 0)
+
+        assertEquals(listOf(0, 2500, 5000, 7500, 10000), samples.take(5))
+        assertEquals(List(3) { LEVEL }, samples.drop(5))
+    }
+
+    /** The last audible frame is one step above silence, never louder. */
+    @Test
+    fun aFadeOutFallsLinearlyToTheEndOfTheAudio() {
+        val samples = fadedBody(frames = 8, fadeInFrames = 0, fadeOutFrames = 4)
+
+        assertEquals(List(4) { LEVEL }, samples.take(4))
+        assertEquals(listOf(10000, 7500, 5000, 2500), samples.drop(4))
+    }
+
+    /**
+     * Two fades longer than the audio between them meet in the middle: the
+     * quieter ramp wins, so the track peaks below its level instead of the
+     * fade in jumping to full volume at the point the fade out takes over.
+     */
+    @Test
+    fun overlappingFadesKeepTheQuieterRamp() {
+        val samples = fadedBody(frames = 4, fadeInFrames = 4, fadeOutFrames = 4)
+
+        assertEquals(listOf(0, 2500, 5000, 2500), samples)
+    }
+
+    /** Scaling keeps the sign of a sample rather than wrapping it positive. */
+    @Test
+    fun aFadeScalesNegativeSamples() {
+        val samples = fadedBody(
+            frames = 4,
+            fadeInFrames = 2,
+            fadeOutFrames = 0,
+            level = -10000,
+        )
+
+        assertEquals(listOf(0, -5000, -10000, -10000), samples)
+    }
+
+    /**
+     * A track that plays once and then goes silent has to fade out where its
+     * audio ends. Fading the end of the slot instead would ramp silence and
+     * leave the audio's own end a hard cut.
+     */
+    @Test
+    fun aNonLoopingSourceFadesOutWhereItRunsOut() {
+        assertEquals(
+            400L,
+            AudioPreRenderer.audibleBodyBytes(
+                bodyBytes = 1000,
+                sourceBytes = 400,
+                loop = false,
+                bytesPerFrame = bytesPerFrame,
+            ),
+        )
+        assertEquals(
+            1000L,
+            AudioPreRenderer.audibleBodyBytes(
+                bodyBytes = 1000,
+                sourceBytes = 400,
+                loop = true,
+                bytesPerFrame = bytesPerFrame,
+            ),
+        )
+        assertEquals(
+            0L,
+            AudioPreRenderer.audibleBodyBytes(
+                bodyBytes = 1000,
+                sourceBytes = 0,
+                loop = true,
+                bytesPerFrame = bytesPerFrame,
+            ),
+        )
+    }
+
+    /**
+     * The fade is applied in place after the whole file is written, so it has
+     * to leave the header and the leading silence in front of the body alone.
+     */
+    @Test
+    fun aFadeOnlyTouchesTheBody() {
+        val prefix = 12
+        val output = File.createTempFile("prerender_fade", ".wav")
+        output.deleteOnExit()
+        val prefixBytes = ByteArray(prefix) { 0x7F }
+        output.writeBytes(prefixBytes + levelFrames(frames = 4, level = LEVEL))
+
+        RandomAccessFile(output, "rw").use { raf ->
+            AudioPreRenderer.applyFade(
+                raf = raf,
+                bodyStart = prefix.toLong(),
+                audibleBytes = 4L * bytesPerFrame,
+                bytesPerFrame = bytesPerFrame,
+                fadeInFrames = 2,
+                fadeOutFrames = 0,
+            )
+        }
+
+        val bytes = output.readBytes()
+        assertEquals(prefixBytes.toList(), bytes.take(prefix))
+        assertEquals(listOf(0, 5000, 10000, 10000), leftSamples(bytes.drop(prefix)))
+    }
+
+    /**
+     * Frames of [level] on both channels, faded, read back as the left
+     * channel. Both channels get the same gain, which is asserted here too.
+     */
+    private fun fadedBody(
+        frames: Int,
+        fadeInFrames: Long,
+        fadeOutFrames: Long,
+        level: Int = LEVEL,
+    ): List<Int> {
+        val output = File.createTempFile("prerender_fade", ".wav")
+        output.deleteOnExit()
+        output.writeBytes(levelFrames(frames, level))
+        RandomAccessFile(output, "rw").use { raf ->
+            AudioPreRenderer.applyFade(
+                raf = raf,
+                bodyStart = 0,
+                audibleBytes = frames.toLong() * bytesPerFrame,
+                bytesPerFrame = bytesPerFrame,
+                fadeInFrames = fadeInFrames,
+                fadeOutFrames = fadeOutFrames,
+            )
+        }
+        val bytes = output.readBytes().toList()
+        val left = leftSamples(bytes)
+        assertEquals(left, rightSamples(bytes), "both channels share one gain")
+        return left
+    }
+
+    /** [frames] of 16-bit stereo PCM holding [level] on both channels. */
+    private fun levelFrames(frames: Int, level: Int): ByteArray {
+        val bytes = ByteArray(frames * bytesPerFrame)
+        for (i in 0 until frames * 2) {
+            bytes[i * 2] = (level and 0xFF).toByte()
+            bytes[i * 2 + 1] = ((level shr 8) and 0xFF).toByte()
+        }
+        return bytes
+    }
+
+    private fun leftSamples(bytes: List<Byte>) = samplesAt(bytes, channel = 0)
+
+    private fun rightSamples(bytes: List<Byte>) = samplesAt(bytes, channel = 1)
+
+    private fun samplesAt(bytes: List<Byte>, channel: Int): List<Int> =
+        (bytes.indices step bytesPerFrame).map { frameStart ->
+            val p = frameStart + channel * 2
+            ((bytes[p].toInt() and 0xFF) or (bytes[p + 1].toInt() shl 8)).toShort().toInt()
+        }
 
     /** The 44-byte header after [AudioPreRenderer.updateWavSizes]. */
     private fun updateSizes(dataSize: Long): ByteArray {

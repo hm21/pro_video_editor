@@ -635,6 +635,8 @@ var task = VideoRenderData(
       VideoAudioTrack(
         path: customAudioPath,
         volume: 0.3, // Background music at 30%
+        fadeInDuration: const Duration(milliseconds: 500), // ease it in
+        fadeOutDuration: const Duration(seconds: 1), // and out at the end
       ),
     ],
     transform: const ExportTransform(

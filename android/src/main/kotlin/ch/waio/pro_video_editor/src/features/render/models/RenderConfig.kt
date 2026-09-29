@@ -316,6 +316,8 @@ data class ChromaKeyConfig(
  * @property audioEndUs End offset within the audio file in microseconds (null = until end)
  * @property startUs Composition start time in microseconds (when in the video timeline this track starts)
  * @property endUs Composition end time in microseconds (when in the video timeline this track ends)
+ * @property fadeInUs How long the track rises from silence to [volume] after it starts, in microseconds
+ * @property fadeOutUs How long the track falls to silence before its audio ends, in microseconds
  */
 data class AudioTrackConfig(
     val path: String,
@@ -324,7 +326,9 @@ data class AudioTrackConfig(
     val audioStartUs: Long? = null,
     val audioEndUs: Long? = null,
     val startUs: Long? = null,
-    val endUs: Long? = null
+    val endUs: Long? = null,
+    val fadeInUs: Long = 0L,
+    val fadeOutUs: Long = 0L
 ) {
     companion object {
         fun fromMap(map: Map<String, Any?>): AudioTrackConfig {
@@ -335,7 +339,9 @@ data class AudioTrackConfig(
                 audioStartUs = (map["audioStartUs"] as? Number)?.toLong(),
                 audioEndUs = (map["audioEndUs"] as? Number)?.toLong(),
                 startUs = (map["startUs"] as? Number)?.toLong(),
-                endUs = (map["endUs"] as? Number)?.toLong()
+                endUs = (map["endUs"] as? Number)?.toLong(),
+                fadeInUs = (map["fadeInUs"] as? Number)?.toLong() ?: 0L,
+                fadeOutUs = (map["fadeOutUs"] as? Number)?.toLong() ?: 0L
             )
         }
     }

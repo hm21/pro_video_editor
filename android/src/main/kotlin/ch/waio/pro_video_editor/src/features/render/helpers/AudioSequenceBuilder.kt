@@ -50,6 +50,8 @@ class AudioSequenceBuilder(
     private var audioEndTimeUs: Long? = null
     private var compositionStartTimeUs: Long? = null
     private var compositionEndTimeUs: Long? = null
+    private var fadeInUs: Long = 0L
+    private var fadeOutUs: Long = 0L
 
     /**
      * Sets whether the audio should loop to fill the play range.
@@ -94,6 +96,16 @@ class AudioSequenceBuilder(
     }
 
     /**
+     * Sets how long the track fades in after it starts and fades out before
+     * its audio ends. See [AudioPreRenderer.render].
+     */
+    fun setFade(fadeInUs: Long, fadeOutUs: Long): AudioSequenceBuilder {
+        this.fadeInUs = fadeInUs.coerceAtLeast(0L)
+        this.fadeOutUs = fadeOutUs.coerceAtLeast(0L)
+        return this
+    }
+
+    /**
      * Builds the audio sequence by pre-rendering the source into a single
      * gap-less PCM WAV file.
      *
@@ -125,7 +137,9 @@ class AudioSequenceBuilder(
             loop = loopAudio,
             compositionStartUs = compStart,
             compositionDurationUs = playDurationUs,
-            videoDurationUs = videoDurationUs
+            videoDurationUs = videoDurationUs,
+            fadeInUs = fadeInUs,
+            fadeOutUs = fadeOutUs
         ) ?: return null
 
         val mediaItem = MediaItem.Builder()

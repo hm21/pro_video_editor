@@ -270,6 +270,7 @@ class LayeredCompositionBuilder(
                 .setAudioEndTime(track.audioEndUs)
                 .setCompositionStartTime(track.startUs)
                 .setCompositionEndTime(track.endUs)
+                .setFade(track.fadeInUs, track.fadeOutUs)
                 .build()
                 ?.also { temporaryFiles.add(it.temporaryFile) }
                 ?.sequence

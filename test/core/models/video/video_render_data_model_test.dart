@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pro_video_editor/core/models/audio/audio_track_model.dart';
 import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart';
 import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
 import 'package:pro_video_editor/core/models/video/chroma_key_model.dart';
@@ -165,6 +166,33 @@ void main() {
         isTrue,
       );
     });
+  });
+
+  group('VideoRenderData audioTracks', () {
+    test(
+      'toAsyncMap sends each track\'s fade over the platform channel',
+      () async {
+        final data = VideoRenderData(
+          id: 'test',
+          videoSegments: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+          audioTracks: const [
+            VideoAudioTrack(
+              path: '/audio/faded.m4a',
+              fadeInDuration: Duration(milliseconds: 250),
+              fadeOutDuration: Duration(seconds: 2),
+            ),
+            VideoAudioTrack(path: '/audio/plain.m4a'),
+          ],
+        );
+
+        final tracks = (await data.toAsyncMap())['audioTracks'] as List;
+
+        expect(tracks[0]['fadeInUs'], 250000);
+        expect(tracks[0]['fadeOutUs'], 2000000);
+        expect(tracks[1]['fadeInUs'], 0);
+        expect(tracks[1]['fadeOutUs'], 0);
+      },
+    );
   });
 
   group('VideoRenderData chromaKey', () {

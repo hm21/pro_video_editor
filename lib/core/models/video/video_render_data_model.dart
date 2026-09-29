@@ -432,6 +432,8 @@ class VideoRenderData {
             'audioEndUs': t.audioEndTime?.inMicroseconds,
             'startUs': t.startTime?.inMicroseconds,
             'endUs': t.endTime?.inMicroseconds,
+            'fadeInUs': t.fadeInDuration.inMicroseconds,
+            'fadeOutUs': t.fadeOutDuration.inMicroseconds,
           },
         )
         .toList();

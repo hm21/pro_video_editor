@@ -35,6 +35,9 @@ internal enum AudioPreRenderer {
   /// composition timeline is handled implicitly by inserting this file
   /// at the correct `compositionInsertTime`.
   ///
+  /// An optional linear fade in and out is baked into the samples, so the
+  /// audio mix needs no volume ramp of its own.
+  ///
   /// - Parameters:
   ///   - audioPath: Absolute path to the source audio file.
   ///   - audioStartTime: Trim start within the source.
@@ -44,13 +47,20 @@ internal enum AudioPreRenderer {
   ///     `targetBodyDuration`. If false, the source plays once and the
   ///     remaining time is filled with silence.
   ///   - targetBodyDuration: How long the output audio should sound.
+  ///   - fadeIn: How long the audio rises from silence to full level
+  ///     after it starts.
+  ///   - fadeOut: How long the audio falls to silence before it ends —
+  ///     the end of the body, or earlier when a non-looping source runs
+  ///     out first.
   /// - Returns: A [Result] on success, nil on failure.
   static func render(
     audioPath: String,
     audioStartTime: CMTime,
     audioEndTime: CMTime?,
     loop: Bool,
-    targetBodyDuration: CMTime
+    targetBodyDuration: CMTime,
+    fadeIn: CMTime = .zero,
+    fadeOut: CMTime = .zero
   ) async -> Result? {
     let sourceURL = URL(fileURLWithPath: audioPath)
     guard FileManager.default.fileExists(atPath: sourceURL.path) else {
@@ -191,6 +201,17 @@ internal enum AudioPreRenderer {
       }
     }
 
+    // A non-looping source stops sounding where it runs out, so that is
+    // where its fade out has to end, not at the end of the silence after it.
+    let audibleBytes = loop ? targetBytes : min(trimmedPcm.count, targetBytes)
+    applyFade(
+      to: &outputBytes,
+      audibleBytes: audibleBytes,
+      bytesPerFrame: bytesPerFrame,
+      fadeInFrames: frameCount(fadeIn, sampleRate: sampleRate),
+      fadeOutFrames: frameCount(fadeOut, sampleRate: sampleRate)
+    )
+
     // Step 3: write the WAV file.
     let outputURL = makeTemporaryWavURL()
     do {
@@ -210,13 +231,82 @@ internal enum AudioPreRenderer {
     let outputDuration = CMTime(value: CMTimeValue(frameCount), timescale: CMTimeScale(sampleRate))
 
     PluginLog.print(
-      "🎼 AudioPreRenderer: rendered \(outputBytes.count) bytes (\(outputDuration.seconds)s), loop=\(loop)"
+      "🎼 AudioPreRenderer: rendered \(outputBytes.count) bytes (\(outputDuration.seconds)s), loop=\(loop), fadeIn=\(fadeIn.seconds)s, fadeOut=\(fadeOut.seconds)s"
     )
 
     return Result(outputURL: outputURL, duration: outputDuration)
   }
 
+  // MARK: - Fade
+
+  /// Ramps the gain of the first `fadeInFrames` and the last `fadeOutFrames`
+  /// of the first `audibleBytes` of 16-bit little-endian PCM in `pcm`.
+  ///
+  /// Both ramps are linear, reaching silence at the audible edge, and where
+  /// they overlap the quieter one wins, so a fade longer than the audio is
+  /// cut short rather than rejected. Frames outside the ramps are untouched.
+  static func applyFade(
+    to pcm: inout Data,
+    audibleBytes: Int,
+    bytesPerFrame: Int,
+    fadeInFrames: Int,
+    fadeOutFrames: Int
+  ) {
+    let audibleFrames = min(audibleBytes, pcm.count) / bytesPerFrame
+    if audibleFrames <= 0 { return }
+    let inEnd = min(max(fadeInFrames, 0), audibleFrames)
+    let outStart = max(audibleFrames - max(fadeOutFrames, 0), 0)
+    if inEnd <= 0 && outStart >= audibleFrames { return }
+
+    // One pass when the ramps meet, so no frame is scaled twice.
+    let ranges: [Range<Int>] =
+      inEnd >= outStart ? [0..<audibleFrames] : [0..<inEnd, outStart..<audibleFrames]
+    let samplesPerFrame = bytesPerFrame / 2
+
+    pcm.withUnsafeMutableBytes { raw in
+      let samples = raw.bindMemory(to: Int16.self)
+      for range in ranges {
+        for frame in range {
+          let gain = fadeGain(
+            frame: frame,
+            audibleFrames: audibleFrames,
+            fadeInFrames: fadeInFrames,
+            fadeOutFrames: fadeOutFrames
+          )
+          if gain >= 1 { continue }
+          let first = frame * samplesPerFrame
+          for index in first..<(first + samplesPerFrame) {
+            let sample = Double(Int16(littleEndian: samples[index]))
+            samples[index] = Int16((sample * gain).rounded()).littleEndian
+          }
+        }
+      }
+    }
+  }
+
+  /// The gain of `frame` out of `audibleFrames`: rising from 0 over the first
+  /// `fadeInFrames`, falling to 0 over the last `fadeOutFrames`, and the lower
+  /// of the two where they overlap.
+  static func fadeGain(
+    frame: Int,
+    audibleFrames: Int,
+    fadeInFrames: Int,
+    fadeOutFrames: Int
+  ) -> Double {
+    let inGain = fadeInFrames > 0 ? Double(frame) / Double(fadeInFrames) : 1
+    let outGain =
+      fadeOutFrames > 0 ? Double(audibleFrames - frame) / Double(fadeOutFrames) : 1
+    return max(min(inGain, outGain, 1), 0)
+  }
+
   // MARK: - Private helpers
+
+  /// How many frames `duration` spans at `sampleRate`.
+  private static func frameCount(_ duration: CMTime, sampleRate: Double) -> Int {
+    let seconds = duration.seconds
+    if !seconds.isFinite || seconds <= 0 { return 0 }
+    return Int(seconds * sampleRate)
+  }
 
   /// Reads PCM data from the source asset for a specific time range.
   private static func readPcm(

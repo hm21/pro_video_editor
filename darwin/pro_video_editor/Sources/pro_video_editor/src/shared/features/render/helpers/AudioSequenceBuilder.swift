@@ -29,6 +29,10 @@ internal class AudioSequenceBuilder {
   /// How long this audio track should play in the composition.
   /// If nil, uses targetDuration minus compositionInsertTime.
   private var compositionPlayDuration: CMTime?
+  /// How long the track fades in after it starts.
+  private var fadeIn: CMTime = .zero
+  /// How long the track fades out before its audio ends.
+  private var fadeOut: CMTime = .zero
 
   /// Initializes builder with audio path and target (full video) duration.
   init(audioPath: String, targetDuration: CMTime) {
@@ -75,6 +79,15 @@ internal class AudioSequenceBuilder {
     return self
   }
 
+  /// Sets how long the track fades in after it starts and fades out before
+  /// its audio ends. See `AudioPreRenderer.render`.
+  @discardableResult
+  func setFade(inUs: Int64, outUs: Int64) -> AudioSequenceBuilder {
+    self.fadeIn = CMTime(value: max(inUs, 0), timescale: 1_000_000)
+    self.fadeOut = CMTime(value: max(outUs, 0), timescale: 1_000_000)
+    return self
+  }
+
   /// Pre-renders the audio and inserts it into `composition` with a
   /// single `insertTimeRange` call.
   func build(in composition: AVMutableComposition) async throws -> BuildResult? {
@@ -96,7 +109,9 @@ internal class AudioSequenceBuilder {
         audioStartTime: audioStartTime,
         audioEndTime: audioEndTime,
         loop: loopAudio,
-        targetBodyDuration: effectivePlayDuration
+        targetBodyDuration: effectivePlayDuration,
+        fadeIn: fadeIn,
+        fadeOut: fadeOut
       )
     else {
       return nil

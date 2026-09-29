@@ -204,6 +204,7 @@ internal class LayeredCompositionBuilder {
           .setAudioEndTime(trackConfig.audioEndUs)
           .setCompositionStartTime(trackConfig.startUs == -1 ? nil : trackConfig.startUs)
           .setCompositionEndTime(trackConfig.endUs == -1 ? nil : trackConfig.endUs)
+          .setFade(inUs: trackConfig.fadeInUs, outUs: trackConfig.fadeOutUs)
         if let result = try await audioBuilder.build(in: composition) {
           let params = AVMutableAudioMixInputParameters(track: result.track)
           params.setVolume(trackConfig.volume, at: .zero)

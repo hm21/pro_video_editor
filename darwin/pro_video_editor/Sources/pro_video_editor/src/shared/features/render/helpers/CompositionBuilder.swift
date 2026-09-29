@@ -105,6 +105,7 @@ internal class CompositionBuilder {
         .setAudioEndTime(trackConfig.audioEndUs)
         .setCompositionStartTime(trackConfig.startUs == -1 ? nil : trackConfig.startUs)
         .setCompositionEndTime(trackConfig.endUs == -1 ? nil : trackConfig.endUs)
+        .setFade(inUs: trackConfig.fadeInUs, outUs: trackConfig.fadeOutUs)
 
       if let result = try await audioBuilder.build(in: composition) {
         customAudioTracks.append((track: result.track, config: trackConfig))

@@ -144,6 +144,7 @@ class CompositionBuilder(
                     .setAudioEndTime(track.audioEndUs)
                     .setCompositionStartTime(track.startUs)
                     .setCompositionEndTime(track.endUs)
+                    .setFade(track.fadeInUs, track.fadeOutUs)
                     .build()
 
                 if (result != null) {

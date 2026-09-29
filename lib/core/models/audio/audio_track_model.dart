@@ -23,6 +23,8 @@ class VideoAudioTrack with TimeRangeMixin {
     this.audioEndTime,
     this.startTime,
     this.endTime,
+    this.fadeInDuration = Duration.zero,
+    this.fadeOutDuration = Duration.zero,
   }) : assert(volume >= 0, '[volume] must be greater than or equal to 0'),
        assert(
          startTime == null || endTime == null || startTime < endTime,
@@ -62,6 +64,26 @@ class VideoAudioTrack with TimeRangeMixin {
   @override
   final Duration? endTime;
 
+  /// How long the track takes to rise from silence to [volume] once it
+  /// starts playing at [startTime].
+  ///
+  /// The gain ramps linearly. A fade longer than the audible part of the
+  /// track is cut short at its end, and a negative one counts as none.
+  ///
+  /// **Default**: [Duration.zero] (starts at full volume)
+  final Duration fadeInDuration;
+
+  /// How long the track takes to fall from [volume] to silence before it
+  /// stops sounding.
+  ///
+  /// The fade ends where the audio ends: at [endTime], or earlier when a
+  /// track that does not [loop] runs out of audio first. The gain ramps
+  /// linearly, and where it overlaps [fadeInDuration] the quieter of the two
+  /// wins. A negative duration counts as none.
+  ///
+  /// **Default**: [Duration.zero] (stops at full volume)
+  final Duration fadeOutDuration;
+
   VideoAudioTrack copyWith({
     String? path,
     double? volume,
@@ -70,6 +92,8 @@ class VideoAudioTrack with TimeRangeMixin {
     Duration? audioEndTime,
     Duration? startTime,
     Duration? endTime,
+    Duration? fadeInDuration,
+    Duration? fadeOutDuration,
   }) {
     return VideoAudioTrack(
       path: path ?? this.path,
@@ -79,6 +103,8 @@ class VideoAudioTrack with TimeRangeMixin {
       audioEndTime: audioEndTime ?? this.audioEndTime,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
+      fadeInDuration: fadeInDuration ?? this.fadeInDuration,
+      fadeOutDuration: fadeOutDuration ?? this.fadeOutDuration,
     );
   }
 
@@ -91,6 +117,8 @@ class VideoAudioTrack with TimeRangeMixin {
       'audioEndTime': audioEndTime?.inMicroseconds,
       'startTime': startTime?.inMicroseconds,
       'endTime': endTime?.inMicroseconds,
+      'fadeInDuration': fadeInDuration.inMicroseconds,
+      'fadeOutDuration': fadeOutDuration.inMicroseconds,
     };
   }
 
@@ -111,6 +139,12 @@ class VideoAudioTrack with TimeRangeMixin {
       endTime: map['endTime'] != null
           ? Duration(microseconds: safeParseInt(map['endTime']))
           : null,
+      fadeInDuration: Duration(
+        microseconds: safeParseInt(map['fadeInDuration']),
+      ),
+      fadeOutDuration: Duration(
+        microseconds: safeParseInt(map['fadeOutDuration']),
+      ),
     );
   }
 
@@ -123,7 +157,8 @@ class VideoAudioTrack with TimeRangeMixin {
   String toString() {
     return 'VideoAudioTrack(path: $path, volume: $volume, loop: $loop, '
         'audioStartTime: $audioStartTime, audioEndTime: $audioEndTime, '
-        'startTime: $startTime, endTime: $endTime)';
+        'startTime: $startTime, endTime: $endTime, '
+        'fadeInDuration: $fadeInDuration, fadeOutDuration: $fadeOutDuration)';
   }
 
   @override
@@ -136,7 +171,9 @@ class VideoAudioTrack with TimeRangeMixin {
         other.audioStartTime == audioStartTime &&
         other.audioEndTime == audioEndTime &&
         other.startTime == startTime &&
-        other.endTime == endTime;
+        other.endTime == endTime &&
+        other.fadeInDuration == fadeInDuration &&
+        other.fadeOutDuration == fadeOutDuration;
   }
 
   @override
@@ -147,6 +184,8 @@ class VideoAudioTrack with TimeRangeMixin {
         audioStartTime.hashCode ^
         audioEndTime.hashCode ^
         startTime.hashCode ^
-        endTime.hashCode;
+        endTime.hashCode ^
+        fadeInDuration.hashCode ^
+        fadeOutDuration.hashCode;
   }
 }

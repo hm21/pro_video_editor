@@ -11,6 +11,8 @@ void main() {
       audioEndTime: const Duration(seconds: 30),
       startTime: const Duration(seconds: 2),
       endTime: const Duration(seconds: 20),
+      fadeInDuration: const Duration(milliseconds: 500),
+      fadeOutDuration: const Duration(seconds: 1),
     );
 
     group('toMap', () {
@@ -24,6 +26,8 @@ void main() {
         expect(map['audioEndTime'], 30000000);
         expect(map['startTime'], 2000000);
         expect(map['endTime'], 20000000);
+        expect(map['fadeInDuration'], 500000);
+        expect(map['fadeOutDuration'], 1000000);
       });
 
       test('serializes null durations as null', () {
@@ -49,6 +53,19 @@ void main() {
         expect(restored.audioEndTime, track.audioEndTime);
         expect(restored.startTime, track.startTime);
         expect(restored.endTime, track.endTime);
+        expect(restored.fadeInDuration, track.fadeInDuration);
+        expect(restored.fadeOutDuration, track.fadeOutDuration);
+      });
+
+      test('reads a map written before fades existed as no fade', () {
+        final restored = VideoAudioTrack.fromMap({
+          'path': '/audio.mp3',
+          'volume': 1.0,
+          'loop': false,
+        });
+
+        expect(restored.fadeInDuration, Duration.zero);
+        expect(restored.fadeOutDuration, Duration.zero);
       });
 
       test('handles null durations', () {
@@ -118,6 +135,20 @@ void main() {
       test('different instances are not equal', () {
         final other = track.copyWith(volume: 0.1);
         expect(other, isNot(track));
+      });
+
+      test('a different fade makes the tracks differ', () {
+        expect(track.copyWith(fadeInDuration: Duration.zero), isNot(track));
+        expect(track.copyWith(fadeOutDuration: Duration.zero), isNot(track));
+      });
+    });
+
+    group('fade', () {
+      test('defaults to none', () {
+        const minimal = VideoAudioTrack(path: '/audio.mp3');
+
+        expect(minimal.fadeInDuration, Duration.zero);
+        expect(minimal.fadeOutDuration, Duration.zero);
       });
     });
 
