@@ -236,19 +236,20 @@ class RenderVideo {
             composition: composition, instructions: videoCompConfig.instructions,
             speed: workingConfig.playbackSpeed)
 
+          // Resolved once, so the export keeps exactly the window the custom
+          // audio tracks are laid over below.
+          let trimRange = try await resolveTrimTimeRange(
+            composition: composition,
+            startUs: workingConfig.startUs,
+            endUs: workingConfig.endUs)
+
           // Custom audio tracks sit on the output timeline, as on Android: they
           // start where the global trim starts and keep their own tempo, so they
           // are added only now, over the window the export keeps.
-          let outputWindow =
-            try await resolveTrimTimeRange(
-              composition: composition,
-              startUs: workingConfig.startUs,
-              endUs: workingConfig.endUs)
-            ?? CMTimeRange(start: .zero, duration: composition.duration)
           let customAudio = try await applyAudioTracks(
             composition: composition,
             audioTracks: workingConfig.audioTracks,
-            window: outputWindow,
+            window: trimRange ?? CMTimeRange(start: .zero, duration: composition.duration),
             audioMix: clipAudioMix)
           temporaryAudioURLs += customAudio.temporaryURLs
           let audioMix = customAudio.audioMix
@@ -385,10 +386,6 @@ class RenderVideo {
             PluginLog.print(
               "📊 Bitrate cap \(cap / 1000) kbps: rendering via AVAssetWriter "
                 + "(AVVideoAverageBitRateKey)")
-            let timeRange = try await resolveTrimTimeRange(
-              composition: composition,
-              startUs: workingConfig.startUs,
-              endUs: workingConfig.endUs)
             let hasAudioTracks = !composition.tracks(withMediaType: .audio).isEmpty
             // Serialize against other encodes (concurrent renders/splits) so
             // they don't starve each other on the hardware encoder, and guard
@@ -409,7 +406,7 @@ class RenderVideo {
                     outputURL: outputURL,
                     fileType: mapFormatToMimeType(format: workingConfig.outputFormat),
                     videoBitrate: cap,
-                    timeRange: timeRange,
+                    timeRange: trimRange,
                     optimizeForNetworkUse: workingConfig.shouldOptimizeForNetworkUse,
                     onProgress: progress)
                 })
@@ -424,8 +421,7 @@ class RenderVideo {
               outputURL: outputURL,
               outputFormat: workingConfig.outputFormat,
               preset: preset,
-              startUs: workingConfig.startUs,
-              endUs: workingConfig.endUs,
+              timeRange: trimRange,
               shouldOptimizeForNetworkUse: workingConfig.shouldOptimizeForNetworkUse
             )
 
@@ -960,8 +956,7 @@ class RenderVideo {
     outputURL: URL,
     outputFormat: String,
     preset: String,
-    startUs: Int64?,
-    endUs: Int64?,
+    timeRange: CMTimeRange?,
     shouldOptimizeForNetworkUse: Bool
   ) async throws -> AVAssetExportSession {
     guard let export = AVAssetExportSession(asset: composition, presetName: preset) else {
@@ -980,10 +975,8 @@ class RenderVideo {
     export.outputFileType = fileType
     export.videoComposition = videoComposition
 
-    // Apply global trim (timeRange) if startUs or endUs is provided
-    if let timeRange = try await resolveTrimTimeRange(
-      composition: composition, startUs: startUs, endUs: endUs)
-    {
+    // Apply the global trim, if any
+    if let timeRange {
       export.timeRange = timeRange
       PluginLog.print(
         "   - TimeRange applied: \(String(format: "%.2f", CMTimeGetSeconds(timeRange.start)))s - \(String(format: "%.2f", CMTimeGetSeconds(CMTimeRangeGetEnd(timeRange))))s"

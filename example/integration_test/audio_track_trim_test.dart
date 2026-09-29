@@ -115,6 +115,33 @@ void main() {
     expectToneAt(pcm, 1, 3);
   }, skip: !isSupported);
 
+  testWidgets('a bitrate cap exports the same placement', (_) async {
+    // A bitrate cap takes the other export path on iOS/macOS: an
+    // AVAssetReader/AVAssetWriter pass instead of an export session.
+    final (duration, pcm) = await render(
+      VideoRenderData(
+        videoSegments: [
+          VideoSegment(video: demo, endTime: const Duration(seconds: 10)),
+        ],
+        startTime: const Duration(seconds: 2),
+        endTime: const Duration(seconds: 6),
+        bitrate: 2000000,
+        enableAudio: false,
+        audioTracks: [
+          reference(),
+          VideoAudioTrack(
+            path: tonePath,
+            startTime: const Duration(seconds: 1),
+            endTime: const Duration(seconds: 3),
+          ),
+        ],
+      ),
+    );
+
+    expect(duration.inMilliseconds / 1000, closeTo(4, 0.15));
+    expectToneAt(pcm, 1, 3);
+  }, skip: !isSupported);
+
   testWidgets('a track fades in and out at the trimmed edges', (_) async {
     final (_, pcm) = await render(
       VideoRenderData(
