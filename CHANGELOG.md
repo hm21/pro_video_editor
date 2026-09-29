@@ -1,5 +1,5 @@
 ## 2.17.0
-- **FEAT**(android, iOS, macOS): `VideoAudioTrack.fadeInDuration` and `fadeOutDuration` fade a custom audio track in from silence and out to silence. The ramps are linear and baked into the track's pre-rendered audio; the fade out ends where the audio does, so a track that plays once fades out where it runs out rather than at the end of its slot, and fades longer than the audio are cut short.
+- **FEAT**(android, iOS, macOS): `VideoAudioTrack.fadeInDuration` and `fadeOutDuration` fade a custom audio track in from and out to silence. The fade out ends where the track's audio ends.
 
 ## 2.16.0
 - **FEAT**(android): A failed render reports the video formats it read. `NativeFailureDetails.sources` lists MIME type, bit depth and transfer (`sdr`, `hlg`, `pq`), and `hasHdrSource` tells an HDR failure apart from an SDR one. Apple platforms leave it null.

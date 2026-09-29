@@ -102,8 +102,9 @@ void main() {
       expect(plain.rms(0, 0.1), greaterThan(0.01));
       expect(plain.rms(5.85, 5.95), greaterThan(0.01));
 
-      // Linear ramps: under a tenth of full level in the first 100 ms and in
-      // the last 150 ms before the window ends, full level in the middle.
+      // Linear ramps: near silence in the first 100 ms and 50–150 ms before
+      // the window ends (~0.06 and ~0.1 of full level, with headroom for
+      // the encoder), half level at 0.5 s, full level in the middle.
       expect(ratio(0, 0.1), lessThan(0.2));
       expect(ratio(0.45, 0.55), inInclusiveRange(0.35, 0.65));
       expect(ratio(2.5, 3.5), inInclusiveRange(0.9, 1.1));

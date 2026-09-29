@@ -229,6 +229,33 @@ internal class AudioPreRendererTest {
     }
 
     /**
+     * A track that plays once is followed by silence up to the end of its
+     * slot; the fade ends at its audible end and leaves that silence alone.
+     */
+    @Test
+    fun aFadeOutEndsWhereTheAudibleBytesEnd() {
+        val output = File.createTempFile("prerender_fade", ".wav")
+        output.deleteOnExit()
+        output.writeBytes(levelFrames(frames = 4, level = LEVEL) + ByteArray(4 * bytesPerFrame))
+
+        RandomAccessFile(output, "rw").use { raf ->
+            AudioPreRenderer.applyFade(
+                raf = raf,
+                bodyStart = 0,
+                audibleBytes = 4L * bytesPerFrame,
+                bytesPerFrame = bytesPerFrame,
+                fadeInFrames = 0,
+                fadeOutFrames = 2,
+            )
+        }
+
+        assertEquals(
+            listOf(LEVEL, LEVEL, 10000, 5000, 0, 0, 0, 0),
+            leftSamples(output.readBytes().toList()),
+        )
+    }
+
+    /**
      * Frames of [level] on both channels, faded, read back as the left
      * channel. Both channels get the same gain, which is asserted here too.
      */

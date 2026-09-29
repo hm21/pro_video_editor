@@ -208,8 +208,8 @@ internal enum AudioPreRenderer {
       to: &outputBytes,
       audibleBytes: audibleBytes,
       bytesPerFrame: bytesPerFrame,
-      fadeInFrames: frameCount(fadeIn, sampleRate: sampleRate),
-      fadeOutFrames: frameCount(fadeOut, sampleRate: sampleRate)
+      fadeInFrames: framesForDuration(fadeIn, sampleRate: sampleRate),
+      fadeOutFrames: framesForDuration(fadeOut, sampleRate: sampleRate)
     )
 
     // Step 3: write the WAV file.
@@ -264,20 +264,21 @@ internal enum AudioPreRenderer {
     let samplesPerFrame = bytesPerFrame / 2
 
     pcm.withUnsafeMutableBytes { raw in
-      let samples = raw.bindMemory(to: Int16.self)
-      for range in ranges {
-        for frame in range {
-          let gain = fadeGain(
-            frame: frame,
-            audibleFrames: audibleFrames,
-            fadeInFrames: fadeInFrames,
-            fadeOutFrames: fadeOutFrames
-          )
-          if gain >= 1 { continue }
-          let first = frame * samplesPerFrame
-          for index in first..<(first + samplesPerFrame) {
-            let sample = Double(Int16(littleEndian: samples[index]))
-            samples[index] = Int16((sample * gain).rounded()).littleEndian
+      raw.withMemoryRebound(to: Int16.self) { samples in
+        for range in ranges {
+          for frame in range {
+            let gain = fadeGain(
+              frame: frame,
+              audibleFrames: audibleFrames,
+              fadeInFrames: fadeInFrames,
+              fadeOutFrames: fadeOutFrames
+            )
+            if gain >= 1 { continue }
+            let first = frame * samplesPerFrame
+            for index in first..<(first + samplesPerFrame) {
+              let sample = Double(Int16(littleEndian: samples[index]))
+              samples[index] = Int16((sample * gain).rounded()).littleEndian
+            }
           }
         }
       }
@@ -302,7 +303,7 @@ internal enum AudioPreRenderer {
   // MARK: - Private helpers
 
   /// How many frames `duration` spans at `sampleRate`.
-  private static func frameCount(_ duration: CMTime, sampleRate: Double) -> Int {
+  private static func framesForDuration(_ duration: CMTime, sampleRate: Double) -> Int {
     let seconds = duration.seconds
     if !seconds.isFinite || seconds <= 0 { return 0 }
     return Int(seconds * sampleRate)
@@ -378,10 +379,7 @@ internal enum AudioPreRenderer {
     sampleRate: Double,
     bytesPerFrame: Int
   ) -> Int {
-    let seconds = duration.seconds
-    if !seconds.isFinite || seconds <= 0 { return 0 }
-    let frames = Int(seconds * sampleRate)
-    return frames * bytesPerFrame
+    return framesForDuration(duration, sampleRate: sampleRate) * bytesPerFrame
   }
 
   /// Creates a unique temporary WAV file URL in the cache directory.

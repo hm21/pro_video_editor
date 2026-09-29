@@ -81,6 +81,11 @@ class VideoAudioTrack with TimeRangeMixin {
   /// linearly, and where it overlaps [fadeInDuration] the quieter of the two
   /// wins. A negative duration counts as none.
   ///
+  /// On iOS and macOS the render's own trim (`VideoRenderData.startTime` /
+  /// `endTime`) and `playbackSpeed` apply after the track is placed, so a
+  /// fade at a trimmed edge is cut off and both fades scale with the speed.
+  /// Android places the track on the trimmed, sped-up output.
+  ///
   /// **Default**: [Duration.zero] (stops at full volume)
   final Duration fadeOutDuration;
 
@@ -185,7 +190,7 @@ class VideoAudioTrack with TimeRangeMixin {
         audioEndTime.hashCode ^
         startTime.hashCode ^
         endTime.hashCode ^
-        fadeInDuration.hashCode ^
-        fadeOutDuration.hashCode;
+        // Hashed as a pair: XOR-ing them would cancel out equal fades.
+        Object.hash(fadeInDuration, fadeOutDuration);
   }
 }

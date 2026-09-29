@@ -602,11 +602,7 @@ object AudioPreRenderer {
     }
 
     private fun usToBytes(durationUs: Long, sampleRate: Int, bytesPerFrame: Int): Long {
-        if (durationUs <= 0L) return 0L
-        // (durationUs * sampleRate / 1_000_000) frames * bytesPerFrame
-        // Use Math.multiplyExact-style guard via Long multiplication.
-        val frames = (durationUs.toDouble() * sampleRate / 1_000_000.0).toLong()
-        return frames * bytesPerFrame
+        return usToFrames(durationUs, sampleRate) * bytesPerFrame
     }
 
     private fun alignToFrame(byteCount: Long, bytesPerFrame: Int): Long {
