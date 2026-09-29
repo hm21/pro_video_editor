@@ -101,7 +101,6 @@ class CompositionBuilder(
             .setEnableAudio(config.enableAudio)
             .setGlobalTrim(config.startUs, config.endUs)
             .setGlobalPlaybackSpeed(config.playbackSpeed)
-            .setHasCustomAudio(hasCustomAudio)
 
         // Detect if audio normalization is needed (check both video and custom audio)
         val needsNormalization = videoBuilder.detectAudioNormalizationNeeded() || hasCustomAudio
@@ -145,6 +144,7 @@ class CompositionBuilder(
                     .setCompositionStartTime(track.startUs)
                     .setCompositionEndTime(track.endUs)
                     .setFade(track.fadeInUs, track.fadeOutUs)
+                    .setVolume(track.volume)
                     .build()
 
                 if (result != null) {

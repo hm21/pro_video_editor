@@ -261,8 +261,7 @@ class LayeredCompositionBuilder(
             backgroundColorSequence(globalDurationUs, canvasW, canvasH)
 
         // Custom audio tracks as separate sequences, mixed natively by Media3.
-        // Per-track volume is applied by the VolumeControlAudioMixerFactory set
-        // on the Transformer.
+        // Each track carries its own volume (see AudioSequenceBuilder.setVolume).
         val audioSequences = audioTracks.mapNotNull { track ->
             AudioSequenceBuilder(context, track.path, globalDurationUs)
                 .setLoop(track.loop)
@@ -271,6 +270,7 @@ class LayeredCompositionBuilder(
                 .setCompositionStartTime(track.startUs)
                 .setCompositionEndTime(track.endUs)
                 .setFade(track.fadeInUs, track.fadeOutUs)
+                .setVolume(track.volume)
                 .build()
                 ?.also { temporaryFiles.add(it.temporaryFile) }
                 ?.sequence

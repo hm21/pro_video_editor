@@ -58,7 +58,6 @@ class VideoSequenceBuilder(
     private var globalStartUs: Long? = null
     private var globalEndUs: Long? = null
     private var globalPlaybackSpeed: Float? = null
-    private var hasCustomAudio: Boolean = false
     private var scaleX: Float? = null
     private var scaleY: Float? = null
     private var outputWidth: Int? = null
@@ -196,17 +195,6 @@ class VideoSequenceBuilder(
      */
     fun setForceRemoveAudio(enabled: Boolean): VideoSequenceBuilder {
         this.forceRemoveAudio = enabled
-        return this
-    }
-
-    /**
-     * Sets whether custom audio will be mixed with video audio.
-     *
-     * When true, volume control is handled by VolumeControlAudioMixer.
-     * When false, volume control uses VolumeAudioProcessor on the video sequence.
-     */
-    fun setHasCustomAudio(hasCustom: Boolean): VideoSequenceBuilder {
-        this.hasCustomAudio = hasCustom
         return this
     }
 
@@ -712,14 +700,12 @@ class VideoSequenceBuilder(
             )
         }
 
-        // Per-clip volume control:
-        // - Without custom audio: VolumeAudioProcessor per clip works (single sequence)
-        // - With custom audio: AudioProcessors don't work with parallel sequences,
-        //   so per-clip volume is best-effort (applied via VolumeControlAudioMixer globally)
+        // Per-clip volume, applied to this clip's own audio before it reaches the
+        // mixer, so it holds whether or not custom audio tracks are mixed in.
         val clipVolume = clip.volume
         val perClipAudioProcessors = mutableListOf<AudioProcessor>().apply {
             addAll(normalizedAudioEffects)
-            if (!hasCustomAudio && clipVolume != null && clipVolume != 1.0f) {
+            if (clipVolume != null && clipVolume != 1.0f) {
                 Log.d(
                     RENDER_TAG,
                     "Clip $index volume: ${clipVolume}x (applied via VolumeAudioProcessor)"

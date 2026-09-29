@@ -52,6 +52,7 @@ class AudioSequenceBuilder(
     private var compositionEndTimeUs: Long? = null
     private var fadeInUs: Long = 0L
     private var fadeOutUs: Long = 0L
+    private var volume: Float = 1.0f
 
     /**
      * Sets whether the audio should loop to fill the play range.
@@ -92,6 +93,19 @@ class AudioSequenceBuilder(
      */
     fun setCompositionEndTime(endTimeUs: Long?): AudioSequenceBuilder {
         this.compositionEndTimeUs = endTimeUs
+        return this
+    }
+
+    /**
+     * Sets the track's volume multiplier (0 = silent, 1 = unchanged).
+     *
+     * It is applied to this track's own audio, so the mixer can sum every
+     * source at unity: Media3 hands sources to the mixer in no guaranteed
+     * order, so a volume keyed to a source's position lands on whichever
+     * source happens to register there.
+     */
+    fun setVolume(volume: Float): AudioSequenceBuilder {
+        this.volume = volume.coerceAtLeast(0f)
         return this
     }
 
@@ -146,9 +160,11 @@ class AudioSequenceBuilder(
             .setUri(Uri.fromFile(preRender.outputFile))
             .build()
 
+        val audioProcessors: List<AudioProcessor> =
+            if (volume != 1.0f) listOf(VolumeAudioProcessor(volume)) else emptyList()
         val editedItem = EditedMediaItem.Builder(mediaItem)
             .setRemoveVideo(true)
-            .setEffects(Effects(emptyList<AudioProcessor>(), emptyList()))
+            .setEffects(Effects(audioProcessors, emptyList()))
             .build()
 
         val sequence = EditedMediaItemSequence.Builder(editedItem).build()

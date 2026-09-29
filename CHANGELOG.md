@@ -1,3 +1,6 @@
+## 2.18.1
+- **FIX**(android): With a custom audio track mixed in, every volume now lands on the source it belongs to. The mixer assigned volumes by the order Media3 registered its sources, which is not guaranteed and changed between identical renders: a track set to 0 could play at full volume and a segment's volume could land on the track. A segment's own `volume` was also ignored whenever a custom track was present. Each segment and track now carries its own volume and the mixer sums them at unity.
+
 ## 2.18.0
 - **FIX**(iOS, macOS): A `VideoAudioTrack` is placed on the exported video, as on Android. With a `VideoRenderData.startTime` trim, its `startTime`/`endTime` count from the trimmed start, and its fades land at the output's edges instead of being cut off.
 

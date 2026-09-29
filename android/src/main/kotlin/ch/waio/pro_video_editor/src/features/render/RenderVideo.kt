@@ -20,7 +20,6 @@ import ch.waio.pro_video_editor.src.features.render.helpers.BitrateCapPolicy
 import ch.waio.pro_video_editor.src.features.render.helpers.EncoderFailureClassifier
 import ch.waio.pro_video_editor.src.features.render.helpers.ResilientVideoEncoderFactory
 import ch.waio.pro_video_editor.src.features.render.helpers.applyComposition
-import ch.waio.pro_video_editor.src.features.render.helpers.VolumeControlAudioMixerFactory
 import ch.waio.pro_video_editor.src.features.render.helpers.ConfigurableInAppMp4Muxer
 import ch.waio.pro_video_editor.src.features.render.helpers.VideoTranscoder
 import ch.waio.pro_video_editor.src.features.render.helpers.VideoReverser
@@ -746,18 +745,6 @@ class RenderVideo(private val context: Context) {
         // encoder slot and delivers the result exactly once.
         val renderFinished = AtomicBoolean(false)
 
-        // Check if we need custom audio mixing with volume control
-        val hasCustomAudio = config.audioTracks.isNotEmpty()
-
-        // Determine if video audio will be present in the mix
-        // Video audio is removed when audio is disabled or all clips have volume 0
-        val videoAudioPresent = config.enableAudio && (
-                config.videoClips.any { (it.volume ?: 1.0f) > 0.0f } ||
-                        config.composition?.layers?.any { layer ->
-                            layer.clips.any { (it.volume ?: 1.0f) > 0.0f }
-                        } == true
-                )
-
         // Build transformer with callbacks
         val transformerBuilder = Transformer.Builder(context)
             .setEncoderFactory(encoderFactory)
@@ -770,18 +757,11 @@ class RenderVideo(private val context: Context) {
         )
         transformerBuilder.setMuxerFactory(muxerFactory)
 
-        // Use custom audio mixer ONLY when mixing video audio with custom audio tracks
-        // For video-only volume adjustment, VolumeAudioProcessor is used per-clip instead
-        // (AudioProcessors don't work with parallel sequences, but work fine with single sequence)
-        if (hasCustomAudio) {
-            val trackVolumes = config.audioTracks.map { it.volume }
-            transformerBuilder.setAudioMixerFactory(
-                VolumeControlAudioMixerFactory(
-                    trackVolumes = trackVolumes,
-                    videoAudioPresent = videoAudioPresent
-                )
-            )
-        }
+        // Every volume, a clip's and a custom track's, is applied to that
+        // source's own audio before mixing, so Media3's default mixer sums all
+        // sources at unity. A mixer that assigned volumes by the order sources
+        // register put them on the wrong sources: Media3 does not guarantee
+        // that order, and it changed between identical renders.
 
         transformer = transformerBuilder
             .addListener(object : Transformer.Listener {
