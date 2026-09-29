@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +7,8 @@ import 'package:integration_test/integration_test.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/core/constants/example_constants.dart';
+
+import 'utils/pcm.dart';
 
 /// Checks the fade a custom audio track gets in a real render: the output is
 /// read back as PCM and its loudness at the edges compared with an unfaded
@@ -42,7 +43,7 @@ void main() {
 
   /// Renders the demo video with [fadeIn]/[fadeOut] on a track that plays a
   /// steady stretch of the demo song, and returns the output's audio.
-  Future<_Pcm> renderTrack({
+  Future<Pcm> renderTrack({
     Duration fadeIn = Duration.zero,
     Duration fadeOut = Duration.zero,
   }) async {
@@ -82,7 +83,7 @@ void main() {
         format: AudioFormat.wav,
       ),
     );
-    return _Pcm.parseWav(await File(wavPath).readAsBytes());
+    return Pcm.parseWav(await File(wavPath).readAsBytes());
   }
 
   testWidgets(
@@ -112,66 +113,4 @@ void main() {
     },
     skip: !isSupported,
   );
-}
-
-/// Mono PCM read from a WAV file.
-class _Pcm {
-  _Pcm(this.samples, this.sampleRate);
-
-  /// Reads 16-bit integer or 32-bit float PCM, averaging the channels.
-  factory _Pcm.parseWav(Uint8List bytes) {
-    final data = ByteData.sublistView(bytes);
-    var offset = 12;
-    int? format;
-    var channels = 0;
-    var sampleRate = 0;
-    var bitsPerSample = 0;
-    while (offset + 8 <= bytes.length) {
-      final id = String.fromCharCodes(bytes.sublist(offset, offset + 4));
-      final size = data.getUint32(offset + 4, Endian.little);
-      final body = offset + 8;
-      if (id == 'fmt ') {
-        format = data.getUint16(body, Endian.little);
-        channels = data.getUint16(body + 2, Endian.little);
-        sampleRate = data.getUint32(body + 4, Endian.little);
-        bitsPerSample = data.getUint16(body + 14, Endian.little);
-      } else if (id == 'data') {
-        final bytesPerSample = bitsPerSample ~/ 8;
-        final end = math.min(body + size, bytes.length);
-        final frames = (end - body) ~/ (bytesPerSample * channels);
-        final samples = Float64List(frames);
-        for (var f = 0; f < frames; f++) {
-          var sum = 0.0;
-          for (var c = 0; c < channels; c++) {
-            final p = body + (f * channels + c) * bytesPerSample;
-            sum += switch ((format, bitsPerSample)) {
-              (3, 32) => data.getFloat32(p, Endian.little),
-              (_, 16) => data.getInt16(p, Endian.little) / 32768,
-              (_, 32) => data.getInt32(p, Endian.little) / 2147483648,
-              _ => throw UnsupportedError('$bitsPerSample-bit PCM'),
-            };
-          }
-          samples[f] = sum / channels;
-        }
-        return _Pcm(samples, sampleRate);
-      }
-      offset = body + size + (size.isOdd ? 1 : 0);
-    }
-    throw const FormatException('WAV without a data chunk');
-  }
-
-  final Float64List samples;
-  final int sampleRate;
-
-  /// Root-mean-square level between [fromSec] and [toSec].
-  double rms(double fromSec, double toSec) {
-    final from = (fromSec * sampleRate).round().clamp(0, samples.length);
-    final to = (toSec * sampleRate).round().clamp(from, samples.length);
-    if (to <= from) return 0;
-    var sum = 0.0;
-    for (var i = from; i < to; i++) {
-      sum += samples[i] * samples[i];
-    }
-    return math.sqrt(sum / (to - from));
-  }
 }

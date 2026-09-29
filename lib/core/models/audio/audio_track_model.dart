@@ -10,8 +10,13 @@ import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 /// Each [VideoAudioTrack] references a custom audio file that can be mixed into
 /// the video during a specific time range.
 ///
+/// [startTime] and [endTime] are measured on the exported video: zero is its
+/// first frame, after `VideoRenderData.startTime` has trimmed the front and
+/// each segment's `playbackSpeed` has been applied. The track itself always
+/// plays at its own speed.
+///
 /// If [startTime] and [endTime] are both `null`, the audio plays for the
-/// entire duration of the video.
+/// entire duration of the exported video.
 class VideoAudioTrack with TimeRangeMixin {
   /// Creates an [VideoAudioTrack] with the given [path], [startTime],
   /// and optional [endTime].
@@ -80,11 +85,6 @@ class VideoAudioTrack with TimeRangeMixin {
   /// track that does not [loop] runs out of audio first. The gain ramps
   /// linearly, and where it overlaps [fadeInDuration] the quieter of the two
   /// wins. A negative duration counts as none.
-  ///
-  /// On iOS and macOS the render's own trim (`VideoRenderData.startTime` /
-  /// `endTime`) and `playbackSpeed` apply after the track is placed, so a
-  /// fade at a trimmed edge is cut off and both fades scale with the speed.
-  /// Android places the track on the trimmed, sped-up output.
   ///
   /// **Default**: [Duration.zero] (stops at full volume)
   final Duration fadeOutDuration;

@@ -15,7 +15,6 @@ import Foundation
 internal class LayeredCompositionBuilder {
   private let config: CompositionConfig
   private var enableAudio: Bool = true
-  private var audioTracks: [AudioTrackConfig] = []
   private var globalChromaKey: ChromaKeyConfig?
 
   init(composition: CompositionConfig) {
@@ -24,11 +23,6 @@ internal class LayeredCompositionBuilder {
 
   func setEnableAudio(_ enabled: Bool) -> LayeredCompositionBuilder {
     self.enableAudio = enabled
-    return self
-  }
-
-  func setAudioTracks(_ tracks: [AudioTrackConfig]) -> LayeredCompositionBuilder {
-    self.audioTracks = tracks
     return self
   }
 
@@ -190,35 +184,12 @@ internal class LayeredCompositionBuilder {
     let videoCompositionData = VideoCompositionData(
       instructions: instructions, frameDuration: frameDuration, renderSize: canvasSize)
 
-    // Custom audio tracks, inserted as extra audio tracks and mixed in.
-    var temporaryAudioURLs: [URL] = []
-    var customAudioParams: [AVMutableAudioMixInputParameters] = []
-    if !audioTracks.isEmpty {
-      let totalDurUs = placed.map { $0.endUs }.max() ?? 0
-      let targetDuration = CMTime(value: totalDurUs, timescale: 1_000_000)
-      for trackConfig in audioTracks {
-        let audioBuilder = AudioSequenceBuilder(
-          audioPath: trackConfig.path, targetDuration: targetDuration
-        ).setLoop(trackConfig.loop)
-          .setAudioStartTime(trackConfig.audioStartUs)
-          .setAudioEndTime(trackConfig.audioEndUs)
-          .setCompositionStartTime(trackConfig.startUs == -1 ? nil : trackConfig.startUs)
-          .setCompositionEndTime(trackConfig.endUs == -1 ? nil : trackConfig.endUs)
-          .setFade(inUs: trackConfig.fadeInUs, outUs: trackConfig.fadeOutUs)
-        if let result = try await audioBuilder.build(in: composition) {
-          let params = AVMutableAudioMixInputParameters(track: result.track)
-          params.setVolume(trackConfig.volume, at: .zero)
-          customAudioParams.append(params)
-          temporaryAudioURLs.append(result.temporaryURL)
-        }
-      }
-    }
-
-    let audioMix = makeAudioMix(audioWindows: audioWindows, extraParams: customAudioParams)
+    // Custom audio tracks are added later by `applyAudioTracks`, once the
+    // global trim is known.
+    let audioMix = makeAudioMix(audioWindows: audioWindows)
 
     PluginLog.print(
       "✅ Layered composition: \(config.layers.count) layers, \(placed.count) clips, "
-        + "\(audioTracks.count) audio tracks, "
         + "canvas \(Int(canvasSize.width))x\(Int(canvasSize.height))")
 
     // No chroma-key windows: the layered path keys each layer on its own
@@ -226,7 +197,7 @@ internal class LayeredCompositionBuilder {
     // composed (opaque) canvas afterwards would be meaningless.
     return (
       composition, videoCompositionData, canvasSize, audioMix, firstVideoTrackID,
-      temporaryAudioURLs, [], []
+      [], [], []
     )
   }
 
@@ -293,11 +264,9 @@ internal class LayeredCompositionBuilder {
     return CGRect(x: x, y: y, width: w, height: h)
   }
 
-  private func makeAudioMix(
-    audioWindows: [AudioWindow], extraParams: [AVMutableAudioMixInputParameters]
-  ) -> AVAudioMix? {
+  private func makeAudioMix(audioWindows: [AudioWindow]) -> AVAudioMix? {
     // One input-parameter set per layer track, with a volume ramp per clip
-    // window, plus any custom audio-track parameters.
+    // window.
     var byTrack: [CMPersistentTrackID: [AudioWindow]] = [:]
     for w in audioWindows { byTrack[w.track.trackID, default: []].append(w) }
 
@@ -310,7 +279,6 @@ internal class LayeredCompositionBuilder {
       }
       params.append(p)
     }
-    params.append(contentsOf: extraParams)
 
     guard !params.isEmpty else { return nil }
     let mix = AVMutableAudioMix()

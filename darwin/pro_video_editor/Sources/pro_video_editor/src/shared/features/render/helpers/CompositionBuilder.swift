@@ -4,16 +4,16 @@ import Foundation
 
 /// Main builder class for creating video compositions from render configurations.
 ///
-/// Orchestrates video sequences, custom audio tracks, and audio mixing.
-/// This class delegates the actual work to specialized builders
-/// (VideoSequenceBuilder, AudioSequenceBuilder) following the Builder pattern.
+/// Orchestrates the video sequence and the mix of the clips' own audio.
+/// This class delegates the actual work to VideoSequenceBuilder following the
+/// Builder pattern. Custom audio tracks are added later by `applyAudioTracks`,
+/// once the playback speed and the global trim are known.
 internal class CompositionBuilder {
 
   private let videoClips: [VideoClip]
   private let videoEffects: VideoCompositorConfig
   private var enableAudio: Bool = true
   private var trimToCommonTrackEnd: Bool = false
-  private var audioTracks: [AudioTrackConfig] = []
   private var globalChromaKey: ChromaKeyConfig?
 
   /// Initializes builder with configuration.
@@ -42,15 +42,6 @@ internal class CompositionBuilder {
   /// - Returns: Self for chaining
   func setTrimToCommonTrackEnd(_ enabled: Bool) -> CompositionBuilder {
     self.trimToCommonTrackEnd = enabled
-    return self
-  }
-
-  /// Sets the audio tracks for mixing.
-  ///
-  /// - Parameter tracks: Array of audio track configurations
-  /// - Returns: Self for chaining
-  func setAudioTracks(_ tracks: [AudioTrackConfig]) -> CompositionBuilder {
-    self.audioTracks = tracks
     return self
   }
 
@@ -91,37 +82,11 @@ internal class CompositionBuilder {
 
     let videoResult = try await videoBuilder.build(in: composition)
 
-    // Add custom audio tracks (each pre-rendered to a single PCM WAV).
-    var customAudioTracks: [(track: AVMutableCompositionTrack, config: AudioTrackConfig)] = []
-    // Start with any reversed-audio temp WAVs created by VideoSequenceBuilder.
-    var temporaryAudioURLs: [URL] = videoResult.reversedAudioTempURLs
-    for trackConfig in audioTracks {
-      PluginLog.print("🎵 Adding audio track: \(trackConfig.path)")
-      let audioBuilder = AudioSequenceBuilder(
-        audioPath: trackConfig.path,
-        targetDuration: videoResult.totalDuration
-      ).setLoop(trackConfig.loop)
-        .setAudioStartTime(trackConfig.audioStartUs)
-        .setAudioEndTime(trackConfig.audioEndUs)
-        .setCompositionStartTime(trackConfig.startUs == -1 ? nil : trackConfig.startUs)
-        .setCompositionEndTime(trackConfig.endUs == -1 ? nil : trackConfig.endUs)
-        .setFade(inUs: trackConfig.fadeInUs, outUs: trackConfig.fadeOutUs)
-
-      if let result = try await audioBuilder.build(in: composition) {
-        customAudioTracks.append((track: result.track, config: trackConfig))
-        temporaryAudioURLs.append(result.temporaryURL)
-      }
-    }
-
-    // Create audio mix with per-clip and per-track volume parameters
+    // Create audio mix with per-clip volume parameters
     var audioMix: AVAudioMix?
-    let hasOriginalAudio = enableAudio && !videoResult.audioTracks.isEmpty
-    let hasCustomAudio = !customAudioTracks.isEmpty
-
-    if hasOriginalAudio || hasCustomAudio {
+    if enableAudio && !videoResult.audioTracks.isEmpty {
       audioMix = createAudioMix(
         originalTracks: videoResult.audioTracks,
-        customAudioTracks: customAudioTracks,
         clipInstructions: videoResult.clipInstructions
       )
     }
@@ -213,7 +178,7 @@ internal class CompositionBuilder {
 
     return (
       composition, videoCompositionData, videoResult.renderSize, audioMix, sourceTrackID,
-      temporaryAudioURLs, fadeWindows, chromaKeyWindows
+      videoResult.reversedAudioTempURLs, fadeWindows, chromaKeyWindows
     )
   }
 
@@ -332,10 +297,9 @@ internal class CompositionBuilder {
     return windows
   }
 
-  /// Creates audio mix with per-clip and per-track volume parameters.
+  /// Creates audio mix with per-clip volume parameters.
   private func createAudioMix(
     originalTracks: [AVMutableCompositionTrack],
-    customAudioTracks: [(track: AVMutableCompositionTrack, config: AudioTrackConfig)],
     clipInstructions: [ClipInstruction]
   ) -> AVAudioMix {
     var audioMixInputParameters: [AVMutableAudioMixInputParameters] = []
@@ -359,14 +323,6 @@ internal class CompositionBuilder {
 
       audioMixInputParameters.append(inputParameters)
       PluginLog.print("🔊 Applied per-clip volume to original audio track")
-    }
-
-    // Apply volume to custom audio tracks
-    for (track, config) in customAudioTracks {
-      let inputParameters = AVMutableAudioMixInputParameters(track: track)
-      inputParameters.setVolume(config.volume, at: .zero)
-      audioMixInputParameters.append(inputParameters)
-      PluginLog.print("🔊 Applied volume \(config.volume) to custom audio track: \(config.path)")
     }
 
     let audioMix = AVMutableAudioMix()

@@ -11,16 +11,15 @@ import Foundation
 ///   - videoClips: Array of video clips to concatenate. Each clip can have optional trimming.
 ///   - videoEffects: Configuration for visual effects (rotation, scale, color, blur, etc.).
 ///   - enableAudio: If true, includes original audio from video clips.
-///   - audioTracks: Array of audio track configurations to mix over the video.
 ///   - chromaKey: Global chroma key for clips that carry none of their own.
 ///
 /// - Returns: A tuple containing:
 ///   - AVMutableComposition: The concatenated video/audio composition
 ///   - VideoCompositionData: Video composition data with instructions and render size
 ///   - CGSize: Final render size (max dimensions from all clips)
-///   - AVAudioMix?: Audio mix with volume controls (nil if no audio mixing needed)
+///   - AVAudioMix?: Audio mix with the clips' volumes (nil if no audio mixing needed)
 ///   - CMPersistentTrackID: The track ID of the video composition track (for fallback on older iOS)
-///   - [URL]: Temporary file URLs (e.g. pre-rendered audio WAVs) the caller MUST delete after export
+///   - [URL]: Temporary file URLs (reversed-audio WAVs) the caller MUST delete after export
 ///   - [FadeWindow]: Dip-to-color windows for fadeToBlack / fadeToWhite transitions
 ///   - [ChromaKeyWindow]: Per-clip chroma-key windows for the single-track path
 ///
@@ -29,7 +28,6 @@ func applyComposition(
   videoClips: [VideoClip],
   videoEffects: VideoCompositorConfig,
   enableAudio: Bool,
-  audioTracks: [AudioTrackConfig],
   trimToCommonTrackEnd: Bool = false,
   chromaKey: ChromaKeyConfig? = nil
 ) async throws -> (
@@ -39,7 +37,6 @@ func applyComposition(
   return try await CompositionBuilder(videoClips: videoClips, videoEffects: videoEffects)
     .setEnableAudio(enableAudio)
     .setTrimToCommonTrackEnd(trimToCommonTrackEnd)
-    .setAudioTracks(audioTracks)
     .setChromaKey(chromaKey)
     .build()
 }

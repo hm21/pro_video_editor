@@ -207,7 +207,6 @@ class RenderVideo {
           if let compositionConfig = workingConfig.composition {
             buildResult = try await LayeredCompositionBuilder(composition: compositionConfig)
               .setEnableAudio(workingConfig.enableAudio)
-              .setAudioTracks(workingConfig.audioTracks)
               .setChromaKey(workingConfig.chromaKey)
               .build()
           } else {
@@ -215,13 +214,12 @@ class RenderVideo {
               videoClips: workingConfig.videoClips,
               videoEffects: effectsConfig,
               enableAudio: workingConfig.enableAudio,
-              audioTracks: workingConfig.audioTracks,
               trimToCommonTrackEnd: workingConfig.trimToCommonTrackEnd,
               chromaKey: workingConfig.chromaKey
             )
           }
           let (
-            composition, videoCompData, renderSize, audioMix, sourceTrackID, audioTempURLs,
+            composition, videoCompData, renderSize, clipAudioMix, sourceTrackID, audioTempURLs,
             fadeWindows, chromaKeyWindows
           ) = buildResult
           temporaryAudioURLs = audioTempURLs
@@ -237,6 +235,23 @@ class RenderVideo {
           videoCompConfig.instructions = applyPlaybackSpeed(
             composition: composition, instructions: videoCompConfig.instructions,
             speed: workingConfig.playbackSpeed)
+
+          // Custom audio tracks sit on the output timeline, as on Android: they
+          // start where the global trim starts and keep their own tempo, so they
+          // are added only now, over the window the export keeps.
+          let outputWindow =
+            try await resolveTrimTimeRange(
+              composition: composition,
+              startUs: workingConfig.startUs,
+              endUs: workingConfig.endUs)
+            ?? CMTimeRange(start: .zero, duration: composition.duration)
+          let customAudio = try await applyAudioTracks(
+            composition: composition,
+            audioTracks: workingConfig.audioTracks,
+            window: outputWindow,
+            audioMix: clipAudioMix)
+          temporaryAudioURLs += customAudio.temporaryURLs
+          let audioMix = customAudio.audioMix
 
           // Get the first video track for orientation info. The layered path
           // handles each layer's orientation itself, so global orientation

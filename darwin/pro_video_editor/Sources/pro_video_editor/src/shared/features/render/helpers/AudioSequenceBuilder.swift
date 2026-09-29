@@ -20,24 +20,27 @@ internal class AudioSequenceBuilder {
   }
 
   private let audioPath: String
-  private let targetDuration: CMTime
+  /// The span of the composition the export keeps. The track's start and end
+  /// count from its start, and the track never plays past its end.
+  private let window: CMTimeRange
   private var loopAudio: Bool = true
   private var audioStartTime: CMTime = .zero
   private var audioEndTime: CMTime?
-  /// Where in the composition timeline to insert this audio track.
+  /// Where on the output timeline (from `window.start`) this track starts.
   private var compositionInsertTime: CMTime = .zero
   /// How long this audio track should play in the composition.
-  /// If nil, uses targetDuration minus compositionInsertTime.
+  /// If nil, it plays until the window ends.
   private var compositionPlayDuration: CMTime?
   /// How long the track fades in after it starts.
   private var fadeIn: CMTime = .zero
   /// How long the track fades out before its audio ends.
   private var fadeOut: CMTime = .zero
 
-  /// Initializes builder with audio path and target (full video) duration.
-  init(audioPath: String, targetDuration: CMTime) {
+  /// Initializes builder with audio path and the span of the composition the
+  /// export keeps.
+  init(audioPath: String, window: CMTimeRange) {
     self.audioPath = audioPath
-    self.targetDuration = targetDuration
+    self.window = window
   }
 
   @discardableResult
@@ -92,7 +95,7 @@ internal class AudioSequenceBuilder {
   /// single `insertTimeRange` call.
   func build(in composition: AVMutableComposition) async throws -> BuildResult? {
     // Compute play duration in the composition.
-    let remainingCompositionTime = CMTimeSubtract(targetDuration, compositionInsertTime)
+    let remainingCompositionTime = CMTimeSubtract(window.duration, compositionInsertTime)
     let playDuration = compositionPlayDuration ?? remainingCompositionTime
     let effectivePlayDuration = CMTimeMinimum(playDuration, remainingCompositionTime)
 
@@ -149,10 +152,11 @@ internal class AudioSequenceBuilder {
     // play duration (loop+trim handled at PCM level).
     let insertDuration = CMTimeMinimum(prerender.duration, effectivePlayDuration)
     let timeRange = CMTimeRange(start: .zero, duration: insertDuration)
+    let insertTime = CMTimeAdd(window.start, compositionInsertTime)
 
     do {
       try compositionAudioTrack.insertTimeRange(
-        timeRange, of: sourceTrack, at: compositionInsertTime
+        timeRange, of: sourceTrack, at: insertTime
       )
     } catch {
       PluginLog.print("⚠️ Failed to insert pre-rendered audio: \(error)")
@@ -160,9 +164,9 @@ internal class AudioSequenceBuilder {
       throw error
     }
 
-    if CMTimeCompare(compositionInsertTime, .zero) > 0 {
+    if CMTimeCompare(insertTime, .zero) > 0 {
       PluginLog.print(
-        "🎵 Audio placed at composition time: \(compositionInsertTime.seconds)s"
+        "🎵 Audio placed at composition time: \(insertTime.seconds)s"
       )
     }
     PluginLog.print(

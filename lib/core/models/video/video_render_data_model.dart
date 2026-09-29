@@ -244,10 +244,15 @@ class VideoRenderData {
 
   /// Optional start time for trimming the entire composition across all
   /// segments.
+  ///
+  /// Measured after each segment's [VideoSegment.playbackSpeed] is applied.
+  /// The trimmed result is the timeline [audioTracks] are placed on.
   final Duration? startTime;
 
   /// Optional end time for trimming the entire composition across all
   /// segments.
+  ///
+  /// Measured after each segment's [VideoSegment.playbackSpeed] is applied.
   final Duration? endTime;
 
   /// A list of color filters with optional time ranges.
@@ -258,8 +263,8 @@ class VideoRenderData {
 
   /// A list of audio tracks with optional time ranges.
   ///
-  /// Each track adds audio to the video, optionally restricted
-  /// to a specific time range.
+  /// Each track adds audio to the video, optionally restricted to a specific
+  /// time range of the exported, trimmed video (see [VideoAudioTrack]).
   final List<VideoAudioTrack> audioTracks;
 
   /// Amount of blur to apply.

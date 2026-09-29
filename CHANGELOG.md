@@ -1,3 +1,6 @@
+## 2.18.0
+- **FIX**(iOS, macOS): A `VideoAudioTrack` is placed on the exported video, as on Android. With a `VideoRenderData.startTime` trim, its `startTime`/`endTime` count from the trimmed start, and its fades land at the output's edges instead of being cut off.
+
 ## 2.17.0
 - **FEAT**(android, iOS, macOS): `VideoAudioTrack.fadeInDuration` and `fadeOutDuration` fade a custom audio track in from and out to silence. The fade out ends where the track's audio ends.
 
