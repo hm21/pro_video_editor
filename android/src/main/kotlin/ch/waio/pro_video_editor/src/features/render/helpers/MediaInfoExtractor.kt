@@ -16,6 +16,27 @@ import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 object MediaInfoExtractor {
 
     /**
+     * Whether the file at [path] carries an audio track at all.
+     *
+     * @param path Absolute path to a media file
+     * @return `false` also when the file cannot be read
+     */
+    fun hasAudioTrack(path: String): Boolean {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(path)
+            (0 until extractor.trackCount).any { i ->
+                extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME)
+                    ?.startsWith("audio/") == true
+            }
+        } catch (e: Exception) {
+            false
+        } finally {
+            extractor.release()
+        }
+    }
+
+    /**
      * Retrieves video duration from file.
      *
      * @param videoPath Absolute path to video file

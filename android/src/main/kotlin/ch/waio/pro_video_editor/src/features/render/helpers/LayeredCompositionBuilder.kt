@@ -91,6 +91,19 @@ class LayeredCompositionBuilder(
     private data class DrawRect(val x: Double, val y: Double, val w: Double, val h: Double)
 
     /**
+     * A layer clip's audio, placed on the output timeline: the source range
+     * [srcStartUs, srcEndUs) plays from [outputStartUs] to [outputEndUs].
+     */
+    private data class LayerAudio(
+        val path: String,
+        val srcStartUs: Long,
+        val srcEndUs: Long?,
+        val outputStartUs: Long,
+        val outputEndUs: Long,
+        val volume: Float
+    )
+
+    /**
      * Where a clip is drawn on the canvas. [draw] is the (possibly oversized for
      * `cover`) destination rectangle; [clip] is the target box the draw is
      * scissored to so overflow can't bleed onto other layers. [clip] is `null`
@@ -123,8 +136,11 @@ class LayeredCompositionBuilder(
 
         // Declare only the video track type. Declaring AUDIO makes Media3 try to
         // force a silent audio track on a muted/video-only layer, which crashes
-        // in SequenceAssetLoader during compositing. Real audio still flows.
+        // in SequenceAssetLoader during compositing. A video-only sequence
+        // carries no audio at all, though, so each layer clip's audio gets an
+        // audio-only sequence of its own instead (see [LayerAudio]).
         val trackTypes = setOf(C.TRACK_TYPE_VIDEO)
+        val layerAudio = mutableListOf<LayerAudio>()
 
         // Media3 can fail to produce frames for a second sequence streaming from
         // the same file URI, so a reused source gets a distinct URI per layer.
@@ -213,6 +229,17 @@ class LayeredCompositionBuilder(
                         layer.chromaKey
                     )
                 )
+                val volume = clip.volume ?: 1.0f
+                if (enableAudio && volume > 0f && MediaInfoExtractor.hasAudioTrack(clip.inputPath)) {
+                    layerAudio += LayerAudio(
+                        path = clip.inputPath,
+                        srcStartUs = srcStartUs ?: 0L,
+                        srcEndUs = srcEndUs,
+                        outputStartUs = outputStartUs,
+                        outputEndUs = outputStartUs + outputDurationUs,
+                        volume = volume
+                    )
+                }
                 outputCursorUs += outputDurationUs
                 itemCount++
                 // Track whether this (so far last) clip ends before its source
@@ -260,6 +287,21 @@ class LayeredCompositionBuilder(
         val videoSequences = layerSequences +
             backgroundColorSequence(globalDurationUs, canvasW, canvasH)
 
+        // Each layer clip's audio, pre-rendered and placed exactly like a custom
+        // track, at the layer's volume.
+        val layerAudioSequences = layerAudio.mapNotNull { audio ->
+            AudioSequenceBuilder(context, audio.path, globalDurationUs)
+                .setLoop(false)
+                .setStartTime(audio.srcStartUs)
+                .setAudioEndTime(audio.srcEndUs)
+                .setCompositionStartTime(audio.outputStartUs)
+                .setCompositionEndTime(audio.outputEndUs)
+                .setVolume(audio.volume)
+                .build()
+                ?.also { temporaryFiles.add(it.temporaryFile) }
+                ?.sequence
+        }
+
         // Custom audio tracks as separate sequences, mixed natively by Media3.
         // Each track carries its own volume (see AudioSequenceBuilder.setVolume).
         val audioSequences = audioTracks.mapNotNull { track ->
@@ -276,10 +318,11 @@ class LayeredCompositionBuilder(
                 ?.sequence
         }
 
-        val sequences = videoSequences + audioSequences
+        val sequences = videoSequences + layerAudioSequences + audioSequences
         Log.d(
             RENDER_TAG,
             "Layered composition: ${videoSequences.size} layers, " +
+                "${layerAudioSequences.size} layer audio, " +
                 "${audioSequences.size} audio tracks, canvas ${canvasW}x$canvasH, " +
                 "duration=${globalDurationUs / 1000}ms"
         )
@@ -367,9 +410,10 @@ class LayeredCompositionBuilder(
         // media length (pre-clip); the playable span is defined by the clipping
         // above. Setting it to the clipped output makes Media3 treat the source
         // as that short and clamps a mid-source end, dropping frames.
-        val removeAudio = !enableAudio || (clip.volume ?: 1.0f) <= 0f
+        // The clip's audio plays from its own audio-only sequence (see
+        // [LayerAudio]); the video-only layer sequence never carries it.
         return EditedMediaItem.Builder(mediaItemBuilder.build())
-            .setRemoveAudio(removeAudio)
+            .setRemoveAudio(true)
             .setEffects(Effects(emptyList(), effects))
             .build()
     }
