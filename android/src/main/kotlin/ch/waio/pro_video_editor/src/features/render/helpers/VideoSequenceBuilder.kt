@@ -9,8 +9,6 @@ import androidx.media3.common.C
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.audio.AudioProcessor
-import androidx.media3.common.audio.ChannelMixingAudioProcessor
-import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.OverlayEffect
@@ -362,88 +360,14 @@ class VideoSequenceBuilder(
     }
 
     /**
-     * Builds channel normalization effects (channel mixer + audio processors).
-     *
-     * Uses boosted ITU-R BS.775 coefficients for multi-channel downmixing.
-     * 
-     * The standard ITU-R BS.775 coefficients (1.0, 0.707, 0.707) cause volume loss
-     * because the energy distributed across multiple channels doesn't fully translate
-     * to stereo. We apply a boost factor of ~1.4 (sqrt(2)) to compensate.
-     * 
-     * This ensures that surround content maintains similar perceived loudness
-     * when mixed with stereo custom audio tracks.
+     * Builds channel normalization effects: a stereo fold ([StereoDownmix])
+     * followed by the global audio processors, so clips with different channel
+     * layouts and custom tracks all reach the mix as stereo.
      */
     private fun buildChannelNormalizationEffects(): List<AudioProcessor> {
-        val channelMixer = ChannelMixingAudioProcessor()
-
-        // Boost factor to compensate for energy loss during downmixing
-        // sqrt(2) ≈ 1.414 compensates for the typical ~70% volume loss
-        val boost = 1.4f
-
-        // 7.1 Surround (8 channels) to Stereo (2 channels)
-        // Channel order: FL, FR, FC, LFE, BL, BR, SL, SR
-        // Boosted coefficients to maintain loudness
-        val eightToTwo = floatArrayOf(
-            1.0f * boost,
-            0.0f,
-            0.707f * boost,
-            0.0f,
-            0.707f * boost,
-            0.0f,
-            0.707f * boost,
-            0.0f,  // Left output
-            0.0f,
-            1.0f * boost,
-            0.707f * boost,
-            0.0f,
-            0.0f,
-            0.707f * boost,
-            0.0f,
-            0.707f * boost   // Right output
-        )
-        channelMixer.putChannelMixingMatrix(
-            ChannelMixingMatrix(8, 2, eightToTwo)
-        )
-
-        // 5.1 Surround (6 channels) to Stereo (2 channels)
-        // Channel order: FL, FR, FC, LFE, BL, BR
-        // Boosted ITU-R BS.775: L' = (L + 0.707*C + 0.707*Ls) * boost
-        val sixToTwo = floatArrayOf(
-            1.0f * boost, 0.0f, 0.707f * boost, 0.0f, 0.707f * boost, 0.0f,  // Left output
-            0.0f, 1.0f * boost, 0.707f * boost, 0.0f, 0.0f, 0.707f * boost   // Right output
-        )
-        channelMixer.putChannelMixingMatrix(
-            ChannelMixingMatrix(6, 2, sixToTwo)
-        )
-
-        // Quad (4 channels) to Stereo (2 channels)
-        // Channel order: FL, FR, BL, BR
-        // Slightly lower boost for quad (less energy distributed)
-        val boostQuad = 1.2f
-        val fourToTwo = floatArrayOf(
-            1.0f * boostQuad, 0.0f, 0.707f * boostQuad, 0.0f,  // Left output
-            0.0f, 1.0f * boostQuad, 0.0f, 0.707f * boostQuad   // Right output
-        )
-        channelMixer.putChannelMixingMatrix(
-            ChannelMixingMatrix(4, 2, fourToTwo)
-        )
-
-        // Stereo (2 channels) to Stereo (2 channels) - passthrough (no boost needed)
-        channelMixer.putChannelMixingMatrix(
-            ChannelMixingMatrix.createForConstantGain(2, 2)
-        )
-
-        // Mono (1 channel) to Stereo (2 channels)
-        channelMixer.putChannelMixingMatrix(
-            ChannelMixingMatrix.createForConstantGain(1, 2)
-        )
-
-        Log.d(
-            RENDER_TAG,
-            "Channel normalization configured with boosted coefficients for loudness preservation"
-        )
-
-        return mutableListOf<AudioProcessor>(channelMixer).apply { addAll(audioEffects) }
+        return mutableListOf<AudioProcessor>(StereoDownmix.processor()).apply {
+            addAll(audioEffects)
+        }
     }
 
     /**
@@ -716,8 +640,7 @@ class VideoSequenceBuilder(
 
         // Per-clip playback speed:
         // - Video: SpeedChangeEffect on the EditedMediaItem
-        // - Audio: SonicAudioProcessor (only effective without custom audio /
-        //   parallel sequences; otherwise best-effort)
+        // - Audio: SonicAudioProcessor on this clip's own audio
         val clipSpeed = clip.playbackSpeed
         val finalAudioEffects: List<AudioProcessor> = if (clipSpeed != null && clipSpeed > 0f && clipSpeed != 1.0f) {
             Log.d(RENDER_TAG, "Clip $index playback speed: ${clipSpeed}x")

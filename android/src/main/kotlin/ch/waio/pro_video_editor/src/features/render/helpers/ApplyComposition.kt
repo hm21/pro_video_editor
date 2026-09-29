@@ -73,15 +73,30 @@ fun applyComposition(
             globalEndUs = config.endUs,
             globalChromaKey = config.chromaKey
         )
-        return CompositionResult(
-            layeredBuilder.build(),
-            layeredBuilder.temporaryFiles.toList()
-        )
+        val built = deletingOnFailure(layeredBuilder.temporaryFiles) {
+            layeredBuilder.build()
+        }
+        return CompositionResult(built, layeredBuilder.temporaryFiles.toList())
     }
 
     val builder = CompositionBuilder(context, config)
         .setVideoEffects(videoEffects)
         .setAudioEffects(audioEffects)
-    val composition = builder.build() ?: return null
+    val composition = deletingOnFailure(builder.temporaryFiles) { builder.build() }
+        ?: return null
     return CompositionResult(composition, builder.temporaryFiles.toList())
+}
+
+/**
+ * Runs [build] and deletes [temporaryFiles] if it throws. A builder that fails
+ * part-way may already have pre-rendered audio or copied sources, and those
+ * never reach the render's own cleanup, which only sees a finished result.
+ */
+private inline fun <T> deletingOnFailure(temporaryFiles: List<File>, build: () -> T): T {
+    try {
+        return build()
+    } catch (e: Throwable) {
+        temporaryFiles.forEach { it.delete() }
+        throw e
+    }
 }

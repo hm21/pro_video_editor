@@ -1,6 +1,8 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
+import androidx.media3.common.C
+import androidx.media3.common.audio.AudioProcessor.AudioFormat
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
@@ -9,9 +11,10 @@ import java.nio.ByteBuffer
 /**
  * Custom AudioProcessor to adjust volume of audio stream.
  *
- * Processes 16-bit PCM audio samples by multiplying each sample
- * with the volume multiplier. Ensures no clipping by clamping
- * values to valid Short range (-32768 to 32767).
+ * Multiplies each sample of 16-bit or float PCM by the volume multiplier;
+ * 16-bit samples are clamped to the valid Short range (-32768 to 32767). Any
+ * other encoding passes through unchanged rather than being scaled as if it
+ * were 16-bit, which would turn it into noise.
  *
  * @property volumeMultiplier Volume adjustment factor (0.0=silent, 1.0=unchanged, >1.0=amplified)
  */
@@ -22,11 +25,21 @@ class VolumeAudioProcessor(private val volumeMultiplier: Float) : BaseAudioProce
         Log.d(RENDER_TAG, "VolumeAudioProcessor created with multiplier: $volumeMultiplier")
     }
 
-    override fun onConfigure(inputAudioFormat: androidx.media3.common.audio.AudioProcessor.AudioFormat): androidx.media3.common.audio.AudioProcessor.AudioFormat {
+    override fun onConfigure(inputAudioFormat: AudioFormat): AudioFormat {
         Log.d(
             RENDER_TAG,
             "VolumeAudioProcessor.onConfigure: sampleRate=${inputAudioFormat.sampleRate}, channels=${inputAudioFormat.channelCount}, encoding=${inputAudioFormat.encoding}"
         )
+        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT &&
+            inputAudioFormat.encoding != C.ENCODING_PCM_FLOAT
+        ) {
+            Log.w(
+                RENDER_TAG,
+                "VolumeAudioProcessor: encoding ${inputAudioFormat.encoding} not supported, " +
+                    "volume $volumeMultiplier is not applied"
+            )
+            return AudioFormat.NOT_SET
+        }
         // Return the same format - we don't change the audio format, just the amplitude
         return inputAudioFormat
     }
@@ -53,6 +66,14 @@ class VolumeAudioProcessor(private val volumeMultiplier: Float) : BaseAudioProce
 
         // Get output buffer with same size as input
         val outputBuffer = replaceOutputBuffer(remaining)
+
+        if (inputAudioFormat.encoding == C.ENCODING_PCM_FLOAT) {
+            repeat(remaining / 4) {
+                outputBuffer.putFloat(inputBuffer.float * volumeMultiplier)
+            }
+            outputBuffer.flip()
+            return
+        }
 
         // Process 16-bit PCM samples
         val sampleCount = remaining / 2

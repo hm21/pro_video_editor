@@ -37,9 +37,12 @@ import java.nio.ByteOrder
  * An optional linear fade in and out is baked into the audio body (2), so
  * the mixer needs no time-varying gain of its own.
  *
- * The output sample rate, channel count and bit depth match the decoder
- * output of the source file. Float PCM is converted to 16-bit signed PCM.
- * Final resampling/mixing happens later inside Media3's encoder pipeline.
+ * The output sample rate matches the decoder output of the source file.
+ * Float PCM is converted to 16-bit signed PCM, and more than two channels are
+ * folded to stereo ([StereoDownmix]): Media3 converts only mono and stereo
+ * sources to the format of the mix, so a 5.1 track beside a stereo one would
+ * fail the export. Final resampling/mixing happens later inside Media3's
+ * encoder pipeline.
  */
 @UnstableApi
 object AudioPreRenderer {
@@ -260,8 +263,8 @@ object AudioPreRenderer {
      * decodes to ~30 MB, and holding that (plus the copy every array growth
      * makes) is enough to push an export over Android's managed-heap limit.
      *
-     * Float PCM is converted to int16. Output sample rate / channel
-     * count match the decoder output.
+     * Float PCM is converted to int16 and more than two channels are folded
+     * to stereo. The output sample rate matches the decoder output.
      */
     private fun decodeRange(
         cacheDir: File,
@@ -320,7 +323,7 @@ object AudioPreRenderer {
                 stopAfterEndUs = true,
                 onFormat = { format ->
                     sampleRate = format.sampleRate
-                    channelCount = format.channelCount
+                    channelCount = format.channelCount.coerceAtMost(2)
                 },
                 onPcm = { pcm, bufferStartUs, format ->
                     val bytesPerFrame = (format.channelCount * 2).coerceAtLeast(1)
@@ -345,8 +348,16 @@ object AudioPreRenderer {
 
                     val writeLen = pcm.size - skipBytes - dropBytes
                     if (writeLen > 0) {
-                        sink.write(pcm, skipBytes, writeLen)
-                        pcmByteLength += writeLen
+                        if (format.channelCount > 2) {
+                            val stereo = StereoDownmix.foldPcm16(
+                                pcm, skipBytes, writeLen, format.channelCount
+                            )
+                            sink.write(stereo)
+                            pcmByteLength += stereo.size
+                        } else {
+                            sink.write(pcm, skipBytes, writeLen)
+                            pcmByteLength += writeLen
+                        }
                         hasCrossedStart = true
                     }
                 },
