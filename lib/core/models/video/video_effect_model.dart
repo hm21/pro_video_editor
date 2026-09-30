@@ -38,11 +38,16 @@ enum VideoEffectType {
   /// The picture flashes white twice a second and is dimmed in between.
   ///
   /// Two flashes a second stay below the three a second that WCAG 2.3.1 names
-  /// as the limit for content that can trigger seizures.
+  /// as the limit for content that can trigger seizures. Flashing effects that
+  /// overlap in time add their flashes up, so keep one of them active at a
+  /// time to stay within it.
   strobe,
 
   /// The picture turns into its negative for a moment at the start of every
   /// second, twice in a row at higher intensities.
+  ///
+  /// At most two flashes a second, like [strobe], and like it only on its
+  /// own: overlapping flashing effects add their flashes up.
   negativeFlash,
 
   /// Darkened corners that draw the eye to the center.

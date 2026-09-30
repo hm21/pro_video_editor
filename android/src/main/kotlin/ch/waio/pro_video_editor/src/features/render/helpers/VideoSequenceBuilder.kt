@@ -576,7 +576,13 @@ class VideoSequenceBuilder(
             flattenTransparency = true,
         )
 
-        clipVideoEffects.addAll(videoEffects)
+        // The video effects run ahead of this clip's speed change (added below)
+        // but have to follow the output timeline, so they learn its speed.
+        clipVideoEffects.addAll(
+            videoEffects.map {
+                if (it is VideoEffectGlEffect) it.withSpeedChange(clip.playbackSpeed) else it
+            }
+        )
 
         // Calculate video dimensions for image layer positioning
         // This must be done before applying any effects

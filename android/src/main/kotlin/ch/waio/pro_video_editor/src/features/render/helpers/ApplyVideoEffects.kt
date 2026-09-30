@@ -12,13 +12,16 @@ import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
  *
  * @param videoEffects List to add the effect to
  * @param effects The effects of the render, each with its time range
+ * @param playbackSpeed The render-wide speed change that follows later in the
+ *   chain, so the effects follow the output timeline
  */
 @UnstableApi
 fun applyVideoEffects(
     videoEffects: MutableList<Effect>,
     effects: List<VideoEffectConfig>,
+    playbackSpeed: Float?,
 ) {
     if (effects.isEmpty()) return
     Log.d(RENDER_TAG, "Applying ${effects.size} video effect(s)")
-    videoEffects += VideoEffectGlEffect(effects)
+    videoEffects += VideoEffectGlEffect(effects).withSpeedChange(playbackSpeed)
 }

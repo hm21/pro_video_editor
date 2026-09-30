@@ -141,7 +141,15 @@ class _VideoEffectsExamplePageState extends State<VideoEffectsExamplePage>
         nativeLogLevel: NativeLogLevel.debug,
       );
     } on RenderCanceledException {
+      if (mounted) setState(() => _isExporting = false);
+      return;
+    } catch (error) {
+      // Brings the controls back, so another render can be started.
+      if (!mounted) return;
       setState(() => _isExporting = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Render failed: $error')));
       return;
     }
     _generationTime = sw.elapsed;

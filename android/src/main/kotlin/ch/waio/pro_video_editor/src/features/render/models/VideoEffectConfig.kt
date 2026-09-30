@@ -139,6 +139,16 @@ class VideoEffectConfig(
     }
 
     companion object {
+        /**
+         * Where a frame at [timeUs] lands after a `SpeedChangeEffect` of [speed]
+         * further down the chain, computed the way that effect computes it: from
+         * the first frame of the stream, [streamStartUs], in float precision.
+         */
+        fun timeAfterSpeedChangeUs(timeUs: Long, streamStartUs: Long, speed: Float): Long {
+            if (speed <= 0f || speed == 1f) return timeUs
+            return (streamStartUs.toFloat() + (timeUs - streamStartUs).toFloat() / speed).toLong()
+        }
+
         /** The combined frame of every effect active at [timeUs]. */
         fun resolve(effects: List<VideoEffectConfig>, timeUs: Long): VideoEffectFrame {
             var frame = VideoEffectFrame.NONE

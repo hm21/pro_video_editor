@@ -95,6 +95,16 @@ internal class VideoEffectConfigTest {
     }
 
     @Test
+    fun timeAfterSpeedChangeUs_movesFramesLikeTheClipsSpeedChange() {
+        // A clip whose frames arrive from 3 s on: Media3's speed change keeps
+        // the first frame where it is and scales the gaps after it.
+        assertEquals(3_000_000, VideoEffectConfig.timeAfterSpeedChangeUs(3_000_000, 3_000_000, 2f))
+        assertEquals(3_500_000, VideoEffectConfig.timeAfterSpeedChangeUs(4_000_000, 3_000_000, 2f))
+        assertEquals(5_000_000, VideoEffectConfig.timeAfterSpeedChangeUs(4_000_000, 3_000_000, 0.5f))
+        assertEquals(4_000_000, VideoEffectConfig.timeAfterSpeedChangeUs(4_000_000, 3_000_000, 1f))
+    }
+
+    @Test
     fun merge_combinesTonesLikeDart() {
         val oldFilm = VideoEffectFrame(sepia = 0.8, brightness = 0.03, vignette = 0.5, vignetteRadius = 0.3)
         val strobe = VideoEffectFrame(brightness = -0.01, flash = 0.9, invert = 0.2)

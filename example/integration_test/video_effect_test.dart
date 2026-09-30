@@ -94,24 +94,26 @@ void main() {
     );
   }
 
-  /// The RGBA pixels of the frame of [video] at [at], at canvas size.
+  /// The RGBA pixels of the frame of [video] at [at], at [size], which is
+  /// the canvas unless the output was turned.
   Future<({ByteData data, int width})> frameOf(
     Uint8List video,
-    Duration at,
-  ) async {
+    Duration at, {
+    Size size = canvas,
+  }) async {
     final frames = await pve.getThumbnails(
       ThumbnailConfigs(
         video: EditorVideo.memory(video),
         outputFormat: ThumbnailFormat.png,
         timestamps: [at],
-        outputSize: canvas,
+        outputSize: size,
         boxFit: ThumbnailBoxFit.cover,
       ),
     );
     expect(frames, isNotEmpty, reason: 'No frame extracted from the output');
     final codec = await instantiateImageCodec(frames.first);
     final image = (await codec.getNextFrame()).image;
-    expect(image.width, canvas.width.toInt());
+    expect(image.width, size.width.toInt());
     return (data: (await image.toByteData())!, width: image.width);
   }
 
@@ -246,6 +248,41 @@ void main() {
       expect(pixel(out, movedInto, bandRow)[1], greaterThan(150));
       expect(pixel(out, movedOutOf, bandRow)[1], lessThan(100));
     });
+
+    // With imageBytesWithCropping, iOS and macOS rotate the frame only after
+    // the effects, which still have to run along the exported frame's rows.
+    // Turned a quarter, the stripe runs across the frame: a split along the
+    // exported rows leaves its edges alone, one along the source rows would
+    // put a red and a blue fringe on its top and bottom edges.
+    testWidgets('splits along the exported rows when rotated', (tester) async {
+      for (final withCropping in [false, true]) {
+        final out = await frameOf(
+          await pve.renderVideo(
+            VideoRenderData(
+              videoSegments: [VideoSegment(video: stripe)],
+              effects: const [VideoEffect.rgbSplit()],
+              transform: const ExportTransform(rotateTurns: 1),
+              imageBytesWithCropping: withCropping,
+            ),
+          ),
+          Duration.zero,
+          size: const Size(360, 640),
+        );
+        // Rows 256..383 of 640 are the stripe.
+        final column = [for (var y = 0; y < 640; y++) pixel(out, 180, y)];
+        expect(grey(column[320]), greaterThan(200));
+        expect(grey(column[100]), lessThan(50));
+        for (final (y, rgb) in column.indexed) {
+          expect(
+            (rgb[0] - rgb[2]).abs(),
+            lessThan(60),
+            reason:
+                'fringe at row $y: $rgb, imageBytesWithCropping: '
+                '$withCropping',
+          );
+        }
+      }
+    });
   });
 
   group('tones', () {
@@ -264,6 +301,24 @@ void main() {
       final dark = await frameOf(video, const Duration(milliseconds: 250));
       expect(grey(pixel(flash, 320, 180)), greaterThan(235));
       expect(grey(pixel(dark, 320, 180)), inInclusiveRange(22, 42));
+    });
+
+    // Effects follow the exported timeline, so a sped-up segment keeps the
+    // strobe at two flashes a second instead of speeding it up with the
+    // footage.
+    testWidgets('strobe keeps its rate on a sped-up segment', (tester) async {
+      final video = await pve.renderVideo(
+        VideoRenderData(
+          videoSegments: [VideoSegment(video: darkGrey, playbackSpeed: 2)],
+          effects: const [VideoEffect.strobe()],
+        ),
+      );
+      // 270 ms in is bucket 6, between two flashes; timed by the footage it
+      // would be bucket 12, the next flash. That flash is at 500 ms.
+      final between = await frameOf(video, const Duration(milliseconds: 270));
+      final flash = await frameOf(video, const Duration(milliseconds: 510));
+      expect(grey(pixel(between, 320, 180)), inInclusiveRange(22, 42));
+      expect(grey(pixel(flash, 320, 180)), greaterThan(235));
     });
 
     testWidgets('negativeFlash turns the picture into its negative', (

@@ -41,12 +41,17 @@ int videoEffectBucketOf(VideoEffectType type, Duration localTime) {
 ///
 /// Deterministic: the same arguments always give the same frame, on every
 /// platform, which is what keeps a preview and an export in step.
+///
+/// [intensity] is clamped to 0..1, and NaN counts as 0: `VideoEffect` only
+/// asserts its range, so release builds can pass anything, and an infinite
+/// size would crash the Apple renderer.
 VideoEffectFrame videoEffectFrameFor(
   VideoEffectType type,
   double intensity,
   int bucket,
 ) {
-  if (intensity <= 0) return VideoEffectFrame.none;
+  if (!(intensity > 0)) return VideoEffectFrame.none;
+  intensity = math.min(intensity, 1.0);
   return switch (type) {
     VideoEffectType.glitch => _glitch(intensity, bucket),
     VideoEffectType.rgbSplit => _rgbSplit(intensity, bucket),

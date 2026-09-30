@@ -56,7 +56,7 @@ class EffectsProcessor {
         applyFlip(videoEffects, config.flipX, config.flipY)
         // Scale is NOT applied here — it is applied by VideoSequenceBuilder
         // AFTER overlay and crop to match the iOS/macOS pipeline order.
-        applyVideoEffects(videoEffects, config.effects)
+        applyVideoEffects(videoEffects, config.effects, config.playbackSpeed)
         applyColorMatrix(videoEffects, config.colorFilters)
         applyBlur(videoEffects, config.blur)
         applyPlaybackSpeed(videoEffects, audioEffects, config.playbackSpeed)

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pro_video_editor/core/utils/video_effect_frames.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 
 void main() {
@@ -296,6 +297,21 @@ void main() {
         expect(frames.every((f) => f.brightness.abs() <= 0.04), isTrue);
         expect(frames.map((f) => f.brightness).toSet().length, greaterThan(1));
         expect(frames[0].noiseOffsetX, isNot(frames[1].noiseOffsetX));
+      });
+
+      // The constructor only asserts the range, so release builds can pass
+      // anything; an infinite size would crash the Apple renderer.
+      test('clamps an intensity the release build lets through', () {
+        for (final type in VideoEffectType.values) {
+          final full = videoEffectFrameFor(type, 1, 0);
+          expect(videoEffectFrameFor(type, double.infinity, 0), full);
+          expect(videoEffectFrameFor(type, 7, 0), full);
+          expect(
+            videoEffectFrameFor(type, double.nan, 0),
+            VideoEffectFrame.none,
+          );
+          expect(videoEffectFrameFor(type, -1, 0), VideoEffectFrame.none);
+        }
       });
 
       test('vignette is constant and scales with intensity', () {
