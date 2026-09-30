@@ -9,6 +9,8 @@ import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
 import 'package:pro_video_editor/core/models/video/chroma_key_model.dart';
 import 'package:pro_video_editor/core/models/video/editor_video_model.dart';
 import 'package:pro_video_editor/core/models/video/video_composition_model.dart';
+import 'package:pro_video_editor/core/models/video/video_effect_frame_model.dart';
+import 'package:pro_video_editor/core/models/video/video_effect_model.dart';
 import 'package:pro_video_editor/core/models/video/video_layer_model.dart';
 import 'package:pro_video_editor/core/models/video/video_quality_config.dart';
 import 'package:pro_video_editor/core/models/video/video_quality_preset.dart';
@@ -402,6 +404,94 @@ void main() {
           isA<FileSystemException>().having((e) => e.path, 'path', missing),
         ),
       );
+    });
+  });
+
+  group('VideoRenderData effects', () {
+    VideoRenderData buildData(List<VideoEffect> effects) {
+      return VideoRenderData(
+        id: 'test',
+        videoSegments: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+        effects: effects,
+      );
+    }
+
+    test('defaults to none', () async {
+      final data = VideoRenderData(
+        id: 'test',
+        videoSegments: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+      );
+      expect(data.effects, isEmpty);
+      expect((await data.toAsyncMap())['effects'], isEmpty);
+    });
+
+    test('toAsyncMap sends each effect as a table of frames', () async {
+      final map = await buildData(const [
+        VideoEffect.glitch(
+          intensity: 0.8,
+          startTime: Duration(seconds: 1),
+          endTime: Duration(seconds: 2),
+        ),
+        VideoEffect.pixelate(),
+      ]).toAsyncMap();
+      final effects = map['effects'] as List<Map<String, dynamic>>;
+      expect(effects, hasLength(2));
+
+      final glitch = effects.first;
+      expect(glitch['startUs'], 1000000);
+      expect(glitch['endUs'], 2000000);
+      expect(glitch['frameRate'], 24);
+      expect(glitch['stride'], VideoEffectFrame.stride);
+      final frames = glitch['frames'] as Float64List;
+      // 20 seconds at 24 frames per second.
+      expect(frames, hasLength(480 * VideoEffectFrame.stride));
+      // The table holds exactly what the preview shows at the same time.
+      const effect = VideoEffect.glitch(intensity: 0.8);
+      const bucket = 5;
+      expect(
+        VideoEffectFrame.fromList(frames, bucket * VideoEffectFrame.stride),
+        effect.frameAt(const Duration(microseconds: bucket * 41667)),
+      );
+
+      // A still effect needs one frame, a one-second pulse 24.
+      expect(
+        (await buildData(const [
+          VideoEffect.pixelPulse(),
+        ]).toAsyncMap())['effects'][0]['frames'],
+        hasLength(24 * VideoEffectFrame.stride),
+      );
+      expect(
+        effects.last['frames'] as Float64List,
+        hasLength(VideoEffectFrame.stride),
+      );
+    });
+
+    test('toAsyncMap leaves out effects at zero intensity', () async {
+      final map = await buildData(const [
+        VideoEffect.vhs(intensity: 0),
+      ]).toAsyncMap();
+      expect(map['effects'], isEmpty);
+    });
+
+    test('toMap and fromMap round-trip the effects', () {
+      final data = buildData(const [
+        VideoEffect.vhs(intensity: 0.3, startTime: Duration(seconds: 1)),
+      ]);
+      expect(VideoRenderData.fromMap(data.toMap()).effects, data.effects);
+    });
+
+    test('fromMap reads a map written before effects existed', () {
+      final legacy = buildData(const []).toMap()..remove('effects');
+      expect(VideoRenderData.fromMap(legacy).effects, isEmpty);
+    });
+
+    test('copyWith replaces the effects', () {
+      final data = buildData(const [VideoEffect.vhs()]);
+      expect(
+        data.copyWith(effects: const [VideoEffect.pixelate()]).effects,
+        const [VideoEffect.pixelate()],
+      );
+      expect(data.copyWith().effects, data.effects);
     });
   });
 }

@@ -8,6 +8,7 @@ import applyFlip
 import applyMaxFrameRate
 import applyPlaybackSpeed
 import applyRotation
+import applyVideoEffects
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 
 /**
@@ -34,10 +35,11 @@ class EffectsProcessor {
      * 1. Rotation - Corrects video orientation
      * 2. Flip - Horizontal/vertical mirroring
      * 3. Scale - Resizes video dimensions
-     * 4. Color Matrix - Applies color transformations (filters, adjustments)
-     * 5. Blur - Applies blur effect
-     * 6. Playback Speed - Adjusts video/audio speed
-     * 7. Frame Rate - Caps the output frame rate (drops surplus frames)
+     * 4. Video Effects - Glitch, VHS, pixelate and other pixel effects
+     * 5. Color Matrix - Applies color transformations (filters, adjustments)
+     * 6. Blur - Applies blur effect
+     * 7. Playback Speed - Adjusts video/audio speed
+     * 8. Frame Rate - Caps the output frame rate (drops surplus frames)
      *
      * @param config The render configuration containing effect parameters
      * @return ProcessedEffects containing lists of video and audio effects
@@ -54,6 +56,7 @@ class EffectsProcessor {
         applyFlip(videoEffects, config.flipX, config.flipY)
         // Scale is NOT applied here — it is applied by VideoSequenceBuilder
         // AFTER overlay and crop to match the iOS/macOS pipeline order.
+        applyVideoEffects(videoEffects, config.effects)
         applyColorMatrix(videoEffects, config.colorFilters)
         applyBlur(videoEffects, config.blur)
         applyPlaybackSpeed(videoEffects, audioEffects, config.playbackSpeed)

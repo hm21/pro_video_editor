@@ -3,6 +3,7 @@
 // Do not manually edit this file.
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
+
 import 'dart:async' as _i7;
 import 'dart:typed_data' as _i5;
 import 'dart:ui' as _i3;
@@ -361,6 +362,14 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
           as List<_i4.ColorFilter>);
 
   @override
+  List<_i4.VideoEffect> get effects =>
+      (super.noSuchMethod(
+            Invocation.getter(#effects),
+            returnValue: <_i4.VideoEffect>[],
+          )
+          as List<_i4.VideoEffect>);
+
+  @override
   List<_i4.VideoAudioTrack> get audioTracks =>
       (super.noSuchMethod(
             Invocation.getter(#audioTracks),
@@ -416,6 +425,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
     Duration? startTime,
     Duration? endTime,
     List<_i4.ColorFilter>? colorFilters,
+    List<_i4.VideoEffect>? effects,
     List<_i4.VideoAudioTrack>? audioTracks,
     double? blur,
     _i4.ChromaKey? chromaKey,
@@ -438,6 +448,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
               #startTime: startTime,
               #endTime: endTime,
               #colorFilters: colorFilters,
+              #effects: effects,
               #audioTracks: audioTracks,
               #blur: blur,
               #chromaKey: chromaKey,
@@ -461,6 +472,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
                 #startTime: startTime,
                 #endTime: endTime,
                 #colorFilters: colorFilters,
+                #effects: effects,
                 #audioTracks: audioTracks,
                 #blur: blur,
                 #chromaKey: chromaKey,

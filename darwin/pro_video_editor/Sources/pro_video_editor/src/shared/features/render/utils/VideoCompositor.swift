@@ -182,6 +182,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// Color filter configs for per-frame LUT computation
   private var colorFilterConfigs: [ColorFilterConfig] = []
 
+  /// Video effects (glitch, VHS, pixelate, …) with their time ranges.
+  private var videoEffects: [VideoEffectConfig] = []
+
   /// Dip-to-color windows for fadeToBlack / fadeToWhite clip transitions
   private var fadeWindows: [FadeWindow] = []
 
@@ -267,6 +270,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
     self.setOverlayImageLayers(from: config.imageLayerConfigs)
     self.colorFilterConfigs = config.colorFilterConfigs
+    self.videoEffects = config.videoEffects
     self.fadeWindows = config.fadeWindows
     self.chromaKeyWindows = config.chromaKeyWindows
   }
@@ -432,6 +436,13 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     lutFilter.setValue(lut.data, forKey: "inputCubeData")
     lutFilter.setValue(image, forKey: kCIInputImageKey)
     return lutFilter.outputImage ?? image
+  }
+
+  /// Applies the video effects active at the given composition time.
+  private func applyVideoEffectStage(to image: CIImage, at compositionTime: CMTime) -> CIImage {
+    guard !videoEffects.isEmpty else { return image }
+    let tUs = Int64(CMTimeGetSeconds(compositionTime) * 1_000_000)
+    return applyVideoEffect(to: image, VideoEffectConfig.resolve(videoEffects, atUs: tUs))
   }
 
   /// Applies a chroma key as its own color cube.
@@ -819,6 +830,10 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     // Apply LUT, blur, and flip BEFORE overlay when imageBytesWithCropping is enabled
     // This ensures these effects only affect the video, not the overlay
     if imageBytesWithCropping {
+      // Video effects right before the color filter, as on Android and in the
+      // Flutter preview, so a filter colors the distorted picture.
+      outputImage = applyVideoEffectStage(to: outputImage, at: request.compositionTime)
+
       // Apply color filter (timed LUT) to video only
       outputImage = applyColorFilter(to: outputImage, at: request.compositionTime)
 
@@ -965,6 +980,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
     // Apply color filter (only if NOT imageBytesWithCropping - otherwise already applied before overlay)
     if !imageBytesWithCropping {
+      outputImage = applyVideoEffectStage(to: outputImage, at: request.compositionTime)
       outputImage = applyColorFilter(to: outputImage, at: request.compositionTime)
 
       // Apply blur

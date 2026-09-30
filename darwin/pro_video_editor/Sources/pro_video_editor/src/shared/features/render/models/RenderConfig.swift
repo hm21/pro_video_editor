@@ -172,6 +172,27 @@ public struct ColorFilterConfig: Sendable {
   }
 }
 
+extension VideoEffectConfig {
+  /// Parses one entry of the `effects` argument: a Dart-built table of frames
+  /// sent as a `Float64List`. Nil when it carries no usable table.
+  static func fromArguments(_ args: [String: Any]) -> VideoEffectConfig? {
+    let values: [Double]
+    if let typed = args["frames"] as? FlutterStandardTypedData {
+      values = typed.data.withUnsafeBytes { Array($0.bindMemory(to: Double.self)) }
+    } else if let list = args["frames"] as? [NSNumber] {
+      values = list.map { $0.doubleValue }
+    } else {
+      return nil
+    }
+    return from(
+      values: values,
+      stride: (args["stride"] as? NSNumber)?.intValue ?? 0,
+      frameRate: (args["frameRate"] as? NSNumber)?.intValue ?? 24,
+      startUs: (args["startUs"] as? NSNumber)?.int64Value,
+      endUs: (args["endUs"] as? NSNumber)?.int64Value)
+  }
+}
+
 /// Configuration for removing a solid-colored background ("green screen").
 ///
 /// Mirrors the Dart `ChromaKey` model and the Kotlin `ChromaKeyConfig`. The
@@ -495,6 +516,9 @@ struct RenderConfig: Sendable {
   /// List of color filters with optional time ranges
   let colorFilters: [ColorFilterConfig]
 
+  /// Glitch, VHS, pixelate and other pixel effects, applied before `colorFilters`
+  let effects: [VideoEffectConfig]
+
   /// List of audio tracks with timing, volume and looping configuration
   let audioTracks: [AudioTrackConfig]
 
@@ -549,6 +573,7 @@ struct RenderConfig: Sendable {
       trimToCommonTrackEnd: self.trimToCommonTrackEnd,
       playbackSpeed: self.playbackSpeed,
       colorFilters: self.colorFilters,
+      effects: self.effects,
       audioTracks: self.audioTracks,
       blur: self.blur,
       chromaKey: self.chromaKey,
@@ -578,6 +603,15 @@ struct RenderConfig: Sendable {
     if let filtersRaw = args["colorFilters"] as? [[String: Any]] {
       colorFilters = filtersRaw.compactMap { filterMap in
         ColorFilterConfig.fromArguments(filterMap)
+      }
+    }
+
+    // Parse video effects
+    var effects: [VideoEffectConfig] = []
+    if let effectsRaw = args["effects"] as? [[String: Any]] {
+      effects = effectsRaw.compactMap { VideoEffectConfig.fromArguments($0) }
+      if effects.count != effectsRaw.count {
+        PluginLog.print("⚠️ Skipped \(effectsRaw.count - effects.count) unreadable video effect(s)")
       }
     }
 
@@ -620,6 +654,7 @@ struct RenderConfig: Sendable {
       trimToCommonTrackEnd: args["trimToCommonTrackEnd"] as? Bool ?? false,
       playbackSpeed: (args["playbackSpeed"] as? NSNumber)?.floatValue,
       colorFilters: colorFilters,
+      effects: effects,
       audioTracks: audioTracks,
       blur: (args["blur"] as? NSNumber)?.doubleValue,
       chromaKey: ChromaKeyConfig.fromArguments(args["chromaKey"] as? [String: Any]),

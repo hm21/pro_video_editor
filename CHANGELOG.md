@@ -1,3 +1,7 @@
+## 2.20.0
+- **FEAT**(android, iOS, macOS): `VideoRenderData.effects` adds visual effects that distort the picture itself: `VideoEffect.glitch` (the color channels jump apart and slices of the picture slip sideways, in short bursts), `VideoEffect.rgbSplit` (a color fringe that punches out every second), `VideoEffect.vhs` (scanlines, moving grain, a slight color fringe and a rolling tracking band), `VideoEffect.tvStatic` (heavy flickering grain and a picture that now and then jumps), `VideoEffect.oldFilm` (sepia tones, grain, a flickering exposure and darkened corners), `VideoEffect.pixelate`, `VideoEffect.pixelPulse` (the picture breaks into blocks every second and sharpens again), `VideoEffect.strobe` (white flashes twice a second), `VideoEffect.negativeFlash` (the picture turns into its negative for a moment every second) and `VideoEffect.vignette` (darkened corners). The flashing effects stay below the three flashes a second that WCAG 2.3.1 allows. Each has an `intensity` and an optional `startTime`/`endTime`, and they are applied right before `colorFilters`.
+- **FEAT**: `VideoEffectPreview` shows the same effects live over a video player, frame for frame what the export renders. It needs Impeller; on other backends the child is shown unchanged.
+
 ## 2.19.1
 - **FIX**(android): Image layers keep their place and size on segments of another resolution, as on iOS and macOS, instead of drifting and growing on a smaller segment.
 

@@ -466,6 +466,8 @@ data class RenderConfig(
     val enableAudio: Boolean = true,
     val playbackSpeed: Float? = null,
     val colorFilters: List<ColorFilterConfig> = emptyList(),
+    /** Glitch, VHS, pixelate and other pixel effects, applied before [colorFilters]. */
+    val effects: List<VideoEffectConfig> = emptyList(),
     val audioTracks: List<AudioTrackConfig> = emptyList(),
     val blur: Double? = null,
     /**
@@ -566,6 +568,14 @@ data class RenderConfig(
             val colorFilters = colorFiltersRaw?.map { ColorFilterConfig.fromMap(it) } ?: emptyList()
             Log.d(PACKAGE_TAG, "Parsed ${colorFilters.size} color filter(s)")
 
+            // Parse video effects
+            @Suppress("UNCHECKED_CAST")
+            val effectsRaw = call.argument<List<Map<String, Any?>>>("effects")
+            val effects = effectsRaw?.mapNotNull { VideoEffectConfig.fromMap(it) } ?: emptyList()
+            if (effects.size != (effectsRaw?.size ?: 0)) {
+                Log.w(PACKAGE_TAG, "Skipped ${(effectsRaw?.size ?: 0) - effects.size} unreadable video effect(s)")
+            }
+
             // Parse audio tracks
             @Suppress("UNCHECKED_CAST")
             val audioTracksRaw = call.argument<List<Map<String, Any?>>>("audioTracks")
@@ -595,6 +605,7 @@ data class RenderConfig(
                 enableAudio = call.argument<Boolean>("enableAudio") ?: true,
                 playbackSpeed = call.argument<Number>("playbackSpeed")?.toFloat(),
                 colorFilters = colorFilters,
+                effects = effects,
                 audioTracks = audioTracks,
                 blur = call.argument<Number>("blur")?.toDouble(),
                 chromaKey = ChromaKeyConfig.fromMap(

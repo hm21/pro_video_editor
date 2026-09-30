@@ -44,6 +44,10 @@ public struct VideoCompositorConfig {
   /// Color filter configs with optional time ranges for per-frame LUT switching.
   var colorFilterConfigs: [ColorFilterConfig] = []
 
+  /// Glitch, VHS, pixelate and other pixel effects, applied right before the
+  /// color filters, with each frame's operations picked by composition time.
+  var videoEffects: [VideoEffectConfig] = []
+
   /// Dip-to-color windows for `fadeToBlack` / `fadeToWhite` clip transitions.
   var fadeWindows: [FadeWindow] = []
 

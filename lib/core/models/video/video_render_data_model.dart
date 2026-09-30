@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:pro_video_editor/core/utils/video_effect_frames.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
@@ -34,6 +35,7 @@ class VideoRenderData {
     this.startTime,
     this.endTime,
     this.colorFilters = const [],
+    this.effects = const [],
     this.audioTracks = const [],
     this.blur,
     this.chromaKey,
@@ -131,6 +133,7 @@ class VideoRenderData {
     int? bitrateOverride,
     int? maxFrameRate,
     List<ColorFilter> colorFilters = const [],
+    List<VideoEffect> effects = const [],
     List<VideoAudioTrack> audioTracks = const [],
     bool shouldOptimizeForNetworkUse = false,
     bool imageBytesWithCropping = false,
@@ -154,6 +157,7 @@ class VideoRenderData {
       bitrate: bitrateOverride ?? qualityConfig.bitrate,
       maxFrameRate: maxFrameRate,
       colorFilters: colorFilters,
+      effects: effects,
       audioTracks: audioTracks,
       qualityConfig: qualityConfig,
       shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
@@ -260,6 +264,19 @@ class VideoRenderData {
   /// Each filter applies a color matrix to the video, optionally
   /// restricted to a specific time range.
   final List<ColorFilter> colorFilters;
+
+  /// Visual effects such as glitch or pixelate, with optional time ranges.
+  ///
+  /// Applied to the video right before [colorFilters], so a filter colors the
+  /// distorted picture, and never to [imageLayers]. Where effects overlap in
+  /// time they are combined; see [VideoEffectFrame.merge].
+  ///
+  /// With [imageBytesWithCropping] left `false`, iOS and macOS apply them
+  /// after [transform]'s crop and Android before it, so an effect's sizes are
+  /// measured against a different frame when both are set.
+  ///
+  /// **Note:** Ignored on Web, Windows and Linux.
+  final List<VideoEffect> effects;
 
   /// A list of audio tracks with optional time ranges.
   ///
@@ -427,6 +444,23 @@ class VideoRenderData {
         )
         .toList();
 
+    // The native renderers get each effect as a table of frames to play back,
+    // so what an effect looks like is defined here and nowhere else.
+    final effectMaps = effects
+        .where((effect) => effect.intensity > 0)
+        .map(
+          (effect) => {
+            'startUs': effect.startTime?.inMicroseconds,
+            'endUs': effect.endTime?.inMicroseconds,
+            'frameRate': videoEffectFrameRate,
+            'stride': VideoEffectFrame.stride,
+            'frames': Float64List.fromList(
+              bakeVideoEffectFrames(effect.type, effect.intensity),
+            ),
+          },
+        )
+        .toList();
+
     final audioTrackMaps = audioTracks
         .map(
           (t) => {
@@ -478,6 +512,7 @@ class VideoRenderData {
           : null,
       'imageLayers': imageLayerMaps,
       'colorFilters': colorFilterMaps,
+      'effects': effectMaps,
       'audioTracks': audioTrackMaps,
       'enableAudio': enableAudio,
       'trimToCommonTrackEnd': trimToCommonTrackEnd,
@@ -515,6 +550,7 @@ class VideoRenderData {
     Duration? startTime,
     Duration? endTime,
     List<ColorFilter>? colorFilters,
+    List<VideoEffect>? effects,
     List<VideoAudioTrack>? audioTracks,
     double? blur,
     ChromaKey? chromaKey,
@@ -536,6 +572,7 @@ class VideoRenderData {
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       colorFilters: colorFilters ?? this.colorFilters,
+      effects: effects ?? this.effects,
       audioTracks: audioTracks ?? this.audioTracks,
       blur: blur ?? this.blur,
       chromaKey: chromaKey ?? this.chromaKey,
@@ -562,6 +599,7 @@ class VideoRenderData {
       'startTime': startTime?.inMicroseconds,
       'endTime': endTime?.inMicroseconds,
       'colorFilters': colorFilters.map((x) => x.toMap()).toList(),
+      'effects': effects.map((x) => x.toMap()).toList(),
       'audioTracks': audioTracks.map((x) => x.toMap()).toList(),
       'blur': blur,
       'chromaKey': chromaKey?.toMap(),
@@ -616,6 +654,13 @@ class VideoRenderData {
           (x) => ColorFilter.fromMap(x as Map<String, dynamic>),
         ),
       ),
+      effects: map['effects'] != null
+          ? List<VideoEffect>.from(
+              (map['effects'] as List).map<VideoEffect>(
+                (x) => VideoEffect.fromMap(x as Map<String, dynamic>),
+              ),
+            )
+          : const [],
       audioTracks: List<VideoAudioTrack>.from(
         (map['audioTracks'] as List).map<VideoAudioTrack>(
           (x) => VideoAudioTrack.fromMap(x as Map<String, dynamic>),
@@ -653,6 +698,7 @@ class VideoRenderData {
         'startTime: $startTime, '
         'endTime: $endTime, '
         'colorFilters: $colorFilters, '
+        'effects: $effects, '
         'audioTracks: $audioTracks, '
         'blur: $blur, '
         'chromaKey: $chromaKey, '
@@ -678,6 +724,7 @@ class VideoRenderData {
         other.startTime == startTime &&
         other.endTime == endTime &&
         listEquals(other.colorFilters, colorFilters) &&
+        listEquals(other.effects, effects) &&
         listEquals(other.audioTracks, audioTracks) &&
         other.blur == blur &&
         other.chromaKey == chromaKey &&
@@ -701,6 +748,7 @@ class VideoRenderData {
         startTime.hashCode ^
         endTime.hashCode ^
         colorFilters.hashCode ^
+        effects.hashCode ^
         audioTracks.hashCode ^
         blur.hashCode ^
         chromaKey.hashCode ^

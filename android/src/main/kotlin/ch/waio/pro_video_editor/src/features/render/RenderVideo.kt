@@ -100,7 +100,10 @@ class RenderVideo(private val context: Context) {
                     layer.chromaKey != null || layer.clips.any { it.chromaKey != null }
                 } == true
 
-        return hasImageLayers || hasBlur || hasColorFilters || hasChromaKey
+        // The video effects shader is ES 2.0 SDR too.
+        val hasEffects = config.effects.isNotEmpty()
+
+        return hasImageLayers || hasBlur || hasColorFilters || hasChromaKey || hasEffects
     }
 
     /**

@@ -13,6 +13,7 @@ import 'features/render/video_renderer_page.dart';
 import 'features/split/split_example_page.dart';
 import 'features/stop_motion/stop_motion_example_page.dart';
 import 'features/thumbnail/thumbnail_example_page.dart';
+import 'features/video_effects/video_effects_example_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -89,6 +90,11 @@ class _HomePageState extends State<HomePage> {
       icon: Icons.filter_center_focus,
       title: 'Chroma Key (Greenscreen)',
       pageBuilder: () => const ChromaKeyExamplePage(),
+    ),
+    _ExampleListItem(
+      icon: Icons.auto_awesome_outlined,
+      title: 'Video Effects (Glitch, VHS, Pixelate)',
+      pageBuilder: () => const VideoEffectsExamplePage(),
     ),
     _ExampleListItem(
       icon: Icons.burst_mode_outlined,

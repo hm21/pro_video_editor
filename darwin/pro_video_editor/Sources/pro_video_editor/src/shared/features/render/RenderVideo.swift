@@ -191,6 +191,7 @@ class RenderVideo {
           PluginLog.print("   🔊 Enable Audio: \(workingConfig.enableAudio)")
           PluginLog.print("   🎵 Audio tracks: \(workingConfig.audioTracks.count)")
           PluginLog.print("   🎨 Color filters: \(workingConfig.colorFilters.count)")
+          PluginLog.print("   ✨ Video effects: \(workingConfig.effects.count)")
           PluginLog.print("===========================")
           PluginLog.print("")
 
@@ -297,6 +298,7 @@ class RenderVideo {
           // second CIColorCube would take its alpha from its own cube and
           // silently un-key the frame.
           applyChromaKey(config: &effectsConfig, windows: chromaKeyWindows)
+          applyVideoEffects(config: &effectsConfig, effects: workingConfig.effects)
           applyColorMatrix(
             config: &effectsConfig,
             filters: workingConfig.colorFilters)

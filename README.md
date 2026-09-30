@@ -130,6 +130,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🎞️ **Clip Transitions**: Add transitions between adjacent clips — `dissolve`, `fadeToBlack`, `fadeToWhite`, `slide`, `push`, and `wipe` — with configurable duration, easing curve, and direction.
 - 🧮 **Color Matrix**: Apply one or multiple 4x5 color matrices (e.g., for filters).
 - 💧 **Blur**: Add a blur effect to the video.
+- ✨ **Video Effects**: `glitch` (channel split and slices that jump sideways), `rgbSplit` (a pulsing color fringe), `vhs` (scanlines, grain and a rolling tracking band), `tvStatic` (heavy flickering grain), `oldFilm` (sepia, grain and flicker), `pixelate`, `pixelPulse` (blocks that sharpen again every second), `strobe`, `negativeFlash` and `vignette`, each with an intensity and an optional time range. `VideoEffectPreview` shows the same frames live over a video player.
 - 🟩 **Chroma Key**: Remove a green (or blue, or any saturated hue) screen, or a bright white or light grey wall, with a soft edge and spill suppression, and fill it with a color, an image, or — in a `VideoComposition` — the layer below. `ChromaKey.autoDetect` measures the key straight off the footage; `greenScreen()`/`blueScreen()` presets are there when you already know. Configurable globally, per `VideoLayer`, or per `VideoSegment`.
 - 📡 **Bitrate**: Cap the video bitrate. Sources already below the cap are exported losslessly over the fast path; sources above it are re-encoded down to the cap. If constant bitrate (CBR) isn't supported, it will gracefully fall back to the next available mode.
 - 🌐 **Streaming Optimization**: Optimize video for progressive playback by placing metadata (moov atom) at the start of the file.
@@ -164,6 +165,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 | `Cancel export task`       | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Blur background`          | 🧪      | 🧪  | 🧪     | ❌      | ❌     | 🚫   |
 | `Chroma Key (Greenscreen)` | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
+| `Video Effects`            | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Custom Audio Tracks`      | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Merge Videos`             | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Stop-Motion (Images→Video)`| ✅     | ✅  | ✅     | ❌      | ❌     | 🚫   |
@@ -215,6 +217,28 @@ Uint8List result = await ProVideoEditor.instance.renderVideo(data);
 /// String outputPath = '${directory.path}/my_video.mp4';
 ///
 /// await ProVideoEditor.instance.renderVideoToFile('${directory.path}/my_video.mp4', data);
+
+/// Video effects, over the whole video or a time range. Animated effects start
+/// at `startTime` and repeat after at most 20 seconds.
+final effectTask = VideoRenderData(
+    videoSegments: [VideoSegment(video: video)],
+    effects: const [
+        VideoEffect.vhs(intensity: 0.6),
+        VideoEffect.glitch(
+            startTime: Duration(seconds: 2),
+            endTime: Duration(milliseconds: 2500),
+        ),
+    ],
+);
+
+/// The same effects, live over a player. `position` is the playhead on the
+/// timeline the effects' time ranges use. Needs Impeller; elsewhere the child
+/// shows unchanged and the export still applies the effects.
+VideoEffectPreview(
+    effects: effectTask.effects,
+    position: playheadNotifier,
+    child: videoPlayer,
+);
 
 /// Listen progress
 StreamBuilder<ProgressModel>(
@@ -703,6 +727,28 @@ final keyedTask = VideoRenderData(
             ),
         ],
     ),
+);
+
+/// Video effects: glitch, VHS and pixelate, over the whole video or a time
+/// range. Animated effects start at `startTime` and repeat every 20 seconds.
+final effectTask = VideoRenderData(
+    videoSegments: [VideoSegment(video: video)],
+    effects: const [
+        VideoEffect.vhs(intensity: 0.6),
+        VideoEffect.glitch(
+            startTime: Duration(seconds: 2),
+            endTime: Duration(milliseconds: 2500),
+        ),
+    ],
+);
+
+/// The same effects, live over a player. `position` is the playhead on the
+/// timeline the effects' time ranges use. Needs Impeller; elsewhere the child
+/// shows unchanged and the export still applies the effects.
+VideoEffectPreview(
+    effects: effectTask.effects,
+    position: playheadNotifier,
+    child: videoPlayer,
 );
 
 /// Listen progress

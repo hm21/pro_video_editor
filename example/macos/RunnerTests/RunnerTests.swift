@@ -2139,3 +2139,302 @@ private final class FakeJob: ChannelTask {
   func sendSuccess(_ payload: Any?) {}
   func sendError(_ error: FlutterError) {}
 }
+
+/// Cross-platform parity guard for the video effect pipeline.
+///
+/// The goldens are duplicated verbatim in the Kotlin test
+/// (`android/src/test/.../helpers/VideoEffectMathTest.kt`). They pin the spec
+/// (`reference(_:)` below mirrors Kotlin's `VideoEffectMath`), and the Core
+/// Image stage the compositor runs has to produce the same pixels, give or take
+/// the one-step rounding of Core Image's half-float intermediates.
+///
+/// **When you change the spec, regenerate the checksums in both files.**
+class VideoEffectTests: XCTestCase {
+  private let width = 24
+  private let height = 16
+
+  /// The compositor's context, so the stage is tested the way it renders.
+  private let context = CIContext(options: [
+    .workingColorSpace: NSNull(),
+    .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
+  ])
+
+  private func source(_ x: Int, _ y: Int) -> (Int, Int, Int) {
+    ((x * 37 + y * 11) % 256, (x * 13 + y * 29 + 64) % 256, (x * 7 + y * 53 + 128) % 256)
+  }
+
+  private func sourceImage() -> CIImage {
+    var bytes = [UInt8](repeating: 255, count: width * height * 4)
+    for y in 0..<height {
+      for x in 0..<width {
+        let (r, g, b) = source(x, y)
+        let i = (y * width + x) * 4
+        bytes[i] = UInt8(r)
+        bytes[i + 1] = UInt8(g)
+        bytes[i + 2] = UInt8(b)
+      }
+    }
+    return CIImage(
+      bitmapData: Data(bytes), bytesPerRow: width * 4,
+      size: CGSize(width: width, height: height), format: .RGBA8, colorSpace: nil)
+  }
+
+  private func render(_ image: CIImage) -> [UInt8] {
+    var out = [UInt8](repeating: 0, count: width * height * 4)
+    context.render(
+      image, toBitmap: &out, rowBytes: width * 4, bounds: image.extent, format: .RGBA8,
+      colorSpace: nil)
+    return out
+  }
+
+  /// The spec, pixel by pixel, as Kotlin's `VideoEffectMath.apply` runs it.
+  private func reference(_ frame: VideoEffectFrame) -> [UInt8] {
+    let block = videoEffectPixels(frame.pixelSize, width)
+    let split = videoEffectPixels(frame.rgbShift, width)
+    let period = max(2, videoEffectPixels(frame.scanlinePeriod, height))
+    let cell = max(1, videoEffectPixels(frame.noiseCellSize, height))
+    let bands = frame.bands.prefix(VideoEffectFrame.maxBands).map {
+      (
+        videoEffectPixels($0.top, height), videoEffectPixels($0.bottom, height),
+        videoEffectPixels($0.shift, width)
+      )
+    }
+    func clamp(_ v: Int, _ high: Int) -> Int { min(max(v, 0), high) }
+    func pixelated(_ x: Int, _ y: Int) -> (Int, Int, Int) {
+      var sx = clamp(x, width - 1)
+      var sy = y
+      if block >= 2 {
+        sx = sx / block * block + block / 2
+        sy = sy / block * block + block / 2
+      }
+      return source(clamp(sx, width - 1), clamp(sy, height - 1))
+    }
+    func banded(_ x: Int, _ y: Int, _ shift: Int) -> (Int, Int, Int) {
+      pixelated(clamp(clamp(x, width - 1) - shift, width - 1), y)
+    }
+    func toByte(_ v: Double) -> UInt8 { UInt8((min(max(v, 0), 1) * 255 + 0.5).rounded(.down)) }
+
+    var out = [UInt8](repeating: 255, count: width * height * 4)
+    for y in 0..<height {
+      let shift = bands.first { y >= $0.0 && y < $0.1 }?.2 ?? 0
+      let dark = frame.scanlines > 0 && (y % period) * 2 >= period
+      for x in 0..<width {
+        let center = banded(x, y, shift)
+        var r = Double(banded(x + split, y, shift).0) / 255
+        var g = Double(center.1) / 255
+        var b = Double(banded(x - split, y, shift).2) / 255
+        if dark {
+          let keep = 1 - frame.scanlines
+          r *= keep
+          g *= keep
+          b *= keep
+        }
+        if frame.noise > 0 {
+          let u = (x / cell + frame.noiseOffsetX) % videoEffectNoiseTileSize
+          let v = (y / cell + frame.noiseOffsetY) % videoEffectNoiseTileSize
+          let grain = (videoEffectNoise(u: u, v: v) - 0.5) * frame.noise
+          r += grain
+          g += grain
+          b += grain
+        }
+        func clampAll() {
+          r = min(max(r, 0), 1)
+          g = min(max(g, 0), 1)
+          b = min(max(b, 0), 1)
+        }
+        clampAll()
+        if frame.sepia > 0 {
+          let s = frame.sepia
+          let sr = 0.393 * r + 0.769 * g + 0.189 * b
+          let sg = 0.349 * r + 0.686 * g + 0.168 * b
+          let sb = 0.272 * r + 0.534 * g + 0.131 * b
+          r += (sr - r) * s
+          g += (sg - g) * s
+          b += (sb - b) * s
+        }
+        let gain = 1 + frame.brightness
+        r *= gain
+        g *= gain
+        b *= gain
+        r += frame.invert * (1 - 2 * r)
+        g += frame.invert * (1 - 2 * g)
+        b += frame.invert * (1 - 2 * b)
+        r += frame.flash * (1 - r)
+        g += frame.flash * (1 - g)
+        b += frame.flash * (1 - b)
+        clampAll()
+        if frame.vignette > 0 {
+          let radius = min(max(frame.vignetteRadius, 0), 0.99)
+          let dx = Double(2 * x + 1) / Double(width) - 1
+          let dy = Double(2 * y + 1) / Double(height) - 1
+          let t = min(max((((dx * dx + dy * dy) / 2).squareRoot() - radius) / (1 - radius), 0), 1)
+          let keep = 1 - frame.vignette * t * t
+          r *= keep
+          g *= keep
+          b *= keep
+        }
+        let i = (y * width + x) * 4
+        out[i] = toByte(r)
+        out[i + 1] = toByte(g)
+        out[i + 2] = toByte(b)
+      }
+    }
+    return out
+  }
+
+  /// An order-sensitive hash of every red, green and blue byte.
+  private func checksum(_ pixels: [UInt8]) -> UInt32 {
+    var h: UInt32 = 0
+    for i in stride(from: 0, to: pixels.count, by: 4) {
+      for c in 0..<3 { h = h &* 31 &+ UInt32(pixels[i + c]) }
+    }
+    return h
+  }
+
+  private let goldens: [(String, VideoEffectFrame, UInt32)] = [
+    ("identity", VideoEffectFrame(), 0x8c5f_1e40),
+    ("pixelate", VideoEffectFrame(pixelSize: 0.25), 0xe43c_d600),
+    (
+      "bands and split",
+      VideoEffectFrame(
+        rgbShift: 0.1,
+        bands: [
+          VideoEffectBand(top: 0.25, bottom: 0.5, shift: 0.2),
+          VideoEffectBand(top: 0.4, bottom: 0.9, shift: -0.125),
+        ]),
+      0x5f7e_3216
+    ),
+    (
+      "scanlines and noise",
+      VideoEffectFrame(
+        scanlines: 0.4, scanlinePeriod: 0.25, noise: 0.3, noiseCellSize: 0.125,
+        noiseOffsetX: 5, noiseOffsetY: 120),
+      0x12b2_6fc6
+    ),
+    (
+      "everything",
+      VideoEffectFrame(
+        pixelSize: 0.125, rgbShift: -0.05, scanlines: 0.25, scanlinePeriod: 0.1875, noise: 0.2,
+        noiseCellSize: 0.0625, noiseOffsetX: 127, noiseOffsetY: 3,
+        bands: [
+          VideoEffectBand(top: 0, bottom: 0.3, shift: 0.5),
+          VideoEffectBand(top: 0.6, bottom: 1, shift: -0.3),
+        ]),
+      0xea95_b6e7
+    ),
+    (
+      "tones",
+      VideoEffectFrame(sepia: 0.6, brightness: -0.1, invert: 0.25, flash: 0.2),
+      0xff2a_26c6
+    ),
+    ("vignette", VideoEffectFrame(vignette: 0.8, vignetteRadius: 0.25), 0x9028_d182),
+    (
+      "old film",
+      VideoEffectFrame(
+        noise: 0.3, noiseCellSize: 0.125, noiseOffsetX: 9, noiseOffsetY: 77, sepia: 0.85,
+        brightness: -0.04, vignette: 0.6, vignetteRadius: 0.3),
+      0xcd38_dc88
+    ),
+    ("sepia overflow", VideoEffectFrame(sepia: 1, brightness: -0.3), 0x10e6_8ca5),
+    (
+      "noisy vignette",
+      VideoEffectFrame(
+        noise: 0.5, noiseCellSize: 0.0625, noiseOffsetX: 33, noiseOffsetY: 90, vignette: 0.9,
+        vignetteRadius: 0.1),
+      0xa502_43e8
+    ),
+    ("strong vignette", VideoEffectFrame(vignette: 1.5, vignetteRadius: 0.1), 0x5ade_77f4),
+    (
+      "negative over noise",
+      VideoEffectFrame(
+        noise: 0.4, noiseCellSize: 0.0625, noiseOffsetX: 64, noiseOffsetY: 1, invert: 1),
+      0x0a1d_b883
+    ),
+  ]
+
+  func testReferenceMatchesTheSharedGoldens() {
+    for (name, frame, golden) in goldens {
+      XCTAssertEqual(checksum(reference(frame)), golden, name)
+    }
+  }
+
+  func testCoreImageStageMatchesTheSpec() {
+    // An odd block exercises the other half of CIPixellate's grid offset.
+    let frames = goldens.map { ($0.0, $0.1) } + [("odd block", VideoEffectFrame(pixelSize: 0.2))]
+    for (name, frame) in frames {
+      let expected = reference(frame)
+      let actual = render(applyVideoEffect(to: sourceImage(), frame))
+      for i in 0..<expected.count where i % 4 != 3 {
+        let pixel = "(\(i / 4 % width), \(i / 4 / width)) channel \(i % 4)"
+        XCTAssertLessThanOrEqual(
+          abs(Int(expected[i]) - Int(actual[i])), 1, "\(name) at \(pixel)")
+      }
+    }
+  }
+
+  func testCoreImageStageKeepsAnExtentAwayFromTheOrigin() {
+    let frame = goldens[4].1
+    let moved = sourceImage().transformed(by: CGAffineTransform(translationX: 7, y: 3))
+    let result = applyVideoEffect(to: moved, frame)
+    XCTAssertEqual(result.extent, moved.extent)
+    XCTAssertEqual(
+      render(result),
+      render(applyVideoEffect(to: sourceImage(), frame)))
+  }
+
+  func testFromArgumentsReadsTheTableAndPicksFramesByTime() {
+    let stride = VideoEffectFrame.stride
+    var values = [Double](repeating: 0, count: stride * 3)
+    for i in 0..<3 { values[i * stride] = Double(i) / 100 }
+    values[8] = 1
+    values[9] = 0.1
+    values[10] = 0.2
+    values[11] = -0.3
+    let data = values.withUnsafeBufferPointer { Data(buffer: $0) }
+    let effect = VideoEffectConfig.fromArguments([
+      "startUs": 1_000_000, "endUs": 2_000_000, "frameRate": 24, "stride": stride,
+      "frames": FlutterStandardTypedData(float64: data),
+    ])!
+
+    XCTAssertNil(effect.frame(atUs: 999_999))
+    XCTAssertEqual(
+      effect.frame(atUs: 1_000_000)?.bands, [VideoEffectBand(top: 0.1, bottom: 0.2, shift: -0.3)])
+    XCTAssertEqual(effect.frame(atUs: 1_041_667)?.pixelSize, 0.01)
+    // Bucket 3 wraps back to the first frame.
+    XCTAssertEqual(effect.frame(atUs: 1_125_000)?.pixelSize, 0)
+    XCTAssertNil(effect.frame(atUs: 2_000_000))
+    XCTAssertNil(VideoEffectConfig.fromArguments(["stride": 3, "frames": [1.0, 2.0, 3.0]]))
+  }
+
+  func testResolveMergesOverlappingEffectsLikeDart() {
+    let pixelate = VideoEffectFrame(pixelSize: 0.05, rgbShift: 0.01)
+    let vhs = VideoEffectFrame(
+      rgbShift: 0.006, scanlines: 0.3, scanlinePeriod: 1 / 270, noise: 0.2,
+      noiseCellSize: 1 / 540, noiseOffsetX: 9, noiseOffsetY: 4,
+      bands: [VideoEffectBand(top: 0.1, bottom: 0.2, shift: 0.01)])
+    let effects = [
+      VideoEffectConfig(startUs: nil, endUs: nil, frameRate: 24, frames: [pixelate]),
+      VideoEffectConfig(startUs: nil, endUs: 1_000, frameRate: 24, frames: [vhs]),
+    ]
+    let merged = VideoEffectConfig.resolve(effects, atUs: 0)
+    XCTAssertEqual(merged.pixelSize, 0.05)
+    XCTAssertEqual(merged.rgbShift, 0.016, accuracy: 1e-12)
+    XCTAssertEqual(merged.scanlines, 0.3)
+    XCTAssertEqual(merged.noiseOffsetX, 9)
+    XCTAssertEqual(merged.bands, vhs.bands)
+    XCTAssertEqual(VideoEffectConfig.resolve(effects, atUs: 1_000), pixelate)
+  }
+
+  func testMergeCombinesTonesLikeDart() {
+    let oldFilm = VideoEffectFrame(sepia: 0.8, brightness: 0.03, vignette: 0.5, vignetteRadius: 0.3)
+    let strobe = VideoEffectFrame(brightness: -0.01, invert: 0.2, flash: 0.9)
+    let vignette = VideoEffectFrame(vignette: 0.7, vignetteRadius: 0.4)
+    let merged = oldFilm.merged(with: strobe).merged(with: vignette)
+    XCTAssertEqual(merged.sepia, 0.8)
+    XCTAssertEqual(merged.brightness, 0.02, accuracy: 1e-12)
+    XCTAssertEqual(merged.invert, 0.2)
+    XCTAssertEqual(merged.flash, 0.9)
+    XCTAssertEqual(merged.vignette, 0.7)
+    XCTAssertEqual(merged.vignetteRadius, 0.4)
+  }
+}
