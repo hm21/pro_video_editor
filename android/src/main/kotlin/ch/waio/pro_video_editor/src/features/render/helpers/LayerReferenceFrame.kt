@@ -7,14 +7,16 @@ import kotlin.math.roundToInt
  * The frame a single-track render's image layers are laid out in, and how a
  * clip of another size converts into it.
  *
- * iOS and macOS composite every clip into one render size and draw the layers
- * onto that frame, after each clip has been scaled to fit it
- * (`CompositionBuilder.calculateTransform`). Android draws the layers per clip,
- * on the clip's own frame, before a `Presentation` scales the clip to the
- * output. With clips of one resolution the two agree. With mixed resolutions
- * the same pixel offsets land on a differently sized frame on Android: on a
- * clip two thirds the size, a layer sat 1.5x further from the origin and
- * covered 1.5x more of the frame, and one in the lower third fell out of it.
+ * iOS and macOS scale every clip to fit one render size
+ * (`CompositionBuilder.calculateTransform`) and draw the layers onto the
+ * scaled clip, from its own top-left corner: the compositor drops the
+ * centring offset, so no layer is shifted for a clip of another shape.
+ * Android draws the layers per clip, on the clip's own frame, before a
+ * `Presentation` scales the clip to the output. With clips of one resolution
+ * the two agree. With mixed resolutions the same pixel offsets land on a
+ * differently sized frame on Android: on a clip two thirds the size, a layer
+ * sat 1.5x further from the origin and covered 1.5x more of the frame, and
+ * one in the lower third fell out of it.
  *
  * So a layer is converted into each clip's own pixels first, by the factor
  * that clip is scaled by to fit the composition frame.

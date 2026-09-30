@@ -1,5 +1,5 @@
 ## 2.19.1
-- **FIX**(android): Image layers keep their place and size on every segment when the segments differ in resolution, as on iOS and macOS. Each segment laid them out in its own pixels, so on a smaller segment a layer moved away from the top-left corner and grew, and one near the bottom or right edge left the frame.
+- **FIX**(android): Image layers keep their place and size on segments of another resolution, as on iOS and macOS, instead of drifting and growing on a smaller segment.
 
 ## 2.19.0
 - **FEAT**(android, iOS, macOS): `ChromaKey` can key a white or light grey wall: a neutral key weighs brightness too, so black and dark greys stay, and `ChromaKey.autoDetect` accepts a bright neutral border. Green and blue screens key exactly as before.

@@ -332,11 +332,13 @@ class VideoSequenceBuilder(
 
         // The frame the image layers' pixel values are laid out in. Only read
         // when there are layers, since it costs a metadata read per clip.
+        // Every clip counts, also one the global trim drops: iOS and macOS
+        // size the composition before they trim it.
         val layerFrame = if (timedImageLayers.isEmpty()) {
             null
         } else {
             LayerReferenceFrame.of(
-                timelineClips.map { clip ->
+                videoClips.map { clip ->
                     val (width, height) = rotatedDimensions(File(clip.inputPath))
                     Pair(width, height)
                 }

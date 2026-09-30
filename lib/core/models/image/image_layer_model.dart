@@ -59,7 +59,8 @@ class ImageLayer with TimeRangeMixin {
   /// When the video segments differ in resolution, the video frame is the one
   /// they are composited into: the first segment's size, replaced by each
   /// later segment that is wider or taller. Every segment is scaled to fit
-  /// inside it, so a layer keeps its place and size on all of them.
+  /// inside it and the layer is placed from the scaled segment's top-left
+  /// corner, so a layer keeps its place and size on segments of one shape.
   final Offset? offset;
 
   /// The display size of the image layer, in pixels of the same frame as

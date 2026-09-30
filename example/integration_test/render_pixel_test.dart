@@ -720,11 +720,19 @@ void main() {
     const centre = Rect.fromLTWH(560, 300, 160, 120);
     const lower = Rect.fromLTWH(160, 560, 160, 120);
 
+    /// With [naturalSize] the layers carry no `size` and are drawn at their
+    /// image's own 160x120 pixels instead.
     Future<Uint8List> renderWithLayers(
       List<EditorVideo> videos, {
       bool withCropping = false,
+      bool naturalSize = false,
+      Duration? endTime,
     }) async {
-      final magenta = EditorLayerImage.memory(await _solidPng(_magenta));
+      final magenta = EditorLayerImage.memory(
+        naturalSize
+            ? await _solidPng(_magenta, width: 160, height: 120)
+            : await _solidPng(_magenta),
+      );
       return pve.renderVideo(
         VideoRenderData(
           videoSegments: [
@@ -732,6 +740,7 @@ void main() {
               VideoSegment(video: video, endTime: const Duration(seconds: 2)),
           ],
           outputFormat: VideoOutputFormat.mp4,
+          endTime: endTime,
           imageBytesWithCropping: withCropping,
           qualityConfig: VideoQualityConfig.custom(
             bitrate: 4000000,
@@ -742,7 +751,7 @@ void main() {
               ImageLayer(
                 image: magenta,
                 offset: rect.topLeft,
-                size: rect.size,
+                size: naturalSize ? null : rect.size,
                 startTime: Duration.zero,
               ),
           ],
@@ -820,6 +829,32 @@ void main() {
       tester,
     ) async {
       await expectBothSegments(await renderWithLayers([worldVideo, h264Video]));
+    }, skip: kIsWeb);
+
+    testWidgets('keep their natural size on a smaller later segment', (
+      tester,
+    ) async {
+      await expectBothSegments(
+        await renderWithLayers([h264Video, worldVideo], naturalSize: true),
+      );
+    }, skip: kIsWeb);
+
+    testWidgets('are laid out in the frame of a segment the trim drops', (
+      tester,
+    ) async {
+      // Only the small segment is left, but the large one still sets the
+      // frame, as iOS and macOS size the composition before trimming it.
+      final bytes = await renderWithLayers([
+        worldVideo,
+        h264Video,
+      ], endTime: const Duration(milliseconds: 1500));
+      expectLayersAt(
+        await frameOf(
+          EditorVideo.memory(bytes),
+          at: const Duration(seconds: 1),
+        ),
+        'trimmed render',
+      );
     }, skip: kIsWeb);
   });
 }
@@ -925,13 +960,18 @@ const _magenta = Color(0xFFFF00FF);
 /// survive YUV coding. No test source contains it.
 bool _isMagenta(List<int> c) => c[0] > 180 && c[1] < 90 && c[2] > 180;
 
-/// A small opaque PNG filled with [color].
-Future<Uint8List> _solidPng(Color color) async {
+/// An opaque [width] x [height] PNG filled with [color].
+Future<Uint8List> _solidPng(
+  Color color, {
+  int width = 16,
+  int height = 16,
+}) async {
   final recorder = PictureRecorder();
-  Canvas(
-    recorder,
-  ).drawRect(const Rect.fromLTWH(0, 0, 16, 16), Paint()..color = color);
-  final image = await recorder.endRecording().toImage(16, 16);
+  Canvas(recorder).drawRect(
+    Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+    Paint()..color = color,
+  );
+  final image = await recorder.endRecording().toImage(width, height);
   final data = await image.toByteData(format: ImageByteFormat.png);
   return data!.buffer.asUint8List();
 }
