@@ -87,7 +87,13 @@ class VideoSequenceBuilder(
         val loop: Boolean = true,
         /** How far into an animated image (GIF) playback begins, in µs. */
         val animationOffsetUs: Long = 0L,
-        val animations: List<LayerAnimationConfig> = emptyList()
+        val animations: List<LayerAnimationConfig> = emptyList(),
+        /**
+         * Size a positioned layer without an explicit [width]/[height] is laid
+         * out at, relative to its image's own pixels. Only a clip of another
+         * size than the composition frame sets it; see [scaledToClipFrame].
+         */
+        val naturalSizeScale: Double = 1.0
     )
 
     /**
@@ -324,9 +330,24 @@ class VideoSequenceBuilder(
         // Compute per-clip fade-to-black windows from clip transitions.
         val fadeInfos = computeFadeInfos(timelineClips)
 
+        // The frame the image layers' pixel values are laid out in. Only read
+        // when there are layers, since it costs a metadata read per clip.
+        val layerFrame = if (timedImageLayers.isEmpty()) {
+            null
+        } else {
+            LayerReferenceFrame.of(
+                timelineClips.map { clip ->
+                    val (width, height) = rotatedDimensions(File(clip.inputPath))
+                    Pair(width, height)
+                }
+            )
+        }
+
         // Build EditedMediaItems for each clip
         val editedMediaItems = timelineClips.mapIndexed { index, clip ->
-            buildEditedMediaItem(index, clip, normalizedAudioEffects, fadeInfos[index])
+            buildEditedMediaItem(
+                index, clip, normalizedAudioEffects, fadeInfos[index], layerFrame
+            )
         }
 
         Log.d(RENDER_TAG, "Total EditedMediaItems created: ${editedMediaItems.size}")
@@ -471,13 +492,29 @@ class VideoSequenceBuilder(
     }
 
     /**
+     * Width, height and total rotation of [inputFile] once the configured
+     * rotation is applied, read once per file.
+     */
+    private fun rotatedDimensions(inputFile: File): Triple<Int, Int, Int> {
+        val key = "${inputFile.absolutePath}|$rotationDegrees"
+        return rotatedDimensionsCache.getOrPut(key) {
+            getRotatedVideoDimensions(inputFile, rotationDegrees)
+        }
+    }
+
+    /**
      * Builds an EditedMediaItem for a single video clip with all effects.
+     *
+     * @param layerFrame The composition frame the image layers are laid out
+     *   in (see [LayerReferenceFrame]); `null` when there are no layers or no
+     *   clip size could be read.
      */
     private fun buildEditedMediaItem(
         index: Int,
         clip: VideoClip,
         normalizedAudioEffects: List<AudioProcessor>,
-        fadeInfo: ClipFadeInfo?
+        fadeInfo: ClipFadeInfo?,
+        layerFrame: Pair<Int, Int>?
     ): EditedMediaItem {
         Log.d(RENDER_TAG, "Processing clip $index: ${clip.inputPath}")
         val inputFile = File(clip.inputPath)
@@ -541,10 +578,7 @@ class VideoSequenceBuilder(
 
         // Calculate video dimensions for image layer positioning
         // This must be done before applying any effects
-        val dimensionsKey = "${inputFile.absolutePath}|$rotationDegrees"
-        val dimensions = rotatedDimensionsCache.getOrPut(dimensionsKey) {
-            getRotatedVideoDimensions(inputFile, rotationDegrees)
-        }
+        val dimensions = rotatedDimensions(inputFile)
         var videoWidth = dimensions.first
         var videoHeight = dimensions.second
         val videoRotation = dimensions.third
@@ -564,12 +598,29 @@ class VideoSequenceBuilder(
             croppedHeight = null
         }
 
+        // Layer pixel values are laid out in the composition frame. Drawn onto
+        // this clip's own, uncropped frame they are converted into its pixels
+        // first (see LayerReferenceFrame); unchanged when the clip has the
+        // frame's size, as every clip of a single-resolution render does.
+        val layerScale = LayerReferenceFrame.layoutScale(videoWidth, videoHeight, layerFrame)
+        val layersOnClipFrame = if (layerScale == 1.0) {
+            timedImageLayers
+        } else {
+            Log.d(
+                RENDER_TAG,
+                "Clip $index: ${videoWidth}x$videoHeight in the " +
+                        "${layerFrame?.first}x${layerFrame?.second} layer frame, " +
+                        "laying image layers out at ${layerScale}x"
+            )
+            timedImageLayers.map { it.scaledToClipFrame(layerScale) }
+        }
+
         // Apply timed image layers BEFORE crop if withCropping is enabled
         // This makes the images get cropped together with the video
         val hasWithCropping = timedImageLayers.any { it.withCropping }
         if (hasWithCropping && timedImageLayers.isNotEmpty()) {
             applyTimedImageLayers(
-                clipVideoEffects, timedImageLayers, videoWidth, videoHeight,
+                clipVideoEffects, layersOnClipFrame, videoWidth, videoHeight,
                 outputWidth, outputHeight,
                 // The crop below throws away everything outside its rectangle,
                 // so only that rectangle is scaled into the output. The raster
@@ -603,8 +654,13 @@ class VideoSequenceBuilder(
         // Apply timed image layers AFTER crop if withCropping is disabled (default)
         // This makes the images stretch to the final cropped size
         if (!hasWithCropping && timedImageLayers.isNotEmpty()) {
+            // A crop frame is sized by the crop values on every platform, so
+            // layers drawn onto it keep theirs.
+            val cropReplacedFrame = croppedWidth != null || croppedHeight != null
             applyTimedImageLayers(
-                clipVideoEffects, timedImageLayers, videoWidth, videoHeight,
+                clipVideoEffects,
+                if (cropReplacedFrame) timedImageLayers else layersOnClipFrame,
+                videoWidth, videoHeight,
                 outputWidth, outputHeight
             )
         }
