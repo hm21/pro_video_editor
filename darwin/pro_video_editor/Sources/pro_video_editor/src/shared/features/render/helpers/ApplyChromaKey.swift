@@ -17,14 +17,17 @@ import Foundation
 //   Cb = -0.168736·r - 0.331264·g + 0.5·b
 //   Cr =  0.5·r - 0.418688·g - 0.081312·b
 //
-//   d     = distance((Cb, Cr), (Cb_key, Cr_key))
+//   w     = 1 - smoothstep(0.04, 0.10, |(Cb_key, Cr_key)|)
+//   d     = |(Cb - Cb_key, Cr - Cr_key, w·(Y - Y_key))|
 //   alpha = smoothstep(similarity, similarity + smoothness, d)
 //
-// The distance lives in the Cb/Cr chroma plane, which is a position rather than
-// a pure hue: Cb and Cr scale with brightness, so a dimly lit patch of the
-// screen sits closer to neutral and further from the key point. The default
-// `similarity` of 0.20 covers roughly 40%-100% of the screen's reference
-// brightness. Same behaviour as FFmpeg's `chromakey` and OBS.
+// For a saturated key `w` is 0 and the distance lives in the Cb/Cr chroma plane,
+// which is a position rather than a pure hue: Cb and Cr scale with brightness,
+// so a dimly lit patch of the screen sits closer to neutral and further from
+// the key point. The default `similarity` of 0.20 covers roughly 40%-100% of
+// the screen's reference brightness. Same behaviour as FFmpeg's `chromakey` and
+// OBS. A neutral key has no chroma to tell white from black, so `w` rises to 1
+// and brightness counts too (see `lumaWeightOf`).
 //
 // Spill suppression removes the chroma component pointing toward the key hue,
 // leaving Y untouched so a despilled pixel never darkens.
@@ -49,6 +52,24 @@ private func smoothstep(_ edge0: Double, _ edge1: Double, _ x: Double) -> Double
   return t * t * (3 - 2 * t)
 }
 
+/// Below this key chroma magnitude, brightness counts fully in the matte.
+let lumaWeightFullBelow = 0.04
+
+/// Above this key chroma magnitude, brightness does not count at all.
+let lumaWeightNoneAbove = 0.10
+
+/// How much the brightness difference counts toward the matte distance, for a
+/// key at chroma `(cb, cr)`.
+///
+/// A saturated key gets `0` and keys on chroma alone, so a shadow on the screen
+/// stays under the key. A neutral key gets `1`: every neutral shares the chroma
+/// origin, so without brightness a white key would also remove black. Mirrors
+/// Kotlin's `ChromaKeyMath.lumaWeight`.
+func lumaWeightOf(cb: Double, cr: Double) -> Double {
+  return 1 - smoothstep(
+    lumaWeightFullBelow, lumaWeightNoneAbove, (cb * cb + cr * cr).squareRoot())
+}
+
 /// Evaluates the chroma key for one pixel.
 ///
 /// Returns the despilled color together with the matte alpha, both **straight**
@@ -62,7 +83,8 @@ func chromaKeyed(r: Double, g: Double, b: Double, _ config: ChromaKeyConfig)
 
   let dCb = chroma.cb - key.cb
   let dCr = chroma.cr - key.cr
-  let distance = (dCb * dCb + dCr * dCr).squareRoot()
+  let dY = (lumaOf(r: r, g: g, b: b) - config.keyLuma) * config.lumaWeight
+  let distance = (dCb * dCb + dCr * dCr + dY * dY).squareRoot()
 
   // max() keeps a zero-width ramp from dividing by zero; smoothstep already
   // guards it, but this also matches the shader's `max(uSmoothness, 1e-4)`.

@@ -184,8 +184,70 @@ void main() {
       expect(chromaDistance(result.color, green), lessThan(0.01));
     });
 
+    group('a bright neutral wall', () {
+      const wall = Color(0xFFD9D9D9);
+      const darkShirt = Color(0xFF202020);
+
+      double lumaOf(Color c) => ChromaKeyDetector.lumaOf(c.r, c.g, c.b);
+
+      test('is measured like a screen', () {
+        final result = ChromaKeyDetector.fromFrames(
+          [frame(screen: wall, subject: darkShirt)],
+          width: width,
+          height: height,
+        );
+
+        expect(chromaDistance(result.color, wall), lessThan(0.01));
+        expect(lumaOf(result.color), closeTo(lumaOf(wall), 0.01));
+        expect(result.coverage, greaterThan(0.99));
+        expect(result.similarity, inInclusiveRange(0.08, 0.35));
+      });
+
+      test('with a lighting falloff widens similarity through brightness', () {
+        // The wall's hue never changes, only its brightness: a chroma-only
+        // distance would report zero spread here and key too tightly.
+        final even = ChromaKeyDetector.fromFrames(
+          [frame(screen: wall, subject: darkShirt)],
+          width: width,
+          height: height,
+        );
+        final uneven = ChromaKeyDetector.fromFrames(
+          [frame(screen: wall, subject: darkShirt, lightingFalloff: 0.2)],
+          width: width,
+          height: height,
+        );
+
+        expect(uneven.spread, greaterThan(even.spread));
+        expect(uneven.similarity, greaterThan(even.similarity));
+      });
+    });
+
+    group('lumaWeightOf', () {
+      ({double cb, double cr}) chroma(Color c) =>
+          ChromaKeyDetector.chromaOf(c.r, c.g, c.b);
+
+      test('ignores brightness for green and blue screens', () {
+        final g = chroma(green);
+        final b = chroma(blue);
+        expect(ChromaKeyDetector.lumaWeightOf(g.cb, g.cr), 0);
+        expect(ChromaKeyDetector.lumaWeightOf(b.cb, b.cr), 0);
+      });
+
+      test('weighs brightness fully for a neutral key', () {
+        expect(ChromaKeyDetector.lumaWeightOf(0, 0), 1);
+      });
+
+      test('ramps smoothly for a pale key', () {
+        // A pale beige wall sits between the two thresholds.
+        final beige = chroma(const Color(0xFFEDDEC7));
+        final weight = ChromaKeyDetector.lumaWeightOf(beige.cb, beige.cr);
+        expect(weight, greaterThan(0.01));
+        expect(weight, lessThan(0.99));
+      });
+    });
+
     group('rejects what is not a screen', () {
-      test('a neutral border', () {
+      test('a mid-grey border', () {
         expect(
           () => ChromaKeyDetector.fromFrames(
             [frame(screen: const Color(0xFF808080))],

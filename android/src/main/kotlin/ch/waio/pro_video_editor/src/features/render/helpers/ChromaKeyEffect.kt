@@ -20,7 +20,7 @@ import ch.waio.pro_video_editor.src.shared.media.ImageOrientation
  * Removes a solid-colored background ("green screen") from every frame.
  *
  * Pixels whose chroma sits within [ChromaKeyConfig.similarity] of the key color
- * are removed, with a [ChromaKeyConfig.smoothness]-wide soft edge, and the key's
+ * (for a neutral key, chroma and brightness) are removed, with a [ChromaKeyConfig.smoothness]-wide soft edge, and the key's
  * color cast is pulled back out of the pixels that remain
  * ([ChromaKeyConfig.spill]).
  *
@@ -124,6 +124,8 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
                 "uniform sampler2D uBgSampler;\n" +
                 "uniform vec2 uKeyCbCr;\n" +
                 "uniform vec2 uKeyDir;\n" +
+                "uniform float uKeyLuma;\n" +
+                "uniform float uLumaWeight;\n" +
                 "uniform float uSimilarity;\n" +
                 "uniform float uSmoothness;\n" +
                 "uniform float uSpill;\n" +
@@ -138,8 +140,10 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
                 "  vec2 cbcr = vec2(\n" +
                 "      dot(rgb, vec3(-0.168736, -0.331264, 0.5)),\n" +
                 "      dot(rgb, vec3(0.5, -0.418688, -0.081312)));\n" +
-                // Matte: distance in the chroma plane, ramped by smoothstep.
-                "  float d = distance(cbcr, uKeyCbCr);\n" +
+                // Matte: distance in the chroma plane, plus brightness weighted
+                // by how neutral the key is, ramped by smoothstep.
+                "  float d = length(vec3(cbcr - uKeyCbCr," +
+                " (y - uKeyLuma) * uLumaWeight));\n" +
                 "  float a = smoothstep(uSimilarity," +
                 " uSimilarity + max(uSmoothness, 1e-4), d);\n" +
                 // Spill: remove the chroma component pointing at the key hue,
@@ -220,6 +224,8 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
                     "uKeyDir",
                     floatArrayOf(config.keyDirCb.toFloat(), config.keyDirCr.toFloat())
                 )
+                glProgram.setFloatUniform("uKeyLuma", config.keyLuma.toFloat())
+                glProgram.setFloatUniform("uLumaWeight", config.lumaWeight.toFloat())
                 glProgram.setFloatUniform("uSimilarity", config.similarity.toFloat())
                 glProgram.setFloatUniform("uSmoothness", config.smoothness.toFloat())
                 glProgram.setFloatUniform("uSpill", config.spill.toFloat())

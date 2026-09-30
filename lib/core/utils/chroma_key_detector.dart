@@ -65,7 +65,8 @@ class ChromaKeyDetectionException implements Exception {
 /// constant the caller picked, and every bit of that offset has to be absorbed
 /// by a wider [ChromaKey.similarity] — which is budget taken away from the
 /// margin that protects the subject. Measuring the screen instead removes the
-/// offset entirely, and works the same for a green, blue or any other screen.
+/// offset entirely, and works the same for a green, blue or any other screen,
+/// and for a bright white or light grey wall.
 ///
 /// The screen is assumed to reach the frame border, which is what lets the
 /// subject be ignored: only a ring around the edge is sampled.
@@ -73,9 +74,28 @@ abstract final class ChromaKeyDetector {
   /// Fraction of the frame, per side, sampled as the border ring.
   static const _ringFraction = 0.12;
 
-  /// A screen has to be at least this saturated. Below it, the border is grey
-  /// or black and there is nothing to key.
+  /// Below this chroma magnitude the border counts as neutral, and a neutral
+  /// border is only a screen when it is bright — see [_minNeutralLuma].
   static const _minChromaMagnitude = 0.08;
+
+  /// A neutral border must be at least this bright to count as a wall.
+  ///
+  /// A white or light grey wall records well above it. A dark or mid-grey
+  /// border is usually an underexposed room, a vignette or a letterbox, and
+  /// keying it would take every shadow in the shot with it, so it is refused.
+  static const _minNeutralLuma = 0.55;
+
+  /// Below this key chroma magnitude, brightness counts fully in the matte.
+  ///
+  /// Must match the renderers: `ChromaKeyMath.LUMA_WEIGHT_FULL_BELOW` in
+  /// Kotlin and `lumaWeightFullBelow` in Swift.
+  static const lumaWeightFullBelow = 0.04;
+
+  /// Above this key chroma magnitude, brightness does not count at all.
+  ///
+  /// Must match `ChromaKeyMath.LUMA_WEIGHT_NONE_ABOVE` and
+  /// `lumaWeightNoneAbove`.
+  static const lumaWeightNoneAbove = 0.10;
 
   /// At least this share of the border must belong to one color.
   static const _minCoverage = 0.6;
@@ -110,6 +130,30 @@ abstract final class ChromaKeyDetector {
     cr: 0.5 * r - 0.418688 * g - 0.081312 * b,
   );
 
+  /// BT.601 luma of a gamma-encoded RGB triple in `0..1`.
+  static double lumaOf(double r, double g, double b) =>
+      0.299 * r + 0.587 * g + 0.114 * b;
+
+  /// How much the brightness difference counts toward the matte distance, for
+  /// a key at chroma `(cb, cr)`, matching the renderers.
+  ///
+  /// A saturated key (a green or blue screen sits near `0.33`) gets `0` and
+  /// keys on chroma alone, so a shadow on the screen, which changes brightness
+  /// but not hue, stays under the key. A neutral key gets `1`: every neutral
+  /// shares the chroma origin, so without brightness a white key would also
+  /// remove black and every grey. The weight ramps smoothly in between.
+  ///
+  /// The matte distance is then
+  /// `|(Cb - Cb_key, Cr - Cr_key, weight · (Y - Y_key))|`.
+  static double lumaWeightOf(double cb, double cr) {
+    final magnitude = sqrt(cb * cb + cr * cr);
+    final t =
+        ((magnitude - lumaWeightFullBelow) /
+                (lumaWeightNoneAbove - lumaWeightFullBelow))
+            .clamp(0.0, 1.0);
+    return 1 - t * t * (3 - 2 * t);
+  }
+
   /// Detects the screen in one or more RGBA frames.
   ///
   /// [frames] are raw RGBA buffers, all [width] x [height]. Passing several
@@ -117,7 +161,7 @@ abstract final class ChromaKeyDetector {
   /// subject that briefly touches the edge.
   ///
   /// Throws a [ChromaKeyDetectionException] when the border is not one
-  /// saturated color.
+  /// saturated color or one bright neutral one.
   static ChromaKeyDetection fromFrames(
     List<Uint8List> frames, {
     required int width,
@@ -168,22 +212,27 @@ abstract final class ChromaKeyDetector {
     final g = _median(ringG);
     final b = _median(ringB);
     final key = chromaOf(r, g, b);
+    final keyLuma = lumaOf(r, g, b);
     final magnitude = sqrt(key.cb * key.cb + key.cr * key.cr);
 
-    if (magnitude < _minChromaMagnitude) {
+    if (magnitude < _minChromaMagnitude && keyLuma < _minNeutralLuma) {
       throw ChromaKeyDetectionException(
-        'The frame border averages to a near-neutral color '
-        '(chroma magnitude ${magnitude.toStringAsFixed(3)}), so there is no '
-        'screen to key. Is the screen actually reaching the frame edge?',
+        'The frame border averages to a dark near-neutral color '
+        '(chroma magnitude ${magnitude.toStringAsFixed(3)}, luma '
+        '${keyLuma.toStringAsFixed(3)}), so there is no screen to key. Is the '
+        'screen actually reaching the frame edge?',
       );
     }
 
-    // How far each border pixel sits from that color.
+    // How far each border pixel sits from that color, in the same space the
+    // renderers key in.
+    final lumaWeight = lumaWeightOf(key.cb, key.cr);
     final distances = List<double>.generate(ringR.length, (i) {
       final c = chromaOf(ringR[i], ringG[i], ringB[i]);
       final dcb = c.cb - key.cb;
       final dcr = c.cr - key.cr;
-      return sqrt(dcb * dcb + dcr * dcr);
+      final dy = (lumaOf(ringR[i], ringG[i], ringB[i]) - keyLuma) * lumaWeight;
+      return sqrt(dcb * dcb + dcr * dcr + dy * dy);
     })..sort();
 
     // Which border pixels belong to the screen. The band is a constant, so

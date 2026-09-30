@@ -1,6 +1,7 @@
 package ch.waio.pro_video_editor.src.features.render.models
 
 import PACKAGE_TAG
+import ch.waio.pro_video_editor.src.features.render.helpers.ChromaKeyMath
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.EncodedImage
 import io.flutter.plugin.common.MethodCall
@@ -243,7 +244,8 @@ data class ColorFilterConfig(
  * its color cube; the GPU runs it in `ChromaKeyEffect`'s fragment shader.
  *
  * @property keyR/keyG/keyB The screen color to remove, gamma-encoded, 0..1
- * @property similarity Chroma-plane radius within which a pixel is fully removed
+ * @property similarity Radius around the key within which a pixel is fully
+ *  removed: in the chroma plane, plus brightness for a neutral key
  * @property smoothness Width of the soft ramp just beyond [similarity]
  * @property spill How strongly the key's color cast is pulled out of the rest
  * @property backgroundColor Solid background ARGB, or null when none
@@ -262,6 +264,15 @@ data class ChromaKeyConfig(
     /** The key color projected onto the Cb/Cr chroma plane. */
     val keyCb: Double = -0.168736 * keyR - 0.331264 * keyG + 0.5 * keyB
     val keyCr: Double = 0.5 * keyR - 0.418688 * keyG - 0.081312 * keyB
+
+    /** BT.601 luma of the key color. */
+    val keyLuma: Double = ChromaKeyMath.luma(keyR, keyG, keyB)
+
+    /**
+     * How much brightness counts toward the matte distance: `0` for a saturated
+     * key, `1` for a neutral one. See [ChromaKeyMath.lumaWeight].
+     */
+    val lumaWeight: Double = ChromaKeyMath.lumaWeight(keyCb, keyCr)
 
     /**
      * Unit vector pointing from neutral toward the key hue, used to pull the

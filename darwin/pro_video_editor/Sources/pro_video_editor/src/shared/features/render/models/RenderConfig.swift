@@ -182,7 +182,8 @@ public struct ChromaKeyConfig: Sendable, Equatable {
   let keyR: Double
   let keyG: Double
   let keyB: Double
-  /// Chroma-plane radius within which a pixel is removed completely.
+  /// Radius around the key within which a pixel is removed completely: in the
+  /// chroma plane, plus brightness for a neutral key.
   let similarity: Double
   /// Width of the soft ramp just beyond `similarity`.
   let smoothness: Double
@@ -212,6 +213,16 @@ public struct ChromaKeyConfig: Sendable, Equatable {
   /// The key color projected onto the Cb/Cr chroma plane.
   var keyChroma: (cb: Double, cr: Double) {
     chromaOf(r: keyR, g: keyG, b: keyB)
+  }
+
+  /// BT.601 luma of the key color.
+  var keyLuma: Double { lumaOf(r: keyR, g: keyG, b: keyB) }
+
+  /// How much brightness counts toward the matte distance: 0 for a saturated
+  /// key, 1 for a neutral one. See `lumaWeightOf(cb:cr:)`.
+  var lumaWeight: Double {
+    let c = keyChroma
+    return lumaWeightOf(cb: c.cb, cr: c.cr)
   }
 
   /// The unit vector pointing from neutral toward the key hue, used to pull
