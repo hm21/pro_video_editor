@@ -10,8 +10,8 @@ import kotlin.test.assertTrue
 /**
  * Cross-platform parity guard for the chroma-key formula.
  *
- * The [golden] and [neutralGolden] tables below are duplicated verbatim in the
- * Swift test
+ * The [golden], [neutralGolden], [tintedGolden] and [beigeGolden] tables below
+ * are duplicated verbatim in the Swift test
  * (`example/macos/RunnerTests/RunnerTests.swift`, `ChromaKeyMathTests`). Both
  * run it against their own implementation — Kotlin's [ChromaKeyMath], which the
  * GLSL shader mirrors, and Swift's `chromaKeyed(r:g:b:_:)`, which is baked into
@@ -123,17 +123,78 @@ internal class ChromaKeyMathTest {
 
     @Test
     fun neutralGoldenTable_matchesTheSharedFormula() {
-        for (row in neutralGolden) {
-            val out = ChromaKeyMath.evaluate(row.r, row.g, row.b, wall)
-            val expected = doubleArrayOf(row.outR, row.outG, row.outB, row.alpha)
-            val labels = listOf("r", "g", "b", "alpha")
+        for (row in neutralGolden) assertGolden(row, wall)
+    }
 
-            for (i in 0..3) {
-                assertTrue(
-                    abs(out[i] - expected[i]) < tolerance,
-                    "${row.name}: ${labels[i]} was ${out[i]}, expected ${expected[i]}",
-                )
-            }
+    /**
+     * A white wall as a camera records it: faintly warm (`0xDCD9D3`), not
+     * exactly neutral. Its chroma is tiny but not zero, so it has a despill
+     * direction; weight 1 must still switch despill off.
+     */
+    private val tintedWall = ChromaKeyConfig(
+        keyR = 0xDC / 255.0,
+        keyG = 0xD9 / 255.0,
+        keyB = 0xD3 / 255.0,
+        similarity = 0.12,
+        smoothness = 0.08,
+        spill = 0.5,
+    )
+
+    /**
+     * A pale beige wall (`0xEDDEC7`), between the two thresholds: weight about
+     * 0.6, so brightness counts partly and despill runs at about 40%.
+     */
+    private val beigeWall = ChromaKeyConfig(
+        keyR = 0xED / 255.0,
+        keyG = 0xDE / 255.0,
+        keyB = 0xC7 / 255.0,
+        similarity = 0.12,
+        smoothness = 0.08,
+        spill = 0.5,
+    )
+
+    private val tintedGolden = listOf(
+        Golden("key color", 0.862745, 0.85098, 0.827451, 0.862745, 0.85098, 0.827451, 0.0),
+        // Leaning toward the wall's faint warm tint, yet not desaturated.
+        Golden("skin tone", 0.86, 0.65, 0.53, 0.86, 0.65, 0.53, 1.0),
+        Golden("red shirt", 0.8, 0.15, 0.15, 0.8, 0.15, 0.15, 1.0),
+        Golden("orange", 0.9, 0.5, 0.1, 0.9, 0.5, 0.1, 1.0),
+        Golden("denim", 0.231373, 0.356863, 0.54902, 0.231373, 0.356863, 0.54902, 1.0),
+    )
+
+    private val beigeGolden = listOf(
+        Golden("key color", 0.929412, 0.870588, 0.780392, 0.918988, 0.872066, 0.80012, 0.0),
+        Golden("black", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        // Skin crowds a beige wall: the hard case, pinned on purpose.
+        Golden("skin tone", 0.86, 0.65, 0.53, 0.837457, 0.653197, 0.572665, 0.129278),
+        // Despilled, but at the faded strength.
+        Golden("red shirt", 0.8, 0.15, 0.15, 0.757197, 0.15607, 0.231009, 1.0),
+        Golden("orange", 0.9, 0.5, 0.1, 0.844612, 0.507855, 0.204826, 1.0),
+        Golden("denim", 0.231373, 0.356863, 0.54902, 0.231373, 0.356863, 0.54902, 1.0),
+    )
+
+    @Test
+    fun tintedGoldenTable_nearNeutralKeyDoesNotDespill() {
+        assertEquals(1.0, tintedWall.lumaWeight, 0.0)
+        assertEquals(0.0, tintedWall.effectiveSpill, 0.0)
+        for (row in tintedGolden) assertGolden(row, tintedWall)
+    }
+
+    @Test
+    fun beigeGoldenTable_matchesTheSharedFormula() {
+        for (row in beigeGolden) assertGolden(row, beigeWall)
+    }
+
+    private fun assertGolden(row: Golden, key: ChromaKeyConfig) {
+        val out = ChromaKeyMath.evaluate(row.r, row.g, row.b, key)
+        val expected = doubleArrayOf(row.outR, row.outG, row.outB, row.alpha)
+        val labels = listOf("r", "g", "b", "alpha")
+
+        for (i in 0..3) {
+            assertTrue(
+                abs(out[i] - expected[i]) < tolerance,
+                "${row.name}: ${labels[i]} was ${out[i]}, expected ${expected[i]}",
+            )
         }
     }
 
@@ -142,8 +203,10 @@ internal class ChromaKeyMathTest {
         // Weight 0 is what keeps every green- and blue-screen result above
         // identical to the chroma-only formula.
         assertEquals(0.0, config.lumaWeight, 0.0)
+        assertEquals(config.spill, config.effectiveSpill, 0.0)
         val blue = ChromaKeyConfig(keyR = 0x00 / 255.0, keyG = 0x47 / 255.0, keyB = 0xBB / 255.0)
         assertEquals(0.0, blue.lumaWeight, 0.0)
+        assertEquals(blue.spill, blue.effectiveSpill, 0.0)
     }
 
     @Test

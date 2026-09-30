@@ -9,9 +9,10 @@ import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 
 /// Removes a solid-colored background (a "green screen") from the video.
 ///
-/// Pixels whose hue is close to [color] are made transparent, with a soft edge
-/// so the matte does not alias, and the key's color cast is pulled back out of
-/// the pixels that remain ([spill]).
+/// Pixels whose hue is close to [color] (for a white or grey wall, hue and
+/// brightness) are made transparent, with a soft edge so the matte does not
+/// alias, and the key's color cast is pulled back out of the pixels that
+/// remain ([spill]).
 ///
 /// ## The algorithm
 ///
@@ -160,7 +161,8 @@ class ChromaKey {
   /// Measures the screen in [video] and returns a key tuned to it.
   ///
   /// This is the most reliable way to build a key, and it is hue-agnostic —
-  /// green, blue or anything else, as long as it is saturated.
+  /// green, blue or anything else, as long as it is saturated, or a bright
+  /// white or light grey wall (see "Neutral keys" on [color]).
   ///
   /// A constant [color] is always a compromise. Paint, fabric, lighting and the
   /// camera's color science all shift the recorded screen away from it, and
@@ -326,8 +328,11 @@ class ChromaKey {
   /// survive unless the wall is lit evenly. And the subject crowds the key:
   /// against a light grey wall (`0xFFD9D9D9`) skin sits only `0.21` away,
   /// versus `0.43` from SMPTE green, and anything white or cream the subject
-  /// wears is keyed with the wall. Keep [similarity] near `0.12` and let
-  /// [autoDetect] measure the wall.
+  /// wears is keyed with the wall. Keep [similarity] near `0.12`; [autoDetect]
+  /// measures the wall and never goes wider than that for a neutral key.
+  ///
+  /// A neutral key does not despill: there is no hue to pull out, so [spill]
+  /// fades out along with the chroma.
   final Color color;
 
   /// How far from [color] a pixel may sit and still be removed completely.
@@ -375,6 +380,10 @@ class ChromaKey {
   ///
   /// - `0.0`: off
   /// - `1.0`: neutralize the key hue completely
+  ///
+  /// Fades out as [color] approaches neutral, and is off for a white or grey
+  /// wall: the faint tint a camera records on such a wall would otherwise
+  /// desaturate the subject along it. See "Neutral keys" on [color].
   ///
   /// **Default**: `0.5`
   final double spill;

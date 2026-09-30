@@ -19,10 +19,10 @@ import ch.waio.pro_video_editor.src.shared.media.ImageOrientation
 /**
  * Removes a solid-colored background ("green screen") from every frame.
  *
- * Pixels whose chroma sits within [ChromaKeyConfig.similarity] of the key color
- * (for a neutral key, chroma and brightness) are removed, with a [ChromaKeyConfig.smoothness]-wide soft edge, and the key's
- * color cast is pulled back out of the pixels that remain
- * ([ChromaKeyConfig.spill]).
+ * Pixels whose chroma (for a neutral key, chroma and brightness) sits within
+ * [ChromaKeyConfig.similarity] of the key color are removed, with a
+ * [ChromaKeyConfig.smoothness]-wide soft edge, and the key's color cast is
+ * pulled back out of the pixels that remain ([ChromaKeyConfig.effectiveSpill]).
  *
  * The removed area becomes, in this order of precedence: the background image,
  * the background color, or transparency. Transparency only means something in
@@ -228,7 +228,7 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
                 glProgram.setFloatUniform("uLumaWeight", config.lumaWeight.toFloat())
                 glProgram.setFloatUniform("uSimilarity", config.similarity.toFloat())
                 glProgram.setFloatUniform("uSmoothness", config.smoothness.toFloat())
-                glProgram.setFloatUniform("uSpill", config.spill.toFloat())
+                glProgram.setFloatUniform("uSpill", config.effectiveSpill.toFloat())
                 glProgram.setFloatsUniform("uBgColor", backgroundColorRgb())
                 glProgram.setIntUniform("uBgMode", bgMode)
 

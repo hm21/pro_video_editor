@@ -30,7 +30,9 @@ import Foundation
 // and brightness counts too (see `lumaWeightOf`).
 //
 // Spill suppression removes the chroma component pointing toward the key hue,
-// leaving Y untouched so a despilled pixel never darkens.
+// leaving Y untouched so a despilled pixel never darkens. Its strength is
+// `spill·(1 - w)`: a neutral key has no hue to pull out, and the faint tint a
+// camera records on a white wall would otherwise desaturate the subject.
 
 /// BT.601 chroma projection of a gamma-encoded RGB triple.
 func chromaOf(r: Double, g: Double, b: Double) -> (cb: Double, cr: Double) {
@@ -79,11 +81,13 @@ func chromaKeyed(r: Double, g: Double, b: Double, _ config: ChromaKeyConfig)
   -> (r: Double, g: Double, b: Double, a: Double)
 {
   let chroma = chromaOf(r: r, g: g, b: b)
+  let y = lumaOf(r: r, g: g, b: b)
   let key = config.keyChroma
+  let lumaWeight = lumaWeightOf(cb: key.cb, cr: key.cr)
 
   let dCb = chroma.cb - key.cb
   let dCr = chroma.cr - key.cr
-  let dY = (lumaOf(r: r, g: g, b: b) - config.keyLuma) * config.lumaWeight
+  let dY = (y - config.keyLuma) * lumaWeight
   let distance = (dCb * dCb + dCr * dCr + dY * dY).squareRoot()
 
   // max() keeps a zero-width ramp from dividing by zero; smoothstep already
@@ -96,16 +100,18 @@ func chromaKeyed(r: Double, g: Double, b: Double, _ config: ChromaKeyConfig)
 
   // Spill suppression. `projection` is how far the pixel leans toward the key
   // hue; only pixels leaning toward it (> 0) are touched, so a complementary
-  // color is never desaturated.
+  // color is never desaturated. The strength fades out with the luma weight,
+  // so a neutral key does not despill at all. Mirrors Kotlin's
+  // `ChromaKeyConfig.effectiveSpill`.
+  let spill = config.spill * (1 - lumaWeight)
   let direction = config.keyDirection
   let projection = chroma.cb * direction.cb + chroma.cr * direction.cr
-  guard config.spill > 0, projection > 0 else {
+  guard spill > 0, projection > 0 else {
     return (r, g, b, alpha)
   }
 
-  let y = lumaOf(r: r, g: g, b: b)
-  let cb = chroma.cb - direction.cb * projection * config.spill
-  let cr = chroma.cr - direction.cr * projection * config.spill
+  let cb = chroma.cb - direction.cb * projection * spill
+  let cr = chroma.cr - direction.cr * projection * spill
 
   return (
     r: min(max(y + 1.402 * cr, 0), 1),

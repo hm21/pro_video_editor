@@ -21,6 +21,10 @@ class ChromaKeyDetection {
 
   /// A [similarity] that covers the measured spread of the screen with room to
   /// spare, without reaching further than it has to.
+  ///
+  /// For a neutral wall it stops at `0.12` even when the spread is larger, so
+  /// an unevenly lit wall keeps its darker parts rather than the key reaching
+  /// into the subject. See "Neutral keys" on [ChromaKey.color].
   final double similarity;
 
   /// The fraction of sampled border pixels that belong to the detected screen,
@@ -31,7 +35,8 @@ class ChromaKeyDetection {
   /// at the edge), and the result should not be trusted.
   final double coverage;
 
-  /// The 99th-percentile chroma distance of the screen from [color].
+  /// The 99th-percentile distance of the screen from [color], in the space the
+  /// key is measured in: chroma, plus brightness for a neutral wall.
   ///
   /// This is the raw measurement [similarity] is derived from; a large value
   /// means an unevenly lit screen.
@@ -123,6 +128,18 @@ abstract final class ChromaKeyDetector {
   /// eating the subject outweighs whatever the border suggested.
   static const _maxSimilarity = 0.35;
 
+  /// The same limit for a neutral key, where the subject sits much closer.
+  ///
+  /// Skin is `0.21` from a light grey wall (versus `0.38`–`0.42` from green),
+  /// so `0.12` plus the default `0.08` of smoothness still leaves a face
+  /// opaque there, and even against a wall as dim as the skin itself (about
+  /// `0.15` away, its chroma alone) the face stays outside the fully removed
+  /// radius. An unevenly lit wall has a large spread, but it is all
+  /// brightness: widening the key to cover it would take the subject with it,
+  /// so the falloff is left to survive instead. Blended with [_maxSimilarity]
+  /// by [lumaWeightOf], so a pale key sits in between.
+  static const _maxNeutralSimilarity = 0.12;
+
   /// BT.601 chroma of a gamma-encoded RGB triple in `0..1`, matching the
   /// keying formula the renderers use.
   static ({double cb, double cr}) chromaOf(double r, double g, double b) => (
@@ -144,7 +161,9 @@ abstract final class ChromaKeyDetector {
   /// remove black and every grey. The weight ramps smoothly in between.
   ///
   /// The matte distance is then
-  /// `|(Cb - Cb_key, Cr - Cr_key, weight · (Y - Y_key))|`.
+  /// `|(Cb - Cb_key, Cr - Cr_key, weight · (Y - Y_key))|`, and spill
+  /// suppression runs at `spill · (1 - weight)`, so a neutral key does not
+  /// despill at all.
   static double lumaWeightOf(double cb, double cr) {
     final magnitude = sqrt(cb * cb + cr * cr);
     final t =
@@ -255,9 +274,11 @@ abstract final class ChromaKeyDetector {
     final spread =
         screen[(screen.length * 0.99).floor().clamp(0, screen.length - 1)];
 
+    final maxSimilarity =
+        _maxSimilarity + (_maxNeutralSimilarity - _maxSimilarity) * lumaWeight;
     final similarity = (spread * _spreadMargin).clamp(
       _minSimilarity,
-      _maxSimilarity,
+      maxSimilarity,
     );
 
     return ChromaKeyDetection(

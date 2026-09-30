@@ -1,5 +1,5 @@
 ## 2.19.0
-- **FEAT**(android, iOS, macOS): `ChromaKey` can key a white or light grey wall. A neutral key now weighs brightness as well as chroma, so it removes the wall but keeps black and dark greys, which a chroma-only key removed along with it. Saturated keys (green, blue) are unchanged. `ChromaKey.autoDetect` accepts a bright neutral frame edge and still refuses a dark one. `ChromaKeyDetector.lumaOf` and `lumaWeightOf` expose the matte's brightness term for live previews.
+- **FEAT**(android, iOS, macOS): `ChromaKey` can key a white or light grey wall: a neutral key weighs brightness too, so black and dark greys stay, and `ChromaKey.autoDetect` accepts a bright neutral border. Green and blue screens key exactly as before.
 
 ## 2.18.1
 - **FIX**(android): With a custom audio track mixed in, each segment and track keeps its own `volume`. Volumes could swap between sources, and a segment's volume was ignored.

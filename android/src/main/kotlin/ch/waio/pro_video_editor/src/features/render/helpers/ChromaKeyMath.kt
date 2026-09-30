@@ -91,14 +91,16 @@ object ChromaKeyMath {
         // Spill suppression. `projection` is how far the pixel leans toward the
         // key hue; only pixels leaning toward it (> 0) are touched, so a
         // complementary color is never desaturated. Y stays untouched, so a
-        // despilled pixel never darkens.
+        // despilled pixel never darkens. The strength fades out with the luma
+        // weight, so a neutral key does not despill at all.
+        val spill = config.effectiveSpill
         val projection = c[0] * config.keyDirCb + c[1] * config.keyDirCr
-        if (config.spill <= 0.0 || projection <= 0.0) {
+        if (spill <= 0.0 || projection <= 0.0) {
             return doubleArrayOf(r, g, b, alpha)
         }
 
-        val cb = c[0] - config.keyDirCb * projection * config.spill
-        val cr = c[1] - config.keyDirCr * projection * config.spill
+        val cb = c[0] - config.keyDirCb * projection * spill
+        val cr = c[1] - config.keyDirCr * projection * spill
 
         return doubleArrayOf(
             clamp01(y + 1.402 * cr),

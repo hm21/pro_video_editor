@@ -275,6 +275,14 @@ data class ChromaKeyConfig(
     val lumaWeight: Double = ChromaKeyMath.lumaWeight(keyCb, keyCr)
 
     /**
+     * [spill] as actually applied, faded out by [lumaWeight]. A neutral key has
+     * no hue to pull out, and the faint tint a camera records on a white wall
+     * would otherwise pick an arbitrary direction and desaturate the subject
+     * along it.
+     */
+    val effectiveSpill: Double = spill * (1.0 - lumaWeight)
+
+    /**
      * Unit vector pointing from neutral toward the key hue, used to pull the
      * key's cast back out during spill suppression. Zero for a neutral (gray)
      * key color, which disables despill rather than dividing by zero.

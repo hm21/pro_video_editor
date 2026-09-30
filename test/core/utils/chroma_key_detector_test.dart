@@ -200,7 +200,7 @@ void main() {
         expect(chromaDistance(result.color, wall), lessThan(0.01));
         expect(lumaOf(result.color), closeTo(lumaOf(wall), 0.01));
         expect(result.coverage, greaterThan(0.99));
-        expect(result.similarity, inInclusiveRange(0.08, 0.35));
+        expect(result.similarity, inInclusiveRange(0.08, 0.12));
       });
 
       test('with a lighting falloff widens similarity through brightness', () {
@@ -219,6 +219,38 @@ void main() {
 
         expect(uneven.spread, greaterThan(even.spread));
         expect(uneven.similarity, greaterThan(even.similarity));
+      });
+
+      test('with a strong falloff stops short of the subject', () {
+        // Skin sits only 0.15-0.21 from a light wall. A falloff this strong
+        // has a spread that a saturated screen would widen the key to cover;
+        // here that would take the face with it, so the key stops at 0.12.
+        const lightSkin = Color(0xFFDBA687);
+        final result = ChromaKeyDetector.fromFrames(
+          [frame(screen: wall, subject: lightSkin, lightingFalloff: 0.4)],
+          width: width,
+          height: height,
+        );
+
+        expect(result.spread * 2, greaterThan(0.12));
+        expect(result.similarity, closeTo(0.12, 1e-9));
+
+        final key = ChromaKeyDetector.chromaOf(
+          result.color.r,
+          result.color.g,
+          result.color.b,
+        );
+        final skin = ChromaKeyDetector.chromaOf(
+          lightSkin.r,
+          lightSkin.g,
+          lightSkin.b,
+        );
+        final dy = lumaOf(lightSkin) - lumaOf(result.color);
+        final d = sqrt(
+          pow(skin.cb - key.cb, 2) + pow(skin.cr - key.cr, 2) + dy * dy,
+        );
+        // Uncapped, the key would have reached 0.35 and removed the face.
+        expect(d, greaterThan(result.similarity));
       });
     });
 
