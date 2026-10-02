@@ -312,25 +312,27 @@ VideoEffectFrame _filmGrain(double intensity, int bucket) {
   );
 }
 
-/// Two to four thin slices that land somewhere else every bucket and shift
+/// Two or three thin slices that land somewhere else every bucket and shift
 /// sideways, and now and then a burst of noise with a slight color fringe.
+///
+/// Each slice stays in its own half or third of the frame, so they never
+/// overlap. There are never more than three, so the slice of an effect that
+/// runs at the same time, such as the tracking band of [VideoEffectType.vhs],
+/// still fits within [VideoEffectFrame.maxBands].
 ///
 /// Noise bursts follow windows of eight buckets (a third of a second): a
 /// window bursts with a chance that grows with [intensity], for its first one
 /// to three buckets. The first window always bursts.
 VideoEffectFrame _signalInterference(double intensity, int bucket) {
   final bands = <VideoEffectBand>[];
-  final count = 2 + (_random(50, bucket) * 3).floor();
+  final count = 2 + (_random(50, bucket) * 2).floor();
   for (var k = 0; k < count; k++) {
-    final top = _random(51, bucket, k) * 0.98;
-    final bottom = math.min(1.0, top + 0.004 + 0.016 * _random(52, bucket, k));
+    final height = 0.004 + 0.016 * _random(52, bucket, k);
+    final top = (k + (1 - count * height) * _random(51, bucket, k)) / count;
     final direction = _random(53, bucket, k) < 0.5 ? 1.0 : -1.0;
     final shift =
         direction * (0.015 + 0.05 * _random(54, bucket, k)) * intensity;
-    final overlaps = bands.any((b) => bottom > b.top && top < b.bottom);
-    if (!overlaps) {
-      bands.add(VideoEffectBand(top: top, bottom: bottom, shift: shift));
-    }
+    bands.add(VideoEffectBand(top: top, bottom: top + height, shift: shift));
   }
 
   final window = bucket ~/ 8;

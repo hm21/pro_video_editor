@@ -386,7 +386,7 @@ void main() {
         expect(frames[0].noiseOffsetX, isNot(frames[1].noiseOffsetX));
       });
 
-      test('signalInterference moves thin slices every bucket', () {
+      test('signalInterference moves two or three thin slices', () {
         final frames = [
           for (var b = 0; b < 480; b++)
             const VideoEffect.signalInterference().frameAt(
@@ -394,13 +394,35 @@ void main() {
             ),
         ];
         for (final frame in frames) {
-          expect(frame.bands.length, inInclusiveRange(1, 4));
-          for (final band in frame.bands) {
+          final count = frame.bands.length;
+          expect(count, inInclusiveRange(2, 3));
+          for (final (k, band) in frame.bands.indexed) {
+            // Each slice keeps to its own part of the frame, so none overlap.
+            expect(band.top, greaterThanOrEqualTo(k / count));
+            expect(band.bottom, lessThanOrEqualTo((k + 1) / count));
             expect(band.bottom - band.top, lessThanOrEqualTo(0.02));
             expect(band.shift.abs(), inInclusiveRange(0.015, 0.065));
           }
         }
+        expect(frames.map((f) => f.bands.length).toSet(), {2, 3});
         expect(frames[0].bands, isNot(frames[1].bands));
+      });
+
+      // A frame carries at most four slices, and the first effect's come
+      // first, so an effect that used them all would hide the next one's.
+      test('signalInterference leaves room for another slice', () {
+        for (var b = 0; b < 480; b++) {
+          final at = Duration(microseconds: b * 41667 + 1000);
+          final merged = VideoEffect.resolve(const [
+            VideoEffect.signalInterference(),
+            VideoEffect.vhs(),
+          ], at);
+          expect(
+            merged.bands,
+            containsAll(const VideoEffect.vhs().frameAt(at).bands),
+            reason: 'bucket $b',
+          );
+        }
       });
 
       test('signalInterference opens on a noise burst and calms down', () {
@@ -458,9 +480,9 @@ void main() {
         expect(
           pin(const VideoEffect.signalInterference()),
           '0.000000, 0.005000, 0.000000, 0.000000, 0.305781, 0.002083, '
-          '38.000000, 66.000000, 4.000000, 0.165132, 0.180701, -0.054526, '
-          '0.626896, 0.644625, 0.064531, 0.374544, 0.384644, 0.041834, '
-          '0.857137, 0.870051, -0.030978, 0.000000, 0.000000, 0.000000, '
+          '38.000000, 66.000000, 3.000000, 0.053544, 0.069113, -0.054526, '
+          '0.535222, 0.552951, 0.064531, 0.790203, 0.800302, 0.041834, '
+          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
           '0.000000, 0.000000, 0.000000',
         );
         expect(
