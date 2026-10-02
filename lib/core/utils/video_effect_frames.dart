@@ -18,6 +18,9 @@ int videoEffectCycleLengthOf(VideoEffectType type) => switch (type) {
   VideoEffectType.vhs ||
   VideoEffectType.tvStatic ||
   VideoEffectType.oldFilm ||
+  VideoEffectType.blockGlitch ||
+  VideoEffectType.filmGrain ||
+  VideoEffectType.signalInterference ||
   VideoEffectType.shake => videoEffectCycleLength,
   // Two seconds: the channels swap sides every second.
   VideoEffectType.rgbSplit => 2 * videoEffectFrameRate,
@@ -28,6 +31,7 @@ int videoEffectCycleLengthOf(VideoEffectType type) => switch (type) {
   VideoEffectType.wave => _wavePeriodBuckets,
   VideoEffectType.pixelate ||
   VideoEffectType.vignette ||
+  VideoEffectType.crt ||
   VideoEffectType.mirror ||
   VideoEffectType.kaleidoscope ||
   VideoEffectType.splitScreen => 1,
@@ -76,6 +80,13 @@ VideoEffectFrame videoEffectFrameFor(
       vignette: 1.3 * intensity,
       vignetteRadius: 0.4 - 0.3 * intensity,
     ),
+    VideoEffectType.blockGlitch => _blockGlitch(intensity, bucket),
+    VideoEffectType.filmGrain => _filmGrain(intensity, bucket),
+    VideoEffectType.signalInterference => _signalInterference(
+      intensity,
+      bucket,
+    ),
+    VideoEffectType.crt => _crt(intensity),
     VideoEffectType.shake => _shake(intensity, bucket),
     VideoEffectType.zoomPulse => _zoomPulse(intensity, bucket),
     // The mirrored and repeated effects keep their symmetry at every
@@ -275,6 +286,109 @@ VideoEffectFrame _negativeFlash(double intensity, int bucket) {
   if (phase < length || echo) return const VideoEffectFrame(invert: 1);
   return VideoEffectFrame.none;
 }
+
+/// An untouched picture broken by bursts in which it falls apart into coarse
+/// blocks, one to three thick slices slip sideways and the color channels
+/// jump apart.
+///
+/// The timeline is split into windows of six buckets (a quarter second). A
+/// window bursts with a chance that grows with [intensity], for its first two
+/// to four buckets. The first window always bursts, so the effect opens on a
+/// burst. The block size holds for a whole burst; the slices and the channel
+/// split change every bucket.
+VideoEffectFrame _blockGlitch(double intensity, int bucket) {
+  final window = bucket ~/ 6;
+  final burstsHere = window == 0 || _random(30, window) < 0.2 + 0.3 * intensity;
+  final burstLength = 2 + (_random(31, window) * 3).floor();
+  if (!burstsHere || bucket - window * 6 >= burstLength) {
+    return VideoEffectFrame.none;
+  }
+
+  final sign = _random(33, bucket) < 0.5 ? 1.0 : -1.0;
+  final bands = <VideoEffectBand>[];
+  final count = 1 + (_random(34, bucket) * 3).floor();
+  for (var k = 0; k < count; k++) {
+    final top = _random(35, bucket, k) * 0.9;
+    final bottom = math.min(1.0, top + 0.06 + 0.18 * _random(36, bucket, k));
+    final direction = _random(37, bucket, k) < 0.5 ? 1.0 : -1.0;
+    final shift =
+        direction * (0.04 + 0.12 * _random(38, bucket, k)) * intensity;
+    final overlaps = bands.any((b) => bottom > b.top && top < b.bottom);
+    if (!overlaps) {
+      bands.add(VideoEffectBand(top: top, bottom: bottom, shift: shift));
+    }
+  }
+  return VideoEffectFrame(
+    pixelSize: (0.015 + 0.03 * _random(32, window)) * intensity,
+    rgbShift: sign * (0.008 + 0.02 * _random(39, bucket)) * intensity,
+    bands: bands,
+  );
+}
+
+/// Fine grain of a constant strength that changes every bucket, like the
+/// grain of a film print, and nothing else.
+VideoEffectFrame _filmGrain(double intensity, int bucket) {
+  const tile = VideoEffectFrame.noiseTileSize;
+  return VideoEffectFrame(
+    noise: 0.14 * intensity,
+    noiseCellSize: 1 / 900,
+    noiseOffsetX: (_random(40, bucket) * tile).floor(),
+    noiseOffsetY: (_random(41, bucket) * tile).floor(),
+  );
+}
+
+/// Two or three thin slices that land somewhere else every bucket and shift
+/// sideways, and now and then a burst of noise with a slight color fringe.
+///
+/// Each slice stays in its own half or third of the frame, so they never
+/// overlap. There are never more than three, so the slice of an effect that
+/// runs at the same time, such as the tracking band of [VideoEffectType.vhs],
+/// still fits within [VideoEffectFrame.maxBands].
+///
+/// Noise bursts follow windows of eight buckets (a third of a second): a
+/// window bursts with a chance that grows with [intensity], for its first one
+/// to three buckets. The first window always bursts.
+VideoEffectFrame _signalInterference(double intensity, int bucket) {
+  final bands = <VideoEffectBand>[];
+  final count = 2 + (_random(50, bucket) * 2).floor();
+  for (var k = 0; k < count; k++) {
+    final height = 0.004 + 0.016 * _random(52, bucket, k);
+    final top = (k + (1 - count * height) * _random(51, bucket, k)) / count;
+    final direction = _random(53, bucket, k) < 0.5 ? 1.0 : -1.0;
+    final shift =
+        direction * (0.015 + 0.05 * _random(54, bucket, k)) * intensity;
+    bands.add(VideoEffectBand(top: top, bottom: top + height, shift: shift));
+  }
+
+  final window = bucket ~/ 8;
+  final burstsHere =
+      window == 0 || _random(55, window) < 0.15 + 0.25 * intensity;
+  final burstLength = 1 + (_random(56, window) * 3).floor();
+  if (!burstsHere || bucket - window * 8 >= burstLength) {
+    return VideoEffectFrame(bands: bands);
+  }
+  const tile = VideoEffectFrame.noiseTileSize;
+  return VideoEffectFrame(
+    rgbShift: 0.005 * intensity,
+    noise: (0.3 + 0.2 * _random(57, bucket)) * intensity,
+    noiseCellSize: 1 / 480,
+    noiseOffsetX: (_random(58, bucket) * tile).floor(),
+    noiseOffsetY: (_random(59, bucket) * tile).floor(),
+    bands: bands,
+  );
+}
+
+/// Strong, coarse scanlines with a slight color fringe and slightly darkened
+/// corners. The picture is brightened a little, so the dark scanlines do not
+/// darken it as a whole as much.
+VideoEffectFrame _crt(double intensity) => VideoEffectFrame(
+  rgbShift: 0.003 * intensity,
+  scanlines: 0.55 * intensity,
+  scanlinePeriod: 1 / 200,
+  brightness: 0.12 * intensity,
+  vignette: 0.35 * intensity,
+  vignetteRadius: 0.45,
+);
 
 /// The picture jumps to a new spot every bucket, in a random direction, by up
 /// to 2% of the frame at full [intensity]. It is zoomed in by a little more
