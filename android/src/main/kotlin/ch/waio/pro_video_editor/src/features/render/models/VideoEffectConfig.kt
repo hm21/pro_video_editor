@@ -54,11 +54,11 @@ data class VideoEffectFrame(
             sepia <= 0.0 && brightness == 0.0 && invert <= 0.0 && flash <= 0.0 &&
             vignette <= 0.0 && !hasTransform && tiles < 2 && !hasWave
 
-    /** Whether the first geometry stage zooms, moves or mirrors the picture. */
+    /** Whether the second geometry stage zooms, moves or mirrors the picture. */
     val hasTransform: Boolean
         get() = zoom > 0.0 || offsetX != 0.0 || offsetY != 0.0 || mirrorX > 0.0 || mirrorY > 0.0
 
-    /** Whether the last geometry stage bends the rows. */
+    /** Whether the first geometry stage bends the rows. */
     val hasWave: Boolean
         get() = waveAmplitude != 0.0 && wavePeriod > 0.0
 

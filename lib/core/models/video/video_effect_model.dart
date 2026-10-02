@@ -75,7 +75,8 @@ enum VideoEffectType {
   splitScreen,
 
   /// The rows bend sideways along a wave that rolls up the picture, like a
-  /// heat haze or a view through water.
+  /// heat haze or a view through water. It is zoomed in slightly, so its
+  /// edges stay out of view.
   wave,
 }
 

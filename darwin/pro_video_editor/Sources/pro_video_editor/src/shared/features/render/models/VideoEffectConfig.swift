@@ -76,12 +76,12 @@ public struct VideoEffectFrame: Sendable, Equatable {
       && !hasTransform && tiles < 2 && !hasWave
   }
 
-  /// Whether the first geometry stage zooms, moves or mirrors the picture.
+  /// Whether the second geometry stage zooms, moves or mirrors the picture.
   var hasTransform: Bool {
     zoom > 0 || offsetX != 0 || offsetY != 0 || mirrorX > 0 || mirrorY > 0
   }
 
-  /// Whether the last geometry stage bends the rows.
+  /// Whether the first geometry stage bends the rows.
   var hasWave: Bool { waveAmplitude != 0 && wavePeriod > 0 }
 
   /// How far the wave bends the rows, or 0 while it is off.

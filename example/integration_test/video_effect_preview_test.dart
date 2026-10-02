@@ -139,10 +139,12 @@ void main() {
         VideoEffect.wave(),
       ], child: stripe);
       // Half the frame tall: the crest is at row 4, the trough at row 13,
-      // where the column moves 1.6 pixels right and left.
-      expect(pixel(out, 8, 4)[0], lessThan(pixel(out, 8, 9)[0]));
+      // where the column moves 1.6 pixels right and left of where it is on
+      // row 9, close to where the wave crosses zero.
+      expect(pixel(out, 6, 4)[0], lessThan(pixel(out, 6, 9)[0]));
       expect(pixel(out, 16, 4)[0], greaterThan(pixel(out, 16, 9)[0]));
-      expect(pixel(out, 7, 13)[0], greaterThan(pixel(out, 7, 9)[0]));
+      expect(pixel(out, 5, 13)[0], greaterThan(pixel(out, 5, 9)[0]));
+      expect(pixel(out, 14, 13)[0], lessThan(pixel(out, 14, 9)[0]));
     });
   });
 }

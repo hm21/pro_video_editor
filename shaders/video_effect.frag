@@ -3,10 +3,10 @@
 // This is the third implementation of the effect pipeline. The other two are
 // the Android render shader (`VideoEffectGlEffect.kt`) and the Apple Core
 // Image stage (`ApplyVideoEffect.swift`), and all three follow the same spec
-// (Kotlin's `VideoEffectMath`): the geometry stages (zoom, move and mirror;
-// tiles; wave), then pixelate, shift the bands, split the channels, darken the
-// scanlines, add the noise, tone the colors, darken the corners. Keep them in
-// lockstep.
+// (Kotlin's `VideoEffectMath`): the geometry stages (wave; zoom, move and
+// mirror; tiles), then pixelate, shift the bands, split the channels, darken
+// the scanlines, add the noise, tone the colors, darken the corners. Keep them
+// in lockstep.
 //
 // Every size arrives as a fraction of the frame and is rounded to whole pixels
 // here, so after the geometry each step copies whole texels and nothing is
@@ -101,11 +101,43 @@ vec4 sourceAt(vec2 p) {
   return sum;
 }
 
-// Geometry stage 1: zoom, move and mirror.
+// How far the row whose center is `y` pixels down moves: a sine drawn with
+// sixteen straight segments per wave.
+float waveShift(float y) {
+  float period = max(uWave.y, 0.1) * uSize.y;
+  float t = (y / period + uWave.z) * 16.0;
+  float k = floor(t);
+  float from = sin(6.283185307179586 * k / 16.0);
+  float to = sin(6.283185307179586 * (k + 1.0) / 16.0);
+  return uWave.x * uSize.x * (from + (to - from) * (t - k));
+}
+
+// Geometry stage 1: rows bent sideways.
+vec4 waved(vec2 texel) {
+  if (uWave.x == 0.0 || uWave.y <= 0.0) return source(texel);
+  texel = clamp(texel, vec2(0.0), uSize - 1.0);
+  return sourceAt(vec2(texel.x + 0.5 - waveShift(texel.y + 0.5), texel.y + 0.5));
+}
+
+// `sourceAt` over the bent picture.
+vec4 wavedAt(vec2 p) {
+  vec2 t = p - 0.5;
+  vec2 i = floor(t);
+  vec2 f = t - i;
+  vec4 sum = vec4(0.0);
+  for (int n = 0; n < 4; n++) {
+    vec2 o = vec2(float(n - 2 * (n / 2)), float(n / 2));
+    vec2 w = mix(1.0 - f, f, o);
+    if (w.x * w.y > 0.0) sum += w.x * w.y * waved(i + o);
+  }
+  return sum;
+}
+
+// Geometry stage 2: zoom, move and mirror.
 vec4 transformed(vec2 texel) {
   if (uZoom <= 0.0 && uOffset == vec2(0.0) && uMirror.x <= 0.0 &&
       uMirror.y <= 0.0) {
-    return source(texel);
+    return waved(texel);
   }
   texel = clamp(texel, vec2(0.0), uSize - 1.0);
   vec2 mirrored = min(
@@ -115,7 +147,7 @@ vec4 transformed(vec2 texel) {
   if (uMirror.x > 0.0 && texel.x >= axis.x) texel.x = 2.0 * axis.x - 1.0 - texel.x;
   if (uMirror.y > 0.0 && texel.y >= axis.y) texel.y = 2.0 * axis.y - 1.0 - texel.y;
   vec2 c = uSize / 2.0;
-  return sourceAt((texel + 0.5 - c - uOffset * uSize) / (1.0 + max(uZoom, 0.0)) + c);
+  return wavedAt((texel + 0.5 - c - uOffset * uSize) / (1.0 + max(uZoom, 0.0)) + c);
 }
 
 // `sourceAt` over the zoomed, moved and mirrored picture.
@@ -132,46 +164,14 @@ vec4 transformedAt(vec2 p) {
   return sum;
 }
 
-// Geometry stage 2: the picture at half its size, four times. The doubled
-// pixel center is a whole number, so `imod` keeps the middle column of an odd
-// width in the copy the spec puts it in.
-vec4 tiled(vec2 texel) {
+// Geometry stage 3, the picture every later step reads: the picture at half
+// its size, four times. The doubled pixel center is a whole number, so `imod`
+// keeps the middle column of an odd width in the copy the spec puts it in.
+vec4 picture(vec2 texel) {
   if (uTiles < 1.5) return transformed(texel);
   texel = clamp(texel, vec2(0.0), uSize - 1.0);
   vec2 doubled = texel * 2.0 + 1.0;
   return transformedAt(vec2(imod(doubled.x, uSize.x), imod(doubled.y, uSize.y)));
-}
-
-// `sourceAt` over the tiled picture.
-vec4 tiledAt(vec2 p) {
-  vec2 t = p - 0.5;
-  vec2 i = floor(t);
-  vec2 f = t - i;
-  vec4 sum = vec4(0.0);
-  for (int n = 0; n < 4; n++) {
-    vec2 o = vec2(float(n - 2 * (n / 2)), float(n / 2));
-    vec2 w = mix(1.0 - f, f, o);
-    if (w.x * w.y > 0.0) sum += w.x * w.y * tiled(i + o);
-  }
-  return sum;
-}
-
-// How far the row whose center is `y` pixels down moves: a sine drawn with
-// sixteen straight segments per wave.
-float waveShift(float y) {
-  float period = max(uWave.y, 0.1) * uSize.y;
-  float t = (y / period + uWave.z) * 16.0;
-  float k = floor(t);
-  float from = sin(6.283185307179586 * k / 16.0);
-  float to = sin(6.283185307179586 * (k + 1.0) / 16.0);
-  return uWave.x * uSize.x * (from + (to - from) * (t - k));
-}
-
-// Geometry stage 3, the picture every later step reads: rows bent sideways.
-vec4 picture(vec2 texel) {
-  if (uWave.x == 0.0 || uWave.y <= 0.0) return tiled(texel);
-  texel = clamp(texel, vec2(0.0), uSize - 1.0);
-  return tiledAt(vec2(texel.x + 0.5 - waveShift(texel.y + 0.5), texel.y + 0.5));
 }
 
 vec4 pixelated(float x, float y) {

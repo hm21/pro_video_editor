@@ -257,9 +257,34 @@ class VideoEffectGlEffect(
                 "  }\n" +
                 "  return sum;\n" +
                 "}\n" +
+                "float waveShift(float y) {\n" +
+                "  float period = max(uWave.y, 0.1) * uSize.y;\n" +
+                "  float t = (y / period + uWave.z) * 16.0;\n" +
+                "  float k = floor(t);\n" +
+                "  float from = sin(6.283185307179586 * k / 16.0);\n" +
+                "  float to = sin(6.283185307179586 * (k + 1.0) / 16.0);\n" +
+                "  return uWave.x * uSize.x * (from + (to - from) * (t - k));\n" +
+                "}\n" +
+                "vec4 waved(vec2 texel) {\n" +
+                "  if (uWave.x == 0.0 || uWave.y <= 0.0) return source(texel);\n" +
+                "  texel = clamp(texel, vec2(0.0), uSize - 1.0);\n" +
+                "  return sourceAt(vec2(texel.x + 0.5 - waveShift(texel.y + 0.5), texel.y + 0.5));\n" +
+                "}\n" +
+                "vec4 wavedAt(vec2 p) {\n" +
+                "  vec2 t = p - 0.5;\n" +
+                "  vec2 i = floor(t);\n" +
+                "  vec2 f = t - i;\n" +
+                "  vec4 sum = vec4(0.0);\n" +
+                "  for (int n = 0; n < 4; n++) {\n" +
+                "    vec2 o = vec2(float(n - 2 * (n / 2)), float(n / 2));\n" +
+                "    vec2 w = mix(1.0 - f, f, o);\n" +
+                "    if (w.x * w.y > 0.0) sum += w.x * w.y * waved(i + o);\n" +
+                "  }\n" +
+                "  return sum;\n" +
+                "}\n" +
                 "vec4 transformed(vec2 texel) {\n" +
                 "  if (uZoom <= 0.0 && uOffset == vec2(0.0) && uMirror.x <= 0.0 && uMirror.y <= 0.0) {\n" +
-                "    return source(texel);\n" +
+                "    return waved(texel);\n" +
                 "  }\n" +
                 "  texel = clamp(texel, vec2(0.0), uSize - 1.0);\n" +
                 "  vec2 mirrored = min(\n" +
@@ -268,7 +293,7 @@ class VideoEffectGlEffect(
                 "  if (uMirror.x > 0.0 && texel.x >= axis.x) texel.x = 2.0 * axis.x - 1.0 - texel.x;\n" +
                 "  if (uMirror.y > 0.0 && texel.y >= axis.y) texel.y = 2.0 * axis.y - 1.0 - texel.y;\n" +
                 "  vec2 c = uSize / 2.0;\n" +
-                "  return sourceAt((texel + 0.5 - c - uOffset * uSize) / (1.0 + max(uZoom, 0.0)) + c);\n" +
+                "  return wavedAt((texel + 0.5 - c - uOffset * uSize) / (1.0 + max(uZoom, 0.0)) + c);\n" +
                 "}\n" +
                 "vec4 transformedAt(vec2 p) {\n" +
                 "  vec2 t = p - 0.5;\n" +
@@ -282,36 +307,11 @@ class VideoEffectGlEffect(
                 "  }\n" +
                 "  return sum;\n" +
                 "}\n" +
-                "vec4 tiled(vec2 texel) {\n" +
+                "vec4 picture(vec2 texel) {\n" +
                 "  if (uTiles < 1.5) return transformed(texel);\n" +
                 "  texel = clamp(texel, vec2(0.0), uSize - 1.0);\n" +
                 "  vec2 doubled = texel * 2.0 + 1.0;\n" +
                 "  return transformedAt(vec2(imod(doubled.x, uSize.x), imod(doubled.y, uSize.y)));\n" +
-                "}\n" +
-                "vec4 tiledAt(vec2 p) {\n" +
-                "  vec2 t = p - 0.5;\n" +
-                "  vec2 i = floor(t);\n" +
-                "  vec2 f = t - i;\n" +
-                "  vec4 sum = vec4(0.0);\n" +
-                "  for (int n = 0; n < 4; n++) {\n" +
-                "    vec2 o = vec2(float(n - 2 * (n / 2)), float(n / 2));\n" +
-                "    vec2 w = mix(1.0 - f, f, o);\n" +
-                "    if (w.x * w.y > 0.0) sum += w.x * w.y * tiled(i + o);\n" +
-                "  }\n" +
-                "  return sum;\n" +
-                "}\n" +
-                "float waveShift(float y) {\n" +
-                "  float period = max(uWave.y, 0.1) * uSize.y;\n" +
-                "  float t = (y / period + uWave.z) * 16.0;\n" +
-                "  float k = floor(t);\n" +
-                "  float from = sin(6.283185307179586 * k / 16.0);\n" +
-                "  float to = sin(6.283185307179586 * (k + 1.0) / 16.0);\n" +
-                "  return uWave.x * uSize.x * (from + (to - from) * (t - k));\n" +
-                "}\n" +
-                "vec4 picture(vec2 texel) {\n" +
-                "  if (uWave.x == 0.0 || uWave.y <= 0.0) return tiled(texel);\n" +
-                "  texel = clamp(texel, vec2(0.0), uSize - 1.0);\n" +
-                "  return tiledAt(vec2(texel.x + 0.5 - waveShift(texel.y + 0.5), texel.y + 0.5));\n" +
                 "}\n" +
                 "vec4 pixelated(float x, float y) {\n" +
                 "  x = clamp(x, 0.0, uSize.x - 1.0);\n" +

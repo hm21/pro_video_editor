@@ -161,6 +161,14 @@ internal class VideoEffectMathTest {
             0xecd22b5b,
             0x9635e4,
         ),
+        // The wave effect's own shape: the bend first, then a zoom that hides
+        // the edges it uncovers.
+        Golden(
+            "zoomed wave",
+            VideoEffectFrame(zoom = 0.11, waveAmplitude = 0.05, wavePeriod = 0.5, wavePhase = 0.125),
+            0xe075e137,
+            0x5140ca,
+        ),
         Golden(
             "backward wave",
             VideoEffectFrame(waveAmplitude = -0.08, wavePeriod = 0.3, wavePhase = 0.9),
@@ -185,8 +193,8 @@ internal class VideoEffectMathTest {
                 wavePeriod = 0.75,
                 wavePhase = 0.4,
             ),
-            0x380b579d,
-            0x919022,
+            0x73ef363b,
+            0xa5991b,
         ),
         Golden(
             "negative over noise",

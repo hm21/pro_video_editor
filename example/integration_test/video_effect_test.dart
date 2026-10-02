@@ -346,16 +346,21 @@ void main() {
       );
       // The wave is half the frame tall: its crest is an eighth of the way
       // down, at row 45, and its trough at row 135. There it moves the
-      // stripe right, and left, by the amplitude, 16 pixels.
+      // stripe right, and left, by the amplitude, 16 pixels. The zoom that
+      // follows, by 1.055 around the center, puts those rows at 38 and 132,
+      // and the stripe, x = 256..383, at 252..387 where the wave crosses
+      // zero, at row 85.
       final reach = frame.waveAmplitude * 640;
       expect(reach, closeTo(16, 1e-9));
-      expect(grey(pixel(out, 264, 45)), lessThan(60));
-      expect(grey(pixel(out, 392, 45)), greaterThan(190));
-      expect(grey(pixel(out, 248, 135)), greaterThan(190));
-      expect(grey(pixel(out, 376, 135)), lessThan(60));
-      // Where the wave crosses zero the stripe stays put.
-      expect(grey(pixel(out, 260, 90)), greaterThan(190));
-      expect(grey(pixel(out, 252, 90)), lessThan(60));
+      expect(frame.zoom, closeTo(0.055, 1e-9));
+      // The crest: 269..403.
+      expect(grey(pixel(out, 262, 38)), lessThan(60));
+      expect(grey(pixel(out, 396, 38)), greaterThan(190));
+      // The trough: 236..370.
+      expect(grey(pixel(out, 244, 132)), greaterThan(190));
+      expect(grey(pixel(out, 378, 132)), lessThan(60));
+      expect(grey(pixel(out, 258, 85)), greaterThan(190));
+      expect(grey(pixel(out, 246, 85)), lessThan(60));
     });
   });
 

@@ -115,8 +115,8 @@ func applyVideoEffect(to image: CIImage, _ frame: VideoEffectFrame) -> CIImage {
   return result.transformed(by: toTopOrigin.inverted()).cropped(to: extent)
 }
 
-/// The three geometry stages: zoom, move and mirror the picture, repeat it in
-/// a 2×2 grid, and bend its rows along a wave.
+/// The three geometry stages: bend the rows along a wave, zoom, move and
+/// mirror the picture, and repeat it in a 2×2 grid.
 ///
 /// Each stage that runs ends in an intermediate image. Core Image would
 /// otherwise fold one stage's transforms into the next stage's sampling, and
@@ -132,6 +132,9 @@ private func applyingGeometry(_ image: CIImage, _ frame: VideoEffectFrame, rect:
   -> CIImage
 {
   var result = image
+  if frame.hasWave {
+    result = waving(result, frame, rect: rect).insertingIntermediate(cache: false)
+  }
   let zoom = max(frame.zoom, 0)
   if zoom > 0 || frame.offsetX != 0 || frame.offsetY != 0 {
     let w = rect.width
@@ -150,9 +153,6 @@ private func applyingGeometry(_ image: CIImage, _ frame: VideoEffectFrame, rect:
   }
   if frame.tiles >= 2 {
     result = tiling(result, rect: rect).insertingIntermediate(cache: false)
-  }
-  if frame.hasWave {
-    result = waving(result, frame, rect: rect).insertingIntermediate(cache: false)
   }
   return result
 }

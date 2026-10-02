@@ -2223,6 +2223,15 @@ class VideoEffectTests: XCTestCase {
     let mx = min(videoEffectPixels(frame.mirrorX, width), width / 2)
     let my = min(videoEffectPixels(frame.mirrorY, height), height / 2)
     let scale = 1 + max(frame.zoom, 0)
+    stage(frame.hasWave) { x, y in
+      let period = max(frame.wavePeriod, VideoEffectFrame.minWavePeriod) * h
+      let t = ((Double(y) + 0.5) / period + frame.wavePhase) * 16
+      let k = t.rounded(.down)
+      let from = sin(2 * Double.pi * k / 16)
+      let to = sin(2 * Double.pi * (k + 1) / 16)
+      let shift = frame.waveAmplitude * w * (from + (to - from) * (t - k))
+      return (Double(x) + 0.5 - shift, Double(y) + 0.5)
+    }
     stage(frame.hasTransform) { x, y in
       let fx = frame.mirrorX > 0 && x >= width - mx ? 2 * (width - mx) - 1 - x : x
       let fy = frame.mirrorY > 0 && y >= height - my ? 2 * (height - my) - 1 - y : y
@@ -2236,15 +2245,6 @@ class VideoEffectTests: XCTestCase {
         ((Double(x) + 0.5) * 2).truncatingRemainder(dividingBy: w),
         ((Double(y) + 0.5) * 2).truncatingRemainder(dividingBy: h)
       )
-    }
-    stage(frame.hasWave) { x, y in
-      let period = max(frame.wavePeriod, VideoEffectFrame.minWavePeriod) * h
-      let t = ((Double(y) + 0.5) / period + frame.wavePhase) * 16
-      let k = t.rounded(.down)
-      let from = sin(2 * Double.pi * k / 16)
-      let to = sin(2 * Double.pi * (k + 1) / 16)
-      let shift = frame.waveAmplitude * w * (from + (to - from) * (t - k))
-      return (Double(x) + 0.5 - shift, Double(y) + 0.5)
     }
     return picture
   }
@@ -2428,6 +2428,11 @@ class VideoEffectTests: XCTestCase {
       0xecd2_2b5b
     ),
     (
+      "zoomed wave",
+      VideoEffectFrame(zoom: 0.11, waveAmplitude: 0.05, wavePeriod: 0.5, wavePhase: 0.125),
+      0xe075_e137
+    ),
+    (
       "backward wave",
       VideoEffectFrame(waveAmplitude: -0.08, wavePeriod: 0.3, wavePhase: 0.9),
       0xf1c3_cb72
@@ -2439,7 +2444,7 @@ class VideoEffectTests: XCTestCase {
         bands: [VideoEffectBand(top: 0.25, bottom: 0.5, shift: 0.2)], zoom: 0.4, offsetX: 0.02,
         offsetY: 0.01, mirrorX: 0.35, mirrorY: 0.5, tiles: 2, waveAmplitude: 0.04,
         wavePeriod: 0.75, wavePhase: 0.4),
-      0x380b_579d
+      0x73ef_363b
     ),
   ]
 

@@ -48,9 +48,9 @@ class VideoEffectBand {
 /// The pixel operations a [VideoEffect] applies to one frame.
 ///
 /// Every renderer applies them in the same order. First the geometry, in three
-/// stages: zoom, move and mirror the picture ([zoom], [offsetX], [offsetY],
-/// [mirrorX], [mirrorY]), repeat it in a grid ([tiles]), then bend its rows
-/// along a wave ([waveAmplitude]). Then pixelate, shift the [bands], split the
+/// stages: bend the rows along a wave ([waveAmplitude]), zoom, move and mirror
+/// the picture ([zoom], [offsetX], [offsetY], [mirrorX], [mirrorY]), then
+/// repeat it in a grid ([tiles]). Then pixelate, shift the [bands], split the
 /// color channels, darken the scanlines, add the noise, tone the colors
 /// ([sepia], [brightness], [invert], [flash]), and darken the edges
 /// ([vignette]). The colors are clamped to 0..1 after the noise and again
@@ -243,10 +243,11 @@ class VideoEffectFrame {
   /// How far the picture is magnified around the frame center: it is scaled
   /// by `1 + zoom`. Renderers treat a negative value as 0.
   ///
-  /// The first geometry stage zooms, moves ([offsetX], [offsetY]) and mirrors
-  /// ([mirrorX], [mirrorY]) the picture. With `p` the center of a pixel,
-  /// after the mirror, `c` the frame center and `o` the offsets in pixels,
-  /// the pixel shows the picture at `(p - c - o) / (1 + zoom) + c`.
+  /// The second geometry stage zooms, moves ([offsetX], [offsetY]) and
+  /// mirrors ([mirrorX], [mirrorY]) the picture the wave bent. With `p` the
+  /// center of a pixel, after the mirror, `c` the frame center and `o` the
+  /// offsets in pixels, the pixel shows that picture at
+  /// `(p - c - o) / (1 + zoom) + c`.
   final double zoom;
 
   /// How far the zoomed picture moves to the right, as a fraction of the
@@ -275,19 +276,22 @@ class VideoEffectFrame {
   /// times, at half its size, in a 2×2 grid. 0 and 1 are off; renderers treat
   /// anything above [maxTiles] as [maxTiles].
   ///
-  /// The second geometry stage: the pixel whose center is `p` shows the
+  /// The last geometry stage: the pixel whose center is `p` shows the
   /// zoomed and mirrored picture at `(p * 2) % size`.
   final int tiles;
 
   /// How far the rows bend sideways along a wave, as a fraction of the frame
   /// width. Positive values bend the first crest to the right.
   ///
-  /// The last geometry stage: the row whose center is `y` pixels below the
+  /// The first geometry stage: the row whose center is `y` pixels below the
   /// top edge moves right by `waveAmplitude * width * w(t)`, with
   /// `t = waveSegments * (y / (wavePeriod * height) + wavePhase)` and `w`
   /// running straight from `sin(2π k / waveSegments)` at every whole
   /// `t = k` to the next: a sine drawn with [waveSegments] straight segments
   /// per wave, which every renderer can draw exactly.
+  ///
+  /// Where a row moves away from an edge, the edge pixel repeats; a [zoom] of
+  /// a little more than twice the amplitude keeps it out of view.
   final double waveAmplitude;
 
   /// The height of one wave, as a fraction of the frame height. A wave is

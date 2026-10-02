@@ -25,6 +25,8 @@ import kotlin.math.sqrt
  * pixels beyond the frame. A stage that is off passes its picture on as is,
  * and the values stay unrounded until the end.
  *
+ * - **Wave**, while [VideoEffectFrame.hasWave]: row `y` reads
+ *   `x + 0.5 - waveShift(y + 0.5)`, in its own row.
  * - **Transform**, while [VideoEffectFrame.hasTransform]: pixel `(x, y)` is
  *   first mirrored: with `m = min(toPixels(mirrorX, width), width / 2)`,
  *   columns from `width - m` on read column `2 * (width - m) - 1 - x`, and
@@ -33,8 +35,6 @@ import kotlin.math.sqrt
  *   `(p - c - o) / (1 + max(zoom, 0)) + c`.
  * - **Tiles**, while `tiles` is 2 or more (treated as 2): pixel `(x, y)` reads
  *   `((x + 0.5) * 2) % width, ((y + 0.5) * 2) % height`.
- * - **Wave**, while [VideoEffectFrame.hasWave]: row `y` reads
- *   `x + 0.5 - waveShift(y + 0.5)`, in its own row.
  *
  * Then, for every output pixel `(x, y)`, in this order, reading the picture
  * the geometry produced:
@@ -147,7 +147,10 @@ object VideoEffectMath {
         val mx = min(toPixels(frame.mirrorX, width), width / 2)
         val my = min(toPixels(frame.mirrorY, height), height / 2)
         val scale = 1.0 + max(frame.zoom, 0.0)
-        var result = stage(frame.hasTransform, picture) { x, y ->
+        var result = stage(frame.hasWave, picture) { x, y ->
+            Pair(x + 0.5 - waveShift(y + 0.5, width, height, frame), y + 0.5)
+        }
+        result = stage(frame.hasTransform, result) { x, y ->
             val fx = if (frame.mirrorX > 0.0 && x >= width - mx) 2 * (width - mx) - 1 - x else x
             val fy = if (frame.mirrorY > 0.0 && y >= height - my) 2 * (height - my) - 1 - y else y
             Pair(
@@ -157,9 +160,6 @@ object VideoEffectMath {
         }
         result = stage(frame.tiles >= 2, result) { x, y ->
             Pair(((x + 0.5) * 2) % width, ((y + 0.5) * 2) % height)
-        }
-        result = stage(frame.hasWave, result) { x, y ->
-            Pair(x + 0.5 - waveShift(y + 0.5, width, height, frame), y + 0.5)
         }
         return result
     }

@@ -403,6 +403,10 @@ void main() {
         const effect = VideoEffect.wave(intensity: 0.4);
         final start = effect.frameAt(Duration.zero);
         expect(start.waveAmplitude, closeTo(0.01, 1e-12));
+        // Zoomed in past the bend: the frame's edges show the bent picture
+        // zoom / 2 / (1 + zoom) of the width in from its edges.
+        expect(start.zoom, closeTo(0.022, 1e-12));
+        expect(start.zoom / 2 / (1 + start.zoom), greaterThan(0.01));
         expect(start.wavePeriod, 0.5);
         expect(start.wavePhase, 0);
         expect(
@@ -437,7 +441,7 @@ void main() {
         );
         expect(
           pin(const VideoEffect.wave()),
-          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
+          '0.055000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
           '0.025000, 0.500000, 0.041667',
         );
       });

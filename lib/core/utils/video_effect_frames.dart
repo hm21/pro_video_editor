@@ -302,12 +302,18 @@ VideoEffectFrame _zoomPulse(double intensity, int bucket) {
 const int _wavePeriodBuckets = 2 * videoEffectFrameRate;
 
 /// Rows bend sideways by up to 2.5% of the frame width along a wave half the
-/// frame tall, which rolls up the picture by one wave every two seconds.
-VideoEffectFrame _wave(double intensity, int bucket) => VideoEffectFrame(
-  waveAmplitude: 0.025 * intensity,
-  wavePeriod: 0.5,
-  wavePhase: bucket / _wavePeriodBuckets,
-);
+/// frame tall, which rolls up the picture by one wave every two seconds. The
+/// picture is zoomed in by a little more than twice the bend, so the edges the
+/// rows move away from never come into view.
+VideoEffectFrame _wave(double intensity, int bucket) {
+  final amplitude = 0.025 * intensity;
+  return VideoEffectFrame(
+    zoom: 2.2 * amplitude,
+    waveAmplitude: amplitude,
+    wavePeriod: 0.5,
+    wavePhase: bucket / _wavePeriodBuckets,
+  );
+}
 
 /// A uniform value in `[0, 1)` for the given keys.
 double _random(int a, int b, [int c = 0]) {
