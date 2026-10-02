@@ -415,12 +415,12 @@ void main() {
         await render(stripe, const [VideoEffect.glow()]),
         Duration.zero,
       );
-      // The stripe spans x = 256..383. A blur of 0.025 * 360 = 9 pixels puts
-      // about a quarter of the stripe's halo six pixels outside it, which the
-      // screen blend turns into a grey of about 64.
+      // The stripe spans x = 256..383. A blur of 0.035 * 360 = 12.6 pixels
+      // puts about a third of the stripe's halo six pixels outside it, which
+      // the screen blend turns into a grey of about 84.
       expect(grey(pixel(out, 320, 180)), greaterThan(240));
-      expect(grey(pixel(out, 250, 180)), inInclusiveRange(35, 100));
-      expect(grey(pixel(out, 389, 180)), inInclusiveRange(35, 100));
+      expect(grey(pixel(out, 250, 180)), inInclusiveRange(55, 115));
+      expect(grey(pixel(out, 389, 180)), inInclusiveRange(55, 115));
       expect(grey(pixel(out, 150, 180)), lessThan(12));
     });
   });

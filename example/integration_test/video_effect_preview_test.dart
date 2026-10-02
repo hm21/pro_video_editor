@@ -169,8 +169,8 @@ void main() {
         VideoEffect.glow(),
       ], child: column);
       expect(pixel(plain, 22, 18), everyElement(lessThanOrEqualTo(2)));
-      // A blur of 0.025 * 36 = 0.9 pixels: the glow reaches only the pixels
-      // right next to the column.
+      // A blur of 0.035 * 36 = 1.26 pixels: the glow reaches only a few
+      // pixels beside the column.
       expect(pixel(out, 23, 18), everyElement(greaterThan(20)));
       expect(pixel(out, 40, 18), everyElement(greaterThan(20)));
       expect(pixel(out, 10, 18), everyElement(lessThanOrEqualTo(8)));
