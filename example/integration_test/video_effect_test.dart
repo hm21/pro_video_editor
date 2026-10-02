@@ -374,4 +374,130 @@ void main() {
       expect(g - b, greaterThan(15 * 400), reason: 'rgb sums $r $g $b');
     });
   });
+
+  group('texture effects', () {
+    late EditorVideo stripe;
+    late EditorVideo midGrey;
+
+    setUpAll(() async {
+      stripe = await videoFromImage(await stripePng());
+      midGrey = await videoFromImage(await solidPng(const Color(0xFF808080)));
+    });
+
+    const width = 640;
+    const height = 360;
+    int toPixels(double f, int size) => (f * size + 0.5).floor();
+
+    testWidgets('blockGlitch opens on coarse blocks', (tester) async {
+      const effect = VideoEffect.blockGlitch();
+      final frame = effect.frameAt(Duration.zero);
+      final block = toPixels(frame.pixelSize, width);
+      expect(block, greaterThan(10), reason: 'The effect opens on a burst');
+
+      final out = await frameOf(
+        await render(stripe, const [effect]),
+        Duration.zero,
+      );
+      // The middle row of a row of blocks, clear of every slice. Green is
+      // read in place, so it shows the blocks without the channel split.
+      final bandRows = [
+        for (final band in frame.bands)
+          (toPixels(band.top, height), toPixels(band.bottom, height)),
+      ];
+      bool clear(int y) => bandRows.every((r) => y < r.$1 - 4 || y >= r.$2 + 4);
+      final y = [
+        for (var row = block ~/ 2; row < height; row += block) row,
+      ].firstWhere(clear);
+      // Each block takes the color of its center pixel, so the stripe's left
+      // edge, x = 256, moves to the edge of the block it falls in.
+      final start = 256 ~/ block * block;
+      final edge = start + block ~/ 2 < 256 ? start + block : start;
+      expect(edge, isNot(256));
+      expect(pixel(out, edge - 3, y)[1], lessThan(100), reason: 'edge $edge');
+      expect(pixel(out, edge + 2, y)[1], greaterThan(150));
+    });
+
+    testWidgets('signalInterference shifts its slices', (tester) async {
+      const effect = VideoEffect.signalInterference();
+      final frame = effect.frameAt(Duration.zero);
+      final out = await frameOf(
+        await render(stripe, const [effect]),
+        Duration.zero,
+      );
+      // Inside each slice the stripe moves by the slice's shift; green, read
+      // in place, shows it without the channel split. Slices thinner than a
+      // few rows are left to the codec.
+      var checked = 0;
+      for (final band in frame.bands) {
+        final top = toPixels(band.top, height);
+        final bottom = toPixels(band.bottom, height);
+        if (bottom - top < 5) continue;
+        final row = (top + bottom) ~/ 2;
+        final shift = toPixels(band.shift, width);
+        final movedInto = shift > 0 ? 384 + shift ~/ 2 : 256 + shift ~/ 2;
+        final movedOutOf = shift > 0 ? 256 + shift ~/ 2 : 384 + shift ~/ 2;
+        expect(pixel(out, movedInto, row)[1], greaterThan(150));
+        expect(pixel(out, movedOutOf, row)[1], lessThan(100));
+        checked++;
+      }
+      expect(checked, greaterThan(0));
+    });
+
+    testWidgets('filmGrain adds grain, not brightness', (tester) async {
+      const at = Duration(milliseconds: 500);
+      final plain = await frameOf(await render(midGrey, const []), at);
+      final out = await frameOf(
+        await render(midGrey, const [VideoEffect.filmGrain()]),
+        at,
+      );
+      var plainSum = 0;
+      var sum = 0;
+      var sumOfSquares = 0;
+      for (var y = 160; y < 200; y++) {
+        for (var x = 300; x < 340; x++) {
+          final g = grey(pixel(out, x, y));
+          plainSum += grey(pixel(plain, x, y));
+          sum += g;
+          sumOfSquares += g * g;
+        }
+      }
+      const n = 1600;
+      final mean = sum / n;
+      final variance = sumOfSquares / n - mean * mean;
+      // The grain moves each pixel by up to 7% either way, a spread of about
+      // 10 levels, and averages out over the patch. The encoder keeps only
+      // part of grain this fine: about 4 levels on a Galaxy S26, 8 on macOS.
+      expect((mean - plainSum / n).abs(), lessThan(3));
+      expect(variance, greaterThan(4), reason: 'variance $variance');
+    });
+
+    testWidgets('crt darkens its scanlines', (tester) async {
+      const at = Duration(milliseconds: 500);
+      const effect = VideoEffect.crt();
+      // 360 / 200 rounds to a period of two rows: every odd row is dark.
+      expect(toPixels(effect.frameAt(at).scanlinePeriod, height), 2);
+      final plain = await frameOf(await render(midGrey, const []), at);
+      final out = await frameOf(await render(midGrey, const [effect]), at);
+      // A patch at the center, where the corners' darkening has not started.
+      var plainSum = 0;
+      var dark = 0;
+      var bright = 0;
+      for (var y = 160; y < 200; y++) {
+        for (var x = 300; x < 340; x++) {
+          plainSum += grey(pixel(plain, x, y));
+          final g = grey(pixel(out, x, y));
+          if (y.isOdd) {
+            dark += g;
+          } else {
+            bright += g;
+          }
+        }
+      }
+      // The bright rows are lifted by 12%, the dark ones keep 45% of that;
+      // the encoder blurs rows this thin a little towards each other.
+      final base = plainSum / 1600;
+      expect(bright / 800, greaterThan(base), reason: 'base $base');
+      expect(dark / 800, lessThan(base * 0.75), reason: 'base $base');
+    });
+  });
 }
