@@ -19,6 +19,16 @@ void main() {
           VideoEffectType.negativeFlash,
         );
         expect(const VideoEffect.vignette().type, VideoEffectType.vignette);
+        expect(
+          const VideoEffect.blockGlitch().type,
+          VideoEffectType.blockGlitch,
+        );
+        expect(const VideoEffect.filmGrain().type, VideoEffectType.filmGrain);
+        expect(
+          const VideoEffect.signalInterference().type,
+          VideoEffectType.signalInterference,
+        );
+        expect(const VideoEffect.crt().type, VideoEffectType.crt);
         expect(const VideoEffect.vhs().intensity, 1);
       });
 
@@ -320,6 +330,147 @@ void main() {
         expect(frame.vignette, closeTo(0.65, 1e-12));
         expect(frame.vignetteRadius, closeTo(0.25, 1e-12));
         expect(effect.frameAt(const Duration(seconds: 7)), frame);
+      });
+
+      test('blockGlitch opens on a burst and is untouched in between', () {
+        final frames = [
+          for (var b = 0; b < 480; b++)
+            const VideoEffect.blockGlitch().frameAt(
+              Duration(microseconds: b * 41667 + 1000),
+            ),
+        ];
+        final first = frames.first;
+        expect(first.pixelSize, greaterThan(0.015));
+        expect(first.bands, isNotEmpty);
+        expect(first.rgbShift.abs(), greaterThan(0.008));
+
+        final bursts = frames.where((f) => !f.isIdentity).toList();
+        expect(bursts.every((f) => f.pixelSize > 0), isTrue);
+        expect(bursts.length, inInclusiveRange(60, 240));
+        // A burst keeps its block size while its slices jump.
+        expect(frames[1].pixelSize, first.pixelSize);
+        expect(frames[1].bands, isNot(first.bands));
+      });
+
+      test('blockGlitch scales its blocks and shifts with intensity', () {
+        final strong = const VideoEffect.blockGlitch().frameAt(Duration.zero);
+        final weak = const VideoEffect.blockGlitch(
+          intensity: 0.5,
+        ).frameAt(Duration.zero);
+        expect(weak.pixelSize, closeTo(strong.pixelSize / 2, 1e-12));
+        expect(weak.rgbShift, closeTo(strong.rgbShift / 2, 1e-12));
+        expect(
+          weak.bands.first.shift,
+          closeTo(strong.bands.first.shift / 2, 1e-12),
+        );
+      });
+
+      test('filmGrain is fine grain of one strength that moves', () {
+        final frames = [
+          for (var b = 0; b < 480; b++)
+            const VideoEffect.filmGrain(
+              intensity: 0.5,
+            ).frameAt(Duration(microseconds: b * 41667 + 1000)),
+        ];
+        for (final frame in frames) {
+          expect(
+            frame,
+            VideoEffectFrame(
+              noise: 0.07,
+              noiseCellSize: 1 / 900,
+              noiseOffsetX: frame.noiseOffsetX,
+              noiseOffsetY: frame.noiseOffsetY,
+            ),
+          );
+        }
+        expect(frames[0].noiseOffsetX, isNot(frames[1].noiseOffsetX));
+      });
+
+      test('signalInterference moves thin slices every bucket', () {
+        final frames = [
+          for (var b = 0; b < 480; b++)
+            const VideoEffect.signalInterference().frameAt(
+              Duration(microseconds: b * 41667 + 1000),
+            ),
+        ];
+        for (final frame in frames) {
+          expect(frame.bands.length, inInclusiveRange(1, 4));
+          for (final band in frame.bands) {
+            expect(band.bottom - band.top, lessThanOrEqualTo(0.02));
+            expect(band.shift.abs(), inInclusiveRange(0.015, 0.065));
+          }
+        }
+        expect(frames[0].bands, isNot(frames[1].bands));
+      });
+
+      test('signalInterference opens on a noise burst and calms down', () {
+        final frames = [
+          for (var b = 0; b < 480; b++)
+            const VideoEffect.signalInterference().frameAt(
+              Duration(microseconds: b * 41667 + 1000),
+            ),
+        ];
+        expect(frames.first.noise, greaterThanOrEqualTo(0.3));
+        final noisy = frames.where((f) => f.noise > 0).toList();
+        expect(noisy.length, inInclusiveRange(20, 120));
+        expect(noisy.every((f) => f.rgbShift > 0), isTrue);
+        expect(
+          frames.where((f) => f.noise == 0).every((f) => f.rgbShift == 0),
+          isTrue,
+        );
+      });
+
+      test('crt is constant scanlines with a slight fringe', () {
+        const effect = VideoEffect.crt(intensity: 0.5);
+        final frame = effect.frameAt(Duration.zero);
+        expect(frame.scanlines, closeTo(0.275, 1e-12));
+        expect(frame.scanlinePeriod, closeTo(1 / 200, 1e-12));
+        expect(frame.rgbShift, closeTo(0.0015, 1e-12));
+        expect(frame.noise, 0);
+        expect(frame.bands, isEmpty);
+        expect(effect.frameAt(const Duration(milliseconds: 4321)), frame);
+      });
+
+      // Pins the look of the effects added after the first release, like the
+      // glitch burst below.
+      test('keeps the look of the texture effects', () {
+        String pin(VideoEffect effect) => effect
+            .frameAt(Duration.zero)
+            .toList()
+            .map((v) => v.toStringAsFixed(6))
+            .join(', ');
+        expect(
+          pin(const VideoEffect.blockGlitch()),
+          '0.037686, 0.026367, 0.000000, 0.000000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 1.000000, 0.800680, 0.946469, 0.100334, '
+          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 0.000000',
+        );
+        expect(
+          pin(const VideoEffect.filmGrain()),
+          '0.000000, 0.000000, 0.000000, 0.000000, 0.140000, 0.001111, '
+          '42.000000, 81.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 0.000000',
+        );
+        expect(
+          pin(const VideoEffect.signalInterference()),
+          '0.000000, 0.005000, 0.000000, 0.000000, 0.305781, 0.002083, '
+          '38.000000, 66.000000, 4.000000, 0.165132, 0.180701, -0.054526, '
+          '0.626896, 0.644625, 0.064531, 0.374544, 0.384644, 0.041834, '
+          '0.857137, 0.870051, -0.030978, 0.000000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 0.000000',
+        );
+        expect(
+          pin(const VideoEffect.crt()),
+          '0.000000, 0.003000, 0.550000, 0.005000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 0.000000, 0.000000, 0.120000, 0.000000, '
+          '0.000000, 0.350000, 0.450000',
+        );
       });
 
       // Pins the look: renderers only play frames back, so a change here is a

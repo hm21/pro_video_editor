@@ -1,3 +1,6 @@
+## 2.21.0
+- **FEAT**(android, iOS, macOS): Four more video effects: `blockGlitch` (the picture breaks into coarse blocks while slices slip sideways, in short bursts), `filmGrain` (fine, calm grain), `signalInterference` (thin flickering slices that shift sideways, with bursts of noise) and `crt` (strong scanlines and a slight color fringe, without movement).
+
 ## 2.20.0
 - **FEAT**(android, iOS, macOS): `VideoRenderData.effects` adds effects that distort the picture itself: glitch, RGB split, VHS, TV static, old film, pixelate, pixel pulse, strobe, negative flash and vignette, each with an intensity and an optional time range. A flashing effect on its own stays below the three flashes a second that WCAG 2.3.1 allows.
 - **FEAT**: `VideoEffectPreview` shows the same effects live over a video player, frame for frame what the export renders (Impeller only).

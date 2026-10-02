@@ -52,6 +52,22 @@ enum VideoEffectType {
 
   /// Darkened corners that draw the eye to the center.
   vignette,
+
+  /// A damaged video stream ("datamosh"): in short bursts the picture breaks
+  /// into coarse blocks while slices of it slip sideways and the color
+  /// channels jump apart. Untouched in between.
+  blockGlitch,
+
+  /// Fine, calm grain over the whole picture, for a subtle analog texture.
+  filmGrain,
+
+  /// A disturbed signal: thin slices that flicker and shift sideways, and now
+  /// and then a burst of noise.
+  signalInterference,
+
+  /// An old CRT monitor: strong scanlines, a slight color fringe and slightly
+  /// darkened corners. It does not move.
+  crt,
 }
 
 /// A visual effect that distorts the picture itself, unlike a [ColorFilter],
@@ -205,6 +221,54 @@ class VideoEffect with TimeRangeMixin {
     Duration? endTime,
   }) : this(
          type: VideoEffectType.vignette,
+         intensity: intensity,
+         startTime: startTime,
+         endTime: endTime,
+       );
+
+  /// Creates a [VideoEffectType.blockGlitch] effect.
+  const VideoEffect.blockGlitch({
+    double intensity = 1,
+    Duration? startTime,
+    Duration? endTime,
+  }) : this(
+         type: VideoEffectType.blockGlitch,
+         intensity: intensity,
+         startTime: startTime,
+         endTime: endTime,
+       );
+
+  /// Creates a [VideoEffectType.filmGrain] effect.
+  const VideoEffect.filmGrain({
+    double intensity = 1,
+    Duration? startTime,
+    Duration? endTime,
+  }) : this(
+         type: VideoEffectType.filmGrain,
+         intensity: intensity,
+         startTime: startTime,
+         endTime: endTime,
+       );
+
+  /// Creates a [VideoEffectType.signalInterference] effect.
+  const VideoEffect.signalInterference({
+    double intensity = 1,
+    Duration? startTime,
+    Duration? endTime,
+  }) : this(
+         type: VideoEffectType.signalInterference,
+         intensity: intensity,
+         startTime: startTime,
+         endTime: endTime,
+       );
+
+  /// Creates a [VideoEffectType.crt] effect.
+  const VideoEffect.crt({
+    double intensity = 1,
+    Duration? startTime,
+    Duration? endTime,
+  }) : this(
+         type: VideoEffectType.crt,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
