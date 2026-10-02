@@ -52,6 +52,31 @@ enum VideoEffectType {
 
   /// Darkened corners that draw the eye to the center.
   vignette,
+
+  /// The picture jitters in every direction, like a handheld camera on a bass
+  /// hit. It is zoomed in slightly, so its edges stay out of view.
+  shake,
+
+  /// The picture punches in at the start of every half second and eases back
+  /// out.
+  zoomPulse,
+
+  /// The right half of the picture mirrors its left half. Less intensity
+  /// zooms in on the center.
+  mirror,
+
+  /// The picture mirrored into four symmetric parts: the right half mirrors
+  /// the left and the bottom half the top. Less intensity zooms in on the
+  /// center.
+  kaleidoscope,
+
+  /// The picture four times, in a 2×2 grid. Less intensity shows less of the
+  /// picture in each copy, zoomed in on its center.
+  splitScreen,
+
+  /// The rows bend sideways along a wave that rolls up the picture, like a
+  /// heat haze or a view through water.
+  wave,
 }
 
 /// A visual effect that distorts the picture itself, unlike a [ColorFilter],
@@ -205,6 +230,78 @@ class VideoEffect with TimeRangeMixin {
     Duration? endTime,
   }) : this(
          type: VideoEffectType.vignette,
+         intensity: intensity,
+         startTime: startTime,
+         endTime: endTime,
+       );
+
+  /// Creates a [VideoEffectType.shake] effect.
+  const VideoEffect.shake({
+    double intensity = 1,
+    Duration? startTime,
+    Duration? endTime,
+  }) : this(
+         type: VideoEffectType.shake,
+         intensity: intensity,
+         startTime: startTime,
+         endTime: endTime,
+       );
+
+  /// Creates a [VideoEffectType.zoomPulse] effect.
+  const VideoEffect.zoomPulse({
+    double intensity = 1,
+    Duration? startTime,
+    Duration? endTime,
+  }) : this(
+         type: VideoEffectType.zoomPulse,
+         intensity: intensity,
+         startTime: startTime,
+         endTime: endTime,
+       );
+
+  /// Creates a [VideoEffectType.mirror] effect.
+  const VideoEffect.mirror({
+    double intensity = 1,
+    Duration? startTime,
+    Duration? endTime,
+  }) : this(
+         type: VideoEffectType.mirror,
+         intensity: intensity,
+         startTime: startTime,
+         endTime: endTime,
+       );
+
+  /// Creates a [VideoEffectType.kaleidoscope] effect.
+  const VideoEffect.kaleidoscope({
+    double intensity = 1,
+    Duration? startTime,
+    Duration? endTime,
+  }) : this(
+         type: VideoEffectType.kaleidoscope,
+         intensity: intensity,
+         startTime: startTime,
+         endTime: endTime,
+       );
+
+  /// Creates a [VideoEffectType.splitScreen] effect.
+  const VideoEffect.splitScreen({
+    double intensity = 1,
+    Duration? startTime,
+    Duration? endTime,
+  }) : this(
+         type: VideoEffectType.splitScreen,
+         intensity: intensity,
+         startTime: startTime,
+         endTime: endTime,
+       );
+
+  /// Creates a [VideoEffectType.wave] effect.
+  const VideoEffect.wave({
+    double intensity = 1,
+    Duration? startTime,
+    Duration? endTime,
+  }) : this(
+         type: VideoEffectType.wave,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,

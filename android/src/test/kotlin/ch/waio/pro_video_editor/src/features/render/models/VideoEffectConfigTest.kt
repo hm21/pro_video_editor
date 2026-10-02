@@ -119,13 +119,48 @@ internal class VideoEffectConfigTest {
     }
 
     @Test
-    fun fromArray_readsTheTonesAfterTheBands() {
-        val values = DoubleArray(VideoEffectFrame.STRIDE)
-        for (i in 0 until 6) values[VideoEffectFrame.STRIDE - 6 + i] = (i + 1) / 10.0
+    fun fromArray_readsTheTonesAfterTheBandsAndTheGeometryLast() {
+        val values = DoubleArray(VideoEffectFrame.STRIDE) { (it + 1) / 100.0 }
+        values[8] = 0.0
+        values[VideoEffectFrame.STRIDE - 4] = 2.0
         val frame = VideoEffectFrame.fromArray(values, 0)
         assertEquals(
-            listOf(0.1, 0.2, 0.3, 0.4, 0.5, 0.6),
+            listOf(0.22, 0.23, 0.24, 0.25, 0.26, 0.27),
             listOf(frame.sepia, frame.brightness, frame.invert, frame.flash, frame.vignette, frame.vignetteRadius),
         )
+        assertEquals(
+            listOf(0.28, 0.29, 0.3, 0.31, 0.32, 0.34, 0.35, 0.36),
+            listOf(
+                frame.zoom, frame.offsetX, frame.offsetY, frame.mirrorX, frame.mirrorY,
+                frame.waveAmplitude, frame.wavePeriod, frame.wavePhase,
+            ),
+        )
+        assertEquals(2, frame.tiles)
+        assertEquals(36, VideoEffectFrame.STRIDE)
+    }
+
+    @Test
+    fun merge_combinesTheGeometryLikeDart() {
+        val shake = VideoEffectFrame(zoom = 0.04, offsetX = 0.01, offsetY = -0.02)
+        val split = VideoEffectFrame(zoom = 0.3, tiles = 2, mirrorX = 0.2)
+        val wave = VideoEffectFrame(waveAmplitude = -0.03, wavePeriod = 0.5, wavePhase = 0.1)
+        val weakWave = VideoEffectFrame(waveAmplitude = 0.01, wavePeriod = 0.9, wavePhase = 0.7, mirrorX = 0.5)
+        val merged = shake.merge(split).merge(wave).merge(weakWave)
+        assertEquals(0.34, merged.zoom, 1e-12)
+        assertEquals(0.01, merged.offsetX, 1e-12)
+        assertEquals(-0.02, merged.offsetY, 1e-12)
+        assertEquals(0.5, merged.mirrorX)
+        assertEquals(2, merged.tiles)
+        assertEquals(listOf(-0.03, 0.5, 0.1), listOf(merged.waveAmplitude, merged.wavePeriod, merged.wavePhase))
+    }
+
+    @Test
+    fun isIdentity_seesEveryGeometryStage() {
+        assertEquals(false, VideoEffectFrame(zoom = 0.1).isIdentity)
+        assertEquals(false, VideoEffectFrame(offsetY = -0.1).isIdentity)
+        assertEquals(false, VideoEffectFrame(mirrorY = 0.5).isIdentity)
+        assertEquals(false, VideoEffectFrame(tiles = 2).isIdentity)
+        assertEquals(false, VideoEffectFrame(waveAmplitude = 0.1, wavePeriod = 0.5).isIdentity)
+        assertEquals(true, VideoEffectFrame(tiles = 1, waveAmplitude = 0.1).isIdentity)
     }
 }

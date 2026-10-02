@@ -19,8 +19,9 @@ void main() {
 
   Future<({ByteData data, int width})> preview(
     WidgetTester tester,
-    List<VideoEffect> effects,
-  ) async {
+    List<VideoEffect> effects, {
+    Widget child = const ColoredBox(color: darkGrey),
+  }) async {
     final key = GlobalKey();
     await tester.pumpWidget(
       Center(
@@ -31,7 +32,7 @@ void main() {
             child: VideoEffectPreview(
               effects: effects,
               position: ValueNotifier(Duration.zero),
-              child: const ColoredBox(color: darkGrey),
+              child: child,
             ),
           ),
         ),
@@ -91,6 +92,57 @@ void main() {
       // Corner pixel (0, 0): 1 - 1.3 * t^2 is below 0, so it is black.
       expect(pixel(out, 0, 0), everyElement(inInclusiveRange(0, 2)));
       expect(pixel(out, 63, 35), pixel(out, 0, 0));
+    });
+
+    // A white column, x = 8..15, on black.
+    const stripe = Stack(
+      textDirection: TextDirection.ltr,
+      children: [
+        ColoredBox(color: Color(0xFF000000), child: SizedBox.expand()),
+        Positioned(
+          left: 8,
+          top: 0,
+          bottom: 0,
+          width: 8,
+          child: ColoredBox(color: Color(0xFFFFFFFF)),
+        ),
+      ],
+    );
+
+    testWidgets('mirror shows the left half mirrored on the right', (
+      tester,
+    ) async {
+      final out = await preview(tester, const [
+        VideoEffect.mirror(),
+      ], child: stripe);
+      // Columns 8..15 mirror onto 48..55.
+      expect(pixel(out, 12, 18), everyElement(greaterThanOrEqualTo(250)));
+      expect(pixel(out, 51, 18), everyElement(greaterThanOrEqualTo(250)));
+      expect(pixel(out, 32, 18), everyElement(lessThanOrEqualTo(5)));
+      expect(pixel(out, 60, 18), everyElement(lessThanOrEqualTo(5)));
+    });
+
+    testWidgets('splitScreen repeats the picture at half size', (tester) async {
+      final out = await preview(tester, const [
+        VideoEffect.splitScreen(),
+      ], child: stripe);
+      // The column lands at 4..7 in the left copies and 36..39 in the right.
+      for (final (x, y) in [(5, 9), (37, 9), (6, 27), (38, 27)]) {
+        expect(pixel(out, x, y), everyElement(greaterThanOrEqualTo(250)));
+      }
+      expect(pixel(out, 12, 9), everyElement(lessThanOrEqualTo(5)));
+      expect(pixel(out, 44, 27), everyElement(lessThanOrEqualTo(5)));
+    });
+
+    testWidgets('wave moves rows sideways', (tester) async {
+      final out = await preview(tester, const [
+        VideoEffect.wave(),
+      ], child: stripe);
+      // Half the frame tall: the crest is at row 4, the trough at row 13,
+      // where the column moves 1.6 pixels right and left.
+      expect(pixel(out, 8, 4)[0], lessThan(pixel(out, 8, 9)[0]));
+      expect(pixel(out, 16, 4)[0], greaterThan(pixel(out, 16, 9)[0]));
+      expect(pixel(out, 7, 13)[0], greaterThan(pixel(out, 7, 9)[0]));
     });
   });
 }

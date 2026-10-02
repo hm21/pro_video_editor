@@ -23,6 +23,15 @@ void main() {
       flash: 0.75,
       vignette: 0.6,
       vignetteRadius: 0.3,
+      zoom: 0.2,
+      offsetX: 0.01,
+      offsetY: -0.02,
+      mirrorX: 0.5,
+      mirrorY: 0.25,
+      tiles: 2,
+      waveAmplitude: -0.03,
+      wavePeriod: 0.5,
+      wavePhase: 0.4,
     );
 
     group('toList', () {
@@ -42,7 +51,18 @@ void main() {
         ]);
         expect(values.sublist(9, 15), [0.1, 0.2, 0.05, 0.5, 0.7, -0.1]);
         expect(values.sublist(15, 21), everyElement(0));
-        expect(values.sublist(21), [0.5, -0.02, 0.25, 0.75, 0.6, 0.3]);
+        expect(values.sublist(21, 27), [0.5, -0.02, 0.25, 0.75, 0.6, 0.3]);
+        expect(values.sublist(27), [
+          0.2,
+          0.01,
+          -0.02,
+          0.5,
+          0.25,
+          2,
+          -0.03,
+          0.5,
+          0.4,
+        ]);
       });
 
       test('round-trips through fromList at an offset', () {
@@ -82,6 +102,27 @@ void main() {
         expect(const VideoEffectFrame(brightness: -0.01).isIdentity, isFalse);
         expect(const VideoEffectFrame(vignette: 0.1).isIdentity, isFalse);
         expect(frame.isIdentity, isFalse);
+      });
+
+      test('is false once any geometry stage is on', () {
+        expect(const VideoEffectFrame(zoom: 0.1).isIdentity, isFalse);
+        expect(const VideoEffectFrame(offsetX: -0.1).isIdentity, isFalse);
+        expect(const VideoEffectFrame(mirrorY: 0.5).isIdentity, isFalse);
+        expect(const VideoEffectFrame(tiles: 2).isIdentity, isFalse);
+        expect(
+          const VideoEffectFrame(
+            waveAmplitude: 0.02,
+            wavePeriod: 0.5,
+          ).isIdentity,
+          isFalse,
+        );
+      });
+
+      test('is true for a single tile and a wave without a period', () {
+        expect(
+          const VideoEffectFrame(tiles: 1, waveAmplitude: 0.1).isIdentity,
+          isTrue,
+        );
       });
     });
 
@@ -131,6 +172,30 @@ void main() {
         expect(merged.invert, 1);
         expect(merged.flash, 0.75);
         expect((merged.vignette, merged.vignetteRadius), (0.9, 0.5));
+      });
+
+      test('adds zooms and offsets, keeps the larger mirrors and tiles and '
+          'the stronger wave with its period and phase', () {
+        const other = VideoEffectFrame(
+          zoom: 0.04,
+          offsetX: 0.02,
+          offsetY: 0.01,
+          mirrorX: 0.1,
+          mirrorY: 0.5,
+          waveAmplitude: 0.05,
+          wavePeriod: 0.9,
+          wavePhase: 0.7,
+        );
+        final merged = frame.merge(other);
+        expect(merged.zoom, closeTo(0.24, 1e-12));
+        expect(merged.offsetX, closeTo(0.03, 1e-12));
+        expect(merged.offsetY, closeTo(-0.01, 1e-12));
+        expect((merged.mirrorX, merged.mirrorY), (0.5, 0.5));
+        expect(merged.tiles, 2);
+        expect(
+          (merged.waveAmplitude, merged.wavePeriod, merged.wavePhase),
+          (0.05, 0.9, 0.7),
+        );
       });
 
       test('keeps the first maxBands bands', () {

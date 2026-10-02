@@ -34,15 +34,36 @@ public struct VideoEffectFrame: Sendable, Equatable {
   var flash: Double = 0
   var vignette: Double = 0
   var vignetteRadius: Double = 0
+  var zoom: Double = 0
+  var offsetX: Double = 0
+  var offsetY: Double = 0
+  var mirrorX: Double = 0
+  var mirrorY: Double = 0
+  var tiles: Int = 0
+  var waveAmplitude: Double = 0
+  var wavePeriod: Double = 0
+  var wavePhase: Double = 0
 
   /// The most bands a frame carries.
   static let maxBands = 4
 
+  /// The most times `tiles` repeats the picture across and down.
+  static let maxTiles = 2
+
+  /// The straight segments each wave is drawn with.
+  static let waveSegments = 16
+
+  /// The shortest wave period drawn, as a fraction of the frame height.
+  static let minWavePeriod = 0.1
+
   /// Where the tone values start in a frame of the table, after the bands.
   private static let toneOffset = 9 + maxBands * 3
 
+  /// Where the geometry values start in a frame of the table, after the tones.
+  private static let geometryOffset = toneOffset + 6
+
   /// Values per frame in the table Dart sends.
-  static let stride = toneOffset + 6
+  static let stride = geometryOffset + 9
 
   /// A frame that leaves the picture unchanged.
   static let none = VideoEffectFrame()
@@ -52,7 +73,16 @@ public struct VideoEffectFrame: Sendable, Equatable {
     pixelSize <= 0 && rgbShift == 0 && scanlines <= 0 && noise <= 0
       && bands.allSatisfy { $0.shift == 0 || $0.bottom <= $0.top }
       && sepia <= 0 && brightness == 0 && invert <= 0 && flash <= 0 && vignette <= 0
+      && !hasTransform && tiles < 2 && !hasWave
   }
+
+  /// Whether the first geometry stage zooms, moves or mirrors the picture.
+  var hasTransform: Bool {
+    zoom > 0 || offsetX != 0 || offsetY != 0 || mirrorX > 0 || mirrorY > 0
+  }
+
+  /// Whether the last geometry stage bends the rows.
+  var hasWave: Bool { waveAmplitude != 0 && wavePeriod > 0 }
 
   /// Combines two frames of overlapping effects, exactly as the Dart
   /// `VideoEffectFrame.merge` does.
@@ -62,6 +92,7 @@ public struct VideoEffectFrame: Sendable, Equatable {
     let strongerScanlines = other.scanlines > scanlines ? other : self
     let strongerNoise = other.noise > noise ? other : self
     let strongerVignette = other.vignette > vignette ? other : self
+    let strongerWave = abs(other.waveAmplitude) > abs(waveAmplitude) ? other : self
     return VideoEffectFrame(
       pixelSize: max(pixelSize, other.pixelSize),
       rgbShift: rgbShift + other.rgbShift,
@@ -77,7 +108,16 @@ public struct VideoEffectFrame: Sendable, Equatable {
       invert: max(invert, other.invert),
       flash: max(flash, other.flash),
       vignette: strongerVignette.vignette,
-      vignetteRadius: strongerVignette.vignetteRadius)
+      vignetteRadius: strongerVignette.vignetteRadius,
+      zoom: zoom + other.zoom,
+      offsetX: offsetX + other.offsetX,
+      offsetY: offsetY + other.offsetY,
+      mirrorX: max(mirrorX, other.mirrorX),
+      mirrorY: max(mirrorY, other.mirrorY),
+      tiles: max(tiles, other.tiles),
+      waveAmplitude: strongerWave.waveAmplitude,
+      wavePeriod: strongerWave.wavePeriod,
+      wavePhase: strongerWave.wavePhase)
   }
 
   /// Reads the frame that starts at `offset` of a Dart-built table.
@@ -103,7 +143,16 @@ public struct VideoEffectFrame: Sendable, Equatable {
       invert: values[offset + toneOffset + 2],
       flash: values[offset + toneOffset + 3],
       vignette: values[offset + toneOffset + 4],
-      vignetteRadius: values[offset + toneOffset + 5])
+      vignetteRadius: values[offset + toneOffset + 5],
+      zoom: values[offset + geometryOffset],
+      offsetX: values[offset + geometryOffset + 1],
+      offsetY: values[offset + geometryOffset + 2],
+      mirrorX: values[offset + geometryOffset + 3],
+      mirrorY: values[offset + geometryOffset + 4],
+      tiles: Int(values[offset + geometryOffset + 5].rounded()),
+      waveAmplitude: values[offset + geometryOffset + 6],
+      wavePeriod: values[offset + geometryOffset + 7],
+      wavePhase: values[offset + geometryOffset + 8])
   }
 }
 

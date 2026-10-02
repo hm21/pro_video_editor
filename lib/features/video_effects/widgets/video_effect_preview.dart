@@ -245,6 +245,15 @@ abstract final class _VideoEffectShader {
       frame.flash,
       frame.vignette,
       frame.vignetteRadius,
+      frame.zoom,
+      frame.offsetX,
+      frame.offsetY,
+      frame.mirrorX,
+      frame.mirrorY,
+      frame.tiles.toDouble(),
+      frame.waveAmplitude,
+      frame.wavePeriod,
+      frame.wavePhase,
     ]);
     for (var i = 0; i < values.length; i++) {
       shader.setFloat(2 + i, values[i]);

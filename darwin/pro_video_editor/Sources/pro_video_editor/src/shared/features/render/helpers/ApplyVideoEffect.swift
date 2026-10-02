@@ -58,8 +58,10 @@ private let videoEffectNoiseTile: CIImage = {
 ///
 /// Built from stock Core Image filters only, so it runs on every device the
 /// plugin supports: a custom kernel would need Metal dynamic libraries, which
-/// older iPhones lack. Every step moves whole pixels — sizes are rounded first,
-/// and resampling happens only at pixel centers — so nothing is interpolated.
+/// older iPhones lack. After the geometry, every step moves whole pixels —
+/// sizes are rounded first, and resampling happens only at pixel centers — so
+/// nothing is interpolated. The geometry interpolates, with the GPU's bilinear
+/// filtering, which can land one step away from the spec's exact arithmetic.
 ///
 /// The spec counts rows from the top, so the frame is flipped into a top-origin
 /// space for the duration and flipped back at the end.
@@ -73,7 +75,8 @@ func applyVideoEffect(to image: CIImage, _ frame: VideoEffectFrame) -> CIImage {
   let rect = CGRect(x: 0, y: 0, width: width, height: height)
   let toTopOrigin = CGAffineTransform(translationX: -extent.minX, y: -extent.minY)
     .concatenating(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: rect.height))
-  var result = image.samplingNearest().transformed(by: toTopOrigin).cropped(to: rect)
+  var result = image.transformed(by: toTopOrigin).cropped(to: rect)
+  result = applyingGeometry(result, frame, rect: rect).samplingNearest()
 
   let block = videoEffectPixels(frame.pixelSize, width)
   if block >= 2 {
@@ -105,6 +108,131 @@ func applyVideoEffect(to image: CIImage, _ frame: VideoEffectFrame) -> CIImage {
   }
 
   return result.transformed(by: toTopOrigin.inverted()).cropped(to: extent)
+}
+
+/// The three geometry stages: zoom, move and mirror the picture, repeat it in
+/// a 2×2 grid, and bend its rows along a wave.
+///
+/// Each stage that runs ends in an intermediate image. Core Image would
+/// otherwise fold one stage's transforms into the next stage's sampling, and
+/// into the nearest sampling of the steps after the geometry, which reads the
+/// source once with other weights than the spec's stage-by-stage filtering.
+private func applyingGeometry(_ image: CIImage, _ frame: VideoEffectFrame, rect: CGRect)
+  -> CIImage
+{
+  var result = image
+  let zoom = max(frame.zoom, 0)
+  if zoom > 0 || frame.offsetX != 0 || frame.offsetY != 0 {
+    let w = rect.width
+    let h = rect.height
+    let move = CGAffineTransform(translationX: -w / 2, y: -h / 2)
+      .concatenating(CGAffineTransform(scaleX: 1 + zoom, y: 1 + zoom))
+      .concatenating(
+        CGAffineTransform(
+          translationX: w / 2 + CGFloat(frame.offsetX) * w,
+          y: h / 2 + CGFloat(frame.offsetY) * h))
+    result = result.clampedToExtent().transformed(by: move).cropped(to: rect)
+      .insertingIntermediate()
+  }
+  if frame.mirrorX > 0 || frame.mirrorY > 0 {
+    result = mirroring(result, frame, rect: rect).insertingIntermediate()
+  }
+  if frame.tiles >= 2 {
+    result = tiling(result, rect: rect).insertingIntermediate()
+  }
+  if frame.hasWave {
+    result = waving(result, frame, rect: rect).insertingIntermediate()
+  }
+  return result
+}
+
+/// The right `m` columns show the columns left of them mirrored, and the
+/// bottom rows the rows above them. Mirroring about a whole-pixel axis maps
+/// pixel centers onto pixel centers, so nothing is resampled.
+private func mirroring(_ image: CIImage, _ frame: VideoEffectFrame, rect: CGRect) -> CIImage {
+  let width = Int(rect.width)
+  let height = Int(rect.height)
+  var result = image.clampedToExtent()
+  if frame.mirrorX > 0 {
+    let axis = CGFloat(width - min(videoEffectPixels(frame.mirrorX, width), width / 2))
+    let mirrored = result.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: 2 * axis, ty: 0))
+      .cropped(to: CGRect(x: axis, y: 0, width: rect.width - axis, height: rect.height))
+    result = mirrored.composited(
+      over: result.cropped(to: CGRect(x: 0, y: 0, width: axis, height: rect.height))
+    ).cropped(to: rect).clampedToExtent()
+  }
+  if frame.mirrorY > 0 {
+    let axis = CGFloat(height - min(videoEffectPixels(frame.mirrorY, height), height / 2))
+    let mirrored = result.transformed(by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 2 * axis))
+      .cropped(to: CGRect(x: 0, y: axis, width: rect.width, height: rect.height - axis))
+    result = mirrored.composited(
+      over: result.cropped(to: CGRect(x: 0, y: 0, width: rect.width, height: axis)))
+  }
+  return result.cropped(to: rect)
+}
+
+/// The picture at half its size, four times. Each copy is cropped to the
+/// pixels whose centers lie in its quarter of the frame, so frames of odd
+/// sizes split the way the spec's `(p * 2) % size` does.
+private func tiling(_ image: CIImage, rect: CGRect) -> CIImage {
+  let tiles = VideoEffectFrame.maxTiles
+  let half = image.clampedToExtent().transformed(
+    by: CGAffineTransform(scaleX: 1 / CGFloat(tiles), y: 1 / CGFloat(tiles)))
+  func edges(_ size: Int) -> [Int] {
+    (0...tiles).map { k in Int((Double(k * size) / Double(tiles) - 0.5).rounded(.up)) }
+  }
+  let xs = edges(Int(rect.width))
+  let ys = edges(Int(rect.height))
+  var result = CIImage.empty()
+  for row in 0..<tiles {
+    for column in 0..<tiles {
+      let cell = CGRect(
+        x: xs[column], y: ys[row], width: xs[column + 1] - xs[column],
+        height: ys[row + 1] - ys[row])
+      let copy = half.transformed(
+        by: CGAffineTransform(
+          translationX: CGFloat(column) * rect.width / CGFloat(tiles),
+          y: CGFloat(row) * rect.height / CGFloat(tiles)))
+      result = copy.cropped(to: cell).composited(over: result)
+    }
+  }
+  return result.cropped(to: rect)
+}
+
+/// Bends the rows sideways along the wave of `frame`.
+///
+/// The spec draws the wave with `waveSegments` straight segments per wave, so
+/// within a segment each row moves by a straight-line function of its height:
+/// a shear. Every segment is the picture sheared by its line and cropped to
+/// the rows whose centers it covers; Core Image's bilinear filtering then reads
+/// each row exactly where the spec does.
+private func waving(_ image: CIImage, _ frame: VideoEffectFrame, rect: CGRect) -> CIImage {
+  let width = Double(rect.width)
+  let height = Int(rect.height)
+  let segments = Double(VideoEffectFrame.waveSegments)
+  let period = max(frame.wavePeriod, VideoEffectFrame.minWavePeriod) * Double(height)
+  let step = period / segments
+  func knot(_ k: Int) -> Double {
+    frame.waveAmplitude * width * sin(2 * Double.pi * Double(k) / segments)
+  }
+  let first = Int(((0.5 / period + frame.wavePhase) * segments).rounded(.down))
+  let last = Int(((Double(height) / period + frame.wavePhase) * segments).rounded(.down))
+  let clamped = image.clampedToExtent()
+  var result = CIImage.empty()
+  for k in first...max(first, last) {
+    // Segment k covers the rows whose centers lie in [top, top + step).
+    let top = (Double(k) / segments - frame.wavePhase) * period
+    let firstRow = max(0, Int((top - 0.5).rounded(.up)))
+    let endRow = min(height, Int((top + step - 0.5).rounded(.up)))
+    guard endRow > firstRow else { continue }
+    let slope = (knot(k + 1) - knot(k)) / step
+    let shear = CGAffineTransform(
+      a: 1, b: 0, c: CGFloat(slope), d: 1, tx: CGFloat(knot(k) - slope * top), ty: 0)
+    result = clamped.transformed(by: shear)
+      .cropped(to: CGRect(x: 0, y: firstRow, width: Int(rect.width), height: endRow - firstRow))
+      .composited(over: result)
+  }
+  return result.cropped(to: rect)
 }
 
 /// Blocks of `block` pixels from the top-left corner, each filled with the

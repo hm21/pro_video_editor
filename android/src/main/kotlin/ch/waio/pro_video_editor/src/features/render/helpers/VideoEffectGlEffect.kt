@@ -19,10 +19,10 @@ import ch.waio.pro_video_editor.src.features.render.models.VideoEffectFrame
  *
  * Each frame's `presentationTimeUs` picks the active [VideoEffectFrame] of
  * every effect ([VideoEffectConfig.resolve]); the fragment shader then applies
- * it. The shader implements [VideoEffectMath] exactly: every size is rounded
- * to whole pixels, so each step copies whole texels and nothing is
- * interpolated, which is what lets Apple's Core Image stage produce the same
- * pixels.
+ * it. The shader implements [VideoEffectMath]: after the geometry every size
+ * is rounded to whole pixels, so each step copies whole texels and nothing is
+ * interpolated, and the geometry stages filter bilinearly in float math,
+ * which is what lets Apple's Core Image stage produce the same pixels.
  *
  * The effect runs ahead of a clip's `SpeedChangeEffect`, so a clip with a
  * [playbackSpeed] hands it timestamps from before the speed change. They are
@@ -143,6 +143,22 @@ class VideoEffectGlEffect(
             glProgram.setFloatUniform("uFlash", frame.flash.toFloat())
             glProgram.setFloatUniform("uVignette", frame.vignette.toFloat())
             glProgram.setFloatUniform("uVignetteRadius", frame.vignetteRadius.toFloat())
+            glProgram.setFloatUniform("uZoom", frame.zoom.toFloat())
+            glProgram.setFloatsUniform(
+                "uOffset", floatArrayOf(frame.offsetX.toFloat(), frame.offsetY.toFloat())
+            )
+            glProgram.setFloatsUniform(
+                "uMirror", floatArrayOf(frame.mirrorX.toFloat(), frame.mirrorY.toFloat())
+            )
+            glProgram.setFloatUniform("uTiles", frame.tiles.toFloat())
+            glProgram.setFloatsUniform(
+                "uWave",
+                floatArrayOf(
+                    frame.waveAmplitude.toFloat(),
+                    frame.wavePeriod.toFloat(),
+                    frame.wavePhase.toFloat(),
+                ),
+            )
         }
 
         // A speed change starts over from the first frame of every input
@@ -178,6 +194,10 @@ class VideoEffectGlEffect(
             //
             // A frame texture puts t=0 at the bottom, while the spec counts rows
             // from the top, so rows are flipped on the way in and out.
+            //
+            // The bilinear helpers and the three channel reads loop rather than
+            // repeat themselves: written out, every geometry stage would be
+            // inlined once per call of the one above it, sixty-four times over.
             // `idiv`/`imod` add half a unit before dividing so an approximate GPU
             // division cannot put a quotient on the wrong side of an integer.
             private const val FRAGMENT_SHADER_SOURCE =
@@ -206,6 +226,11 @@ class VideoEffectGlEffect(
                 "uniform float uFlash;\n" +
                 "uniform float uVignette;\n" +
                 "uniform float uVignetteRadius;\n" +
+                "uniform float uZoom;\n" +
+                "uniform vec2 uOffset;\n" +
+                "uniform vec2 uMirror;\n" +
+                "uniform float uTiles;\n" +
+                "uniform vec3 uWave;\n" +
                 "float toPixels(float f, float size) { return floor(f * size + 0.5); }\n" +
                 "float idiv(float a, float b) { return floor((a + 0.5) / b); }\n" +
                 "float imod(float a, float b) { return a - b * idiv(a, b); }\n" +
@@ -215,11 +240,77 @@ class VideoEffectGlEffect(
                 "  a = imod(a * a + v * 3.0 + 29.0, 251.0);\n" +
                 "  return a / 251.0;\n" +
                 "}\n" +
-                "vec4 fetch(vec2 texel) {\n" +
+                "vec4 source(vec2 texel) {\n" +
                 "  texel = clamp(texel, vec2(0.0), uSize - 1.0);\n" +
-                "  vec2 uv = vec2((texel.x + 0.5) / uSize.x," +
-                " 1.0 - (texel.y + 0.5) / uSize.y);\n" +
+                "  vec2 uv = vec2((texel.x + 0.5) / uSize.x, 1.0 - (texel.y + 0.5) / uSize.y);\n" +
                 "  return texture2D(uTexSampler, uv);\n" +
+                "}\n" +
+                "vec4 sourceAt(vec2 p) {\n" +
+                "  vec2 t = p - 0.5;\n" +
+                "  vec2 i = floor(t);\n" +
+                "  vec2 f = t - i;\n" +
+                "  vec4 sum = vec4(0.0);\n" +
+                "  for (int n = 0; n < 4; n++) {\n" +
+                "    vec2 o = vec2(float(n - 2 * (n / 2)), float(n / 2));\n" +
+                "    vec2 w = mix(1.0 - f, f, o);\n" +
+                "    if (w.x * w.y > 0.0) sum += w.x * w.y * source(i + o);\n" +
+                "  }\n" +
+                "  return sum;\n" +
+                "}\n" +
+                "vec4 transformed(vec2 texel) {\n" +
+                "  if (uZoom <= 0.0 && uOffset == vec2(0.0) && uMirror.x <= 0.0 && uMirror.y <= 0.0) {\n" +
+                "    return source(texel);\n" +
+                "  }\n" +
+                "  texel = clamp(texel, vec2(0.0), uSize - 1.0);\n" +
+                "  vec2 mirrored = min(\n" +
+                "      vec2(toPixels(uMirror.x, uSize.x), toPixels(uMirror.y, uSize.y)), floor(uSize / 2.0));\n" +
+                "  vec2 axis = uSize - mirrored;\n" +
+                "  if (uMirror.x > 0.0 && texel.x >= axis.x) texel.x = 2.0 * axis.x - 1.0 - texel.x;\n" +
+                "  if (uMirror.y > 0.0 && texel.y >= axis.y) texel.y = 2.0 * axis.y - 1.0 - texel.y;\n" +
+                "  vec2 c = uSize / 2.0;\n" +
+                "  return sourceAt((texel + 0.5 - c - uOffset * uSize) / (1.0 + max(uZoom, 0.0)) + c);\n" +
+                "}\n" +
+                "vec4 transformedAt(vec2 p) {\n" +
+                "  vec2 t = p - 0.5;\n" +
+                "  vec2 i = floor(t);\n" +
+                "  vec2 f = t - i;\n" +
+                "  vec4 sum = vec4(0.0);\n" +
+                "  for (int n = 0; n < 4; n++) {\n" +
+                "    vec2 o = vec2(float(n - 2 * (n / 2)), float(n / 2));\n" +
+                "    vec2 w = mix(1.0 - f, f, o);\n" +
+                "    if (w.x * w.y > 0.0) sum += w.x * w.y * transformed(i + o);\n" +
+                "  }\n" +
+                "  return sum;\n" +
+                "}\n" +
+                "vec4 tiled(vec2 texel) {\n" +
+                "  if (uTiles < 1.5) return transformed(texel);\n" +
+                "  texel = clamp(texel, vec2(0.0), uSize - 1.0);\n" +
+                "  return transformedAt(mod((texel + 0.5) * 2.0, uSize));\n" +
+                "}\n" +
+                "vec4 tiledAt(vec2 p) {\n" +
+                "  vec2 t = p - 0.5;\n" +
+                "  vec2 i = floor(t);\n" +
+                "  vec2 f = t - i;\n" +
+                "  vec4 sum = vec4(0.0);\n" +
+                "  for (int n = 0; n < 4; n++) {\n" +
+                "    vec2 o = vec2(float(n - 2 * (n / 2)), float(n / 2));\n" +
+                "    vec2 w = mix(1.0 - f, f, o);\n" +
+                "    if (w.x * w.y > 0.0) sum += w.x * w.y * tiled(i + o);\n" +
+                "  }\n" +
+                "  return sum;\n" +
+                "}\n" +
+                "float waveShift(float y) {\n" +
+                "  float period = max(uWave.y, 0.1) * uSize.y;\n" +
+                "  float t = (y / period + uWave.z) * 16.0;\n" +
+                "  float k = floor(t);\n" +
+                "  float from = sin(6.283185307179586 * k / 16.0);\n" +
+                "  float to = sin(6.283185307179586 * (k + 1.0) / 16.0);\n" +
+                "  return uWave.x * uSize.x * (from + (to - from) * (t - k));\n" +
+                "}\n" +
+                "vec4 picture(vec2 texel) {\n" +
+                "  if (uWave.x == 0.0 || uWave.y <= 0.0) return tiled(texel);\n" +
+                "  texel = clamp(texel, vec2(0.0), uSize - 1.0);\n" +
+                "  return tiledAt(vec2(texel.x + 0.5 - waveShift(texel.y + 0.5), texel.y + 0.5));\n" +
                 "}\n" +
                 "vec4 pixelated(float x, float y) {\n" +
                 "  x = clamp(x, 0.0, uSize.x - 1.0);\n" +
@@ -229,7 +320,7 @@ class VideoEffectGlEffect(
                 "    x = idiv(x, block) * block + center;\n" +
                 "    y = idiv(y, block) * block + center;\n" +
                 "  }\n" +
-                "  return fetch(vec2(x, y));\n" +
+                "  return picture(vec2(x, y));\n" +
                 "}\n" +
                 "vec4 banded(float x, float y, float shift) {\n" +
                 "  x = clamp(x, 0.0, uSize.x - 1.0);\n" +
@@ -246,11 +337,21 @@ class VideoEffectGlEffect(
                 "  if (uBandCount > 1.5 && covers(uBand1, p.y)) shift = toPixels(uBand1.z, uSize.x);\n" +
                 "  if (uBandCount > 0.5 && covers(uBand0, p.y)) shift = toPixels(uBand0.z, uSize.x);\n" +
                 "  float split = toPixels(uRgbShift, uSize.x);\n" +
-                "  vec4 center = banded(p.x, p.y, shift);\n" +
-                "  vec3 rgb = vec3(\n" +
-                "      banded(p.x + split, p.y, shift).r,\n" +
-                "      center.g,\n" +
-                "      banded(p.x - split, p.y, shift).b);\n" +
+                "  vec4 center = vec4(0.0);\n" +
+                "  vec3 rgb = vec3(0.0);\n" +
+                "  for (int k = 0; k < 3; k++) {\n" +
+                "    if (k > 0 && split == 0.0) break;\n" +
+                "    vec4 c = banded(p.x + (k == 1 ? split : (k == 2 ? -split : 0.0)), p.y, shift);\n" +
+                "    if (k == 0) {\n" +
+                "      center = c;\n" +
+                "      rgb = c.rgb;\n" +
+                "    } else if (k == 1) {\n" +
+                "      rgb.r = c.r;\n" +
+                "    } else {\n" +
+                "      rgb.b = c.b;\n" +
+                "    }\n" +
+                "  }\n" +
+
                 "  if (uScanlines > 0.0) {\n" +
                 "    float period = max(2.0, toPixels(uScanlinePeriod, uSize.y));\n" +
                 "    if (imod(p.y, period) * 2.0 >= period) rgb *= 1.0 - uScanlines;\n" +

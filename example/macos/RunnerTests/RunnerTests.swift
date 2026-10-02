@@ -2187,6 +2187,68 @@ class VideoEffectTests: XCTestCase {
     return out
   }
 
+  /// The spec's geometry stages, as Kotlin's `VideoEffectMath.geometry` runs
+  /// them, over the source: red, green and blue from 0 to 1 per pixel.
+  private func geometry(_ frame: VideoEffectFrame) -> [[Double]] {
+    var picture: [[Double]] = (0..<(width * height)).map { i in
+      let (r, g, b) = source(i % width, i / width)
+      return [Double(r) / 255, Double(g) / 255, Double(b) / 255]
+    }
+    func sample(_ image: [[Double]], _ px: Double, _ py: Double) -> [Double] {
+      let tx = px - 0.5
+      let ty = py - 0.5
+      let x0 = Int(tx.rounded(.down))
+      let y0 = Int(ty.rounded(.down))
+      let fx = tx - Double(x0)
+      let fy = ty - Double(y0)
+      func at(_ x: Int, _ y: Int, _ c: Int) -> Double {
+        image[min(max(y, 0), height - 1) * width + min(max(x, 0), width - 1)][c]
+      }
+      return (0..<3).map { c in
+        let top = at(x0, y0, c) + (at(x0 + 1, y0, c) - at(x0, y0, c)) * fx
+        let bottom = at(x0, y0 + 1, c) + (at(x0 + 1, y0 + 1, c) - at(x0, y0 + 1, c)) * fx
+        return top + (bottom - top) * fy
+      }
+    }
+    func stage(_ on: Bool, _ read: (Int, Int) -> (Double, Double)) {
+      guard on else { return }
+      let input = picture
+      picture = (0..<(width * height)).map { i in
+        let (px, py) = read(i % width, i / width)
+        return sample(input, px, py)
+      }
+    }
+    let w = Double(width)
+    let h = Double(height)
+    let mx = min(videoEffectPixels(frame.mirrorX, width), width / 2)
+    let my = min(videoEffectPixels(frame.mirrorY, height), height / 2)
+    let scale = 1 + max(frame.zoom, 0)
+    stage(frame.hasTransform) { x, y in
+      let fx = frame.mirrorX > 0 && x >= width - mx ? 2 * (width - mx) - 1 - x : x
+      let fy = frame.mirrorY > 0 && y >= height - my ? 2 * (height - my) - 1 - y : y
+      return (
+        (Double(fx) + 0.5 - w / 2 - frame.offsetX * w) / scale + w / 2,
+        (Double(fy) + 0.5 - h / 2 - frame.offsetY * h) / scale + h / 2
+      )
+    }
+    stage(frame.tiles >= 2) { x, y in
+      (
+        ((Double(x) + 0.5) * 2).truncatingRemainder(dividingBy: w),
+        ((Double(y) + 0.5) * 2).truncatingRemainder(dividingBy: h)
+      )
+    }
+    stage(frame.hasWave) { x, y in
+      let period = max(frame.wavePeriod, VideoEffectFrame.minWavePeriod) * h
+      let t = ((Double(y) + 0.5) / period + frame.wavePhase) * 16
+      let k = t.rounded(.down)
+      let from = sin(2 * Double.pi * k / 16)
+      let to = sin(2 * Double.pi * (k + 1) / 16)
+      let shift = frame.waveAmplitude * w * (from + (to - from) * (t - k))
+      return (Double(x) + 0.5 - shift, Double(y) + 0.5)
+    }
+    return picture
+  }
+
   /// The spec, pixel by pixel, as Kotlin's `VideoEffectMath.apply` runs it.
   private func reference(_ frame: VideoEffectFrame) -> [UInt8] {
     let block = videoEffectPixels(frame.pixelSize, width)
@@ -2199,17 +2261,18 @@ class VideoEffectTests: XCTestCase {
         videoEffectPixels($0.shift, width)
       )
     }
+    let picture = geometry(frame)
     func clamp(_ v: Int, _ high: Int) -> Int { min(max(v, 0), high) }
-    func pixelated(_ x: Int, _ y: Int) -> (Int, Int, Int) {
+    func pixelated(_ x: Int, _ y: Int) -> [Double] {
       var sx = clamp(x, width - 1)
       var sy = y
       if block >= 2 {
         sx = sx / block * block + block / 2
         sy = sy / block * block + block / 2
       }
-      return source(clamp(sx, width - 1), clamp(sy, height - 1))
+      return picture[clamp(sy, height - 1) * width + clamp(sx, width - 1)]
     }
-    func banded(_ x: Int, _ y: Int, _ shift: Int) -> (Int, Int, Int) {
+    func banded(_ x: Int, _ y: Int, _ shift: Int) -> [Double] {
       pixelated(clamp(clamp(x, width - 1) - shift, width - 1), y)
     }
     func toByte(_ v: Double) -> UInt8 { UInt8((min(max(v, 0), 1) * 255 + 0.5).rounded(.down)) }
@@ -2220,9 +2283,9 @@ class VideoEffectTests: XCTestCase {
       let dark = frame.scanlines > 0 && (y % period) * 2 >= period
       for x in 0..<width {
         let center = banded(x, y, shift)
-        var r = Double(banded(x + split, y, shift).0) / 255
-        var g = Double(center.1) / 255
-        var b = Double(banded(x - split, y, shift).2) / 255
+        var r = banded(x + split, y, shift)[0]
+        var g = center[1]
+        var b = banded(x - split, y, shift)[2]
         if dark {
           let keep = 1 - frame.scanlines
           r *= keep
@@ -2350,6 +2413,34 @@ class VideoEffectTests: XCTestCase {
         noise: 0.4, noiseCellSize: 0.0625, noiseOffsetX: 64, noiseOffsetY: 1, invert: 1),
       0x0a1d_b883
     ),
+    (
+      "zoom and offset",
+      VideoEffectFrame(zoom: 0.3, offsetX: 0.05, offsetY: -0.03125),
+      0xd7ef_0dfc
+    ),
+    ("mirror", VideoEffectFrame(mirrorX: 0.5), 0x8eba_3800),
+    ("kaleidoscope", VideoEffectFrame(mirrorX: 0.35, mirrorY: 0.5), 0x15a0_01c0),
+    ("tiles", VideoEffectFrame(tiles: 2), 0x3271_0580),
+    ("zoomed tiles", VideoEffectFrame(zoom: 0.3, tiles: 2), 0xd3df_8920),
+    (
+      "wave",
+      VideoEffectFrame(waveAmplitude: 0.05, wavePeriod: 0.5, wavePhase: 0.125),
+      0xecd2_2b5b
+    ),
+    (
+      "backward wave",
+      VideoEffectFrame(waveAmplitude: -0.08, wavePeriod: 0.3, wavePhase: 0.9),
+      0xf1c3_cb72
+    ),
+    (
+      "geometry under everything",
+      VideoEffectFrame(
+        pixelSize: 0.125, rgbShift: 0.05, scanlines: 0.25, scanlinePeriod: 0.25,
+        bands: [VideoEffectBand(top: 0.25, bottom: 0.5, shift: 0.2)], zoom: 0.4, offsetX: 0.02,
+        offsetY: 0.01, mirrorX: 0.35, mirrorY: 0.5, tiles: 2, waveAmplitude: 0.04,
+        wavePeriod: 0.75, wavePhase: 0.4),
+      0x380b_579d
+    ),
   ]
 
   func testReferenceMatchesTheSharedGoldens() {
@@ -2361,6 +2452,9 @@ class VideoEffectTests: XCTestCase {
   func testCoreImageStageMatchesTheSpec() {
     // An odd block exercises the other half of CIPixellate's grid offset.
     let frames = goldens.map { ($0.0, $0.1) } + [("odd block", VideoEffectFrame(pixelSize: 0.2))]
+    // The geometry interpolates with the GPU's bilinear filtering, whose
+    // weights are rounded, so it can land one step away from the spec; the
+    // steps after it copy whole pixels and add nothing to that.
     for (name, frame) in frames {
       let expected = reference(frame)
       let actual = render(applyVideoEffect(to: sourceImage(), frame))
@@ -2423,6 +2517,25 @@ class VideoEffectTests: XCTestCase {
     XCTAssertEqual(merged.noiseOffsetX, 9)
     XCTAssertEqual(merged.bands, vhs.bands)
     XCTAssertEqual(VideoEffectConfig.resolve(effects, atUs: 1_000), pixelate)
+  }
+
+  func testMergeCombinesTheGeometryLikeDart() {
+    let shake = VideoEffectFrame(zoom: 0.04, offsetX: 0.01, offsetY: -0.02)
+    let split = VideoEffectFrame(zoom: 0.3, mirrorX: 0.2, tiles: 2)
+    let wave = VideoEffectFrame(waveAmplitude: -0.03, wavePeriod: 0.5, wavePhase: 0.1)
+    let weakWave = VideoEffectFrame(
+      mirrorX: 0.5, waveAmplitude: 0.01, wavePeriod: 0.9, wavePhase: 0.7)
+    let merged = shake.merged(with: split).merged(with: wave).merged(with: weakWave)
+    XCTAssertEqual(merged.zoom, 0.34, accuracy: 1e-12)
+    XCTAssertEqual(merged.offsetX, 0.01, accuracy: 1e-12)
+    XCTAssertEqual(merged.offsetY, -0.02, accuracy: 1e-12)
+    XCTAssertEqual(merged.mirrorX, 0.5)
+    XCTAssertEqual(merged.tiles, 2)
+    XCTAssertEqual(merged.waveAmplitude, -0.03)
+    XCTAssertEqual(merged.wavePeriod, 0.5)
+    XCTAssertEqual(merged.wavePhase, 0.1)
+    XCTAssertFalse(VideoEffectFrame(tiles: 2).isIdentity)
+    XCTAssertTrue(VideoEffectFrame(tiles: 1, waveAmplitude: 0.1).isIdentity)
   }
 
   func testMergeCombinesTonesLikeDart() {

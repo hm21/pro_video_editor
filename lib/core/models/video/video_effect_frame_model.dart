@@ -47,15 +47,21 @@ class VideoEffectBand {
 
 /// The pixel operations a [VideoEffect] applies to one frame.
 ///
-/// Every renderer applies them in the same order: pixelate, shift the
-/// [bands], split the color channels, darken the scanlines, add the noise,
-/// tone the colors ([sepia], [brightness], [invert], [flash]), then darken the
-/// edges ([vignette]). The colors are clamped to 0..1 after the noise and
-/// again after the tones, not between the tones.
+/// Every renderer applies them in the same order. First the geometry, in three
+/// stages: zoom, move and mirror the picture ([zoom], [offsetX], [offsetY],
+/// [mirrorX], [mirrorY]), repeat it in a grid ([tiles]), then bend its rows
+/// along a wave ([waveAmplitude]). Then pixelate, shift the [bands], split the
+/// color channels, darken the scanlines, add the noise, tone the colors
+/// ([sepia], [brightness], [invert], [flash]), and darken the edges
+/// ([vignette]). The colors are clamped to 0..1 after the noise and again
+/// after the tones, not between the tones.
 ///
 /// Sizes are fractions of the frame, so a preview and an export at another
 /// resolution show the same picture; each renderer rounds them to whole pixels
-/// with `floor(fraction * size + 0.5)`.
+/// with `floor(fraction * size + 0.5)`. Only the geometry moves the picture by
+/// fractions of a pixel: each of its stages reads the picture the stage before
+/// produced with bilinear filtering, repeating the edge pixels beyond the
+/// frame.
 ///
 /// A [VideoEffect] produces one of these for every point in time; the native
 /// renderers only ever see frames, so the look of an effect is defined once,
@@ -79,6 +85,15 @@ class VideoEffectFrame {
     this.flash = 0,
     this.vignette = 0,
     this.vignetteRadius = 0,
+    this.zoom = 0,
+    this.offsetX = 0,
+    this.offsetY = 0,
+    this.mirrorX = 0,
+    this.mirrorY = 0,
+    this.tiles = 0,
+    this.waveAmplitude = 0,
+    this.wavePeriod = 0,
+    this.wavePhase = 0,
   });
 
   /// Reads a frame written by [toList], starting at [offset].
@@ -107,6 +122,15 @@ class VideoEffectFrame {
       flash: values[offset + _toneOffset + 3],
       vignette: values[offset + _toneOffset + 4],
       vignetteRadius: values[offset + _toneOffset + 5],
+      zoom: values[offset + _geometryOffset],
+      offsetX: values[offset + _geometryOffset + 1],
+      offsetY: values[offset + _geometryOffset + 2],
+      mirrorX: values[offset + _geometryOffset + 3],
+      mirrorY: values[offset + _geometryOffset + 4],
+      tiles: values[offset + _geometryOffset + 5].round(),
+      waveAmplitude: values[offset + _geometryOffset + 6],
+      wavePeriod: values[offset + _geometryOffset + 7],
+      wavePhase: values[offset + _geometryOffset + 8],
     );
   }
 
@@ -119,11 +143,24 @@ class VideoEffectFrame {
   /// The edge length of the repeating noise tile, in noise cells.
   static const int noiseTileSize = 128;
 
+  /// The most times [tiles] repeats the picture across and down.
+  static const int maxTiles = 2;
+
+  /// The straight segments each wave of [waveAmplitude] is drawn with.
+  static const int waveSegments = 16;
+
+  /// The shortest [wavePeriod] renderers draw; a shorter one is drawn this
+  /// tall.
+  static const double minWavePeriod = 0.1;
+
   /// Where the tone values start in [toList], after the bands.
   static const int _toneOffset = 9 + maxBands * 3;
 
+  /// Where the geometry values start in [toList], after the tones.
+  static const int _geometryOffset = _toneOffset + 6;
+
   /// The number of values in [toList].
-  static const int stride = _toneOffset + 6;
+  static const int stride = _geometryOffset + 9;
 
   /// The edge of a pixelation block, as a fraction of the frame width.
   ///
@@ -203,6 +240,64 @@ class VideoEffectFrame {
   /// the corners. Renderers clamp it to `0..0.99`.
   final double vignetteRadius;
 
+  /// How far the picture is magnified around the frame center: it is scaled
+  /// by `1 + zoom`. Renderers treat a negative value as 0.
+  ///
+  /// The first geometry stage zooms, moves ([offsetX], [offsetY]) and mirrors
+  /// ([mirrorX], [mirrorY]) the picture. With `p` the center of a pixel,
+  /// after the mirror, `c` the frame center and `o` the offsets in pixels,
+  /// the pixel shows the picture at `(p - c - o) / (1 + zoom) + c`.
+  final double zoom;
+
+  /// How far the zoomed picture moves to the right, as a fraction of the
+  /// frame width. Negative values move it to the left.
+  ///
+  /// Where the picture no longer covers the frame its edge pixels repeat; a
+  /// [zoom] of at least twice the offset keeps the edges out of view.
+  final double offsetX;
+
+  /// How far the zoomed picture moves down, as a fraction of the frame
+  /// height. See [offsetX].
+  final double offsetY;
+
+  /// How much of the frame, from the right edge, shows the mirror image of
+  /// what is left of it: 0.5 mirrors the left half onto the right one.
+  ///
+  /// Rounded to whole pixels and to at most half the frame width, `m`: from
+  /// column `width - m` on, column `x` shows column `2 * (width - m) - 1 - x`.
+  final double mirrorX;
+
+  /// How much of the frame, from the bottom edge, shows the mirror image of
+  /// what is above it. See [mirrorX].
+  final double mirrorY;
+
+  /// How many times the picture repeats across and down: 2 shows it four
+  /// times, at half its size, in a 2×2 grid. 0 and 1 are off; renderers treat
+  /// anything above [maxTiles] as [maxTiles].
+  ///
+  /// The second geometry stage: the pixel whose center is `p` shows the
+  /// zoomed and mirrored picture at `(p * 2) % size`.
+  final int tiles;
+
+  /// How far the rows bend sideways along a wave, as a fraction of the frame
+  /// width. Positive values bend the first crest to the right.
+  ///
+  /// The last geometry stage: the row whose center is `y` pixels below the
+  /// top edge moves right by `waveAmplitude * width * w(t)`, with
+  /// `t = waveSegments * (y / (wavePeriod * height) + wavePhase)` and `w`
+  /// running straight from `sin(2π k / waveSegments)` at every whole
+  /// `t = k` to the next: a sine drawn with [waveSegments] straight segments
+  /// per wave, which every renderer can draw exactly.
+  final double waveAmplitude;
+
+  /// The height of one wave, as a fraction of the frame height. A wave is
+  /// off at 0 or less, and drawn at least [minWavePeriod] tall.
+  final double wavePeriod;
+
+  /// Where the wave starts, in waves. Raising it between frames rolls the
+  /// wave up the picture.
+  final double wavePhase;
+
   /// Whether this frame leaves the picture unchanged.
   bool get isIdentity =>
       pixelSize <= 0 &&
@@ -214,7 +309,14 @@ class VideoEffectFrame {
       brightness == 0 &&
       invert <= 0 &&
       flash <= 0 &&
-      vignette <= 0;
+      vignette <= 0 &&
+      zoom <= 0 &&
+      offsetX == 0 &&
+      offsetY == 0 &&
+      mirrorX <= 0 &&
+      mirrorY <= 0 &&
+      tiles < 2 &&
+      (waveAmplitude == 0 || wavePeriod <= 0);
 
   /// Combines this frame with [other], for effects that overlap in time.
   ///
@@ -222,13 +324,18 @@ class VideoEffectFrame {
   /// scanlines and the stronger noise win with their own sizes, and the bands
   /// of this frame come before those of [other], up to [maxBands]. Of the
   /// tones, the stronger sepia, invert and flash win, the brightness changes
-  /// add up, and the stronger vignette wins with its own radius.
+  /// add up, and the stronger vignette wins with its own radius. Of the
+  /// geometry, the zooms and the offsets add up, the larger mirrors and tiles
+  /// win, and the stronger wave wins with its own period and phase.
   VideoEffectFrame merge(VideoEffectFrame other) {
     if (other.isIdentity) return this;
     if (isIdentity) return other;
     final strongerScanlines = other.scanlines > scanlines ? other : this;
     final strongerNoise = other.noise > noise ? other : this;
     final strongerVignette = other.vignette > vignette ? other : this;
+    final strongerWave = other.waveAmplitude.abs() > waveAmplitude.abs()
+        ? other
+        : this;
     return VideoEffectFrame(
       pixelSize: math.max(pixelSize, other.pixelSize),
       rgbShift: rgbShift + other.rgbShift,
@@ -245,6 +352,15 @@ class VideoEffectFrame {
       flash: math.max(flash, other.flash),
       vignette: strongerVignette.vignette,
       vignetteRadius: strongerVignette.vignetteRadius,
+      zoom: zoom + other.zoom,
+      offsetX: offsetX + other.offsetX,
+      offsetY: offsetY + other.offsetY,
+      mirrorX: math.max(mirrorX, other.mirrorX),
+      mirrorY: math.max(mirrorY, other.mirrorY),
+      tiles: math.max(tiles, other.tiles),
+      waveAmplitude: strongerWave.waveAmplitude,
+      wavePeriod: strongerWave.wavePeriod,
+      wavePhase: strongerWave.wavePhase,
     );
   }
 
@@ -253,7 +369,8 @@ class VideoEffectFrame {
   /// `pixelSize, rgbShift, scanlines, scanlinePeriod, noise, noiseCellSize,
   /// noiseOffsetX, noiseOffsetY, bandCount`, then `top, bottom, shift` for
   /// each of the [maxBands] bands, zero-filled, then `sepia, brightness,
-  /// invert, flash, vignette, vignetteRadius`.
+  /// invert, flash, vignette, vignetteRadius`, then `zoom, offsetX, offsetY,
+  /// mirrorX, mirrorY, tiles, waveAmplitude, wavePeriod, wavePhase`.
   List<double> toList() {
     final values = List<double>.filled(stride, 0)
       ..[0] = pixelSize
@@ -276,7 +393,16 @@ class VideoEffectFrame {
       ..[_toneOffset + 2] = invert
       ..[_toneOffset + 3] = flash
       ..[_toneOffset + 4] = vignette
-      ..[_toneOffset + 5] = vignetteRadius;
+      ..[_toneOffset + 5] = vignetteRadius
+      ..[_geometryOffset] = zoom
+      ..[_geometryOffset + 1] = offsetX
+      ..[_geometryOffset + 2] = offsetY
+      ..[_geometryOffset + 3] = mirrorX
+      ..[_geometryOffset + 4] = mirrorY
+      ..[_geometryOffset + 5] = tiles.toDouble()
+      ..[_geometryOffset + 6] = waveAmplitude
+      ..[_geometryOffset + 7] = wavePeriod
+      ..[_geometryOffset + 8] = wavePhase;
     return values;
   }
 
@@ -297,10 +423,19 @@ class VideoEffectFrame {
       other.invert == invert &&
       other.flash == flash &&
       other.vignette == vignette &&
-      other.vignetteRadius == vignetteRadius;
+      other.vignetteRadius == vignetteRadius &&
+      other.zoom == zoom &&
+      other.offsetX == offsetX &&
+      other.offsetY == offsetY &&
+      other.mirrorX == mirrorX &&
+      other.mirrorY == mirrorY &&
+      other.tiles == tiles &&
+      other.waveAmplitude == waveAmplitude &&
+      other.wavePeriod == wavePeriod &&
+      other.wavePhase == wavePhase;
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     pixelSize,
     rgbShift,
     scanlines,
@@ -316,7 +451,16 @@ class VideoEffectFrame {
     flash,
     vignette,
     vignetteRadius,
-  );
+    zoom,
+    offsetX,
+    offsetY,
+    mirrorX,
+    mirrorY,
+    tiles,
+    waveAmplitude,
+    wavePeriod,
+    wavePhase,
+  ]);
 
   @override
   String toString() =>
@@ -325,5 +469,8 @@ class VideoEffectFrame {
       'noise: $noise, noiseCellSize: $noiseCellSize, '
       'noiseOffset: ($noiseOffsetX, $noiseOffsetY), bands: $bands, '
       'sepia: $sepia, brightness: $brightness, invert: $invert, '
-      'flash: $flash, vignette: $vignette, vignetteRadius: $vignetteRadius)';
+      'flash: $flash, vignette: $vignette, vignetteRadius: $vignetteRadius, '
+      'zoom: $zoom, offset: ($offsetX, $offsetY), '
+      'mirror: ($mirrorX, $mirrorY), tiles: $tiles, '
+      'wave: ($waveAmplitude, $wavePeriod, $wavePhase))';
 }

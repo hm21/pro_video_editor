@@ -141,6 +141,54 @@ internal class VideoEffectMathTest {
             0xd027ba,
         ),
         Golden(
+            "zoom and offset",
+            VideoEffectFrame(zoom = 0.3, offsetX = 0.05, offsetY = -0.03125),
+            0xd7ef0dfc,
+            0x364c51,
+        ),
+        Golden("mirror", VideoEffectFrame(mirrorX = 0.5), 0x8eba3800, 0xfb2fe1),
+        Golden(
+            "kaleidoscope",
+            VideoEffectFrame(mirrorX = 0.35, mirrorY = 0.5),
+            0x15a001c0,
+            0xfb2fe1,
+        ),
+        Golden("tiles", VideoEffectFrame(tiles = 2), 0x32710580, 0x4e3360),
+        Golden("zoomed tiles", VideoEffectFrame(zoom = 0.3, tiles = 2), 0xd3df8920, 0x5e1929),
+        Golden(
+            "wave",
+            VideoEffectFrame(waveAmplitude = 0.05, wavePeriod = 0.5, wavePhase = 0.125),
+            0xecd22b5b,
+            0x9635e4,
+        ),
+        Golden(
+            "backward wave",
+            VideoEffectFrame(waveAmplitude = -0.08, wavePeriod = 0.3, wavePhase = 0.9),
+            0xf1c3cb72,
+            0x4248ee,
+        ),
+        Golden(
+            "geometry under everything",
+            VideoEffectFrame(
+                pixelSize = 0.125,
+                rgbShift = 0.05,
+                scanlines = 0.25,
+                scanlinePeriod = 0.25,
+                bands = listOf(VideoEffectBand(0.25, 0.5, 0.2)),
+                zoom = 0.4,
+                offsetX = 0.02,
+                offsetY = 0.01,
+                mirrorX = 0.35,
+                mirrorY = 0.5,
+                tiles = 2,
+                waveAmplitude = 0.04,
+                wavePeriod = 0.75,
+                wavePhase = 0.4,
+            ),
+            0x380b579d,
+            0x919022,
+        ),
+        Golden(
             "negative over noise",
             VideoEffectFrame(
                 noise = 0.4,
@@ -224,6 +272,54 @@ internal class VideoEffectMathTest {
         assertTrue(factor(0, 0) < factor(0, 7))
         // Symmetric about both center lines.
         assertEquals(factor(0, 0), factor(width - 1, height - 1), 1e-12)
+    }
+
+    @Test
+    fun mirror_showsTheLeftHalfMirroredOnTheRight() {
+        val out = VideoEffectMath.apply(source, width, height, VideoEffectFrame(mirrorX = 0.5))
+        for (y in 0 until height) for (x in 0 until width / 2) {
+            assertEquals(source[y * width + x], out[y * width + x], "($x, $y)")
+            assertEquals(source[y * width + x], out[y * width + width - 1 - x], "mirror of ($x, $y)")
+        }
+    }
+
+    @Test
+    fun tiles_showTheWholePictureAtHalfSizeInEachQuarter() {
+        val out = VideoEffectMath.apply(source, width, height, VideoEffectFrame(tiles = 2))
+        // Each pixel of a quarter averages a 2x2 block of the source.
+        fun channel(p: Int, shift: Int) = (p shr shift) and 0xFF
+        for ((x, y) in listOf(0 to 0, 5 to 3, 11 to 7)) {
+            for (shift in intArrayOf(16, 8, 0)) {
+                val block = listOf(0 to 0, 1 to 0, 0 to 1, 1 to 1).sumOf { (dx, dy) ->
+                    channel(source[(2 * y + dy) * width + 2 * x + dx], shift)
+                }
+                for ((qx, qy) in listOf(0 to 0, 12 to 0, 0 to 8, 12 to 8)) {
+                    val actual = channel(out[(qy + y) * width + qx + x], shift)
+                    assertTrue(
+                        kotlin.math.abs(actual - block / 4.0) <= 0.5 + 1e-9,
+                        "($x, $y) in the quarter at ($qx, $qy): $actual for ${block / 4.0}",
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun wave_movesEachRowByTheWaveAtItsCenter() {
+        // Row 0's center, half a pixel down, sits on the crest of the wave:
+        // t = (0.5 / 8 + 0.1875) * 16 = 4, where the sine is 1.
+        val frame = VideoEffectFrame(waveAmplitude = 1.0 / 24, wavePeriod = 0.5, wavePhase = 0.1875)
+        assertEquals(1.0, VideoEffectMath.waveShift(0.5, width, height, frame))
+        val out = VideoEffectMath.apply(source, width, height, frame)
+        // The row moves one pixel right and repeats its edge pixel.
+        assertEquals(source[0], out[0])
+        for (x in 1 until width) assertEquals(source[x - 1], out[x], "column $x")
+        // Between knots the wave runs straight: halfway to the next one.
+        assertEquals(
+            (1.0 + kotlin.math.sin(2 * Math.PI * 5 / 16)) / 2,
+            VideoEffectMath.waveShift(0.75, width, height, frame),
+            1e-12,
+        )
     }
 
     @Test
