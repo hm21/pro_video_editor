@@ -197,6 +197,44 @@ internal class VideoEffectMathTest {
             0xa5991b,
         ),
         Golden(
+            "glow",
+            VideoEffectFrame(glow = 1.0, glowThreshold = 0.5, glowRadius = 0.125),
+            0x0ccf5e16,
+            0xfb48e3,
+        ),
+        Golden(
+            "wide glow over tones",
+            VideoEffectFrame(
+                sepia = 0.5,
+                brightness = 0.2,
+                vignette = 0.8,
+                vignetteRadius = 0.2,
+                glow = 1.2,
+                glowThreshold = 0.3,
+                glowRadius = 0.25,
+            ),
+            0xc3ac6681,
+            0xf69ed4,
+        ),
+        Golden(
+            "glow without blur",
+            VideoEffectFrame(glow = 0.8, glowThreshold = 0.6, glowRadius = 0.01),
+            0x366f3b63,
+            0xfb2fe1,
+        ),
+        Golden(
+            "glow over a strong vignette",
+            VideoEffectFrame(
+                vignette = 1.5,
+                vignetteRadius = 0.1,
+                glow = 0.9,
+                glowThreshold = 0.4,
+                glowRadius = 0.0625,
+            ),
+            0x23502818,
+            0xd029bb,
+        ),
+        Golden(
             "negative over noise",
             VideoEffectFrame(
                 noise = 0.4,
@@ -328,6 +366,40 @@ internal class VideoEffectMathTest {
             VideoEffectMath.waveShift(0.75, width, height, frame),
             1e-12,
         )
+    }
+
+    @Test
+    fun glow_spreadsBrightAreasIntoDarkNeighbours() {
+        // A white column on black glows into the columns beside it, fading out.
+        val stripe = IntArray(width * height) { i ->
+            if (i % width in 10..11) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
+        }
+        val frame = VideoEffectFrame(glow = 1.0, glowThreshold = 0.5, glowRadius = 0.125)
+        val out = VideoEffectMath.apply(stripe, width, height, frame)
+        fun red(x: Int) = (out[8 * width + x] shr 16) and 0xFF
+        assertEquals(255, red(10))
+        assertTrue(red(9) > red(8) && red(8) > red(7) && red(7) > red(6), "${(4..12).map(::red)}")
+        assertTrue(red(3) < 4, "${red(3)}")
+        // Symmetric around the column.
+        assertEquals(red(8), red(13))
+        // Below the threshold nothing glows.
+        val dim = IntArray(width * height) { i ->
+            if (i % width in 10..11) 0xFF707070.toInt() else 0xFF000000.toInt()
+        }
+        assertTrue(VideoEffectMath.apply(dim, width, height, frame).contentEquals(dim))
+    }
+
+    @Test
+    fun gaussianBlur_keepsTheTotalAndRepeatsTheEdges() {
+        val values = DoubleArray(width * height) { if (it == 8 * width + 12) 1.0 else 0.0 }
+        val blurred = VideoEffectMath.gaussianBlur(values, width, height, 2.0)
+        assertEquals(1.0, blurred.sum(), 1e-9)
+        assertTrue(blurred[8 * width + 12] < 0.1)
+        // A constant image stays constant, edges included.
+        val flat = DoubleArray(width * height) { 0.4 }
+        assertTrue(VideoEffectMath.gaussianBlur(flat, width, height, 3.0).all { kotlin.math.abs(it - 0.4) < 1e-12 })
+        // Below half a pixel there is no blur.
+        assertTrue(VideoEffectMath.gaussianBlur(values, width, height, 0.4).contentEquals(values))
     }
 
     @Test

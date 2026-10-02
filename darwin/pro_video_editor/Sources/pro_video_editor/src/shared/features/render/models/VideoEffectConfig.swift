@@ -43,6 +43,9 @@ public struct VideoEffectFrame: Sendable, Equatable {
   var waveAmplitude: Double = 0
   var wavePeriod: Double = 0
   var wavePhase: Double = 0
+  var glow: Double = 0
+  var glowThreshold: Double = 0
+  var glowRadius: Double = 0
 
   /// The most bands a frame carries.
   static let maxBands = 4
@@ -62,8 +65,11 @@ public struct VideoEffectFrame: Sendable, Equatable {
   /// Where the geometry values start in a frame of the table, after the tones.
   private static let geometryOffset = toneOffset + 6
 
+  /// Where the glow values start in a frame of the table, after the geometry.
+  private static let glowOffset = geometryOffset + 9
+
   /// Values per frame in the table Dart sends.
-  static let stride = geometryOffset + 9
+  static let stride = glowOffset + 3
 
   /// A frame that leaves the picture unchanged.
   static let none = VideoEffectFrame()
@@ -73,7 +79,7 @@ public struct VideoEffectFrame: Sendable, Equatable {
     pixelSize <= 0 && rgbShift == 0 && scanlines <= 0 && noise <= 0
       && bands.allSatisfy { $0.shift == 0 || $0.bottom <= $0.top }
       && sepia <= 0 && brightness == 0 && invert <= 0 && flash <= 0 && vignette <= 0
-      && !hasTransform && tiles < 2 && !hasWave
+      && !hasTransform && tiles < 2 && !hasWave && glow <= 0
   }
 
   /// Whether the second geometry stage zooms, moves or mirrors the picture.
@@ -96,6 +102,7 @@ public struct VideoEffectFrame: Sendable, Equatable {
     let strongerNoise = other.noise > noise ? other : self
     let strongerVignette = other.vignette > vignette ? other : self
     let strongerWave = other.waveStrength > waveStrength ? other : self
+    let strongerGlow = other.glow > glow ? other : self
     return VideoEffectFrame(
       pixelSize: max(pixelSize, other.pixelSize),
       rgbShift: rgbShift + other.rgbShift,
@@ -120,7 +127,10 @@ public struct VideoEffectFrame: Sendable, Equatable {
       tiles: max(tiles, other.tiles),
       waveAmplitude: strongerWave.waveAmplitude,
       wavePeriod: strongerWave.wavePeriod,
-      wavePhase: strongerWave.wavePhase)
+      wavePhase: strongerWave.wavePhase,
+      glow: strongerGlow.glow,
+      glowThreshold: strongerGlow.glowThreshold,
+      glowRadius: strongerGlow.glowRadius)
   }
 
   /// Reads the frame that starts at `offset` of a Dart-built table.
@@ -155,7 +165,10 @@ public struct VideoEffectFrame: Sendable, Equatable {
       tiles: Int(values[offset + geometryOffset + 5].rounded()),
       waveAmplitude: values[offset + geometryOffset + 6],
       wavePeriod: values[offset + geometryOffset + 7],
-      wavePhase: values[offset + geometryOffset + 8])
+      wavePhase: values[offset + geometryOffset + 8],
+      glow: values[offset + glowOffset],
+      glowThreshold: values[offset + glowOffset + 1],
+      glowRadius: values[offset + glowOffset + 2])
   }
 }
 

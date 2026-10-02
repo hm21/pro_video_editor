@@ -46,13 +46,16 @@ data class VideoEffectFrame(
     val waveAmplitude: Double = 0.0,
     val wavePeriod: Double = 0.0,
     val wavePhase: Double = 0.0,
+    val glow: Double = 0.0,
+    val glowThreshold: Double = 0.0,
+    val glowRadius: Double = 0.0,
 ) {
     /** Whether the frame leaves the picture unchanged. */
     val isIdentity: Boolean
         get() = pixelSize <= 0.0 && rgbShift == 0.0 && scanlines <= 0.0 &&
             noise <= 0.0 && bands.all { it.shift == 0.0 || it.bottom <= it.top } &&
             sepia <= 0.0 && brightness == 0.0 && invert <= 0.0 && flash <= 0.0 &&
-            vignette <= 0.0 && !hasTransform && tiles < 2 && !hasWave
+            vignette <= 0.0 && !hasTransform && tiles < 2 && !hasWave && glow <= 0.0
 
     /** Whether the second geometry stage zooms, moves or mirrors the picture. */
     val hasTransform: Boolean
@@ -77,6 +80,7 @@ data class VideoEffectFrame(
         val strongerNoise = if (other.noise > noise) other else this
         val strongerVignette = if (other.vignette > vignette) other else this
         val strongerWave = if (other.waveStrength > waveStrength) other else this
+        val strongerGlow = if (other.glow > glow) other else this
         return VideoEffectFrame(
             pixelSize = max(pixelSize, other.pixelSize),
             rgbShift = rgbShift + other.rgbShift,
@@ -102,6 +106,9 @@ data class VideoEffectFrame(
             waveAmplitude = strongerWave.waveAmplitude,
             wavePeriod = strongerWave.wavePeriod,
             wavePhase = strongerWave.wavePhase,
+            glow = strongerGlow.glow,
+            glowThreshold = strongerGlow.glowThreshold,
+            glowRadius = strongerGlow.glowRadius,
         )
     }
 
@@ -124,8 +131,11 @@ data class VideoEffectFrame(
         /** Where the geometry values start in a frame of the table, after the tones. */
         private const val GEOMETRY_OFFSET = TONE_OFFSET + 6
 
+        /** Where the glow values start in a frame of the table, after the geometry. */
+        private const val GLOW_OFFSET = GEOMETRY_OFFSET + 9
+
         /** Values per frame in the table Dart sends. */
-        const val STRIDE = GEOMETRY_OFFSET + 9
+        const val STRIDE = GLOW_OFFSET + 3
 
         /** A frame that leaves the picture unchanged. */
         val NONE = VideoEffectFrame()
@@ -164,6 +174,9 @@ data class VideoEffectFrame(
                 waveAmplitude = values[offset + GEOMETRY_OFFSET + 6],
                 wavePeriod = values[offset + GEOMETRY_OFFSET + 7],
                 wavePhase = values[offset + GEOMETRY_OFFSET + 8],
+                glow = values[offset + GLOW_OFFSET],
+                glowThreshold = values[offset + GLOW_OFFSET + 1],
+                glowRadius = values[offset + GLOW_OFFSET + 2],
             )
         }
     }

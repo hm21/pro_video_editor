@@ -24,6 +24,8 @@ import ch.waio.pro_video_editor.src.features.render.models.VideoEffectFrame
  * interpolated, and the geometry stages filter bilinearly in float math,
  * which is what lets Apple's Core Image stage produce the same pixels.
  *
+ * A frame with a glow takes extra passes, see [VideoEffectGlow].
+ *
  * The effect runs ahead of a clip's `SpeedChangeEffect`, so a clip with a
  * [playbackSpeed] hands it timestamps from before the speed change. They are
  * moved to where that effect puts the frame, so the effects follow the
@@ -70,6 +72,9 @@ class VideoEffectGlEffect(
         /** The first timestamp of the current input stream, where a speed change anchors. */
         private var streamStartUs = C.TIME_UNSET
 
+        /** The glow passes, created the first time a frame glows. */
+        private var glow: VideoEffectGlow? = null
+
         init {
             try {
                 glProgram = GlProgram(VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE)
@@ -92,6 +97,11 @@ class VideoEffectGlEffect(
                     presentationTimeUs, streamStartUs, playbackSpeed
                 )
                 val frame = VideoEffectConfig.resolve(effects, timelineUs)
+                // A glowing frame is drawn into the glow's intermediate first,
+                // which then screens the halo over it into the output.
+                val glow = if (frame.glow > 0.0) glow ?: VideoEffectGlow().also { glow = it } else null
+                val outputFbo = if (glow != null) VideoEffectGlow.currentFramebuffer() else 0
+                glow?.beginPicture(width, height)
                 glProgram.use()
                 glProgram.setSamplerTexIdUniform("uTexSampler", inputTexId, 0)
                 glProgram.setFloatsUniform(
@@ -108,6 +118,7 @@ class VideoEffectGlEffect(
                 // No blending: the draw covers the cleared target entirely.
                 GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
                 GlUtil.checkGlError()
+                glow?.finish(frame, outputFbo)
             } catch (e: Exception) {
                 throw VideoFrameProcessingException(e, presentationTimeUs)
             }
@@ -176,6 +187,7 @@ class VideoEffectGlEffect(
         override fun release() {
             super.release()
             try {
+                glow?.release()
                 glProgram.delete()
             } catch (e: Exception) {
                 throw VideoFrameProcessingException(e)

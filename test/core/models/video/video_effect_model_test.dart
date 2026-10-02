@@ -43,6 +43,7 @@ void main() {
           VideoEffectType.splitScreen,
         );
         expect(const VideoEffect.wave().type, VideoEffectType.wave);
+        expect(const VideoEffect.glow().type, VideoEffectType.glow);
         expect(const VideoEffect.vhs().intensity, 1);
       });
 
@@ -519,7 +520,8 @@ void main() {
           '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
           '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
           '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
-          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000',
+          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 0.000000',
         );
         expect(
           pin(const VideoEffect.filmGrain()),
@@ -528,7 +530,8 @@ void main() {
           '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
           '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
           '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
-          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000',
+          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 0.000000',
         );
         expect(
           pin(const VideoEffect.signalInterference()),
@@ -537,7 +540,8 @@ void main() {
           '0.535222, 0.552951, 0.064531, 0.790203, 0.800302, 0.041834, '
           '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
           '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
-          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000',
+          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 0.000000',
         );
         expect(
           pin(const VideoEffect.crt()),
@@ -546,7 +550,8 @@ void main() {
           '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
           '0.000000, 0.000000, 0.000000, 0.000000, 0.120000, 0.000000, '
           '0.000000, 0.350000, 0.450000, 0.000000, 0.000000, 0.000000, '
-          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000',
+          '0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
+          '0.000000, 0.000000, 0.000000',
         );
       });
 
@@ -653,7 +658,7 @@ void main() {
         String pin(VideoEffect effect) => effect
             .frameAt(const Duration(milliseconds: 100))
             .toList()
-            .sublist(27)
+            .sublist(27, 36)
             .map((v) => v.toStringAsFixed(6))
             .join(', ');
         expect(
@@ -676,6 +681,18 @@ void main() {
           '0.055000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, '
           '0.025000, 0.500000, 0.041667',
         );
+      });
+
+      test('glow is constant, stronger and lower with more intensity', () {
+        const effect = VideoEffect.glow(intensity: 0.5);
+        final frame = effect.frameAt(Duration.zero);
+        expect(frame.glow, closeTo(1, 1e-12));
+        expect(frame.glowThreshold, closeTo(0.71, 1e-12));
+        expect(frame.glowRadius, 0.035);
+        expect(effect.frameAt(const Duration(seconds: 7)), frame);
+        final full = const VideoEffect.glow().frameAt(Duration.zero);
+        expect(full.glow, closeTo(2, 1e-12));
+        expect(full.glowThreshold, closeTo(0.64, 1e-12));
       });
 
       // Pins the look: renderers only play frames back, so a change here is a
@@ -714,6 +731,8 @@ void main() {
           // zoom, offsetX, offsetY, mirrorX, mirrorY, tiles, waveAmplitude,
           // wavePeriod, wavePhase
           for (var i = 0; i < 9; i++) '0.000000',
+          // glow, glowThreshold, glowRadius
+          for (var i = 0; i < 3; i++) '0.000000',
         ]);
       });
     });

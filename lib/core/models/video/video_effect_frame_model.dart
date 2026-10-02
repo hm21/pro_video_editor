@@ -52,9 +52,10 @@ class VideoEffectBand {
 /// the picture ([zoom], [offsetX], [offsetY], [mirrorX], [mirrorY]), then
 /// repeat it in a grid ([tiles]). Then pixelate, shift the [bands], split the
 /// color channels, darken the scanlines, add the noise, tone the colors
-/// ([sepia], [brightness], [invert], [flash]), and darken the edges
-/// ([vignette]). The colors are clamped to 0..1 after the noise and again
-/// after the tones, not between the tones.
+/// ([sepia], [brightness], [invert], [flash]), darken the edges ([vignette]),
+/// and finally let the bright areas glow ([glow]). The colors are clamped to
+/// 0..1 after the noise, again after the tones, and after the glow, not
+/// between the tones.
 ///
 /// Sizes are fractions of the frame, so a preview and an export at another
 /// resolution show the same picture; each renderer rounds them to whole pixels
@@ -94,6 +95,9 @@ class VideoEffectFrame {
     this.waveAmplitude = 0,
     this.wavePeriod = 0,
     this.wavePhase = 0,
+    this.glow = 0,
+    this.glowThreshold = 0,
+    this.glowRadius = 0,
   });
 
   /// Reads a frame written by [toList], starting at [offset].
@@ -131,6 +135,9 @@ class VideoEffectFrame {
       waveAmplitude: values[offset + _geometryOffset + 6],
       wavePeriod: values[offset + _geometryOffset + 7],
       wavePhase: values[offset + _geometryOffset + 8],
+      glow: values[offset + _glowOffset],
+      glowThreshold: values[offset + _glowOffset + 1],
+      glowRadius: values[offset + _glowOffset + 2],
     );
   }
 
@@ -159,8 +166,11 @@ class VideoEffectFrame {
   /// Where the geometry values start in [toList], after the tones.
   static const int _geometryOffset = _toneOffset + 6;
 
+  /// Where the glow values start in [toList], after the geometry.
+  static const int _glowOffset = _geometryOffset + 9;
+
   /// The number of values in [toList].
-  static const int stride = _geometryOffset + 9;
+  static const int stride = _glowOffset + 3;
 
   /// The edge of a pixelation block, as a fraction of the frame width.
   ///
@@ -302,6 +312,28 @@ class VideoEffectFrame {
   /// wave up the picture.
   final double wavePhase;
 
+  /// How strongly the bright areas glow into their surroundings, from 0 (off).
+  ///
+  /// The last step. Only pixels brighter than [glowThreshold] glow, keeping
+  /// their color: with the brightness `l = 0.2126 r + 0.7152 g + 0.0722 b`
+  /// and `k = clamp((l - t) / (1 - t), 0, 1)`, `halo` is
+  /// `min(1, glow * k * rgb)` blurred with a Gaussian whose standard deviation
+  /// is [glowRadius] of the frame height, repeating the edge pixels beyond the
+  /// frame. The halo is laid over the picture with a screen blend,
+  /// `rgb = 1 - (1 - rgb) * (1 - halo)`.
+  ///
+  /// The blur is the one step renderers may approximate, for example at a
+  /// lower resolution; they stay within a few steps of the exact blur.
+  final double glow;
+
+  /// The brightness from which a pixel starts to glow, from 0 to 1.
+  /// Renderers clamp it to `0..0.99`.
+  final double glowThreshold;
+
+  /// The standard deviation of the [glow]'s blur, as a fraction of the frame
+  /// height. Below half a pixel the halo is not blurred.
+  final double glowRadius;
+
   /// Whether this frame leaves the picture unchanged.
   bool get isIdentity =>
       pixelSize <= 0 &&
@@ -320,7 +352,8 @@ class VideoEffectFrame {
       mirrorX <= 0 &&
       mirrorY <= 0 &&
       tiles < 2 &&
-      _waveStrength == 0;
+      _waveStrength == 0 &&
+      glow <= 0;
 
   /// How far the wave bends the rows, or 0 while it is off.
   double get _waveStrength => wavePeriod > 0 ? waveAmplitude.abs() : 0;
@@ -334,7 +367,8 @@ class VideoEffectFrame {
   /// add up, and the stronger vignette wins with its own radius. Of the
   /// geometry, the zooms and the offsets add up, the larger mirrors and tiles
   /// win, and the stronger wave wins with its own period and phase; a wave
-  /// without a period counts as none.
+  /// without a period counts as none. The stronger glow wins with its own
+  /// threshold and radius.
   VideoEffectFrame merge(VideoEffectFrame other) {
     if (other.isIdentity) return this;
     if (isIdentity) return other;
@@ -342,6 +376,7 @@ class VideoEffectFrame {
     final strongerNoise = other.noise > noise ? other : this;
     final strongerVignette = other.vignette > vignette ? other : this;
     final strongerWave = other._waveStrength > _waveStrength ? other : this;
+    final strongerGlow = other.glow > glow ? other : this;
     return VideoEffectFrame(
       pixelSize: math.max(pixelSize, other.pixelSize),
       rgbShift: rgbShift + other.rgbShift,
@@ -367,6 +402,9 @@ class VideoEffectFrame {
       waveAmplitude: strongerWave.waveAmplitude,
       wavePeriod: strongerWave.wavePeriod,
       wavePhase: strongerWave.wavePhase,
+      glow: strongerGlow.glow,
+      glowThreshold: strongerGlow.glowThreshold,
+      glowRadius: strongerGlow.glowRadius,
     );
   }
 
@@ -376,7 +414,8 @@ class VideoEffectFrame {
   /// noiseOffsetX, noiseOffsetY, bandCount`, then `top, bottom, shift` for
   /// each of the [maxBands] bands, zero-filled, then `sepia, brightness,
   /// invert, flash, vignette, vignetteRadius`, then `zoom, offsetX, offsetY,
-  /// mirrorX, mirrorY, tiles, waveAmplitude, wavePeriod, wavePhase`.
+  /// mirrorX, mirrorY, tiles, waveAmplitude, wavePeriod, wavePhase`, then
+  /// `glow, glowThreshold, glowRadius`.
   List<double> toList() {
     final values = List<double>.filled(stride, 0)
       ..[0] = pixelSize
@@ -408,7 +447,10 @@ class VideoEffectFrame {
       ..[_geometryOffset + 5] = tiles.toDouble()
       ..[_geometryOffset + 6] = waveAmplitude
       ..[_geometryOffset + 7] = wavePeriod
-      ..[_geometryOffset + 8] = wavePhase;
+      ..[_geometryOffset + 8] = wavePhase
+      ..[_glowOffset] = glow
+      ..[_glowOffset + 1] = glowThreshold
+      ..[_glowOffset + 2] = glowRadius;
     return values;
   }
 
@@ -438,7 +480,10 @@ class VideoEffectFrame {
       other.tiles == tiles &&
       other.waveAmplitude == waveAmplitude &&
       other.wavePeriod == wavePeriod &&
-      other.wavePhase == wavePhase;
+      other.wavePhase == wavePhase &&
+      other.glow == glow &&
+      other.glowThreshold == glowThreshold &&
+      other.glowRadius == glowRadius;
 
   @override
   int get hashCode => Object.hashAll([
@@ -466,6 +511,9 @@ class VideoEffectFrame {
     waveAmplitude,
     wavePeriod,
     wavePhase,
+    glow,
+    glowThreshold,
+    glowRadius,
   ]);
 
   @override
@@ -478,5 +526,6 @@ class VideoEffectFrame {
       'flash: $flash, vignette: $vignette, vignetteRadius: $vignetteRadius, '
       'zoom: $zoom, offset: ($offsetX, $offsetY), '
       'mirror: ($mirrorX, $mirrorY), tiles: $tiles, '
-      'wave: ($waveAmplitude, $wavePeriod, $wavePhase))';
+      'wave: ($waveAmplitude, $wavePeriod, $wavePhase), '
+      'glow: $glow, glowThreshold: $glowThreshold, glowRadius: $glowRadius)';
 }

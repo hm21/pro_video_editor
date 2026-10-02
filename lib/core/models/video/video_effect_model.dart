@@ -94,6 +94,11 @@ enum VideoEffectType {
   /// heat haze or a view through water. It is zoomed in slightly, so its
   /// edges stay out of view.
   wave,
+
+  /// The brightest areas bloom softly into their surroundings, like stage
+  /// lights or a sunset through a soft lens; the rest of the picture stays as
+  /// it is. More intensity glows stronger and from slightly darker areas on.
+  glow,
 }
 
 /// A visual effect that distorts the picture itself, unlike a [ColorFilter],
@@ -367,6 +372,18 @@ class VideoEffect with TimeRangeMixin {
     Duration? endTime,
   }) : this(
          type: VideoEffectType.wave,
+         intensity: intensity,
+         startTime: startTime,
+         endTime: endTime,
+       );
+
+  /// Creates a [VideoEffectType.glow] effect.
+  const VideoEffect.glow({
+    double intensity = 1,
+    Duration? startTime,
+    Duration? endTime,
+  }) : this(
+         type: VideoEffectType.glow,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,

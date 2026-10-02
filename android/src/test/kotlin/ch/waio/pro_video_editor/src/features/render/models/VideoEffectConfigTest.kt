@@ -119,10 +119,10 @@ internal class VideoEffectConfigTest {
     }
 
     @Test
-    fun fromArray_readsTheTonesAfterTheBandsAndTheGeometryLast() {
+    fun fromArray_readsTheTonesTheGeometryAndTheGlowInOrder() {
         val values = DoubleArray(VideoEffectFrame.STRIDE) { (it + 1) / 100.0 }
         values[8] = 0.0
-        values[VideoEffectFrame.STRIDE - 4] = 2.0
+        values[32] = 2.0
         val frame = VideoEffectFrame.fromArray(values, 0)
         assertEquals(
             listOf(0.22, 0.23, 0.24, 0.25, 0.26, 0.27),
@@ -136,7 +136,8 @@ internal class VideoEffectConfigTest {
             ),
         )
         assertEquals(2, frame.tiles)
-        assertEquals(36, VideoEffectFrame.STRIDE)
+        assertEquals(listOf(0.37, 0.38, 0.39), listOf(frame.glow, frame.glowThreshold, frame.glowRadius))
+        assertEquals(39, VideoEffectFrame.STRIDE)
     }
 
     @Test
@@ -167,5 +168,15 @@ internal class VideoEffectConfigTest {
         assertEquals(false, VideoEffectFrame(tiles = 2).isIdentity)
         assertEquals(false, VideoEffectFrame(waveAmplitude = 0.1, wavePeriod = 0.5).isIdentity)
         assertEquals(true, VideoEffectFrame(tiles = 1, waveAmplitude = 0.1).isIdentity)
+    }
+
+    @Test
+    fun merge_keepsTheStrongerGlowWithItsThresholdAndRadius() {
+        val soft = VideoEffectFrame(glow = 0.4, glowThreshold = 0.7, glowRadius = 0.05)
+        val strong = VideoEffectFrame(glow = 0.9, glowThreshold = 0.5, glowRadius = 0.02, sepia = 0.3)
+        val merged = soft.merge(strong)
+        assertEquals(listOf(0.9, 0.5, 0.02), listOf(merged.glow, merged.glowThreshold, merged.glowRadius))
+        assertEquals(merged, strong.merge(soft).copy(sepia = 0.3))
+        assertEquals(false, VideoEffectFrame(glow = 0.1).isIdentity)
     }
 }

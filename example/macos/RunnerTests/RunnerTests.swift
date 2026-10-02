@@ -2277,7 +2277,7 @@ class VideoEffectTests: XCTestCase {
     }
     func toByte(_ v: Double) -> UInt8 { UInt8((min(max(v, 0), 1) * 255 + 0.5).rounded(.down)) }
 
-    var out = [UInt8](repeating: 255, count: width * height * 4)
+    var channels = [[Double]](repeating: [Double](repeating: 0, count: width * height), count: 3)
     for y in 0..<height {
       let shift = bands.first { y >= $0.0 && y < $0.1 }?.2 ?? 0
       let dark = frame.scanlines > 0 && (y % period) * 2 >= period
@@ -2336,10 +2336,56 @@ class VideoEffectTests: XCTestCase {
           g *= keep
           b *= keep
         }
-        let i = (y * width + x) * 4
-        out[i] = toByte(r)
-        out[i + 1] = toByte(g)
-        out[i + 2] = toByte(b)
+        clampAll()
+        channels[0][y * width + x] = r
+        channels[1][y * width + x] = g
+        channels[2][y * width + x] = b
+      }
+    }
+    if frame.glow > 0 {
+      let t = min(max(frame.glowThreshold, 0), 0.99)
+      let k = (0..<(width * height)).map { i in
+        let l = 0.2126 * channels[0][i] + 0.7152 * channels[1][i] + 0.0722 * channels[2][i]
+        return min(max((l - t) / (1 - t), 0), 1)
+      }
+      channels = channels.map { channel in
+        let bright = zip(channel, k).map { min(1, frame.glow * $1 * $0) }
+        let halo = gaussianBlur(bright, sigma: frame.glowRadius * Double(height))
+        return zip(channel, halo).map { min(max(1 - (1 - $0) * (1 - $1), 0), 1) }
+      }
+    }
+    var out = [UInt8](repeating: 255, count: width * height * 4)
+    for i in 0..<(width * height) {
+      out[i * 4] = toByte(channels[0][i])
+      out[i * 4 + 1] = toByte(channels[1][i])
+      out[i * 4 + 2] = toByte(channels[2][i])
+    }
+    return out
+  }
+
+  /// Kotlin's `VideoEffectMath.gaussianBlur`: rows, then columns, a normalized
+  /// kernel reaching `ceil(3 * sigma)` pixels, edges repeated.
+  private func gaussianBlur(_ values: [Double], sigma: Double) -> [Double] {
+    guard sigma >= 0.5 else { return values }
+    let reach = Int((3 * sigma).rounded(.up))
+    var kernel = (0...(2 * reach)).map { exp(-Double(($0 - reach) * ($0 - reach)) / (2 * sigma * sigma)) }
+    let total = kernel.reduce(0, +)
+    kernel = kernel.map { $0 / total }
+    func clamp(_ v: Int, _ high: Int) -> Int { min(max(v, 0), high) }
+    var rows = [Double](repeating: 0, count: values.count)
+    for y in 0..<height {
+      for x in 0..<width {
+        var sum = 0.0
+        for k in 0..<kernel.count { sum += kernel[k] * values[y * width + clamp(x + k - reach, width - 1)] }
+        rows[y * width + x] = sum
+      }
+    }
+    var out = [Double](repeating: 0, count: values.count)
+    for y in 0..<height {
+      for x in 0..<width {
+        var sum = 0.0
+        for k in 0..<kernel.count { sum += kernel[k] * rows[clamp(y + k - reach, height - 1) * width + x] }
+        out[y * width + x] = sum
       }
     }
     return out
@@ -2448,9 +2494,44 @@ class VideoEffectTests: XCTestCase {
     ),
   ]
 
+  /// The glow goldens, apart because Core Image's own Gaussian may differ from
+  /// the spec's by a step or two.
+  private let glowGoldens: [(String, VideoEffectFrame, UInt32)] = [
+    ("glow", VideoEffectFrame(glow: 1, glowThreshold: 0.5, glowRadius: 0.125), 0x0ccf_5e16),
+    (
+      "wide glow over tones",
+      VideoEffectFrame(
+        sepia: 0.5, brightness: 0.2, vignette: 0.8, vignetteRadius: 0.2, glow: 1.2,
+        glowThreshold: 0.3, glowRadius: 0.25),
+      0xc3ac_6681
+    ),
+    (
+      "glow without blur", VideoEffectFrame(glow: 0.8, glowThreshold: 0.6, glowRadius: 0.01),
+      0x366f_3b63
+    ),
+    (
+      "glow over a strong vignette",
+      VideoEffectFrame(
+        vignette: 1.5, vignetteRadius: 0.1, glow: 0.9, glowThreshold: 0.4, glowRadius: 0.0625),
+      0x2350_2818
+    ),
+  ]
+
   func testReferenceMatchesTheSharedGoldens() {
-    for (name, frame, golden) in goldens {
+    for (name, frame, golden) in goldens + glowGoldens {
       XCTAssertEqual(checksum(reference(frame)), golden, name)
+    }
+  }
+
+  func testCoreImageGlowStaysCloseToTheSpec() {
+    for (name, frame, _) in glowGoldens {
+      let expected = reference(frame)
+      let actual = render(applyVideoEffect(to: sourceImage(), frame))
+      var worst = 0
+      for i in 0..<expected.count where i % 4 != 3 {
+        worst = max(worst, abs(Int(expected[i]) - Int(actual[i])))
+      }
+      XCTAssertLessThanOrEqual(worst, 2, name)
     }
   }
 

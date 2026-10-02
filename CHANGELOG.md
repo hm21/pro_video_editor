@@ -1,3 +1,6 @@
+## 2.22.0
+- **FEAT**(android, iOS, macOS): A `glow` video effect: the brightest areas bloom softly into their surroundings while the rest of the picture stays as it is. `VideoEffectFrame` gains `glow`, `glowThreshold` and `glowRadius`, applied as the last step, so `VideoEffectFrame.toList` grows from 36 to 39 values. `VideoEffectPreview` shows the glow live as well.
+
 ## 2.21.0
 - **FEAT**(android, iOS, macOS): Four more video effects: `blockGlitch` (the picture breaks into coarse blocks while slices slip sideways, in short bursts), `filmGrain` (fine, calm grain), `signalInterference` (thin flickering slices that shift sideways, with bursts of noise) and `crt` (strong scanlines and a slight color fringe, without movement).
 - **FEAT**(android, iOS, macOS): Video effects that move or rearrange the picture: `shake`, `zoomPulse`, `mirror`, `kaleidoscope`, `splitScreen` and `wave`. `VideoEffectFrame` gains a geometry stage for them, ahead of every other operation: a wave (`waveAmplitude`, `wavePeriod`, `wavePhase`), then `zoom`, `offsetX`/`offsetY`, `mirrorX`/`mirrorY`, then `tiles`, so `VideoEffectFrame.toList` grows from 27 to 36 values. `VideoEffectPreview` shows them live as well.

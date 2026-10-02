@@ -2,6 +2,8 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import ch.waio.pro_video_editor.src.features.render.models.VideoEffectFrame
 import kotlin.math.PI
+import kotlin.math.ceil
+import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -61,13 +63,29 @@ import kotlin.math.sqrt
  *    `t = clamp((d - r) / (1 - r), 0, 1)`, rgb is multiplied by
  *    `1 - vignette * t²`.
  *
- * The colors are clamped to 0..1 after step 5 and after step 6, not between
- * the tones. Alpha is the unshifted pixel's, after the geometry.
+ * 8. **Glow**, over the whole picture of step 7: with
+ *    `t = clamp(glowThreshold, 0, 0.99)`, the brightness
+ *    `l = 0.2126 r + 0.7152 g + 0.0722 b` and `k = clamp((l - t) / (1 - t), 0, 1)`,
+ *    each channel's `min(1, glow * k * c)` is blurred by [gaussianBlur] with a
+ *    standard deviation of `glowRadius * height` pixels into `halo`; then
+ *    `c = 1 - (1 - c) * (1 - halo)`.
+ *
+ * The colors are clamped to 0..1 after steps 5, 6, 7 and 8, not between the
+ * tones. Alpha is the unshifted pixel's, after the geometry.
+ *
+ * The glow's blur is the one step renderers may approximate: the GLES shader
+ * blurs at a lower resolution and Core Image uses its own Gaussian, both
+ * within a few steps of [gaussianBlur].
  */
 object VideoEffectMath {
 
     /** Edge length of the repeating noise tile, in cells. */
     const val NOISE_TILE = 128
+
+    /** The weights of red, green and blue in the glow's brightness (Rec. 709). */
+    const val LUMA_RED = 0.2126
+    const val LUMA_GREEN = 0.7152
+    const val LUMA_BLUE = 0.0722
 
     /** The sepia tone matrix, row by row: red, green and blue out of `(r, g, b)`. */
     val SEPIA = arrayOf(
@@ -86,6 +104,34 @@ object VideoEffectMath {
         val dy = (2.0 * y + 1.0) / height - 1.0
         val t = ((sqrt((dx * dx + dy * dy) / 2.0) - r) / (1.0 - r)).coerceIn(0.0, 1.0)
         return 1.0 - amount * t * t
+    }
+
+    /**
+     * Blurs one channel of a [width] by [height] image with a Gaussian of
+     * standard deviation [sigma] pixels, in rows and then in columns. The
+     * kernel reaches `ceil(3 * sigma)` pixels to each side and is normalized;
+     * pixels beyond the frame repeat the edge. Below half a pixel it returns
+     * [values] unchanged.
+     */
+    fun gaussianBlur(values: DoubleArray, width: Int, height: Int, sigma: Double): DoubleArray {
+        if (sigma < 0.5) return values
+        val reach = ceil(3 * sigma).toInt()
+        val kernel = DoubleArray(2 * reach + 1) { exp(-((it - reach) * (it - reach)) / (2 * sigma * sigma)) }
+        val total = kernel.sum()
+        for (i in kernel.indices) kernel[i] /= total
+        val rows = DoubleArray(width * height)
+        for (y in 0 until height) for (x in 0 until width) {
+            var sum = 0.0
+            for (k in kernel.indices) sum += kernel[k] * values[y * width + (x + k - reach).coerceIn(0, width - 1)]
+            rows[y * width + x] = sum
+        }
+        val out = DoubleArray(width * height)
+        for (y in 0 until height) for (x in 0 until width) {
+            var sum = 0.0
+            for (k in kernel.indices) sum += kernel[k] * rows[(y + k - reach).coerceIn(0, height - 1) * width + x]
+            out[y * width + x] = sum
+        }
+        return out
     }
 
     /** Rounds a fraction of [size] to whole pixels: `floor(f * size + 0.5)`. */
@@ -211,7 +257,10 @@ object VideoEffectMath {
             return pixelated((sx - shift).coerceIn(0, width - 1), y)
         }
 
-        val out = IntArray(width * height)
+        val red = DoubleArray(width * height)
+        val green = DoubleArray(width * height)
+        val blue = DoubleArray(width * height)
+        val alpha = IntArray(width * height)
         for (y in 0 until height) {
             val shift = bands.firstOrNull { y >= it.first && y < it.second }?.third ?: 0
             val dark = frame.scanlines > 0.0 && (y % scanPeriod) * 2 >= scanPeriod
@@ -251,11 +300,40 @@ object VideoEffectMath {
                     val keep = vignetteFactor(x, y, width, height, frame.vignette, frame.vignetteRadius)
                     r *= keep; g *= keep; b *= keep
                 }
-                out[y * width + x] = (toByte(picture[center + 3]) shl 24) or
-                    (toByte(r) shl 16) or (toByte(g) shl 8) or toByte(b)
+                val i = y * width + x
+                red[i] = r.coerceIn(0.0, 1.0)
+                green[i] = g.coerceIn(0.0, 1.0)
+                blue[i] = b.coerceIn(0.0, 1.0)
+                alpha[i] = toByte(picture[center + 3]) shl 24
             }
         }
-        return out
+        if (frame.glow > 0.0) glow(red, green, blue, width, height, frame)
+        return IntArray(width * height) {
+            alpha[it] or (toByte(red[it]) shl 16) or (toByte(green[it]) shl 8) or toByte(blue[it])
+        }
+    }
+
+    /** Step 8, in place. */
+    private fun glow(
+        red: DoubleArray,
+        green: DoubleArray,
+        blue: DoubleArray,
+        width: Int,
+        height: Int,
+        frame: VideoEffectFrame,
+    ) {
+        val t = frame.glowThreshold.coerceIn(0.0, 0.99)
+        val k = DoubleArray(red.size) {
+            ((LUMA_RED * red[it] + LUMA_GREEN * green[it] + LUMA_BLUE * blue[it] - t) / (1.0 - t))
+                .coerceIn(0.0, 1.0)
+        }
+        for (channel in arrayOf(red, green, blue)) {
+            val bright = DoubleArray(channel.size) { min(1.0, frame.glow * k[it] * channel[it]) }
+            val halo = gaussianBlur(bright, width, height, frame.glowRadius * height)
+            for (i in channel.indices) {
+                channel[i] = (1.0 - (1.0 - channel[i]) * (1.0 - halo[i])).coerceIn(0.0, 1.0)
+            }
+        }
     }
 
     private fun toByte(value: Double): Int = (value.coerceIn(0.0, 1.0) * 255.0).roundToInt()

@@ -32,6 +32,9 @@ void main() {
       waveAmplitude: -0.03,
       wavePeriod: 0.5,
       wavePhase: 0.4,
+      glow: 0.8,
+      glowThreshold: 0.55,
+      glowRadius: 0.02,
     );
 
     group('toList', () {
@@ -52,7 +55,8 @@ void main() {
         expect(values.sublist(9, 15), [0.1, 0.2, 0.05, 0.5, 0.7, -0.1]);
         expect(values.sublist(15, 21), everyElement(0));
         expect(values.sublist(21, 27), [0.5, -0.02, 0.25, 0.75, 0.6, 0.3]);
-        expect(values.sublist(27), [
+        expect(values.sublist(36), [0.8, 0.55, 0.02]);
+        expect(values.sublist(27, 36), [
           0.2,
           0.01,
           -0.02,
@@ -101,6 +105,7 @@ void main() {
         expect(const VideoEffectFrame(noise: 0.1).isIdentity, isFalse);
         expect(const VideoEffectFrame(brightness: -0.01).isIdentity, isFalse);
         expect(const VideoEffectFrame(vignette: 0.1).isIdentity, isFalse);
+        expect(const VideoEffectFrame(glow: 0.1).isIdentity, isFalse);
         expect(frame.isIdentity, isFalse);
       });
 
@@ -211,6 +216,20 @@ void main() {
             (0.02, 0.5, 0.3),
           );
         }
+      });
+
+      test('keeps the stronger glow with its threshold and radius', () {
+        const soft = VideoEffectFrame(
+          glow: 0.4,
+          glowThreshold: 0.7,
+          glowRadius: 0.05,
+        );
+        final merged = frame.merge(soft);
+        expect(
+          (merged.glow, merged.glowThreshold, merged.glowRadius),
+          (0.8, 0.55, 0.02),
+        );
+        expect(soft.merge(frame).glow, 0.8);
       });
 
       test('keeps the first maxBands bands', () {

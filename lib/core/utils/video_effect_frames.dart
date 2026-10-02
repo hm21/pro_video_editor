@@ -34,7 +34,8 @@ int videoEffectCycleLengthOf(VideoEffectType type) => switch (type) {
   VideoEffectType.crt ||
   VideoEffectType.mirror ||
   VideoEffectType.kaleidoscope ||
-  VideoEffectType.splitScreen => 1,
+  VideoEffectType.splitScreen ||
+  VideoEffectType.glow => 1,
 };
 
 /// The bucket of [localTime] into [type]'s cycle.
@@ -106,6 +107,14 @@ VideoEffectFrame videoEffectFrameFor(
       zoom: 1 - intensity,
     ),
     VideoEffectType.wave => _wave(intensity, bucket),
+    // Only the brightest parts glow, from about two thirds of full brightness
+    // on; more intensity glows stronger and from a little lower. The halo
+    // spreads over about a tenth of the frame height.
+    VideoEffectType.glow => VideoEffectFrame(
+      glow: 2 * intensity,
+      glowThreshold: 0.78 - 0.14 * intensity,
+      glowRadius: 0.035,
+    ),
   };
 }
 

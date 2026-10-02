@@ -112,6 +112,10 @@ func applyVideoEffect(to image: CIImage, _ frame: VideoEffectFrame) -> CIImage {
     result = vignetting(result, frame, rect: rect)
   }
 
+  if frame.glow > 0 {
+    result = glowing(clamped(result), frame, rect: rect)
+  }
+
   return result.transformed(by: toTopOrigin.inverted()).cropped(to: extent)
 }
 
@@ -482,6 +486,66 @@ private func vignetting(_ image: CIImage, _ frame: VideoEffectFrame, rect: CGRec
   return factor.applyingFilter(
     "CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: image]
   ).cropped(to: rect)
+}
+
+/// Lets the brightest areas glow: with the brightness
+/// `l = 0.2126 r + 0.7152 g + 0.0722 b` and `k = clamp((l - t) / (1 - t), 0, 1)`,
+/// `min(1, glow * k * c)` is blurred into a halo and screened over the picture,
+/// `1 - (1 - c) * (1 - halo)`.
+///
+/// The blur is Core Image's own Gaussian with the spec's standard deviation.
+/// Its kernel is not documented and differs from the spec's by a step or two,
+/// which the spec allows for this one operation.
+private func glowing(_ image: CIImage, _ frame: VideoEffectFrame, rect: CGRect) -> CIImage {
+  let t = min(max(frame.glowThreshold, 0), 0.99)
+  // k in every channel: the brightness, moved and stretched so the threshold
+  // lands on 0 and full brightness on 1, then clamped.
+  let gain = CGFloat(1 / (1 - t))
+  let bias = CGFloat(-t / (1 - t))
+  let luma = CIVector(x: 0.2126 * gain, y: 0.7152 * gain, z: 0.0722 * gain, w: 0)
+  let k = image.applyingFilter(
+    "CIColorMatrix",
+    parameters: [
+      "inputRVector": luma,
+      "inputGVector": luma,
+      "inputBVector": luma,
+      "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+      "inputBiasVector": CIVector(x: bias, y: bias, z: bias, w: 1),
+    ]
+  ).applyingFilter(
+    "CIColorClamp",
+    parameters: [
+      "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 1),
+      "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1),
+    ])
+  let amount = CGFloat(frame.glow)
+  let bright = k.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: image])
+    .applyingFilter(
+      "CIColorMatrix",
+      parameters: [
+        "inputRVector": CIVector(x: amount, y: 0, z: 0, w: 0),
+        "inputGVector": CIVector(x: 0, y: amount, z: 0, w: 0),
+        "inputBVector": CIVector(x: 0, y: 0, z: amount, w: 0),
+        "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+        "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+      ]
+    ).applyingFilter(
+      "CIColorClamp",
+      parameters: [
+        "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 1),
+        "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1),
+      ])
+  let sigma = frame.glowRadius * Double(rect.height)
+  // The intermediate drops the nearest sampling the steps before set up, which
+  // the blur would otherwise inherit and resample with.
+  let halo =
+    sigma < 0.5
+    ? bright.cropped(to: rect)
+    : bright.cropped(to: rect).insertingIntermediate().samplingLinear().clampedToExtent()
+      .applyingGaussianBlur(sigma: sigma).cropped(to: rect)
+  return clamped(
+    halo.applyingFilter("CIScreenBlendMode", parameters: [kCIInputBackgroundImageKey: image])
+      .cropped(to: rect))
 }
 
 /// Clamps red, green and blue to 0..1, where the spec clamps between steps.

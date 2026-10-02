@@ -1,6 +1,6 @@
 name: pro_video_editor
 description: "A Flutter video editor: Seamlessly enhance your videos with user-friendly editing features."
-version: 2.21.0
+version: 2.22.0
 homepage: https://github.com/hm21/pro_video_editor/
 repository: https://github.com/hm21/pro_video_editor/
 documentation: https://github.com/hm21/pro_video_editor/
@@ -49,6 +49,7 @@ flutter:
   # The live preview of `VideoEffect`s; see `VideoEffectPreview`.
   shaders:
     - shaders/video_effect.frag
+    - shaders/video_effect_glow.frag
 
   plugin:
     platforms:

@@ -401,6 +401,30 @@ void main() {
     });
   });
 
+  group('glow', () {
+    late EditorVideo stripe;
+
+    setUpAll(() async {
+      stripe = await videoFromImage(await stripePng());
+    });
+
+    testWidgets('spreads the white stripe into the black beside it', (
+      tester,
+    ) async {
+      final out = await frameOf(
+        await render(stripe, const [VideoEffect.glow()]),
+        Duration.zero,
+      );
+      // The stripe spans x = 256..383. A blur of 0.025 * 360 = 9 pixels puts
+      // about a quarter of the stripe's halo six pixels outside it, which the
+      // screen blend turns into a grey of about 64.
+      expect(grey(pixel(out, 320, 180)), greaterThan(240));
+      expect(grey(pixel(out, 250, 180)), inInclusiveRange(35, 100));
+      expect(grey(pixel(out, 389, 180)), inInclusiveRange(35, 100));
+      expect(grey(pixel(out, 150, 180)), lessThan(12));
+    });
+  });
+
   group('tones', () {
     late EditorVideo darkGrey;
     late EditorVideo midGrey;
