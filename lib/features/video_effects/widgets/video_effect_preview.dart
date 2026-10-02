@@ -20,7 +20,9 @@ import '/core/models/video/video_effect_model.dart';
 ///
 /// A glow is screened over [child] through a [BackdropFilter], blurred with
 /// Flutter's own Gaussian, which stays close to the export's blur but not
-/// pixel-exact.
+/// pixel-exact. It glows from whatever is painted within the preview's
+/// bounds, so a [child] that leaves some of them transparent lets what lies
+/// behind it glow too; give it the video's aspect ratio.
 ///
 /// ```dart
 /// VideoEffectPreview(
@@ -115,7 +117,7 @@ class _VideoEffectPreviewState extends State<VideoEffectPreview> {
   /// changed. [rebuild] is false where a build follows anyway.
   void _update({bool rebuild = true}) {
     final frame = VideoEffect.resolve(widget.effects, widget.position.value);
-    final hasShader = _shader != null;
+    final hasShader = _shader != null || _glowShader != null;
     if (frame == _frame && hasShader == !frame.isIdentity) return;
 
     if (frame.isIdentity) {
@@ -140,12 +142,31 @@ class _VideoEffectPreviewState extends State<VideoEffectPreview> {
       return;
     }
 
+    final previous = _frame;
     _frame = frame;
-    _replaceShader(_VideoEffectShader.build(program, frame));
-    _replaceGlowShader(
-      frame.glow > 0 ? _VideoEffectShader.buildGlow(glowProgram, frame) : null,
+    // A frame that only glows skips the effect shader, which would leave the
+    // picture as it is.
+    _replaceShader(
+      _withoutGlow(frame).isIdentity
+          ? null
+          : _VideoEffectShader.build(program, frame),
     );
+    if (frame.glow <= 0) {
+      _replaceGlowShader(null);
+    } else if (_glowShader == null ||
+        frame.glow != previous.glow ||
+        frame.glowThreshold != previous.glowThreshold) {
+      _replaceGlowShader(_VideoEffectShader.buildGlow(glowProgram, frame));
+    }
     if (rebuild) _markNeedsBuild();
+  }
+
+  /// [frame] without its glow, the last three values of its table.
+  static VideoEffectFrame _withoutGlow(VideoEffectFrame frame) {
+    if (frame.glow <= 0) return frame;
+    final values = frame.toList()
+      ..fillRange(VideoEffectFrame.stride - 3, VideoEffectFrame.stride, 0);
+    return VideoEffectFrame.fromList(values);
   }
 
   /// Rebuilds, or schedules the rebuild when the position changed while the
@@ -188,10 +209,11 @@ class _VideoEffectPreviewState extends State<VideoEffectPreview> {
     final filter = _filter;
     final glowShader = _glowShader;
     final glowRadius = _frame.glowRadius;
-    // The clip bounds the area the glow's backdrop filter reads and draws.
-    // Every layer stays in the tree while it is off, so the player is never
-    // remounted.
+    // The clip bounds the area the glow's backdrop filter reads and draws, so
+    // it is only there while the frame glows. Every layer stays in the tree
+    // while it is off, so the player is never remounted.
     return ClipRect(
+      clipBehavior: glowShader == null ? Clip.none : Clip.hardEdge,
       child: Stack(
         alignment: Alignment.topLeft,
         fit: StackFit.passthrough,
@@ -222,8 +244,10 @@ class _VideoEffectPreviewState extends State<VideoEffectPreview> {
   }
 
   /// The halo: the bright pass blurred by [sigma] logical pixels. The blur
-  /// is bounded, so it reads only the preview's own pixels, as the export's
-  /// blur reads only the frame's.
+  /// is bounded to the preview, as the export's blur is to the frame. It
+  /// leaves out what lies beyond the edge where the export repeats the edge
+  /// pixels, so a thin bright line right at the edge glows less than in the
+  /// file.
   static ImageFilterConfig _glowFilter(ui.FragmentShader shader, double sigma) {
     final brightPass = ImageFilterConfig(ui.ImageFilter.shader(shader));
     if (sigma < 0.5) return brightPass;
