@@ -89,6 +89,8 @@ internal class VideoEffectGlow {
         )
         screenProgram.setFloatUniform("uScale", scale.toFloat())
         draw(screenProgram)
+        // The halo was bound on the second unit; hand the first back active.
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
     }
 
     fun release() {

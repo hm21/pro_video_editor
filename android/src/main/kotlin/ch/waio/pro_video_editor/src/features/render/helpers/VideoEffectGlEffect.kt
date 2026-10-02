@@ -187,8 +187,11 @@ class VideoEffectGlEffect(
         override fun release() {
             super.release()
             try {
-                glow?.release()
-                glProgram.delete()
+                try {
+                    glow?.release()
+                } finally {
+                    glProgram.delete()
+                }
             } catch (e: Exception) {
                 throw VideoFrameProcessingException(e)
             }
