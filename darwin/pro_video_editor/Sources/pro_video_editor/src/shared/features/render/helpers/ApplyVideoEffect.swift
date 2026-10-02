@@ -537,12 +537,13 @@ private func glowing(_ image: CIImage, _ frame: VideoEffectFrame, rect: CGRect) 
       ])
   let sigma = frame.glowRadius * Double(rect.height)
   // The intermediate drops the nearest sampling the steps before set up, which
-  // the blur would otherwise inherit and resample with.
+  // the blur would otherwise inherit and resample with. Like the geometry's,
+  // it is not cached: no other frame reuses it.
   let halo =
     sigma < 0.5
     ? bright.cropped(to: rect)
-    : bright.cropped(to: rect).insertingIntermediate().samplingLinear().clampedToExtent()
-      .applyingGaussianBlur(sigma: sigma).cropped(to: rect)
+    : bright.cropped(to: rect).insertingIntermediate(cache: false).samplingLinear()
+      .clampedToExtent().applyingGaussianBlur(sigma: sigma).cropped(to: rect)
   return clamped(
     halo.applyingFilter("CIScreenBlendMode", parameters: [kCIInputBackgroundImageKey: image])
       .cropped(to: rect))
