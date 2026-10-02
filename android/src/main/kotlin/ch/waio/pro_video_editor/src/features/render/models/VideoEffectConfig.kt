@@ -62,6 +62,10 @@ data class VideoEffectFrame(
     val hasWave: Boolean
         get() = waveAmplitude != 0.0 && wavePeriod > 0.0
 
+    /** How far the wave bends the rows, or 0 while it is off. */
+    private val waveStrength: Double
+        get() = if (hasWave) abs(waveAmplitude) else 0.0
+
     /**
      * Combines two frames of overlapping effects, exactly as the Dart
      * `VideoEffectFrame.merge` does.
@@ -72,8 +76,7 @@ data class VideoEffectFrame(
         val strongerScanlines = if (other.scanlines > scanlines) other else this
         val strongerNoise = if (other.noise > noise) other else this
         val strongerVignette = if (other.vignette > vignette) other else this
-        val strongerWave =
-            if (abs(other.waveAmplitude) > abs(waveAmplitude)) other else this
+        val strongerWave = if (other.waveStrength > waveStrength) other else this
         return VideoEffectFrame(
             pixelSize = max(pixelSize, other.pixelSize),
             rgbShift = rgbShift + other.rgbShift,

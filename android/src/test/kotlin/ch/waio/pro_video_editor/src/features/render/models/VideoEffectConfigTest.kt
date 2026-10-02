@@ -152,6 +152,11 @@ internal class VideoEffectConfigTest {
         assertEquals(0.5, merged.mirrorX)
         assertEquals(2, merged.tiles)
         assertEquals(listOf(-0.03, 0.5, 0.1), listOf(merged.waveAmplitude, merged.wavePeriod, merged.wavePhase))
+        // A wave without a period is off, however strong.
+        val off = VideoEffectFrame(zoom = 0.1, waveAmplitude = 0.05)
+        for (frame in listOf(wave.merge(off), off.merge(wave))) {
+            assertEquals(listOf(-0.03, 0.5, 0.1), listOf(frame.waveAmplitude, frame.wavePeriod, frame.wavePhase))
+        }
     }
 
     @Test

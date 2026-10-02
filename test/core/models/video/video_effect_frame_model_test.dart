@@ -198,6 +198,21 @@ void main() {
         );
       });
 
+      test('keeps a wave over a stronger one without a period', () {
+        const wave = VideoEffectFrame(
+          waveAmplitude: 0.02,
+          wavePeriod: 0.5,
+          wavePhase: 0.3,
+        );
+        const off = VideoEffectFrame(zoom: 0.1, waveAmplitude: 0.05);
+        for (final merged in [wave.merge(off), off.merge(wave)]) {
+          expect(
+            (merged.waveAmplitude, merged.wavePeriod, merged.wavePhase),
+            (0.02, 0.5, 0.3),
+          );
+        }
+      });
+
       test('keeps the first maxBands bands', () {
         const four = VideoEffectFrame(
           bands: [

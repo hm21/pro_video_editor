@@ -316,7 +316,10 @@ class VideoEffectFrame {
       mirrorX <= 0 &&
       mirrorY <= 0 &&
       tiles < 2 &&
-      (waveAmplitude == 0 || wavePeriod <= 0);
+      _waveStrength == 0;
+
+  /// How far the wave bends the rows, or 0 while it is off.
+  double get _waveStrength => wavePeriod > 0 ? waveAmplitude.abs() : 0;
 
   /// Combines this frame with [other], for effects that overlap in time.
   ///
@@ -326,16 +329,15 @@ class VideoEffectFrame {
   /// tones, the stronger sepia, invert and flash win, the brightness changes
   /// add up, and the stronger vignette wins with its own radius. Of the
   /// geometry, the zooms and the offsets add up, the larger mirrors and tiles
-  /// win, and the stronger wave wins with its own period and phase.
+  /// win, and the stronger wave wins with its own period and phase; a wave
+  /// without a period counts as none.
   VideoEffectFrame merge(VideoEffectFrame other) {
     if (other.isIdentity) return this;
     if (isIdentity) return other;
     final strongerScanlines = other.scanlines > scanlines ? other : this;
     final strongerNoise = other.noise > noise ? other : this;
     final strongerVignette = other.vignette > vignette ? other : this;
-    final strongerWave = other.waveAmplitude.abs() > waveAmplitude.abs()
-        ? other
-        : this;
+    final strongerWave = other._waveStrength > _waveStrength ? other : this;
     return VideoEffectFrame(
       pixelSize: math.max(pixelSize, other.pixelSize),
       rgbShift: rgbShift + other.rgbShift,

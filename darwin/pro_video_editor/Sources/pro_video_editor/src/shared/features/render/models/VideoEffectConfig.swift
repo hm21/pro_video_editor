@@ -84,6 +84,9 @@ public struct VideoEffectFrame: Sendable, Equatable {
   /// Whether the last geometry stage bends the rows.
   var hasWave: Bool { waveAmplitude != 0 && wavePeriod > 0 }
 
+  /// How far the wave bends the rows, or 0 while it is off.
+  private var waveStrength: Double { hasWave ? abs(waveAmplitude) : 0 }
+
   /// Combines two frames of overlapping effects, exactly as the Dart
   /// `VideoEffectFrame.merge` does.
   func merged(with other: VideoEffectFrame) -> VideoEffectFrame {
@@ -92,7 +95,7 @@ public struct VideoEffectFrame: Sendable, Equatable {
     let strongerScanlines = other.scanlines > scanlines ? other : self
     let strongerNoise = other.noise > noise ? other : self
     let strongerVignette = other.vignette > vignette ? other : self
-    let strongerWave = abs(other.waveAmplitude) > abs(waveAmplitude) ? other : self
+    let strongerWave = other.waveStrength > waveStrength ? other : self
     return VideoEffectFrame(
       pixelSize: max(pixelSize, other.pixelSize),
       rgbShift: rgbShift + other.rgbShift,

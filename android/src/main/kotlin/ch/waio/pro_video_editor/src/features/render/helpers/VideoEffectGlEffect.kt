@@ -285,7 +285,8 @@ class VideoEffectGlEffect(
                 "vec4 tiled(vec2 texel) {\n" +
                 "  if (uTiles < 1.5) return transformed(texel);\n" +
                 "  texel = clamp(texel, vec2(0.0), uSize - 1.0);\n" +
-                "  return transformedAt(mod((texel + 0.5) * 2.0, uSize));\n" +
+                "  vec2 doubled = texel * 2.0 + 1.0;\n" +
+                "  return transformedAt(vec2(imod(doubled.x, uSize.x), imod(doubled.y, uSize.y)));\n" +
                 "}\n" +
                 "vec4 tiledAt(vec2 p) {\n" +
                 "  vec2 t = p - 0.5;\n" +

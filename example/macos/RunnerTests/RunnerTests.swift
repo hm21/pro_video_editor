@@ -2476,6 +2476,24 @@ class VideoEffectTests: XCTestCase {
       render(applyVideoEffect(to: sourceImage(), frame)))
   }
 
+  func testWaveCoversEveryRow() {
+    // At this height and phase, segment boundaries worked out one segment at
+    // a time round apart and leave row 22 in no segment.
+    let w = 4
+    let h = 1080
+    let grey = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+      .cropped(to: CGRect(x: 0, y: 0, width: w, height: h))
+    let frame = VideoEffectFrame(waveAmplitude: 0.025, wavePeriod: 0.5, wavePhase: 1.0 / 48)
+    let result = applyVideoEffect(to: grey, frame)
+    var out = [UInt8](repeating: 0, count: w * h * 4)
+    context.render(
+      result, toBitmap: &out, rowBytes: w * 4, bounds: result.extent, format: .RGBA8,
+      colorSpace: nil)
+    for y in 0..<h {
+      XCTAssertEqual(out[y * w * 4 + 3], 255, "row \(y)")
+    }
+  }
+
   func testFromArgumentsReadsTheTableAndPicksFramesByTime() {
     let stride = VideoEffectFrame.stride
     var values = [Double](repeating: 0, count: stride * 3)
@@ -2534,6 +2552,13 @@ class VideoEffectTests: XCTestCase {
     XCTAssertEqual(merged.waveAmplitude, -0.03)
     XCTAssertEqual(merged.wavePeriod, 0.5)
     XCTAssertEqual(merged.wavePhase, 0.1)
+    // A wave without a period is off, however strong.
+    let off = VideoEffectFrame(zoom: 0.1, waveAmplitude: 0.05)
+    for frame in [wave.merged(with: off), off.merged(with: wave)] {
+      XCTAssertEqual(frame.waveAmplitude, -0.03)
+      XCTAssertEqual(frame.wavePeriod, 0.5)
+      XCTAssertEqual(frame.wavePhase, 0.1)
+    }
     XCTAssertFalse(VideoEffectFrame(tiles: 2).isIdentity)
     XCTAssertTrue(VideoEffectFrame(tiles: 1, waveAmplitude: 0.1).isIdentity)
   }

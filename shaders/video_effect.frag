@@ -1,7 +1,7 @@
 // Live preview of a VideoEffectFrame, for `VideoEffectPreview`.
 //
 // This is the third implementation of the effect pipeline. The other two are
-// the Android render shader (`VideoEffectShaderProgram.kt`) and the Apple Core
+// the Android render shader (`VideoEffectGlEffect.kt`) and the Apple Core
 // Image stage (`ApplyVideoEffect.swift`), and all three follow the same spec
 // (Kotlin's `VideoEffectMath`): the geometry stages (zoom, move and mirror;
 // tiles; wave), then pixelate, shift the bands, split the channels, darken the
@@ -132,11 +132,14 @@ vec4 transformedAt(vec2 p) {
   return sum;
 }
 
-// Geometry stage 2: the picture at half its size, four times.
+// Geometry stage 2: the picture at half its size, four times. The doubled
+// pixel center is a whole number, so `imod` keeps the middle column of an odd
+// width in the copy the spec puts it in.
 vec4 tiled(vec2 texel) {
   if (uTiles < 1.5) return transformed(texel);
   texel = clamp(texel, vec2(0.0), uSize - 1.0);
-  return transformedAt(mod((texel + 0.5) * 2.0, uSize));
+  vec2 doubled = texel * 2.0 + 1.0;
+  return transformedAt(vec2(imod(doubled.x, uSize.x), imod(doubled.y, uSize.y)));
 }
 
 // `sourceAt` over the tiled picture.

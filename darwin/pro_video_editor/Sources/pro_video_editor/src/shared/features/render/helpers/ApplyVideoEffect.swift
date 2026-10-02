@@ -75,7 +75,12 @@ func applyVideoEffect(to image: CIImage, _ frame: VideoEffectFrame) -> CIImage {
   let rect = CGRect(x: 0, y: 0, width: width, height: height)
   let toTopOrigin = CGAffineTransform(translationX: -extent.minX, y: -extent.minY)
     .concatenating(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: rect.height))
-  var result = image.transformed(by: toTopOrigin).cropped(to: rect)
+  // The geometry reads the source bilinearly and ends in nearest sampling
+  // itself; without it, the source is read nearest, so a frame whose extent
+  // is not on whole pixels is still copied pixel for pixel.
+  let hasGeometry = frame.hasTransform || frame.tiles >= 2 || frame.hasWave
+  var result = (hasGeometry ? image : image.samplingNearest())
+    .transformed(by: toTopOrigin).cropped(to: rect)
   result = applyingGeometry(result, frame, rect: rect).samplingNearest()
 
   let block = videoEffectPixels(frame.pixelSize, width)
@@ -117,6 +122,12 @@ func applyVideoEffect(to image: CIImage, _ frame: VideoEffectFrame) -> CIImage {
 /// otherwise fold one stage's transforms into the next stage's sampling, and
 /// into the nearest sampling of the steps after the geometry, which reads the
 /// source once with other weights than the spec's stage-by-stage filtering.
+/// That holds for the mirror after the zoom too, although it only moves whole
+/// pixels: without the zoom's intermediate the two together land several
+/// steps away from the spec.
+///
+/// The intermediates are not cached: every video frame is a new picture, so
+/// none would ever be reused, and they would only crowd out what is.
 private func applyingGeometry(_ image: CIImage, _ frame: VideoEffectFrame, rect: CGRect)
   -> CIImage
 {
@@ -132,16 +143,16 @@ private func applyingGeometry(_ image: CIImage, _ frame: VideoEffectFrame, rect:
           translationX: w / 2 + CGFloat(frame.offsetX) * w,
           y: h / 2 + CGFloat(frame.offsetY) * h))
     result = result.clampedToExtent().transformed(by: move).cropped(to: rect)
-      .insertingIntermediate()
+      .insertingIntermediate(cache: false)
   }
   if frame.mirrorX > 0 || frame.mirrorY > 0 {
-    result = mirroring(result, frame, rect: rect).insertingIntermediate()
+    result = mirroring(result, frame, rect: rect).insertingIntermediate(cache: false)
   }
   if frame.tiles >= 2 {
-    result = tiling(result, rect: rect).insertingIntermediate()
+    result = tiling(result, rect: rect).insertingIntermediate(cache: false)
   }
   if frame.hasWave {
-    result = waving(result, frame, rect: rect).insertingIntermediate()
+    result = waving(result, frame, rect: rect).insertingIntermediate(cache: false)
   }
   return result
 }
@@ -206,6 +217,10 @@ private func tiling(_ image: CIImage, rect: CGRect) -> CIImage {
 /// a shear. Every segment is the picture sheared by its line and cropped to
 /// the rows whose centers it covers; Core Image's bilinear filtering then reads
 /// each row exactly where the spec does.
+///
+/// Each row's segment is computed the way the spec computes it. Segment
+/// boundaries worked out per segment instead can round apart, which leaves a
+/// row in no segment, and empty.
 private func waving(_ image: CIImage, _ frame: VideoEffectFrame, rect: CGRect) -> CIImage {
   let width = Double(rect.width)
   let height = Int(rect.height)
@@ -215,22 +230,25 @@ private func waving(_ image: CIImage, _ frame: VideoEffectFrame, rect: CGRect) -
   func knot(_ k: Int) -> Double {
     frame.waveAmplitude * width * sin(2 * Double.pi * Double(k) / segments)
   }
-  let first = Int(((0.5 / period + frame.wavePhase) * segments).rounded(.down))
-  let last = Int(((Double(height) / period + frame.wavePhase) * segments).rounded(.down))
+  func segment(_ row: Int) -> Int {
+    Int((((Double(row) + 0.5) / period + frame.wavePhase) * segments).rounded(.down))
+  }
   let clamped = image.clampedToExtent()
   var result = CIImage.empty()
-  for k in first...max(first, last) {
-    // Segment k covers the rows whose centers lie in [top, top + step).
+  var firstRow = 0
+  while firstRow < height {
+    let k = segment(firstRow)
+    var endRow = firstRow + 1
+    while endRow < height && segment(endRow) == k { endRow += 1 }
+    // Segment k starts at the row center `top`.
     let top = (Double(k) / segments - frame.wavePhase) * period
-    let firstRow = max(0, Int((top - 0.5).rounded(.up)))
-    let endRow = min(height, Int((top + step - 0.5).rounded(.up)))
-    guard endRow > firstRow else { continue }
     let slope = (knot(k + 1) - knot(k)) / step
     let shear = CGAffineTransform(
       a: 1, b: 0, c: CGFloat(slope), d: 1, tx: CGFloat(knot(k) - slope * top), ty: 0)
     result = clamped.transformed(by: shear)
       .cropped(to: CGRect(x: 0, y: firstRow, width: Int(rect.width), height: endRow - firstRow))
       .composited(over: result)
+    firstRow = endRow
   }
   return result.cropped(to: rect)
 }
