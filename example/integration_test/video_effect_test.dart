@@ -309,6 +309,43 @@ void main() {
       expect(grey(pixel(out, 600, 180)), lessThan(60));
     });
 
+    // A phone stores a portrait video as landscape pixels plus a rotation
+    // flag. The geometry belongs to the picture as it is shown, so the mirror
+    // runs along the shown rows: left and right match, top and bottom do not.
+    testWidgets('mirror follows the shown picture of a rotated clip', (
+      tester,
+    ) async {
+      // 640x360 pixels, shown as 360x640.
+      final rotated = EditorVideo.asset('assets/tests/test_g.mp4');
+      for (final withCropping in [false, true]) {
+        final out = await frameOf(
+          await pve.renderVideo(
+            VideoRenderData(
+              videoSegments: [VideoSegment(video: rotated)],
+              effects: const [VideoEffect.mirror()],
+              imageBytesWithCropping: withCropping,
+            ),
+          ),
+          Duration.zero,
+          size: const Size(360, 640),
+        );
+        var across = 0;
+        var down = 0;
+        var count = 0;
+        for (var y = 20; y < 320; y += 20) {
+          for (var x = 10; x < 180; x += 20) {
+            final here = grey(pixel(out, x, y));
+            across += (here - grey(pixel(out, 359 - x, y))).abs();
+            down += (here - grey(pixel(out, x, 639 - y))).abs();
+            count++;
+          }
+        }
+        final reason = 'imageBytesWithCropping: $withCropping';
+        expect(across / count, lessThan(8), reason: reason);
+        expect(down / count, greaterThan(20), reason: reason);
+      }
+    });
+
     testWidgets('splitScreen shows the picture four times at half size', (
       tester,
     ) async {
