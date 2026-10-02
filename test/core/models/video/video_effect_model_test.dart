@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/core/utils/video_effect_frames.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
@@ -276,22 +278,41 @@ void main() {
       });
 
       // WCAG 2.3.1: content must not flash more than three times a second.
-      test('strobe and negativeFlash flash at most three times a second', () {
-        for (final effect in const [
-          VideoEffect.strobe(),
-          VideoEffect.negativeFlash(),
-        ]) {
-          var flashes = 0;
+      test('no effect flashes more than three times a second', () {
+        for (final type in VideoEffectType.values) {
+          final length = videoEffectCycleLengthOf(type);
+          final frames = [
+            for (var b = 0; b < length; b++) videoEffectFrameFor(type, 1, b),
+          ];
+          // The buckets in which a white flash or a negative starts, through
+          // the cycle and one second past it, so a wrap is counted too.
+          final onsets = <int>[];
           var wasOn = false;
-          for (var b = 0; b < 24; b++) {
-            final frame = effect.frameAt(
-              Duration(microseconds: b * 41667 + 1000),
-            );
+          for (var b = 0; b < length + videoEffectFrameRate; b++) {
+            final frame = frames[b % length];
             final on = frame.flash >= 0.5 || frame.invert >= 0.5;
-            if (on && !wasOn) flashes++;
+            if (on && !wasOn) onsets.add(b);
             wasOn = on;
           }
-          expect(flashes, inInclusiveRange(1, 3), reason: '${effect.type}');
+          for (var start = 0; start < length; start++) {
+            final inOneSecond = onsets.where(
+              (b) => b >= start && b < start + videoEffectFrameRate,
+            );
+            expect(inOneSecond.length, lessThanOrEqualTo(3), reason: '$type');
+          }
+          if (type == VideoEffectType.strobe ||
+              type == VideoEffectType.negativeFlash) {
+            expect(onsets, isNotEmpty, reason: '$type');
+          } else {
+            // A brightness that changes by a tenth would be a flash as well;
+            // the strobe's dimming is part of its flashes.
+            final levels = frames.map((f) => f.brightness);
+            expect(
+              levels.reduce(math.max) - levels.reduce(math.min),
+              lessThan(0.1),
+              reason: '$type',
+            );
+          }
         }
       });
 
@@ -363,6 +384,13 @@ void main() {
           weak.bands.first.shift,
           closeTo(strong.bands.first.shift / 2, 1e-12),
         );
+
+        // More intensity bursts more often.
+        int bursts(double intensity) => [
+          for (var b = 0; b < 480; b++)
+            videoEffectFrameFor(VideoEffectType.blockGlitch, intensity, b),
+        ].where((f) => !f.isIdentity).length;
+        expect(bursts(0.2), lessThan(bursts(1)));
       });
 
       test('filmGrain is fine grain of one strength that moves', () {
@@ -440,6 +468,17 @@ void main() {
           frames.where((f) => f.noise == 0).every((f) => f.rgbShift == 0),
           isTrue,
         );
+
+        // More intensity bursts more often.
+        int bursts(double intensity) => [
+          for (var b = 0; b < 480; b++)
+            videoEffectFrameFor(
+              VideoEffectType.signalInterference,
+              intensity,
+              b,
+            ),
+        ].where((f) => f.noise > 0).length;
+        expect(bursts(0.2), lessThan(bursts(1)));
       });
 
       test('crt is constant scanlines with a slight fringe', () {
@@ -493,6 +532,22 @@ void main() {
           '0.000000, 0.000000, 0.000000, 0.000000, 0.120000, 0.000000, '
           '0.000000, 0.350000, 0.450000',
         );
+      });
+
+      // The opening frames pinned above always burst; this pins when the
+      // bursts that follow come.
+      test('keeps the timing of the texture effects\' bursts', () {
+        Duration bucket(int b) => Duration(microseconds: b * 41667 + 1000);
+        // Blocks mark a blockGlitch burst, noise a signalInterference one.
+        bool isBurst(VideoEffectFrame f) => f.pixelSize > 0 || f.noise > 0;
+        List<int> bursts(VideoEffect effect) => [
+          for (var b = 0; b < 48; b++)
+            if (isBurst(effect.frameAt(bucket(b)))) b,
+        ];
+        final blockGlitch = bursts(const VideoEffect.blockGlitch());
+        expect(blockGlitch, [0, 1, 2, 3, 18, 19, 20, 24, 25, 26, 36, 37]);
+        final interference = bursts(const VideoEffect.signalInterference());
+        expect(interference, [0, 1, 8, 9, 16, 17, 18, 32, 40, 41, 42]);
       });
 
       // Pins the look: renderers only play frames back, so a change here is a
