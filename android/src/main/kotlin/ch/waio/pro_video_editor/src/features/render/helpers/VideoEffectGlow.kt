@@ -5,6 +5,7 @@ import androidx.media3.common.util.GlProgram
 import androidx.media3.common.util.GlUtil
 import androidx.media3.common.util.UnstableApi
 import ch.waio.pro_video_editor.src.features.render.models.VideoEffectFrame
+import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -24,6 +25,12 @@ import kotlin.math.min
  * least four small pixels per standard deviation, which keeps the halo within
  * a step or two of [VideoEffectMath.gaussianBlur], the deviation the spec
  * allows for this step.
+ *
+ * The spec repeats the edge pixels beyond the frame, so a thin bright line
+ * right at the edge glows as strongly as a wide bright area there. Repeating
+ * the small texture's edge instead would first spread the line over a whole
+ * block. So the small texture has a margin as wide as the blur reaches, whose
+ * blocks average the repeated edge pixels, and the blur stays inside it.
  */
 @UnstableApi
 internal class VideoEffectGlow {
@@ -38,6 +45,7 @@ internal class VideoEffectGlow {
     private var pictureFbo = NONE
 
     private var scale = 0
+    private var margin = 0
     private var smallWidth = 0
     private var smallHeight = 0
     private val smallTextures = intArrayOf(NONE, NONE)
@@ -62,7 +70,7 @@ internal class VideoEffectGlow {
      */
     fun finish(frame: VideoEffectFrame, outputFbo: Int) {
         val sigma = frame.glowRadius * height
-        ensureSmall(scaleFor(sigma))
+        ensureSmall(sigma)
         val threshold = frame.glowThreshold.coerceIn(0.0, 0.99).toFloat()
 
         GlUtil.focusFramebufferUsingCurrentContext(smallFbos[0], smallWidth, smallHeight)
@@ -70,6 +78,7 @@ internal class VideoEffectGlow {
         brightProgram.setSamplerTexIdUniform("uPicture", pictureTexture, 0)
         brightProgram.setFloatsUniform("uPictureSize", floatArrayOf(width.toFloat(), height.toFloat()))
         brightProgram.setFloatUniform("uScale", scale.toFloat())
+        brightProgram.setFloatUniform("uMargin", margin.toFloat())
         brightProgram.setFloatUniform("uGlow", frame.glow.toFloat())
         brightProgram.setFloatUniform("uThreshold", threshold)
         draw(brightProgram)
@@ -88,6 +97,7 @@ internal class VideoEffectGlow {
             "uHaloSize", floatArrayOf(smallWidth.toFloat(), smallHeight.toFloat())
         )
         screenProgram.setFloatUniform("uScale", scale.toFloat())
+        screenProgram.setFloatUniform("uMargin", margin.toFloat())
         draw(screenProgram)
         // The halo was bound on the second unit; hand the first back active.
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -119,9 +129,13 @@ internal class VideoEffectGlow {
         GlUtil.checkGlError()
     }
 
-    private fun ensureSmall(scale: Int) {
-        val w = (width + scale - 1) / scale
-        val h = (height + scale - 1) / scale
+    /** Sizes the small textures for a blur of [sigma] pixels. */
+    private fun ensureSmall(sigma: Double) {
+        val scale = scaleFor(sigma)
+        val margin = marginFor(sigma, scale)
+        val w = (width + scale - 1) / scale + 2 * margin
+        val h = (height + scale - 1) / scale + 2 * margin
+        this.margin = margin
         if (scale == this.scale && w == smallWidth && h == smallHeight && smallTextures[0] != NONE) return
         deleteSmall()
         for (i in 0..1) {
@@ -155,11 +169,21 @@ internal class VideoEffectGlow {
         /** The largest block the bright pass averages; its loops stop here. */
         private const val MAX_SCALE = 32
 
+        /** The farthest the blur reaches, in small pixels; its loop stops here. */
+        private const val MAX_REACH = 64
+
         /**
          * The downscale for a blur of [sigma] pixels: at least four small
          * pixels per standard deviation, at most [MAX_SCALE].
          */
         fun scaleFor(sigma: Double): Int = min(MAX_SCALE, max(1, floor(sigma / 4).toInt()))
+
+        /**
+         * The small pixels the blur of [sigma] pixels reaches at [scale], which
+         * the small texture adds around the picture; none without a blur.
+         */
+        fun marginFor(sigma: Double, scale: Int): Int =
+            if (sigma < 0.5) 0 else min(MAX_REACH, ceil(3 * sigma / scale).toInt())
 
         /** The framebuffer the caller drew into last, so the glow can return to it. */
         fun currentFramebuffer(): Int {
@@ -183,37 +207,35 @@ internal class VideoEffectGlow {
 
         // Averages a block of uScale by uScale picture pixels of
         // min(1, glow * k * c), with k how far the pixel's brightness is past
-        // the threshold. Blocks at the right and top edges average only the
-        // pixels the picture has.
+        // the threshold. The small texture starts uMargin blocks before the
+        // picture, and blocks past its edges average the repeated edge pixels.
         private const val BRIGHT_SHADER = PRECISION +
             "uniform sampler2D uPicture;\n" +
             "uniform vec2 uPictureSize;\n" +
             "uniform float uScale;\n" +
+            "uniform float uMargin;\n" +
             "uniform float uGlow;\n" +
             "uniform float uThreshold;\n" +
             "void main() {\n" +
-            "  vec2 block = floor(gl_FragCoord.xy) * uScale;\n" +
+            "  vec2 block = (floor(gl_FragCoord.xy) - uMargin) * uScale;\n" +
             "  vec3 sum = vec3(0.0);\n" +
-            "  float count = 0.0;\n" +
             "  for (int j = 0; j < 32; j++) {\n" +
             "    if (float(j) >= uScale) break;\n" +
             "    for (int i = 0; i < 32; i++) {\n" +
             "      if (float(i) >= uScale) break;\n" +
-            "      vec2 texel = block + vec2(float(i), float(j));\n" +
-            "      if (texel.x < uPictureSize.x && texel.y < uPictureSize.y) {\n" +
-            "        vec3 c = texture2D(uPicture, (texel + 0.5) / uPictureSize).rgb;\n" +
-            "        float l = dot(c, vec3(0.2126, 0.7152, 0.0722));\n" +
-            "        float k = clamp((l - uThreshold) / (1.0 - uThreshold), 0.0, 1.0);\n" +
-            "        sum += min(vec3(1.0), uGlow * k * c);\n" +
-            "        count += 1.0;\n" +
-            "      }\n" +
+            "      vec2 texel = clamp(block + vec2(float(i), float(j)), vec2(0.0), uPictureSize - 1.0);\n" +
+            "      vec3 c = texture2D(uPicture, (texel + 0.5) / uPictureSize).rgb;\n" +
+            "      float l = dot(c, vec3(0.2126, 0.7152, 0.0722));\n" +
+            "      float k = clamp((l - uThreshold) / (1.0 - uThreshold), 0.0, 1.0);\n" +
+            "      sum += min(vec3(1.0), uGlow * k * c);\n" +
             "    }\n" +
             "  }\n" +
-            "  gl_FragColor = vec4(sum / max(count, 1.0), 1.0);\n" +
+            "  gl_FragColor = vec4(sum / (uScale * uScale), 1.0);\n" +
             "}"
 
         // One direction of the Gaussian, reaching ceil(3 sigma) pixels to each
-        // side, with the edge pixels repeated.
+        // side, at most MAX_REACH. The margin keeps it inside the texture; the
+        // clamp only guards the reads.
         private const val BLUR_SHADER = PRECISION +
             "uniform sampler2D uSource;\n" +
             "uniform vec2 uSize;\n" +
@@ -243,10 +265,11 @@ internal class VideoEffectGlow {
             "uniform vec2 uPictureSize;\n" +
             "uniform vec2 uHaloSize;\n" +
             "uniform float uScale;\n" +
+            "uniform float uMargin;\n" +
             "void main() {\n" +
             "  vec2 p = floor(gl_FragCoord.xy) + 0.5;\n" +
             "  vec4 c = texture2D(uPicture, p / uPictureSize);\n" +
-            "  vec3 halo = texture2D(uHalo, p / uScale / uHaloSize).rgb;\n" +
+            "  vec3 halo = texture2D(uHalo, (p / uScale + uMargin) / uHaloSize).rgb;\n" +
             "  gl_FragColor = vec4(clamp(1.0 - (1.0 - c.rgb) * (1.0 - halo), 0.0, 1.0), c.a);\n" +
             "}"
     }
