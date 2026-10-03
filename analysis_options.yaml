@@ -6,6 +6,7 @@ analyzer:
     - android/**
     - windows/**
     - linux/**
+    - darwin/**
   language:
     strict-raw-types: true
 

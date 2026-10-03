@@ -9,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/core/constants/example_constants.dart';
 
+import 'utils/pcm.dart';
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   final testVideo = EditorVideo.asset(kVideoEditorExampleH264Path);
@@ -327,6 +329,47 @@ void main() {
     if (await file.exists()) {
       await file.delete();
     }
+  }, skip: skipPlatform);
+
+  testWidgets('extractAudio to WAV writes the decoded HE-AAC format', (
+    tester,
+  ) async {
+    // HE-AAC v2 describes only its AAC core layer in the track (22.05 kHz
+    // mono) but decodes to 44.1 kHz stereo (SBR + PS). A WAV header taken
+    // from the track claims a quarter of the real data rate: the 2 s, 440 Hz
+    // tone would last 8 s and sound two octaves too low.
+    final video = EditorVideo.asset('assets/tests/he_aac_v2.m4a');
+    final directory = await getTemporaryDirectory();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+
+    Future<Pcm> extract(String name, {Duration? start, Duration? end}) async {
+      final outputPath = '${directory.path}/test_audio_he_aac_${name}_$ts.wav';
+      await pve.extractAudioToFile(
+        outputPath,
+        AudioExtractConfigs(
+          video: video,
+          format: AudioFormat.wav,
+          startTime: start,
+          endTime: end,
+        ),
+      );
+      final file = File(outputPath);
+      final pcm = Pcm.parseWav(await file.readAsBytes());
+      await file.delete();
+      return pcm;
+    }
+
+    final full = await extract('full');
+    expect(full.seconds, closeTo(2, 0.1), reason: 'Full WAV length');
+    expect(full.toneFrequency(0.2, 1.8), closeTo(440, 10));
+
+    final trimmed = await extract(
+      'trimmed',
+      start: const Duration(milliseconds: 500),
+      end: const Duration(milliseconds: 1500),
+    );
+    expect(trimmed.seconds, closeTo(1, 0.1), reason: 'Trimmed WAV length');
+    expect(trimmed.toneFrequency(0.2, 0.8), closeTo(440, 10));
   }, skip: skipPlatform);
 
   testWidgets('extractAudio handles invalid time ranges gracefully', (
