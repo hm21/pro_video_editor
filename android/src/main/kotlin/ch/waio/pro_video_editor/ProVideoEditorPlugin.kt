@@ -1,5 +1,6 @@
 package ch.waio.pro_video_editor
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import ch.waio.pro_video_editor.src.features.audio.ExtractAudio
@@ -23,6 +24,9 @@ import ch.waio.pro_video_editor.src.features.stopmotion.models.StopMotionConfig
 import ch.waio.pro_video_editor.src.shared.FailureDetails
 import ch.waio.pro_video_editor.src.shared.JobRegistry
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.StreamOnlySources
+import ch.waio.pro_video_editor.src.shared.media.copyContentToFile
+import ch.waio.pro_video_editor.src.shared.media.isContentUri
 import ch.waio.pro_video_editor.src.features.thumbnail.ThumbnailGenerator
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailConfig
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailTask
@@ -35,6 +39,8 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -78,6 +84,22 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var mediaInfoExtractor: MediaInfoExtractor
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private lateinit var appContext: Context
+
+    /**
+     * Checks the content URIs of incoming calls off the main thread (see
+     * [onMethodCall]). Single-threaded, so calls keep their order.
+     */
+    private lateinit var sourceExecutor: ExecutorService
+
+    /**
+     * Task ids of the calls handed to [sourceExecutor] and not dispatched
+     * yet, with how many calls carry each. Main thread only.
+     */
+    private val waitingTaskIds = HashMap<String, Int>()
+
+    /** Set once the engine is gone. Main thread only. */
+    private var detached = false
     private val renderTasks = JobRegistry<RenderTask> { task ->
         task.canceled.set(true)
         task.job?.cancel()
@@ -161,6 +183,10 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             }
         })
 
+        appContext = flutterPluginBinding.applicationContext
+        sourceExecutor = Executors.newSingleThreadExecutor()
+        sourceExecutor.execute { StreamOnlySources.clearStaleCopies(appContext) }
+
         renderVideo = RenderVideo(flutterPluginBinding.applicationContext)
         splitVideo = SplitVideo(flutterPluginBinding.applicationContext)
         stopMotionGenerator = StopMotionGenerator(flutterPluginBinding.applicationContext)
@@ -191,6 +217,8 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         logChannel.setStreamHandler(null)
         Log.sink = null
         logSink = null
+        detached = true
+        sourceExecutor.shutdown()
     }
 
     /**
@@ -206,8 +234,104 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
      * - getWaveform: Generates complete waveform data
      * - startWaveformStream: Starts streaming waveform generation
      * - cancelTask: Cancels an active render, audio, waveform or thumbnail stream task
+     * - copyContentToFile: Copies a content URI into a local file
+     *
+     * A call that carries a content URI not seen before is dispatched only
+     * once [StreamOnlySources] has checked it on [sourceExecutor], which
+     * copies a source that cannot be seeked. A later call with the same task
+     * id waits behind it, so a cancel never overtakes the task it cancels;
+     * other calls do not wait for the copy. The copies a call reads are kept
+     * until it is answered.
      */
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        val sources = contentUrisIn(call.arguments)
+        val reply = if (sources.isEmpty()) result else {
+            StreamOnlySources.acquire(sources)
+            ReplyListeningResult(result) { StreamOnlySources.release(sources) }
+        }
+        // A plain copy reads the source front to back, so it needs no check.
+        val check = call.method != "copyContentToFile" &&
+            sources.any(StreamOnlySources::needsCheck)
+        val id = (call.arguments as? Map<*, *>)?.get("id") as? String
+        if (!check && (id == null || id !in waitingTaskIds)) {
+            dispatch(call, reply)
+            return
+        }
+
+        if (id != null) waitingTaskIds[id] = (waitingTaskIds[id] ?: 0) + 1
+        sourceExecutor.execute {
+            try {
+                if (check) StreamOnlySources.prepare(appContext, sources)
+            } catch (e: Throwable) {
+                // The call still runs and reports what fails to open.
+                Log.e("ProVideoEditorPlugin", "Checking the sources failed", e)
+            } finally {
+                mainHandler.post {
+                    if (id != null) {
+                        val count = waitingTaskIds.getValue(id) - 1
+                        if (count > 0) waitingTaskIds[id] = count else waitingTaskIds.remove(id)
+                    }
+                    if (detached) {
+                        (reply as? ReplyListeningResult)?.abandon()
+                    } else {
+                        dispatch(call, reply)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Forwards to [result] and runs [onReply] once the call is answered. */
+    private class ReplyListeningResult(
+        private val result: MethodChannel.Result,
+        private val onReply: () -> Unit
+    ) : MethodChannel.Result {
+        private val replied = AtomicBoolean(false)
+
+        /** Runs [onReply] for a call that will never be answered. */
+        fun abandon() {
+            if (replied.compareAndSet(false, true)) onReply()
+        }
+
+        override fun success(value: Any?) {
+            try {
+                result.success(value)
+            } finally {
+                abandon()
+            }
+        }
+
+        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+            try {
+                result.error(errorCode, errorMessage, errorDetails)
+            } finally {
+                abandon()
+            }
+        }
+
+        override fun notImplemented() {
+            try {
+                result.notImplemented()
+            } finally {
+                abandon()
+            }
+        }
+    }
+
+    /** Collects every content URI among the string values of [value]. */
+    private fun contentUrisIn(
+        value: Any?,
+        into: MutableSet<String> = linkedSetOf()
+    ): Set<String> {
+        when (value) {
+            is String -> if (value.isContentUri()) into.add(value)
+            is Map<*, *> -> value.values.forEach { contentUrisIn(it, into) }
+            is List<*> -> value.forEach { contentUrisIn(it, into) }
+        }
+        return into
+    }
+
+    private fun dispatch(call: MethodCall, result: MethodChannel.Result) {
         applyInlineNativeLogLevel(call)
 
         when (call.method) {
@@ -224,6 +348,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             "getWaveform" -> handleGetWaveform(call, result)
             "startWaveformStream" -> handleStartWaveformStream(call, result)
             "cancelTask" -> handleCancelTask(call, result)
+            "copyContentToFile" -> handleCopyContentToFile(call, result)
             else -> result.notImplemented()
         }
     }
@@ -252,6 +377,28 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
      */
     private fun handleGetPlatformVersion(result: MethodChannel.Result) {
         result.success("Android ${android.os.Build.VERSION.RELEASE}")
+    }
+
+    /**
+     * Copies a content URI into a local file for EditorVideo.safeFilePath.
+     * The file is [outputPath] plus the extension of the source's MIME type;
+     * its path is the result.
+     */
+    private fun handleCopyContentToFile(call: MethodCall, result: MethodChannel.Result) {
+        val inputPath = call.argument<String>("inputPath")
+        val outputPath = call.argument<String>("outputPath")
+        if (inputPath == null || outputPath == null) {
+            result.error("INVALID_ARGUMENTS", "inputPath and outputPath are required", null)
+            return
+        }
+        Thread {
+            try {
+                val file = copyContentToFile(appContext, inputPath, outputPath)
+                mainHandler.post { result.success(file.path) }
+            } catch (e: Exception) {
+                mainHandler.post { result.error("COPY_FAILED", e.message, null) }
+            }
+        }.start()
     }
 
     /**

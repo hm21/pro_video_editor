@@ -25,6 +25,11 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Serves test media for integration_test/content_uri_test.dart. -->
+        <provider
+            android:name=".TestMediaProvider"
+            android:authorities="${applicationId}.testmedia"
+            android:exported="false" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
