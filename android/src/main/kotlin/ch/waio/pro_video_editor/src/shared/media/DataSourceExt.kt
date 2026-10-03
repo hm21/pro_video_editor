@@ -6,6 +6,7 @@ import android.media.MediaExtractor
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import java.io.File
@@ -16,18 +17,27 @@ import java.io.InputStream
  * Input paths handed over from Dart are either filesystem paths or Android
  * `content://` URIs (EditorVideo.content). These helpers open both kinds, so a
  * content URI is read in place through the ContentResolver instead of being
- * copied to a file first.
+ * copied to a file first. Only a URI whose provider streams it without
+ * random access is read from a local copy (see StreamOnlySources).
  */
 
 /** Whether this input path is a `content://` URI rather than a filesystem path. */
 fun String.isContentUri(): Boolean = startsWith("content://")
 
 /**
+ * The path to open this input from: the local copy of a stream-only content
+ * URI, or else the input itself.
+ */
+fun String.readablePath(): String = StreamOnlySources.copyOf(this)?.path ?: this
+
+/**
  * Converts a path string (either a `content://` URI or a filesystem path) into an Android [Uri].
  * Content URIs are parsed directly, while filesystem paths are converted via [Uri.fromFile].
  */
-fun String.toContentOrFileUri(): Uri =
-    if (isContentUri()) toUri() else Uri.fromFile(File(this))
+fun String.toContentOrFileUri(): Uri {
+    val path = readablePath()
+    return if (path.isContentUri()) path.toUri() else Uri.fromFile(File(path))
+}
 
 /**
  * Sets the URI on a [MediaItem.Builder] from a path string that can be either a `content://` URI
@@ -41,10 +51,11 @@ fun MediaItem.Builder.contentUri(path: String): MediaItem.Builder =
  */
 @Throws(IOException::class)
 fun MediaExtractor.contentDataSource(context: Context, path: String) {
-    if (path.isContentUri()) {
-        setDataSource(context, path.toUri(), null)
+    val source = path.readablePath()
+    if (source.isContentUri()) {
+        setDataSource(context, source.toUri(), null)
     } else {
-        setDataSource(path)
+        setDataSource(source)
     }
 }
 
@@ -53,10 +64,11 @@ fun MediaExtractor.contentDataSource(context: Context, path: String) {
  */
 @Throws(IllegalArgumentException::class, SecurityException::class)
 fun MediaMetadataRetriever.contentDataSource(context: Context, path: String) {
-    if (path.isContentUri()) {
-        setDataSource(context, path.toUri())
+    val source = path.readablePath()
+    if (source.isContentUri()) {
+        setDataSource(context, source.toUri())
     } else {
-        setDataSource(path)
+        setDataSource(source)
     }
 }
 
@@ -82,6 +94,7 @@ fun openMediaExtractor(context: Context, path: String): MediaExtractor {
  * URI resolves and is readable by this app.
  */
 fun mediaSourceExists(context: Context, path: String): Boolean {
+    StreamOnlySources.copyOf(path)?.let { return true }
     if (!path.isContentUri()) return File(path).exists()
     return try {
         context.contentResolver.openAssetFileDescriptor(path.toUri(), "r")
@@ -96,6 +109,7 @@ fun mediaSourceExists(context: Context, path: String): Boolean {
  * it cannot be determined.
  */
 fun mediaSourceLength(context: Context, path: String): Long {
+    StreamOnlySources.copyOf(path)?.let { return it.length() }
     if (!path.isContentUri()) return File(path).length()
     val uri = path.toUri()
     try {
@@ -138,7 +152,30 @@ fun contentMimeType(context: Context, path: String): String? {
 /** Opens the media at [path] (file path or content URI) as a byte stream. */
 @Throws(IOException::class)
 fun openMediaInputStream(context: Context, path: String): InputStream {
-    if (!path.isContentUri()) return File(path).inputStream()
-    return context.contentResolver.openInputStream(path.toUri())
+    val source = path.readablePath()
+    if (!source.isContentUri()) return File(source).inputStream()
+    return context.contentResolver.openInputStream(source.toUri())
         ?: throw IOException("Cannot open $path")
+}
+
+/**
+ * Copies the media at [path] (file path or content URI) into a new file at
+ * [outputPathWithoutExtension] plus the extension of its MIME type, and
+ * returns that file. Blocks while copying.
+ */
+@Throws(IOException::class)
+fun copyContentToFile(context: Context, path: String, outputPathWithoutExtension: String): File {
+    val extension = contentMimeType(context, path)
+        ?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }
+        ?: "mp4"
+    val output = File("$outputPathWithoutExtension.$extension")
+    try {
+        openMediaInputStream(context, path).use { input ->
+            output.outputStream().use { input.copyTo(it) }
+        }
+    } catch (e: Exception) {
+        output.delete()
+        throw e
+    }
+    return output
 }

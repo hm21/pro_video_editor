@@ -1,8 +1,11 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/core/models/video/editor_video_model.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('EditorVideo', () {
     group('toMap / fromMap', () {
       test('roundtrip with memory bytes', () {
@@ -105,11 +108,53 @@ void main() {
         );
       });
 
-      test('has no file path or bytes', () async {
+      test('has no bytes', () async {
         final video = EditorVideo.content(_contentUrl);
 
-        await expectLater(video.safeFilePath(), throwsUnsupportedError);
         await expectLater(video.safeByteArray(), throwsUnsupportedError);
+      });
+
+      test('safeFilePath copies the content natively on Android', () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+        const plugin = MethodChannel('pro_video_editor');
+        final calls = <MethodCall>[];
+        messenger
+          ..setMockMethodCallHandler(pathProvider, (_) async => '/tmp')
+          ..setMockMethodCallHandler(plugin, (call) async {
+            calls.add(call);
+            return '${(call.arguments as Map)['outputPath']}.mov';
+          });
+        addTearDown(() {
+          messenger
+            ..setMockMethodCallHandler(pathProvider, null)
+            ..setMockMethodCallHandler(plugin, null);
+        });
+        final video = EditorVideo.content(_contentUrl);
+
+        final path = await video.safeFilePath();
+
+        expect(calls.single.method, 'copyContentToFile');
+        expect(calls.single.arguments, {
+          'inputPath': _contentUrl,
+          'outputPath': path.substring(0, path.length - '.mov'.length),
+        });
+        expect(path, startsWith('/tmp/media_'));
+        expect(path, endsWith('.mov'));
+        expect(video.file?.path, path);
+        // Like a downloaded network video, the copy is used from now on.
+        expect(await video.contentOrSafeFilePath(), path);
+      });
+
+      test('safeFilePath throws on other platforms', () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+
+        await expectLater(
+          EditorVideo.content(_contentUrl).safeFilePath(),
+          throwsUnsupportedError,
+        );
       });
 
       test('a local file is preferred over the content url', () async {

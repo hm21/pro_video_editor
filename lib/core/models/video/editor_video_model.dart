@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
 
+import '/core/platform/content_uri_copy.dart';
 import '/core/platform/io/io_helper.dart';
 import '/core/platform/path/path_provider_helper.dart';
 import '/shared/utils/converters.dart';
@@ -131,8 +132,10 @@ class EditorVideo {
   /// returned by the photo picker or the Storage Access Framework.
   ///
   /// The video is read in place through the `ContentResolver`, so large files
-  /// are not copied. Your app must be able to read the URI for as long as the
-  /// video is used, for example by taking a persistable URI permission.
+  /// are not copied. Only a provider that streams the file without random
+  /// access, as some cloud and archive providers do, gets it copied once into
+  /// the cache. Your app must be able to read the URI for as long as the video
+  /// is used, for example by taking a persistable URI permission.
   ///
   /// **Android only.** Using it on another platform throws an
   /// [UnsupportedError].
@@ -206,19 +209,17 @@ class EditorVideo {
   /// Android.
   Future<String> contentOrSafeFilePath() async {
     if (typePreferredFile != EditorVideoType.content) return safeFilePath();
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
-      throw UnsupportedError(
-        'EditorVideo.content (content:// URIs) is only supported on Android.',
-      );
-    }
+    _ensureContentSupported();
     return contentUrl!;
   }
 
   /// Safely generates a file path for the video and writes the video data to
   /// a file based on the type of the video.
   ///
-  /// Throws an [UnsupportedError] for an [EditorVideo.content] video, which has
-  /// no file path; use [contentOrSafeFilePath] instead.
+  /// An [EditorVideo.content] video is copied into a temporary file on
+  /// Android, the same way a network video is downloaded; on other platforms
+  /// it throws an [UnsupportedError]. The plugin's own calls read the URI in
+  /// place instead, see [contentOrSafeFilePath].
   Future<String> safeFilePath() async {
     switch (typePreferredFile) {
       case EditorVideoType.memory:
@@ -231,14 +232,28 @@ class EditorVideo {
         // file is already present
         break;
       case EditorVideoType.content:
-        throw UnsupportedError(
-          'A content:// video has no file path; use contentOrSafeFilePath().',
+        _ensureContentSupported();
+        file = File(
+          await copyContentUriToFile(
+            contentUrl!,
+            await _tempFilePath(withExtension: false),
+          ),
         );
     }
     return file!.path;
   }
 
-  Future<String> _tempFilePath() async {
+  void _ensureContentSupported() {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      throw UnsupportedError(
+        'EditorVideo.content (content:// URIs) is only supported on Android.',
+      );
+    }
+  }
+
+  /// A new path in the temporary directory. Without [withExtension], the
+  /// native side appends the extension that matches the content.
+  Future<String> _tempFilePath({bool withExtension = true}) async {
     final directory = await getTemporaryDirectory();
 
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -248,9 +263,10 @@ class EditorVideo {
     // them apart — two of them would pick the same path, write over each
     // other and end up as one clip.
     final unique = _tempFileCounter++;
+    final path = '${directory.path}/media_${now}_$unique';
+    if (!withExtension) return path;
     // Preserve original file extension for proper format detection
-    final extension = _getFileExtension();
-    return '${directory.path}/media_${now}_$unique.$extension';
+    return '$path.${_getFileExtension()}';
   }
 
   /// Returns the type of the video source.
