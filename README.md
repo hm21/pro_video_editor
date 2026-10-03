@@ -201,6 +201,8 @@ var data = VideoRenderData(
             // video: EditorVideo.file(File('/path/to/video.mp4')),
             // video: EditorVideo.network('https://example.com/video.mp4'),
             // video: EditorVideo.memory(videoBytes),
+            // Android only: a content:// URI, e.g. from the photo picker, read in place without copying.
+            // video: EditorVideo.content('content://media/picker/0/com.android.providers.media.photopicker/media/1000000123'),
         ),
     ],
     enableAudio: false,

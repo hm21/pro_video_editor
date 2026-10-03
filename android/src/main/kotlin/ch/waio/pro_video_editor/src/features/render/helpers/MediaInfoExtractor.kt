@@ -1,10 +1,15 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
+import android.content.Context
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import androidx.media3.common.util.UnstableApi
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.contentDataSource
+import ch.waio.pro_video_editor.src.shared.media.mediaSourceLength
+import ch.waio.pro_video_editor.src.shared.media.openMediaExtractor
 
 /**
  * Utility class for extracting media information from video and audio files.
@@ -13,7 +18,7 @@ import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
  * using Android's MediaExtractor API.
  */
 @UnstableApi
-object MediaInfoExtractor {
+class MediaInfoExtractor(private val context: Context) {
 
     /**
      * Whether the file at [path] carries an audio track at all.
@@ -24,7 +29,7 @@ object MediaInfoExtractor {
     fun hasAudioTrack(path: String): Boolean {
         val extractor = MediaExtractor()
         return try {
-            extractor.setDataSource(path)
+            extractor.contentDataSource(context, path)
             (0 until extractor.trackCount).any { i ->
                 extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME)
                     ?.startsWith("audio/") == true
@@ -44,8 +49,7 @@ object MediaInfoExtractor {
      */
     fun getVideoDuration(videoPath: String): Long {
         return try {
-            val extractor = MediaExtractor()
-            extractor.setDataSource(videoPath)
+            val extractor = openMediaExtractor(context, videoPath)
             var duration = 0L
 
             for (i in 0 until extractor.trackCount) {
@@ -82,7 +86,7 @@ object MediaInfoExtractor {
         try {
             val extractor = MediaExtractor()
             try {
-                extractor.setDataSource(videoPath)
+                extractor.contentDataSource(context, videoPath)
                 for (i in 0 until extractor.trackCount) {
                     val format = extractor.getTrackFormat(i)
                     val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
@@ -102,13 +106,11 @@ object MediaInfoExtractor {
         }
 
         try {
-            val retriever = android.media.MediaMetadataRetriever()
+            val retriever = MediaMetadataRetriever()
             try {
-                retriever.setDataSource(videoPath)
+                retriever.contentDataSource(context, videoPath)
                 val rate = retriever
-                    .extractMetadata(
-                        android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE
-                    )
+                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
                     ?.toLongOrNull()
                 if (rate != null && rate > 0) return rate
             } finally {
@@ -120,7 +122,7 @@ object MediaInfoExtractor {
 
         try {
             val durationUs = getVideoDuration(videoPath)
-            val sizeBytes = java.io.File(videoPath).length()
+            val sizeBytes = mediaSourceLength(context, videoPath)
             if (durationUs > 0 && sizeBytes > 0) {
                 return sizeBytes * 8L * 1_000_000L / durationUs
             }
@@ -140,8 +142,7 @@ object MediaInfoExtractor {
      */
     fun getVideoFrameRate(videoPath: String): Float? {
         return try {
-            val extractor = MediaExtractor()
-            extractor.setDataSource(videoPath)
+            val extractor = openMediaExtractor(context, videoPath)
             var frameRate: Float? = null
 
             for (i in 0 until extractor.trackCount) {
@@ -171,8 +172,7 @@ object MediaInfoExtractor {
      */
     fun getAudioDuration(audioPath: String): Long {
         return try {
-            val extractor = MediaExtractor()
-            extractor.setDataSource(audioPath)
+            val extractor = openMediaExtractor(context, audioPath)
             var duration = 0L
 
             for (i in 0 until extractor.trackCount) {
@@ -201,8 +201,7 @@ object MediaInfoExtractor {
      */
     fun getAudioChannelCount(videoPath: String): Int? {
         return try {
-            val extractor = MediaExtractor()
-            extractor.setDataSource(videoPath)
+            val extractor = openMediaExtractor(context, videoPath)
             var channelCount: Int? = null
 
             for (i in 0 until extractor.trackCount) {
@@ -231,8 +230,7 @@ object MediaInfoExtractor {
      */
     fun getAudioSampleRate(audioPath: String): Int {
         return try {
-            val extractor = MediaExtractor()
-            extractor.setDataSource(audioPath)
+            val extractor = openMediaExtractor(context, audioPath)
             var sampleRate = 0
 
             for (i in 0 until extractor.trackCount) {
@@ -299,8 +297,7 @@ object MediaInfoExtractor {
      */
     fun getVideoFormatInfo(videoPath: String): VideoFormatInfo {
         return try {
-            val extractor = MediaExtractor()
-            extractor.setDataSource(videoPath)
+            val extractor = openMediaExtractor(context, videoPath)
 
             var isHevc = false
             var bitDepth = 8

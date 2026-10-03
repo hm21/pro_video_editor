@@ -1,7 +1,8 @@
 package ch.waio.pro_video_editor.src.features.render.utils
 
+import android.content.Context
 import android.media.MediaMetadataRetriever
-import java.io.File
+import ch.waio.pro_video_editor.src.shared.media.contentDataSource
 
 /**
  * Calculates the actual display dimensions of a video after rotation is applied.
@@ -20,7 +21,7 @@ import java.io.File
  * - Applied rotation: 90°
  * - Result: 1080x1920 (portrait)
  *
- * @param videoFile The video file to analyze
+ * @param path The path to video file to analyze
  * @param rotationDegrees Additional rotation to apply (in degrees, typically 0, 90, 180, or 270)
  * @return Triple containing (width, height, normalizedRotation)
  *         - width: Final display width after rotation
@@ -29,12 +30,13 @@ import java.io.File
  *         Returns (0, 0, 0) if metadata extraction fails
  */
 fun getRotatedVideoDimensions(
-    videoFile: File,
+    context: Context,
+    path: String,
     rotationDegrees: Float
 ): Triple<Int, Int, Int> {
     val retriever = MediaMetadataRetriever()
     return try {
-        retriever.setDataSource(videoFile.absolutePath)
+        retriever.contentDataSource(context, path)
 
         // Extract raw video dimensions from file metadata
         val widthRaw =

@@ -11,6 +11,7 @@ import ch.waio.pro_video_editor.src.features.audio.models.AudioMergeConfig
 import ch.waio.pro_video_editor.src.features.metadata.Metadata
 import ch.waio.pro_video_editor.src.features.metadata.models.MetadataConfig
 import ch.waio.pro_video_editor.src.features.render.RenderVideo
+import ch.waio.pro_video_editor.src.features.render.helpers.MediaInfoExtractor
 import ch.waio.pro_video_editor.src.features.render.helpers.RenderSourceFormats
 import ch.waio.pro_video_editor.src.features.render.models.CodecResourceExhaustedException
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
@@ -74,6 +75,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var extractAudio: ExtractAudio
     private lateinit var mergeAudio: MergeAudio
     private lateinit var waveformGenerator: WaveformGenerator
+    private lateinit var mediaInfoExtractor: MediaInfoExtractor
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val renderTasks = JobRegistry<RenderTask> { task ->
@@ -167,6 +169,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         extractAudio = ExtractAudio(flutterPluginBinding.applicationContext)
         mergeAudio = MergeAudio(flutterPluginBinding.applicationContext)
         waveformGenerator = WaveformGenerator(flutterPluginBinding.applicationContext)
+        mediaInfoExtractor = MediaInfoExtractor(flutterPluginBinding.applicationContext)
     }
 
     /**
@@ -500,7 +503,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                         // MediaExtractor open, and a composition can have
                         // dozens. A probe that throws still reports the error.
                         if (task.canceled.get()) report(null) else Thread {
-                            report(runCatching { RenderSourceFormats.of(renderConfig) }.getOrNull())
+                            report(runCatching { RenderSourceFormats.of(renderConfig, mediaInfoExtractor) }.getOrNull())
                         }.start()
                     }
                 )

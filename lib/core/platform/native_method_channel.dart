@@ -192,7 +192,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     bool checkStreamingOptimization = false,
     NativeLogLevel? nativeLogLevel,
   }) async {
-    var inputPath = await value.safeFilePath();
+    var inputPath = await value.contentOrSafeFilePath();
 
     var extension = _getFileExtension(inputPath);
 
@@ -213,7 +213,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     EditorVideo value, {
     NativeLogLevel? nativeLogLevel,
   }) async {
-    var inputPath = await value.safeFilePath();
+    var inputPath = await value.contentOrSafeFilePath();
 
     final result = await methodChannel.invokeMethod<bool>('hasAudioTrack', {
       'inputPath': inputPath,
@@ -228,7 +228,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     ThumbnailBase value, {
     NativeLogLevel? nativeLogLevel,
   }) async {
-    var inputPath = await value.video.safeFilePath();
+    var inputPath = await value.video.contentOrSafeFilePath();
 
     final response = await methodChannel
         .invokeMethod<List<dynamic>>('getThumbnails', {
@@ -311,7 +311,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       // un-cancellable native task.
       _beginDispatch(value.id);
       try {
-        final inputPath = await value.video.safeFilePath();
+        final inputPath = await value.video.contentOrSafeFilePath();
         _handoffToNative(value.id);
         if (finished) return;
         // Subscribe before starting: native emits the first frame as soon as
@@ -384,7 +384,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       timestamp = Duration.zero;
     }
 
-    var inputPath = await value.video.safeFilePath();
+    var inputPath = await value.video.contentOrSafeFilePath();
 
     final response = await methodChannel.invokeMethod<List<dynamic>>(
       'getThumbnails',
@@ -411,7 +411,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     NativeLogLevel? nativeLogLevel,
   }) async {
     try {
-      var inputPath = await value.video.safeFilePath();
+      var inputPath = await value.video.contentOrSafeFilePath();
 
       final Uint8List? result = await methodChannel
           .invokeMethod<Uint8List>('extractAudio', {
@@ -443,7 +443,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     NativeLogLevel? nativeLogLevel,
   }) async {
     try {
-      var inputPath = await value.video.safeFilePath();
+      var inputPath = await value.video.contentOrSafeFilePath();
 
       await methodChannel.invokeMethod<String>('extractAudio', {
         'inputPath': inputPath,
@@ -498,7 +498,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       // Resolve every segment to a local file path, preserving order.
       final inputPaths = <String>[];
       for (final segment in configs.segments) {
-        inputPaths.add(await segment.video.safeFilePath());
+        inputPaths.add(await segment.video.contentOrSafeFilePath());
       }
 
       final response = await methodChannel
@@ -527,7 +527,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     NativeLogLevel? nativeLogLevel,
   }) async {
     try {
-      var inputPath = await value.video.safeFilePath();
+      var inputPath = await value.video.contentOrSafeFilePath();
 
       final response = await methodChannel
           .invokeMethod<Map<dynamic, dynamic>>('getWaveform', {
@@ -558,7 +558,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     NativeLogLevel? nativeLogLevel,
   }) async* {
     // Get the input path before starting the stream
-    final inputPath = await value.video.safeFilePath();
+    final inputPath = await value.video.contentOrSafeFilePath();
     final extension = _getFileExtension(inputPath);
 
     // Start the streaming waveform generation on native side
@@ -768,7 +768,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   }) async {
     _beginDispatch(value.id);
     try {
-      final inputPath = await value.video.safeFilePath();
+      final inputPath = await value.video.contentOrSafeFilePath();
       _handoffToNative(value.id);
 
       await methodChannel.invokeMethod<void>('splitVideo', {

@@ -1,5 +1,6 @@
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 
@@ -172,6 +173,20 @@ void main() {
 
       test('a differing key breaks equality', () {
         expect(segment.copyWith(chromaKey: key), isNot(segment));
+      });
+    });
+
+    group('content source', () {
+      tearDown(() => debugDefaultTargetPlatformOverride = null);
+
+      test('toAsyncMap passes the content url to native on Android', () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        const url = 'content://media/external/video/media/42';
+        final map = await VideoSegment(
+          video: EditorVideo.content(url),
+        ).toAsyncMap();
+
+        expect(map['inputPath'], url);
       });
     });
   });

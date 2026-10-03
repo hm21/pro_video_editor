@@ -6,13 +6,14 @@ import android.graphics.Bitmap
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
-import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.inspector.frame.FrameExtractor
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailConfig
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailJobHandle
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.contentDataSource
+import ch.waio.pro_video_editor.src.shared.media.toContentOrFileUri
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,7 +25,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -46,6 +46,8 @@ class ThumbnailGenerator(private val context: Context) {
     // Create a dedicated coroutine scope for this service
     // SupervisorJob ensures that failures don't cancel sibling coroutines
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private val sequentialFrameDecoder = SequentialFrameDecoder(context)
 
     private companion object {
         /** Upper bound of concurrent hardware decoder sessions. */
@@ -270,7 +272,7 @@ class ThumbnailGenerator(private val context: Context) {
         onFrame: (indices: List<Int>, bytes: ByteArray) -> Unit,
     ) = coroutineScope {
         val timestampsUs = config.timestampsUs
-        val scan = SequentialFrameDecoder.scan(config.inputPath)
+        val scan = sequentialFrameDecoder.scan(config.inputPath)
         val sortedIndices = targetIndices.sortedBy { timestampsUs[it] }
 
         // Group the time-sorted targets by the GOP their decode starts in.
@@ -298,7 +300,8 @@ class ThumbnailGenerator(private val context: Context) {
         val jobs = chunks.map { chunkIndices ->
             async(Dispatchers.IO) {
                 val chunkTimestamps = chunkIndices.map { timestampsUs[it] }
-                SequentialFrameDecoder(config.inputPath).decode(
+                sequentialFrameDecoder.decode(
+                    config.inputPath,
                     chunkTimestamps,
                     config.outputWidth,
                     config.outputHeight,
@@ -391,7 +394,7 @@ class ThumbnailGenerator(private val context: Context) {
         onFrame: (indices: List<Int>, bytes: ByteArray) -> Unit,
     ) {
         val timestampsUs = config.timestampsUs
-        val mediaItem = MediaItem.fromUri(Uri.fromFile(File(config.inputPath)))
+        val mediaItem = MediaItem.fromUri(config.inputPath.toContentOrFileUri())
         val sortedIndices = targetIndices.sortedBy { timestampsUs[it] }
 
         val extractor = FrameExtractor.Builder(context, mediaItem).build()
@@ -452,8 +455,6 @@ class ThumbnailGenerator(private val context: Context) {
         isCancelled: () -> Boolean,
         onFrame: (indices: List<Int>, bytes: ByteArray) -> Unit,
     ) = withContext(Dispatchers.IO) {
-        val tempVideoFile = File(config.inputPath)
-
         // Process all timestamps in parallel
         val jobs = targetIndices.map { index ->
             async {
@@ -462,9 +463,10 @@ class ThumbnailGenerator(private val context: Context) {
                 val startTime = System.currentTimeMillis()
                 var retriever: MediaMetadataRetriever? = null
                 try {
-                    retriever = MediaMetadataRetriever().apply {
-                        setDataSource(tempVideoFile.absolutePath)
-                    }
+                    // Assigned before opening, so the finally block also
+                    // releases it when the source cannot be opened.
+                    retriever = MediaMetadataRetriever()
+                    retriever.contentDataSource(context, config.inputPath)
 
                     // Extract frame at specified timestamp (closest frame)
                     val bitmap =
@@ -529,11 +531,9 @@ class ThumbnailGenerator(private val context: Context) {
         maxOutputFrames: Int = 10,
         onProgress: (Double) -> Unit,
     ): List<ByteArray> = withContext(Dispatchers.IO) {
-        val tempVideoFile = File(inputPath)
-
         // First, identify all keyframes in the video
         val keyframeTimestamps =
-            extractKeyframeTimestamps(tempVideoFile.absolutePath, maxOutputFrames)
+            extractKeyframeTimestamps(inputPath, maxOutputFrames)
         val thumbnails = MutableList<ByteArray?>(keyframeTimestamps.size) { null }
         val completed = AtomicInteger(0)
 
@@ -543,9 +543,10 @@ class ThumbnailGenerator(private val context: Context) {
                 val startTime = System.currentTimeMillis()
                 var retriever: MediaMetadataRetriever? = null
                 try {
-                    retriever = MediaMetadataRetriever().apply {
-                        setDataSource(tempVideoFile.absolutePath)
-                    }
+                    // Assigned before opening, so the finally block also
+                    // releases it when the source cannot be opened.
+                    retriever = MediaMetadataRetriever()
+                    retriever.contentDataSource(context, inputPath)
 
                     // Extract keyframe (OPTION_CLOSEST_SYNC ensures we get exact keyframe)
                     val bitmap =
@@ -605,7 +606,7 @@ class ThumbnailGenerator(private val context: Context) {
         val allKeyframes = mutableListOf<Long>()
 
         try {
-            extractor.setDataSource(videoPath)
+            extractor.contentDataSource(context, videoPath)
 
             // Find the video track
             val videoTrackIndex = (0 until extractor.trackCount).first {

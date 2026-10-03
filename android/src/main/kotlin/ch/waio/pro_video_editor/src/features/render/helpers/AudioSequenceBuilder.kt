@@ -10,6 +10,7 @@ import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.mediaSourceExists
 import java.io.File
 
 /**
@@ -127,8 +128,7 @@ class AudioSequenceBuilder(
      *   delete after export, or null if the audio could not be prepared.
      */
     fun build(): BuildResult? {
-        val sourceFile = File(audioPath)
-        if (!sourceFile.exists()) {
+        if (!mediaSourceExists(context, audioPath)) {
             Log.e(RENDER_TAG, "Custom audio file not found: $audioPath")
             return null
         }

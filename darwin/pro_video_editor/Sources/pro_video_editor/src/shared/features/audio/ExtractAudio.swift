@@ -403,9 +403,11 @@ class ExtractAudio {
           )
         }
 
+        // Only a fallback for the WAV header: the read loop below replaces it
+        // with the format the decoder actually delivers.
         let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)!.pointee
-        let sampleRate = Int(asbd.mSampleRate)
-        let channels = Int(asbd.mChannelsPerFrame)
+        var sampleRate = Int(asbd.mSampleRate)
+        var channels = Int(asbd.mChannelsPerFrame)
         let bitsPerSample = 16
 
         var timeRange: CMTimeRange
@@ -531,9 +533,26 @@ class ExtractAudio {
 
         let totalDuration = CMTimeGetSeconds(effectiveDuration)
         var totalPcmBytes: Int64 = 0
+        var decodedFormatKnown = false
 
         while let sampleBuffer = readerOutput.copyNextSampleBuffer() {
           if isCancelled { break }
+
+          // The header must describe the PCM as decoded, not the track: for
+          // HE-AAC the track only describes the AAC core layer, while the
+          // decoder applies SBR (twice the sample rate) and, for HE-AAC v2,
+          // PS (mono to stereo). The header written above is rewritten with
+          // this format once reading is done.
+          if !decodedFormatKnown,
+            let desc = CMSampleBufferGetFormatDescription(sampleBuffer),
+            let streamDesc = CMAudioFormatDescriptionGetStreamBasicDescription(desc)
+          {
+            let decodedRate = Int(streamDesc.pointee.mSampleRate)
+            let decodedChannels = Int(streamDesc.pointee.mChannelsPerFrame)
+            if decodedRate > 0 { sampleRate = decodedRate }
+            if decodedChannels > 0 { channels = decodedChannels }
+            decodedFormatKnown = true
+          }
 
           if let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) {
             let length = CMBlockBufferGetDataLength(blockBuffer)

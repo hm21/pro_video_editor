@@ -139,7 +139,7 @@ class VideoSegment {
   /// Resolves the input path and any chroma-key background image, so this is
   /// asynchronous.
   Future<Map<String, dynamic>> toAsyncMap() async {
-    final inputPath = await video.safeFilePath();
+    final inputPath = await video.contentOrSafeFilePath();
 
     return {
       'inputPath': inputPath,

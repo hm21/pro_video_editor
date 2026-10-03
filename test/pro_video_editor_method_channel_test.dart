@@ -20,10 +20,10 @@ void main() {
   const MethodChannel channel = MethodChannel('pro_video_editor');
   final mockVideo = MockEditorVideo();
   final mockBytes = Uint8List.fromList([0x00, 0x01]);
-  const mockFilePath = '';
+  const mockPath = '';
 
   setUp(() {
-    when(mockVideo.safeFilePath()).thenAnswer((_) async => mockFilePath);
+    when(mockVideo.contentOrSafeFilePath()).thenAnswer((_) async => mockPath);
     when(mockVideo.safeByteArray()).thenAnswer((_) async => mockBytes);
 
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
