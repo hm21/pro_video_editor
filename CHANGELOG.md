@@ -1,3 +1,8 @@
+## 2.22.0
+- **FEAT**(android): `EditorVideo.content` reads a `content://` URI, e.g. from the photo picker or the Storage Access Framework, in place instead of copying the file. Other platforms throw an `UnsupportedError`. `EditorVideoType` gains `content`.
+- **FIX**(iOS, macOS): WAV extraction of HE-AAC audio writes the decoded sample rate and channel count, so the file no longer plays two to four times too long.
+- **FIX**(android): A trimmed WAV extraction keeps exactly the requested range. It came out up to ~110 ms short and shifted.
+
 ## 2.21.0
 - **FEAT**(android, iOS, macOS): Four more video effects: `blockGlitch` (the picture breaks into coarse blocks while slices slip sideways, in short bursts), `filmGrain` (fine, calm grain), `signalInterference` (thin flickering slices that shift sideways, with bursts of noise) and `crt` (strong scanlines and a slight color fringe, without movement).
 - **FEAT**(android, iOS, macOS): Video effects that move or rearrange the picture: `shake`, `zoomPulse`, `mirror`, `kaleidoscope`, `splitScreen` and `wave`. `VideoEffectFrame` gains a geometry stage for them, ahead of every other operation: a wave (`waveAmplitude`, `wavePeriod`, `wavePhase`), then `zoom`, `offsetX`/`offsetY`, `mirrorX`/`mirrorY`, then `tiles`, so `VideoEffectFrame.toList` grows from 27 to 36 values. `VideoEffectPreview` shows them live as well.
