@@ -484,6 +484,42 @@ void main() {
         );
       });
 
+      testWidgets('renders more sources than the copy cache keeps', (_) async {
+        if (!published) return;
+        // The plugin keeps at most four copies of stream-only sources.
+        final videos = <EditorVideo>[];
+        for (var i = 0; i < 5; i++) {
+          final path = await tempPath('clip_$i.mp4');
+          File(clipFile).copySync(path);
+          final uri = await publish(path, 'video/mp4');
+          if (uri == null) return;
+          videos.add(EditorVideo.content(uri));
+        }
+        // One call per source, so the cache drops the first copy again.
+        for (final video in videos) {
+          await pve.getMetadata(video);
+        }
+
+        late Uint8List result;
+        final problems = await problemsDuring(() async {
+          result = await pve.renderVideo(
+            VideoRenderData(
+              videoSegments: [
+                for (final video in videos)
+                  VideoSegment(
+                    video: video,
+                    endTime: const Duration(seconds: 1),
+                  ),
+              ],
+            ),
+          );
+        });
+        final meta = await pve.getMetadata(EditorVideo.memory(result));
+
+        expect(problems, isEmpty, reason: 'a source failed: $problems');
+        expectCloseMs(meta.duration, 5000, 'five 1 s clips');
+      });
+
       testWidgets('safeFilePath copies the content into a file', (_) async {
         if (!published) return;
         final video = EditorVideo.content(demo.contentUrl!);

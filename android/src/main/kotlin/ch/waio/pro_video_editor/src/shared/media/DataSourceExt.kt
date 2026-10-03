@@ -164,15 +164,29 @@ fun openMediaInputStream(context: Context, path: String): InputStream {
  * returns that file. Blocks while copying.
  */
 @Throws(IOException::class)
-fun copyContentToFile(context: Context, path: String, outputPathWithoutExtension: String): File {
+fun copyContentToFile(context: Context, path: String, outputPathWithoutExtension: String): File =
+    openMediaInputStream(context, path).use { input ->
+        writeMediaFile(context, path, input, outputPathWithoutExtension)
+    }
+
+/**
+ * Writes [input], the content of [path], into a new file at
+ * [outputPathWithoutExtension] plus the extension of [path]'s MIME type, and
+ * returns that file. The file is deleted again when writing fails.
+ */
+@Throws(IOException::class)
+fun writeMediaFile(
+    context: Context,
+    path: String,
+    input: InputStream,
+    outputPathWithoutExtension: String
+): File {
     val extension = contentMimeType(context, path)
         ?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }
         ?: "mp4"
     val output = File("$outputPathWithoutExtension.$extension")
     try {
-        openMediaInputStream(context, path).use { input ->
-            output.outputStream().use { input.copyTo(it) }
-        }
+        output.outputStream().use { input.copyTo(it) }
     } catch (e: Exception) {
         output.delete()
         throw e

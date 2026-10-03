@@ -1,5 +1,5 @@
 ## 2.23.0
-- **FEAT**(android): `EditorVideo.safeFilePath` copies an `EditorVideo.content` video into a temporary file instead of throwing. The plugin's own calls still read the URI in place.
+- **FEAT**(android): `EditorVideo.safeFilePath` copies an `EditorVideo.content` video into a temporary file instead of throwing. Without that call, the plugin keeps reading the URI in place.
 - **FIX**(android): `EditorVideo.content` works with providers that stream the file without random access, as some cloud and archive providers do. Such a source is copied once into the cache; before, most calls failed with `setDataSource failed`.
 
 ## 2.22.0

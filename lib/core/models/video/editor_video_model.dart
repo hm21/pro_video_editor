@@ -218,8 +218,10 @@ class EditorVideo {
   ///
   /// An [EditorVideo.content] video is copied into a temporary file on
   /// Android, the same way a network video is downloaded; on other platforms
-  /// it throws an [UnsupportedError]. The plugin's own calls read the URI in
-  /// place instead, see [contentOrSafeFilePath].
+  /// it throws an [UnsupportedError]. Like a downloaded network video, that
+  /// file is then used for this video from now on, also by the plugin's own
+  /// calls, which otherwise read the URI in place (see
+  /// [contentOrSafeFilePath]).
   Future<String> safeFilePath() async {
     switch (typePreferredFile) {
       case EditorVideoType.memory:

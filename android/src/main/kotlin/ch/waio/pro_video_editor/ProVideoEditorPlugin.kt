@@ -92,8 +92,14 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
      */
     private lateinit var sourceExecutor: ExecutorService
 
-    /** Calls handed to [sourceExecutor] and not dispatched yet. Main thread only. */
-    private var callsWaitingForSources = 0
+    /**
+     * Task ids of the calls handed to [sourceExecutor] and not dispatched
+     * yet, with how many calls carry each. Main thread only.
+     */
+    private val waitingTaskIds = HashMap<String, Int>()
+
+    /** Set once the engine is gone. Main thread only. */
+    private var detached = false
     private val renderTasks = JobRegistry<RenderTask> { task ->
         task.canceled.set(true)
         task.job?.cancel()
@@ -179,7 +185,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
 
         appContext = flutterPluginBinding.applicationContext
         sourceExecutor = Executors.newSingleThreadExecutor()
-        StreamOnlySources.clearStaleCopies(appContext)
+        sourceExecutor.execute { StreamOnlySources.clearStaleCopies(appContext) }
 
         renderVideo = RenderVideo(flutterPluginBinding.applicationContext)
         splitVideo = SplitVideo(flutterPluginBinding.applicationContext)
@@ -211,6 +217,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         logChannel.setStreamHandler(null)
         Log.sink = null
         logSink = null
+        detached = true
         sourceExecutor.shutdown()
     }
 
@@ -231,26 +238,82 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
      *
      * A call that carries a content URI not seen before is dispatched only
      * once [StreamOnlySources] has checked it on [sourceExecutor], which
-     * copies a source that cannot be seeked. Later calls wait behind it, so
-     * a cancel never overtakes the task it cancels.
+     * copies a source that cannot be seeked. A later call with the same task
+     * id waits behind it, so a cancel never overtakes the task it cancels;
+     * other calls do not wait for the copy. The copies a call reads are kept
+     * until it is answered.
      */
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        // A plain copy reads the source front to back, so it needs no check.
-        val unchecked = if (call.method == "copyContentToFile") {
-            emptyList()
-        } else {
-            contentUrisIn(call.arguments).filter(StreamOnlySources::needsCheck)
+        val sources = contentUrisIn(call.arguments)
+        val reply = if (sources.isEmpty()) result else {
+            StreamOnlySources.acquire(sources)
+            ReplyListeningResult(result) { StreamOnlySources.release(sources) }
         }
-        if (unchecked.isEmpty() && callsWaitingForSources == 0) {
-            dispatch(call, result)
+        // A plain copy reads the source front to back, so it needs no check.
+        val check = call.method != "copyContentToFile" &&
+            sources.any(StreamOnlySources::needsCheck)
+        val id = (call.arguments as? Map<*, *>)?.get("id") as? String
+        if (!check && (id == null || id !in waitingTaskIds)) {
+            dispatch(call, reply)
             return
         }
-        callsWaitingForSources++
+
+        if (id != null) waitingTaskIds[id] = (waitingTaskIds[id] ?: 0) + 1
         sourceExecutor.execute {
-            StreamOnlySources.prepare(appContext, unchecked)
-            mainHandler.post {
-                callsWaitingForSources--
-                dispatch(call, result)
+            try {
+                if (check) StreamOnlySources.prepare(appContext, sources)
+            } catch (e: Throwable) {
+                // The call still runs and reports what fails to open.
+                Log.e("ProVideoEditorPlugin", "Checking the sources failed", e)
+            } finally {
+                mainHandler.post {
+                    if (id != null) {
+                        val count = waitingTaskIds.getValue(id) - 1
+                        if (count > 0) waitingTaskIds[id] = count else waitingTaskIds.remove(id)
+                    }
+                    if (detached) {
+                        (reply as? ReplyListeningResult)?.abandon()
+                    } else {
+                        dispatch(call, reply)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Forwards to [result] and runs [onReply] once the call is answered. */
+    private class ReplyListeningResult(
+        private val result: MethodChannel.Result,
+        private val onReply: () -> Unit
+    ) : MethodChannel.Result {
+        private val replied = AtomicBoolean(false)
+
+        /** Runs [onReply] for a call that will never be answered. */
+        fun abandon() {
+            if (replied.compareAndSet(false, true)) onReply()
+        }
+
+        override fun success(value: Any?) {
+            try {
+                result.success(value)
+            } finally {
+                abandon()
+            }
+        }
+
+        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+            try {
+                result.error(errorCode, errorMessage, errorDetails)
+            } finally {
+                abandon()
+            }
+        }
+
+        override fun notImplemented() {
+            try {
+                result.notImplemented()
+            } finally {
+                abandon()
             }
         }
     }
