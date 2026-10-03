@@ -9,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor_example/core/constants/example_constants.dart';
 
+import 'utils/pcm.dart';
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   final testVideo = EditorVideo.asset(kVideoEditorExampleH264Path);
@@ -360,6 +362,63 @@ void main() {
     final file = File(outputPath);
     if (await file.exists()) {
       await file.delete();
+    }
+  }, skip: skipPlatform);
+
+  testWidgets('extractAudio to WAV keeps a trimmed range in place', (
+    tester,
+  ) async {
+    // 1 kHz bursts start exactly at 0.6 s and 1.2 s. The two files declare
+    // the AAC encoder delay differently (iTunes metadata vs. an edit list);
+    // both have to come out on the timeline of the audio as it plays.
+    double? onsetAfter(Pcm pcm, double fromSec) {
+      final from = (fromSec * pcm.sampleRate).round();
+      for (var i = from; i < pcm.samples.length; i++) {
+        if (pcm.samples[i].abs() > 0.1) return i / pcm.sampleRate;
+      }
+      return null;
+    }
+
+    final directory = await getTemporaryDirectory();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+
+    for (final asset in ['aac_bursts_itunes.m4a', 'aac_bursts_ffmpeg.m4a']) {
+      for (final (start, end) in [(null, null), (0.5, 1.5), (0.55, 1.95)]) {
+        final outputPath =
+            '${directory.path}/test_audio_bursts_${asset}_${start}_$ts.wav';
+        await pve.extractAudioToFile(
+          outputPath,
+          AudioExtractConfigs(
+            video: EditorVideo.asset('assets/tests/$asset'),
+            format: AudioFormat.wav,
+            startTime: start == null
+                ? null
+                : Duration(milliseconds: (start * 1000).round()),
+            endTime: end == null
+                ? null
+                : Duration(milliseconds: (end * 1000).round()),
+          ),
+        );
+        final file = File(outputPath);
+        final pcm = Pcm.parseWav(await file.readAsBytes());
+        await file.delete();
+
+        final offset = start ?? 0;
+        final reason = '$asset, range $start-$end';
+        expect(
+          pcm.seconds,
+          closeTo((end ?? 2) - offset, 0.005),
+          reason: '$reason: length',
+        );
+        final first = onsetAfter(pcm, 0);
+        expect(first, isNotNull, reason: '$reason: first burst');
+        expect(first! + offset, closeTo(0.6, 0.005), reason: reason);
+        expect(
+          onsetAfter(pcm, first + 0.3)! + offset,
+          closeTo(1.2, 0.005),
+          reason: reason,
+        );
+      }
     }
   }, skip: skipPlatform);
 }
