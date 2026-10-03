@@ -1,12 +1,12 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
+import android.content.Context
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Crop
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
-import java.io.File
 
 /**
  * Applies crop transformation to video.
@@ -18,7 +18,7 @@ import java.io.File
  * - Default values (full frame if not specified)
  *
  * @param videoEffects List to add crop effect to
- * @param inputFile Video file for dimension detection
+ * @param inputPath Video file path for dimension detection
  * @param rotationDegrees Applied rotation (affects crop coordinates)
  * @param flipX Whether video is flipped horizontally
  * @param flipY Whether video is flipped vertically
@@ -29,8 +29,9 @@ import java.io.File
  */
 @UnstableApi
 fun applyCrop(
+    context: Context,
     videoEffects: MutableList<Effect>,
-    inputFile: File,
+    inputPath: String,
     rotationDegrees: Float,
     flipX: Boolean,
     flipY: Boolean,
@@ -42,8 +43,9 @@ fun applyCrop(
     if (cropX == null && cropY == null && cropWidth == null && cropHeight == null) return
 
     try {
-        val (originalVideoWidth, originalVideoHeight, videoRotation) = getRotatedVideoDimensions(
-            inputFile,
+        val (originalVideoWidth, originalVideoHeight, _) = getRotatedVideoDimensions(
+            context,
+            inputPath,
             rotationDegrees
         )
 

@@ -10,6 +10,7 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import androidx.media3.common.util.UnstableApi
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.openMediaExtractor
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -84,6 +85,7 @@ object VideoReverser {
             if (includeAudio) {
                 try {
                     audioPre = preEncodeReversedAudio(
+                        context = context,
                         inputPath = inputPath,
                         segmentStartUs = segmentStartUs,
                         segmentEndUs = segmentEndUs,
@@ -105,6 +107,7 @@ object VideoReverser {
             // muxer, then starts it. The returned track index is for the video.
             var audioTrackIdx = -1
             val videoResult = reverseVideoTrack(
+                context = context,
                 inputPath = inputPath,
                 segmentStartUs = segmentStartUs,
                 segmentEndUs = segmentEndUs,
@@ -185,6 +188,7 @@ object VideoReverser {
      * list, typically 20–80 MB for a 40-second 1080p clip at 4–8 Mbps.
      */
     private fun reverseVideoTrack(
+        context: Context,
         inputPath: String,
         segmentStartUs: Long,
         segmentEndUs: Long,
@@ -199,7 +203,7 @@ object VideoReverser {
         // forwarded to the final output muxer (MediaMuxer.setOrientationHint
         // must be called before start(), which happens inside remuxReversed).
         val rotation = run {
-            val ex = MediaExtractor().apply { setDataSource(inputPath) }
+            val ex = openMediaExtractor(context, inputPath)
             try {
                 val vidIdx = findTrack(ex, "video/")
                 if (vidIdx != null) {
@@ -215,6 +219,7 @@ object VideoReverser {
 
         // Phase A: single forward decode + re-encode (70 % of progress).
         transcodeSegmentToAllIntra(
+            context = context,
             inputPath = inputPath,
             segmentStartUs = segmentStartUs,
             segmentEndUs = segmentEndUs,
@@ -245,13 +250,14 @@ object VideoReverser {
      * making Phase B (sample reorder) codec-free.
      */
     private fun transcodeSegmentToAllIntra(
+        context: Context,
         inputPath: String,
         segmentStartUs: Long,
         segmentEndUs: Long,
         outFile: File,
         onProgress: (Float) -> Unit,
     ) {
-        val extractor = MediaExtractor().apply { setDataSource(inputPath) }
+        val extractor = openMediaExtractor(context, inputPath)
         val videoTrackIndex = findTrack(extractor, "video/")
             ?: throw IllegalStateException("No video track found in $inputPath")
         extractor.selectTrack(videoTrackIndex)
@@ -755,13 +761,14 @@ object VideoReverser {
     // ---------------------------------------------------------------------
 
     private fun preEncodeReversedAudio(
+        context: Context,
         inputPath: String,
         segmentStartUs: Long,
         segmentEndUs: Long,
         workDir: File,
         onProgress: (Float) -> Unit = {},
     ): AudioPreEncoded? {
-        val extractor = MediaExtractor().apply { setDataSource(inputPath) }
+        val extractor = openMediaExtractor(context, inputPath)
         val audioTrackIndex = findTrack(extractor, "audio/")
         if (audioTrackIndex == null) {
             extractor.release()

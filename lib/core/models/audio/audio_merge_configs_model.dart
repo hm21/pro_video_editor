@@ -56,8 +56,8 @@ class AudioMergeSegment {
 
   /// Converts this segment to a map for platform channel communication.
   ///
-  /// [inputPath] is the resolved local file path for [video] (produced by
-  /// [EditorVideo.safeFilePath]).
+  /// [inputPath] is the resolved local file path or Android content URI for
+  /// [video] (produced by [EditorVideo.contentOrSafeFilePath]).
   Map<String, dynamic> toMap(String inputPath) {
     return {
       'inputPath': inputPath,
@@ -177,8 +177,9 @@ class AudioMergeConfigs {
 
   /// Converts this configuration to a map for platform channel communication.
   ///
-  /// [segmentInputPaths] must contain one resolved local file path per entry in
-  /// [segments], in the same order (produced by [EditorVideo.safeFilePath]).
+  /// [segmentInputPaths] must contain one resolved local file path or Android
+  /// content URI per entry in [segments], in the same order (produced by
+  /// [EditorVideo.contentOrSafeFilePath]).
   Map<String, dynamic> toMap(List<String> segmentInputPaths) {
     assert(
       segmentInputPaths.length == segments.length,

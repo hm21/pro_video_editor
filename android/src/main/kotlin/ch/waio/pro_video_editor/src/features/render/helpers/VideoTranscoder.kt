@@ -15,6 +15,7 @@ import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.contentUri
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference
@@ -27,7 +28,8 @@ import java.util.concurrent.atomic.AtomicReference
  * we can then safely apply effects like ColorMatrix, Blur, or Overlay.
  */
 @UnstableApi
-object VideoTranscoder {
+class VideoTranscoder(private val context: Context) {
+    private val mediaInfoExtractor: MediaInfoExtractor = MediaInfoExtractor(context)
 
     /**
      * Result of a transcoding operation.
@@ -50,7 +52,7 @@ object VideoTranscoder {
      * @return True if transcoding is needed
      */
     fun needsTranscoding(videoPath: String): Boolean {
-        val formatInfo = MediaInfoExtractor.getVideoFormatInfo(videoPath)
+        val formatInfo = mediaInfoExtractor.getVideoFormatInfo(videoPath)
         val needsTranscode = formatInfo.needsTranscodingForEffects()
 
         Log.d(
@@ -71,11 +73,10 @@ object VideoTranscoder {
      * This is a blocking operation that should be called from a background thread.
      * The transcoded file is saved to the app's cache directory.
      * 
-     * @param context Android context
      * @param inputPath Path to the input video
      * @return TranscodeResult indicating success, not-needed, or error
      */
-    fun transcodeToH264Sync(context: Context, inputPath: String): TranscodeResult {
+    fun transcodeToH264Sync(inputPath: String): TranscodeResult {
         // Check if transcoding is needed
         if (!needsTranscoding(inputPath)) {
             Log.d(RENDER_TAG, "No transcoding needed for: $inputPath")
@@ -109,7 +110,7 @@ object VideoTranscoder {
 
                             // Verify the output is actually H.264
                             val outputInfo =
-                                MediaInfoExtractor.getVideoFormatInfo(outputFile.absolutePath)
+                                mediaInfoExtractor.getVideoFormatInfo(outputFile.absolutePath)
                             Log.i(
                                 RENDER_TAG, "Transcoded output: isHevc=${outputInfo.isHevc}, " +
                                         "bitDepth=${outputInfo.bitDepth}, isHdr=${outputInfo.isHdr}"
@@ -134,7 +135,7 @@ object VideoTranscoder {
 
                 // Create composition with HDR tonemapping to force SDR output
                 val mediaItem = MediaItem.Builder()
-                    .setUri(inputPath)
+                    .contentUri(inputPath)
                     .build()
 
                 // Use HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL to convert HDR to SDR
@@ -175,17 +176,15 @@ object VideoTranscoder {
     /**
      * Async version of transcoding.
      * 
-     * @param context Android context
      * @param inputPath Path to the input video
      * @param onComplete Callback with result
      */
     fun transcodeToH264Async(
-        context: Context,
         inputPath: String,
         onComplete: (TranscodeResult) -> Unit
     ) {
         Thread {
-            val result = transcodeToH264Sync(context, inputPath)
+            val result = transcodeToH264Sync(inputPath)
             Handler(Looper.getMainLooper()).post {
                 onComplete(result)
             }
@@ -195,18 +194,14 @@ object VideoTranscoder {
     /**
      * Transcodes multiple video clips if needed.
      * 
-     * @param context Android context
      * @param inputPaths List of input video paths
      * @return Map of original path to transcoded path (or original if no transcoding needed)
      */
-    fun transcodeClipsIfNeeded(
-        context: Context,
-        inputPaths: List<String>
-    ): Map<String, String> {
+    fun transcodeClipsIfNeeded(inputPaths: List<String>): Map<String, String> {
         val result = mutableMapOf<String, String>()
 
         for (inputPath in inputPaths) {
-            when (val transcodeResult = transcodeToH264Sync(context, inputPath)) {
+            when (val transcodeResult = transcodeToH264Sync(inputPath)) {
                 is TranscodeResult.Success -> {
                     result[inputPath] = transcodeResult.outputPath
                 }

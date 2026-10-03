@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.webkit.MimeTypeMap
 import androidx.media3.common.C
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
@@ -23,6 +24,11 @@ import ch.waio.pro_video_editor.src.features.render.models.CompositionConfig
 import ch.waio.pro_video_editor.src.features.render.models.SegmentTransformConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.contentDataSource
+import ch.waio.pro_video_editor.src.shared.media.contentMimeType
+import ch.waio.pro_video_editor.src.shared.media.contentUri
+import ch.waio.pro_video_editor.src.shared.media.isContentUri
+import ch.waio.pro_video_editor.src.shared.media.openMediaInputStream
 import java.io.File
 import kotlin.math.max
 import kotlin.math.min
@@ -64,6 +70,8 @@ class LayeredCompositionBuilder(
      */
     private val globalChromaKey: ChromaKeyConfig? = null
 ) {
+    val mediaInfoExtractor = MediaInfoExtractor(context)
+
     /** Temp files (source duplicates) to delete after export. */
     val temporaryFiles: MutableList<File> = mutableListOf()
 
@@ -170,7 +178,7 @@ class LayeredCompositionBuilder(
 
             for (clip in layer.clips) {
                 val (displayW, displayH) = readDisplaySize(clip.inputPath)
-                val srcMediaDurationUs = MediaInfoExtractor.getVideoDuration(clip.inputPath)
+                val srcMediaDurationUs = mediaInfoExtractor.getVideoDuration(clip.inputPath)
                 val fullDurationUs =
                     ((clip.endUs ?: srcMediaDurationUs) - (clip.startUs ?: 0L))
                         .coerceAtLeast(0L)
@@ -230,7 +238,7 @@ class LayeredCompositionBuilder(
                     )
                 )
                 val volume = clip.volume ?: 1.0f
-                if (enableAudio && volume > 0f && MediaInfoExtractor.hasAudioTrack(clip.inputPath)) {
+                if (enableAudio && volume > 0f && mediaInfoExtractor.hasAudioTrack(clip.inputPath)) {
                     layerAudio += LayerAudio(
                         path = clip.inputPath,
                         srcStartUs = srcStartUs ?: 0L,
@@ -360,7 +368,7 @@ class LayeredCompositionBuilder(
         canvasH: Int,
         layerChromaKey: ChromaKeyConfig?
     ): EditedMediaItem {
-        val mediaItemBuilder = MediaItem.Builder().setUri(Uri.fromFile(File(inputPath)))
+        val mediaItemBuilder = MediaItem.Builder().contentUri(inputPath)
         if (srcStartUs != null || srcEndUs != null) {
             val clipping = MediaItem.ClippingConfiguration.Builder()
                 .setStartPositionUs(srcStartUs ?: 0L)
@@ -561,8 +569,27 @@ class LayeredCompositionBuilder(
      * Returns a distinct file path with the same content as [path], so Media3
      * sees a unique URI per layer. Prefers a symlink, falls back to a copy. The
      * result is registered in [temporaryFiles] for cleanup after export.
+     *
+     * A content URI cannot be symlinked, so it is copied.
      */
     private fun distinctSourceFor(path: String): String {
+        if (path.isContentUri()) {
+            val ext = contentMimeType(context, path)
+                ?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }
+                ?: "mp4"
+            val dst = File(context.cacheDir, "layer_src_${System.nanoTime()}.$ext")
+            return try {
+                openMediaInputStream(context, path).use { input ->
+                    dst.outputStream().use { output -> input.copyTo(output) }
+                }
+                temporaryFiles.add(dst)
+                dst.path
+            } catch (e: Exception) {
+                dst.delete()
+                Log.w(RENDER_TAG, "Could not duplicate source $path: ${e.message}")
+                path
+            }
+        }
         val src = File(path)
         val ext = src.extension.ifEmpty { "mp4" }
         val dst = File(context.cacheDir, "layer_src_${System.nanoTime()}.$ext")
@@ -584,7 +611,7 @@ class LayeredCompositionBuilder(
     private fun readDisplaySize(path: String): Pair<Int, Int> {
         val retriever = MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(path)
+            retriever.contentDataSource(context, path)
             val w = retriever
                 .extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
                 ?.toIntOrNull() ?: 0

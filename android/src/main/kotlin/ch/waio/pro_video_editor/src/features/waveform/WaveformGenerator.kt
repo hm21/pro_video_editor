@@ -10,6 +10,7 @@ import ch.waio.pro_video_editor.src.features.audio.NoAudioTrackException
 import ch.waio.pro_video_editor.src.features.waveform.models.WaveformConfig
 import ch.waio.pro_video_editor.src.features.waveform.models.WaveformJobHandle
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.contentDataSource
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
@@ -69,7 +70,7 @@ class WaveformGenerator(private val context: Context) {
             try {
                 // Initialize extractor
                 extractor = MediaExtractor()
-                extractor.setDataSource(config.inputPath)
+                extractor.contentDataSource(context, config.inputPath)
 
                 // Find audio track
                 val audioTrackIndex = findAudioTrack(extractor)

@@ -24,14 +24,17 @@ object RenderSourceFormats {
      * One entry per distinct format among the clips, then the layers' clips.
      * Opens every source, so it must not run on the main thread.
      */
-    fun of(config: RenderConfig): List<Map<String, Any>> = describeDistinct(
+    fun of(
+        config: RenderConfig,
+        mediaInfoExtractor: MediaInfoExtractor,
+    ): List<Map<String, Any>> = describeDistinct(
         (
             config.videoClips.map { it.inputPath } +
                 (config.composition?.layers ?: emptyList())
                     .flatMap { layer -> layer.clips.map { it.inputPath } }
             )
             .distinct()
-            .map { MediaInfoExtractor.getVideoFormatInfo(it) }
+            .map { mediaInfoExtractor.getVideoFormatInfo(it) }
     )
 
     /**

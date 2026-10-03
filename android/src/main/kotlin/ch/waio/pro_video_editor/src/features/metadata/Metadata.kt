@@ -5,11 +5,17 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import ch.waio.pro_video_editor.src.features.metadata.models.MetadataConfig
+import ch.waio.pro_video_editor.src.shared.media.contentDataSource
+import ch.waio.pro_video_editor.src.shared.media.contentMimeType
+import ch.waio.pro_video_editor.src.shared.media.isContentUri
+import ch.waio.pro_video_editor.src.shared.media.mediaSourceLength
+import ch.waio.pro_video_editor.src.shared.media.openMediaInputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.io.File
+import java.io.InputStream
 
 /**
  * Service for extracting metadata from video files.
@@ -90,16 +96,26 @@ class Metadata(private val context: Context) {
      * @throws Exception if the file cannot be accessed or metadata extraction fails
      */
     private fun processVideo(config: MetadataConfig): Map<String, Any> {
-        val tempFile = File(config.inputPath)
         val retriever = MediaMetadataRetriever()
 
         try {
-            retriever.setDataSource(tempFile.absolutePath)
+            retriever.contentDataSource(context, config.inputPath)
 
             // Initialize metadata map with file size
             val metadata = mutableMapOf<String, Any>(
-                "fileSize" to tempFile.length()
+                "fileSize" to mediaSourceLength(context, config.inputPath)
             )
+
+            // A content URI carries no file extension for Dart to derive the
+            // format from, so report the subtype of its MIME type instead
+            // (e.g. "mp4", "quicktime"), matching what Dart derives for files.
+            if (config.inputPath.isContentUri()) {
+                val mimeType = contentMimeType(context, config.inputPath)
+                    ?: retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+                mimeType?.substringAfter('/', "")?.takeIf { it.isNotEmpty() }?.let {
+                    metadata["extension"] = it
+                }
+            }
 
             // Extract duration and bitrate
             metadata["duration"] =
@@ -138,7 +154,7 @@ class Metadata(private val context: Context) {
             val hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
             if (hasAudio == "yes") {
                 // Extract actual audio track duration using MediaExtractor
-                val audioDuration = extractAudioDuration(tempFile.absolutePath)
+                val audioDuration = extractAudioDuration(config.inputPath)
                 if (audioDuration != null) {
                     metadata["audioDuration"] = audioDuration
                 }
@@ -193,7 +209,7 @@ class Metadata(private val context: Context) {
             // Check if video is optimized for streaming (moov before mdat)
             // Only perform this check if explicitly requested (performance optimization)
             if (config.checkStreamingOptimization) {
-                val isOptimizedForStreaming = checkStreamingOptimization(tempFile)
+                val isOptimizedForStreaming = checkStreamingOptimization(config.inputPath)
                 if (isOptimizedForStreaming != null) {
                     metadata["isOptimizedForStreaming"] = isOptimizedForStreaming
                 }
@@ -217,11 +233,10 @@ class Metadata(private val context: Context) {
      * @throws Exception if the file cannot be accessed or check fails
      */
     private fun checkAudioTrack(config: MetadataConfig): Boolean {
-        val tempFile = File(config.inputPath)
         val retriever = MediaMetadataRetriever()
 
         try {
-            retriever.setDataSource(tempFile.absolutePath)
+            retriever.contentDataSource(context, config.inputPath)
 
             // Check if video has audio track
             val hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
@@ -273,13 +288,13 @@ class Metadata(private val context: Context) {
      * This method provides more accurate audio duration compared to the overall
      * video duration, especially when the audio track is shorter than the video.
      *
-     * @param filePath Absolute path to the video file
+     * @param path A path to the video file
      * @return Audio duration in milliseconds, or null if no audio track is found
      */
-    private fun extractAudioDuration(filePath: String): Double? {
+    private fun extractAudioDuration(path: String): Double? {
         val extractor = MediaExtractor()
         try {
-            extractor.setDataSource(filePath)
+            extractor.contentDataSource(context, path)
 
             // Find the audio track
             for (i in 0 until extractor.trackCount) {
@@ -311,19 +326,25 @@ class Metadata(private val context: Context) {
      * When moov comes first, browsers can start playback before downloading the
      * entire file (progressive streaming / fast start).
      *
-     * @param file The video file to check
+     * @param path The video file path or content URI to check
      * @return true if optimized for streaming (moov before mdat), false if not,
      *         null if the format doesn't support this check or an error occurred
      */
-    private fun checkStreamingOptimization(file: File): Boolean? {
+    private fun checkStreamingOptimization(path: String): Boolean? {
         // Only check MP4/MOV/M4V files
-        val extension = file.extension.lowercase()
-        if (extension !in listOf("mp4", "mov", "m4v", "m4a")) {
-            return null
+        if (path.isContentUri()) {
+            // An unknown type is scanned anyway; a non-MP4 stream finds neither atom.
+            val mimeType = contentMimeType(context, path)?.lowercase()
+            if (mimeType != null && mimeType !in STREAMING_CHECK_MIME_TYPES) return null
+        } else {
+            val extension = File(path).extension.lowercase()
+            if (extension !in listOf("mp4", "mov", "m4v", "m4a")) {
+                return null
+            }
         }
 
         try {
-            file.inputStream().use { inputStream ->
+            return openMediaInputStream(context, path).use { inputStream ->
                 val buffer = ByteArray(8)
                 var moovPosition: Long = -1
                 var mdatPosition: Long = -1
@@ -331,8 +352,7 @@ class Metadata(private val context: Context) {
 
                 while (true) {
                     // Read atom header (4 bytes size + 4 bytes type)
-                    val bytesRead = inputStream.read(buffer, 0, 8)
-                    if (bytesRead < 8) break
+                    if (!inputStream.readFully(buffer)) break
 
                     // Parse atom size (big-endian)
                     val atomSize = ((buffer[0].toLong() and 0xFF) shl 24) or
@@ -358,7 +378,7 @@ class Metadata(private val context: Context) {
                     val actualSize = if (atomSize == 1L) {
                         // Read 64-bit size
                         val extBuffer = ByteArray(8)
-                        if (inputStream.read(extBuffer, 0, 8) < 8) break
+                        if (!inputStream.readFully(extBuffer)) break
                         ((extBuffer[0].toLong() and 0xFF) shl 56) or
                                 ((extBuffer[1].toLong() and 0xFF) shl 48) or
                                 ((extBuffer[2].toLong() and 0xFF) shl 40) or
@@ -376,9 +396,7 @@ class Metadata(private val context: Context) {
 
                     // Skip to next atom
                     val skipBytes = actualSize - 8 - (if (atomSize == 1L) 8 else 0)
-                    if (skipBytes > 0) {
-                        inputStream.skip(skipBytes)
-                    }
+                    if (skipBytes > 0 && !inputStream.skipFully(skipBytes)) break
                     position += actualSize
                 }
 
@@ -394,4 +412,43 @@ class Metadata(private val context: Context) {
         }
     }
 
+    /**
+     * Fills [buffer] completely; false when the stream ends first. A single
+     * read() may return fewer bytes on a pipe-backed content stream.
+     */
+    private fun InputStream.readFully(buffer: ByteArray): Boolean {
+        var offset = 0
+        while (offset < buffer.size) {
+            val read = read(buffer, offset, buffer.size - offset)
+            if (read < 0) return false
+            offset += read
+        }
+        return true
+    }
+
+    /**
+     * Skips exactly [count] bytes; false when the stream ends first. skip()
+     * may skip fewer bytes than asked on a pipe-backed content stream.
+     */
+    private fun InputStream.skipFully(count: Long): Boolean {
+        var remaining = count
+        while (remaining > 0) {
+            val skipped = skip(remaining)
+            if (skipped > 0) {
+                remaining -= skipped
+            } else {
+                // skip() made no progress: read one byte to tell EOF apart.
+                if (read() < 0) return false
+                remaining--
+            }
+        }
+        return true
+    }
+
+    private companion object {
+        /** Content MIME types of the MP4 family the moov/mdat check applies to. */
+        val STREAMING_CHECK_MIME_TYPES = setOf(
+            "video/mp4", "video/quicktime", "video/x-m4v", "audio/mp4", "audio/x-m4a"
+        )
+    }
 }

@@ -3,7 +3,6 @@ package ch.waio.pro_video_editor.src.features.split
 import mapFormatToMimeType
 import android.content.Context
 import android.media.MediaMetadataRetriever
-import android.net.Uri
 import android.os.Handler
 import android.os.SystemClock
 import androidx.media3.common.MediaItem
@@ -18,6 +17,9 @@ import ch.waio.pro_video_editor.src.features.render.helpers.ResilientVideoEncode
 import ch.waio.pro_video_editor.src.features.render.models.RenderJobHandle
 import ch.waio.pro_video_editor.src.shared.concurrency.ExportGate
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.contentDataSource
+import ch.waio.pro_video_editor.src.shared.media.contentUri
+import ch.waio.pro_video_editor.src.shared.media.isContentUri
 import java.io.File
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -51,7 +53,7 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * Note on stalls: a genuine hang here is almost always contention for the
  * device's limited hardware [android.media.MediaCodec] encoder pool — split and
- * concurrent speed renders both drive their [Transformer] on the main [Looper]
+ * concurrent speed renders both drive their [Transformer] on the main [android.os.Looper]
  * with no global cap on live encoder sessions. A second concurrent encoder can
  * block at `progress == 0`, which the stall bound now catches.
  */
@@ -139,8 +141,7 @@ class SplitVideo(private val context: Context) {
             return handle
         }
 
-        val inputFile = File(inputPath)
-        if (!inputFile.exists()) {
+        if (!inputPath.isContentUri() && !File(inputPath).exists()) {
             finishError(IllegalArgumentException("Input file not found: $inputPath"))
             return handle
         }
@@ -287,7 +288,7 @@ class SplitVideo(private val context: Context) {
         if (endUs != null) clipping.setEndPositionUs(endUs)
 
         val mediaItem = MediaItem.Builder()
-            .setUri(Uri.fromFile(File(inputPath)))
+            .contentUri(inputPath)
             .setClippingConfiguration(clipping.build())
             .build()
         val editedMediaItem = EditedMediaItem.Builder(mediaItem)
@@ -484,7 +485,7 @@ class SplitVideo(private val context: Context) {
     private fun probeDurationUs(path: String): Long {
         val retriever = MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(path)
+            retriever.contentDataSource(context, path)
             val ms = retriever
                 .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                 ?.toLongOrNull() ?: 0L

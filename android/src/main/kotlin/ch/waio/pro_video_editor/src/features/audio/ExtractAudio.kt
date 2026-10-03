@@ -5,7 +5,6 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.MediaItem
@@ -23,6 +22,8 @@ import androidx.media3.transformer.Transformer
 import ch.waio.pro_video_editor.src.features.audio.models.AudioExtractConfig
 import ch.waio.pro_video_editor.src.features.audio.models.AudioExtractJobHandle
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.contentDataSource
+import ch.waio.pro_video_editor.src.shared.media.contentUri
 import java.io.File
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
@@ -127,7 +128,7 @@ class ExtractAudio(private val context: Context) {
             try {
                 // Initialize extractor
                 extractor = MediaExtractor()
-                extractor.setDataSource(config.inputPath)
+                extractor.contentDataSource(context, config.inputPath)
 
                 // Find audio track
                 val audioTrackIndex = findAudioTrack(extractor)
@@ -157,7 +158,7 @@ class ExtractAudio(private val context: Context) {
                     var tempExtractor: MediaExtractor? = null
                     try {
                         tempExtractor = MediaExtractor()
-                        tempExtractor.setDataSource(config.inputPath)
+                        tempExtractor.contentDataSource(context, config.inputPath)
                         tempExtractor.selectTrack(audioTrackIndex)
                         val firstSampleTimeUs = tempExtractor.sampleTime
                         
@@ -285,7 +286,7 @@ class ExtractAudio(private val context: Context) {
             try {
                 // Initialize extractor
                 extractor = MediaExtractor()
-                extractor.setDataSource(config.inputPath)
+                extractor.contentDataSource(context, config.inputPath)
 
                 // Find audio track
                 val audioTrackIndex = findAudioTrack(extractor)
@@ -501,7 +502,7 @@ class ExtractAudio(private val context: Context) {
             val hasAudio: Boolean
             try {
                 probe = MediaExtractor()
-                probe.setDataSource(config.inputPath)
+                probe.contentDataSource(context, config.inputPath)
                 hasAudio = findAudioTrack(probe) >= 0
             } catch (e: Exception) {
                 mainHandler.post { onError(e) }
@@ -524,8 +525,7 @@ class ExtractAudio(private val context: Context) {
             mainHandler.post {
                 if (canceled.get()) return@post
                 try {
-                    val mediaItemBuilder = MediaItem.Builder()
-                        .setUri(Uri.fromFile(File(config.inputPath)))
+                    val mediaItemBuilder = MediaItem.Builder().contentUri(config.inputPath)
 
                     if (config.startUs != null || config.endUs != null) {
                         val clipping = MediaItem.ClippingConfiguration.Builder().apply {

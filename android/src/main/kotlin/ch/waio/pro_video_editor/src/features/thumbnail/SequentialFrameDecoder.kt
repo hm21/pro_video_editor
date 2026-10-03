@@ -1,5 +1,6 @@
 package ch.waio.pro_video_editor.src.features.thumbnail
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
@@ -17,6 +18,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Process
 import android.view.Surface
+import ch.waio.pro_video_editor.src.shared.media.contentDataSource
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.TreeSet
@@ -39,7 +41,7 @@ import java.util.concurrent.CancellationException
  * sample timestamps are scanned up front (no decoding) and each requested
  * timestamp is mapped to the presentation time of the closest frame.
  */
-class SequentialFrameDecoder(private val inputPath: String) {
+class SequentialFrameDecoder(private val context: Context) {
 
     /**
      * Decode-free scan of the video track: sample and sync timestamps plus
@@ -112,6 +114,7 @@ class SequentialFrameDecoder(private val inputPath: String) {
      *   are expected to fall back to another extraction path.
      */
     fun decode(
+        inputPath: String,
         timestampsUs: List<Long>,
         outputWidth: Int,
         outputHeight: Int,
@@ -133,7 +136,7 @@ class SequentialFrameDecoder(private val inputPath: String) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_DISPLAY)
 
         try {
-            extractor.setDataSource(inputPath)
+            extractor.contentDataSource(context, inputPath)
             val trackIndex = scan.trackIndex
             extractor.selectTrack(trackIndex)
             val format = extractor.getTrackFormat(trackIndex)
@@ -309,56 +312,57 @@ class SequentialFrameDecoder(private val inputPath: String) {
         }
     }
 
-    companion object {
-        /**
-         * Scans the video track of [inputPath] without decoding: collects
-         * every sample timestamp plus the sync (keyframe) timestamps and the
-         * track properties needed to configure a decoder.
-         */
-        fun scan(inputPath: String): MediaScan {
-            val extractor = MediaExtractor()
-            try {
-                extractor.setDataSource(inputPath)
-                val trackIndex = (0 until extractor.trackCount).first {
-                    extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)
-                        ?.startsWith("video/") == true
-                }
-                extractor.selectTrack(trackIndex)
-                val format = extractor.getTrackFormat(trackIndex)
+    /**
+     * Scans the video track of [inputPath] without decoding: collects
+     * every sample timestamp plus the sync (keyframe) timestamps and the
+     * track properties needed to configure a decoder.
+     */
+    fun scan(inputPath: String): MediaScan {
+        val extractor = MediaExtractor()
+        try {
+            extractor.contentDataSource(context, inputPath)
 
-                val samplePts = ArrayList<Long>(1024)
-                val syncPts = TreeSet<Long>()
-                while (true) {
-                    val time = extractor.sampleTime
-                    if (time >= 0) {
-                        samplePts.add(time)
-                        if (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
-                            syncPts.add(time)
-                        }
-                    }
-                    if (!extractor.advance()) break
-                }
-                check(samplePts.isNotEmpty()) { "No video samples found" }
-                samplePts.sort()
-
-                return MediaScan(
-                    trackIndex = trackIndex,
-                    mime = format.getString(MediaFormat.KEY_MIME)!!,
-                    width = format.getInteger(MediaFormat.KEY_WIDTH),
-                    height = format.getInteger(MediaFormat.KEY_HEIGHT),
-                    rotation = if (format.containsKey(MediaFormat.KEY_ROTATION)) {
-                        format.getInteger(MediaFormat.KEY_ROTATION)
-                    } else {
-                        0
-                    },
-                    samplePts = samplePts.toLongArray(),
-                    syncPts = syncPts,
-                )
-            } finally {
-                extractor.release()
+            val trackIndex = (0 until extractor.trackCount).first {
+                extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)
+                    ?.startsWith("video/") == true
             }
-        }
+            extractor.selectTrack(trackIndex)
+            val format = extractor.getTrackFormat(trackIndex)
 
+            val samplePts = ArrayList<Long>(1024)
+            val syncPts = TreeSet<Long>()
+            while (true) {
+                val time = extractor.sampleTime
+                if (time >= 0) {
+                    samplePts.add(time)
+                    if (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
+                        syncPts.add(time)
+                    }
+                }
+                if (!extractor.advance()) break
+            }
+            check(samplePts.isNotEmpty()) { "No video samples found" }
+            samplePts.sort()
+
+            return MediaScan(
+                trackIndex = trackIndex,
+                mime = format.getString(MediaFormat.KEY_MIME)!!,
+                width = format.getInteger(MediaFormat.KEY_WIDTH),
+                height = format.getInteger(MediaFormat.KEY_HEIGHT),
+                rotation = if (format.containsKey(MediaFormat.KEY_ROTATION)) {
+                    format.getInteger(MediaFormat.KEY_ROTATION)
+                } else {
+                    0
+                },
+                samplePts = samplePts.toLongArray(),
+                syncPts = syncPts,
+            )
+        } finally {
+            extractor.release()
+        }
+    }
+
+    companion object {
         private const val DEQUEUE_TIMEOUT_US = 10_000L
         private const val STALL_TIMEOUT_MS = 10_000L
         const val FRAME_WAIT_TIMEOUT_MS = 2_500L

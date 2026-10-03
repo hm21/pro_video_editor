@@ -79,6 +79,9 @@ class RenderVideo(private val context: Context) {
     }
 
     private val effectsProcessor = EffectsProcessor()
+    private val mediaInfoExtractor = MediaInfoExtractor(context)
+
+    private val videoTranscoder = VideoTranscoder(context)
 
     /**
      * Checks if the render configuration includes GPU-intensive effects
@@ -124,7 +127,7 @@ class RenderVideo(private val context: Context) {
         // Mixing different codecs (HEVC + H.264) can cause frame processing errors
         if (config.videoClips.size > 1) {
             val hasAnyHevc10bit = config.videoClips.any { clip ->
-                VideoTranscoder.needsTranscoding(clip.inputPath)
+                videoTranscoder.needsTranscoding(clip.inputPath)
             }
             if (hasAnyHevc10bit) {
                 Log.d(
@@ -198,7 +201,7 @@ class RenderVideo(private val context: Context) {
         }
 
         val cleanupAllPreFiles: () -> Unit = {
-            VideoTranscoder.cleanupTranscodedFiles(transcodedFiles)
+            videoTranscoder.cleanupTranscodedFiles(transcodedFiles)
             VideoReverser.cleanupReversedFiles(reversedFiles)
             ClipTransitionRenderer.cleanupFiles(transitionFiles)
         }
@@ -235,9 +238,7 @@ class RenderVideo(private val context: Context) {
                                 (workingConfig.composition?.layers ?: emptyList())
                                     .flatMap { layer -> layer.clips.map { it.inputPath } }
                             ).distinct()
-                        val transcodeMap = VideoTranscoder.transcodeClipsIfNeeded(
-                            context, inputPaths
-                        )
+                        val transcodeMap = videoTranscoder.transcodeClipsIfNeeded(inputPaths)
                         transcodedFiles = transcodeMap.values
                             .filter { it.contains("transcoded_") }
                         if (transcodedFiles.isNotEmpty()) {
@@ -349,7 +350,7 @@ class RenderVideo(private val context: Context) {
             // pre-rendered audio WAV temps.
             exportGate.release()
             cleanupAudioTempFiles(audioTempFilesRef.get())
-            VideoTranscoder.cleanupTranscodedFiles(transcodedFiles)
+            videoTranscoder.cleanupTranscodedFiles(transcodedFiles)
             VideoReverser.cleanupReversedFiles(reversedFiles)
             ClipTransitionRenderer.cleanupFiles(transitionFiles)
             if (config.outputPath == null) {
@@ -386,8 +387,7 @@ class RenderVideo(private val context: Context) {
             val clip = clips[clipIdx]
             val startUs = clip.startUs ?: 0L
             val endUs = clip.endUs
-                ?: ch.waio.pro_video_editor.src.features.render.helpers
-                    .MediaInfoExtractor.getVideoDuration(clip.inputPath)
+                ?: mediaInfoExtractor.getVideoDuration(clip.inputPath)
             try {
                 val reversed = VideoReverser.reverseSync(
                     context = context,
@@ -483,9 +483,9 @@ class RenderVideo(private val context: Context) {
             }
 
             val curStart = current.startUs ?: 0L
-            val curEnd = current.endUs ?: MediaInfoExtractor.getVideoDuration(current.inputPath)
-            val nextStart = next!!.startUs ?: 0L
-            val nextEnd = next.endUs ?: MediaInfoExtractor.getVideoDuration(next.inputPath)
+            val curEnd = current.endUs ?: mediaInfoExtractor.getVideoDuration(current.inputPath)
+            val nextStart = next.startUs ?: 0L
+            val nextEnd = next.endUs ?: mediaInfoExtractor.getVideoDuration(next.inputPath)
             val curDur = curEnd - curStart
             val nextDur = nextEnd - nextStart
 
@@ -495,7 +495,7 @@ class RenderVideo(private val context: Context) {
             val plan = ClipTransitionGeometry.planOverlap(
                 outgoingSourceDurationUs = curDur,
                 incomingSourceDurationUs = nextDur,
-                transitionDurationUs = transition!!.durationUs,
+                transitionDurationUs = transition.durationUs,
                 outgoingSpeed = current.playbackSpeed,
                 incomingSpeed = next.playbackSpeed,
             )
@@ -570,9 +570,9 @@ class RenderVideo(private val context: Context) {
             val singleClip = lastIdx == 0
 
             val firstStart = first.startUs ?: 0L
-            val firstEnd = first.endUs ?: MediaInfoExtractor.getVideoDuration(first.inputPath)
+            val firstEnd = first.endUs ?: mediaInfoExtractor.getVideoDuration(first.inputPath)
             val lastStart = last.startUs ?: 0L
-            val lastEnd = last.endUs ?: MediaInfoExtractor.getVideoDuration(last.inputPath)
+            val lastEnd = last.endUs ?: mediaInfoExtractor.getVideoDuration(last.inputPath)
 
             // Single-clip loops carve the head and tail from the same source, so
             // they need the stricter head+tail<L guard; multi-clip loops keep two
@@ -987,7 +987,7 @@ class RenderVideo(private val context: Context) {
         }.distinct()
         if (clipPaths.isEmpty()) return false
 
-        val sourceBitrates = clipPaths.map { MediaInfoExtractor.getVideoBitrate(it) }
+        val sourceBitrates = clipPaths.map { mediaInfoExtractor.getVideoBitrate(it) }
         val forceEncode = BitrateCapPolicy.shouldForceEncode(cap, sourceBitrates)
         Log.i(
             RENDER_TAG,

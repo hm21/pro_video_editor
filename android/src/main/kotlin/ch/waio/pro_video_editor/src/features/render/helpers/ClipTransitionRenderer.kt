@@ -11,6 +11,7 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import androidx.media3.common.util.UnstableApi
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.openMediaExtractor
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -92,10 +93,10 @@ object ClipTransitionRenderer {
             // 1) Decode both segments to packed I420 frames, spilled to disk so
             //    long/high-res transitions don't OOM the heap.
             val outSeg = decodeSegment(
-                outgoingPath, outTailStartUs, outTailEndUs, File(workDir, "out_frames.i420")
+                context, outgoingPath, outTailStartUs, outTailEndUs, File(workDir, "out_frames.i420")
             )
             val inSeg = decodeSegment(
-                incomingPath, inHeadStartUs, inHeadEndUs, File(workDir, "in_frames.i420")
+                context, incomingPath, inHeadStartUs, inHeadEndUs, File(workDir, "in_frames.i420")
             )
 
             if (outSeg == null || inSeg == null ||
@@ -135,6 +136,7 @@ object ClipTransitionRenderer {
             if (includeAudio) {
                 try {
                     audioPre = preEncodeCrossfadeAudio(
+                        context,
                         outgoingPath, outTailStartUs, outTailEndUs,
                         incomingPath, inHeadStartUs, inHeadEndUs,
                         curve, effectiveDurationUs, workDir
@@ -330,9 +332,9 @@ object ClipTransitionRenderer {
      * blended output needs no orientation hint of its own.
      */
     private fun decodeSegment(
-        path: String, startUs: Long, endUs: Long, framesFile: File,
+        context: Context, path: String, startUs: Long, endUs: Long, framesFile: File,
     ): DecodedSegment? {
-        val extractor = MediaExtractor().apply { setDataSource(path) }
+        val extractor = openMediaExtractor(context, path)
         val videoTrackIndex = findTrack(extractor, "video/") ?: run {
             extractor.release(); return null
         }
@@ -713,12 +715,13 @@ object ClipTransitionRenderer {
      * track is known).
      */
     private fun preEncodeCrossfadeAudio(
+        context: Context,
         outgoingPath: String, outStartUs: Long, outEndUs: Long,
         incomingPath: String, inStartUs: Long, inEndUs: Long,
         curve: String, outputDurationUs: Long, workDir: File,
     ): AudioPreEncoded? {
-        val outPcm = decodePcm(outgoingPath, outStartUs, outEndUs) ?: return null
-        val inPcm = decodePcm(incomingPath, inStartUs, inEndUs) ?: return null
+        val outPcm = decodePcm(context, outgoingPath, outStartUs, outEndUs) ?: return null
+        val inPcm = decodePcm(context, incomingPath, inStartUs, inEndUs) ?: return null
         if (outPcm.sampleRate != inPcm.sampleRate || outPcm.channelCount != inPcm.channelCount) {
             Log.w(RENDER_TAG, "Transition audio format mismatch; skipping crossfade")
             return null
@@ -794,8 +797,10 @@ object ClipTransitionRenderer {
 
     private class DecodedPcm(val pcm: ByteArray, val sampleRate: Int, val channelCount: Int)
 
-    private fun decodePcm(path: String, startUs: Long, endUs: Long): DecodedPcm? {
-        val extractor = MediaExtractor().apply { setDataSource(path) }
+    private fun decodePcm(
+        context: Context, path: String, startUs: Long, endUs: Long,
+    ): DecodedPcm? {
+        val extractor = openMediaExtractor(context, path)
         val trackIndex = findTrack(extractor, "audio/") ?: run {
             extractor.release(); return null
         }

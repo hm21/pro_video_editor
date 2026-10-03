@@ -2,7 +2,6 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
 import android.content.Context
-import android.net.Uri
 import applyChromaKey
 import applyScale
 import androidx.media3.common.C
@@ -23,6 +22,8 @@ import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.EncodedImage
+import ch.waio.pro_video_editor.src.shared.media.contentUri
+import ch.waio.pro_video_editor.src.shared.media.isContentUri
 import java.io.File
 
 /**
@@ -34,8 +35,10 @@ import java.io.File
 @UnstableApi
 class VideoSequenceBuilder(
     private val videoClips: List<VideoClip>,
-    private val context: Context? = null,
+    private val context: Context,
 ) {
+    private val mediaInfoExtractor = MediaInfoExtractor(context)
+
     /**
      * Paths to temp files produced while building the sequence (currently:
      * reversed-segment MP4s pre-rendered by [VideoReverser]). The caller MUST
@@ -240,7 +243,7 @@ class VideoSequenceBuilder(
         }
 
         val audioChannelCounts = videoClips.mapNotNull { clip ->
-            MediaInfoExtractor.getAudioChannelCount(clip.inputPath)
+            mediaInfoExtractor.getAudioChannelCount(clip.inputPath)
         }
 
         val needsNormalization = audioChannelCounts.isNotEmpty() &&
@@ -279,7 +282,7 @@ class VideoSequenceBuilder(
             val clipDurationUs = when {
                 clip.endUs != null && clip.startUs != null -> clip.endUs - clip.startUs
                 clip.endUs != null -> clip.endUs
-                else -> MediaInfoExtractor.getVideoDuration(clip.inputPath)
+                else -> mediaInfoExtractor.getVideoDuration(clip.inputPath)
             }.coerceAtLeast(0L)
             totalDurationUs += VideoTimelineDurationCalculator.renderedClipDurationUs(
                 sourceDurationUs = clipDurationUs,
@@ -339,7 +342,7 @@ class VideoSequenceBuilder(
         } else {
             LayerReferenceFrame.of(
                 videoClips.map { clip ->
-                    val (width, height) = rotatedDimensions(File(clip.inputPath))
+                    val (width, height) = rotatedDimensions(clip.inputPath)
                     Pair(width, height)
                 }
             )
@@ -426,7 +429,7 @@ class VideoSequenceBuilder(
         return when {
             clip.endUs != null && clip.startUs != null -> clip.endUs - clip.startUs
             clip.endUs != null -> clip.endUs
-            else -> MediaInfoExtractor.getVideoDuration(clip.inputPath)
+            else -> mediaInfoExtractor.getVideoDuration(clip.inputPath)
         }.coerceAtLeast(0L)
     }
 
@@ -494,13 +497,13 @@ class VideoSequenceBuilder(
     }
 
     /**
-     * Width, height and total rotation of [inputFile] once the configured
+     * Width, height and total rotation of [inputPath] once the configured
      * rotation is applied, read once per file.
      */
-    private fun rotatedDimensions(inputFile: File): Triple<Int, Int, Int> {
-        val key = "${inputFile.absolutePath}|$rotationDegrees"
+    private fun rotatedDimensions(inputPath: String): Triple<Int, Int, Int> {
+        val key = "$inputPath|$rotationDegrees"
         return rotatedDimensionsCache.getOrPut(key) {
-            getRotatedVideoDimensions(inputFile, rotationDegrees)
+            getRotatedVideoDimensions(context, inputPath, rotationDegrees)
         }
     }
 
@@ -519,16 +522,17 @@ class VideoSequenceBuilder(
         layerFrame: Pair<Int, Int>?
     ): EditedMediaItem {
         Log.d(RENDER_TAG, "Processing clip $index: ${clip.inputPath}")
-        val inputFile = File(clip.inputPath)
-
-        if (!inputFile.exists()) {
-            Log.e(RENDER_TAG, "ERROR: Video file does not exist: ${clip.inputPath}")
-        } else {
-            Log.d(RENDER_TAG, "Video file exists, size: ${inputFile.length()} bytes")
+        if (!clip.inputPath.isContentUri()) {
+            val inputFile = File(clip.inputPath)
+            if (!inputFile.exists()) {
+                Log.e(RENDER_TAG, "ERROR: Video file does not exist: ${clip.inputPath}")
+            } else {
+                Log.d(RENDER_TAG, "Video file exists, size: ${inputFile.length()} bytes")
+            }
         }
 
         // Build MediaItem with optional trimming
-        val mediaItemBuilder = MediaItem.Builder().setUri(Uri.fromFile(inputFile))
+        val mediaItemBuilder = MediaItem.Builder().contentUri(clip.inputPath)
 
         if (clip.startUs != null || clip.endUs != null) {
             val startUs = clip.startUs ?: 0L
@@ -586,10 +590,7 @@ class VideoSequenceBuilder(
 
         // Calculate video dimensions for image layer positioning
         // This must be done before applying any effects
-        val dimensions = rotatedDimensions(inputFile)
-        var videoWidth = dimensions.first
-        var videoHeight = dimensions.second
-        val videoRotation = dimensions.third
+        var (videoWidth, videoHeight, videoRotation) = rotatedDimensions(clip.inputPath)
 
         // Adjust dimensions based on rotation
         val isRotated90Deg = videoRotation == 90 || videoRotation == 270
@@ -643,8 +644,9 @@ class VideoSequenceBuilder(
         // Apply crop if configured
         cropConfig?.let { crop ->
             applyCrop(
+                context,
                 clipVideoEffects,
-                inputFile,
+                clip.inputPath,
                 rotationDegrees,
                 flipX,
                 flipY,
@@ -788,7 +790,7 @@ class VideoSequenceBuilder(
         val inputs = clips.map { clip ->
             VideoGlobalTrimCalculator.ClipInput(
                 sourceStartUs = clip.startUs ?: 0L,
-                sourceEndUs = clip.endUs ?: MediaInfoExtractor.getVideoDuration(clip.inputPath),
+                sourceEndUs = clip.endUs ?: mediaInfoExtractor.getVideoDuration(clip.inputPath),
                 playbackSpeed = clip.playbackSpeed,
                 reverseVideo = clip.reverseVideo,
             )
@@ -829,15 +831,6 @@ class VideoSequenceBuilder(
      */
     private fun expandReversedClips(clips: List<VideoClip>): List<VideoClip> {
         if (clips.none { it.reverseVideo }) return clips
-        val ctx = context
-        if (ctx == null) {
-            Log.w(
-                RENDER_TAG,
-                "Reverse requested but no Context provided to VideoSequenceBuilder; " +
-                        "leaving clips unchanged."
-            )
-            return clips
-        }
         Log.w(
             RENDER_TAG,
             "Reversed clip reached VideoSequenceBuilder — pre-render fallback engaged " +
@@ -851,14 +844,14 @@ class VideoSequenceBuilder(
                 continue
             }
             val sourceStartUs = clip.startUs ?: 0L
-            val sourceEndUs = clip.endUs ?: MediaInfoExtractor.getVideoDuration(clip.inputPath)
+            val sourceEndUs = clip.endUs ?: mediaInfoExtractor.getVideoDuration(clip.inputPath)
             if (sourceEndUs <= sourceStartUs) {
                 Log.w(RENDER_TAG, "Skipping reversed clip with invalid range: ${clip.inputPath}")
                 continue
             }
             try {
                 val reversed = VideoReverser.reverseSync(
-                    context = ctx,
+                    context = context,
                     inputPath = clip.inputPath,
                     segmentStartUs = sourceStartUs,
                     segmentEndUs = sourceEndUs,

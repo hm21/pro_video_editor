@@ -1,5 +1,4 @@
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/core/models/video/editor_video_model.dart';
 
@@ -56,6 +55,81 @@ void main() {
       test('fromMap with null sources throws assertion', () {
         expect(() => EditorVideo.fromMap({}), throwsA(isA<AssertionError>()));
       });
+
+      test('roundtrip with content url', () {
+        final video = EditorVideo.content(_contentUrl);
+        final map = video.toMap();
+        final restored = EditorVideo.fromMap(map);
+
+        expect(map, {'contentUrl': _contentUrl});
+        expect(restored.hasContentUrl, isTrue);
+        expect(restored.contentUrl, _contentUrl);
+        expect(restored, video);
+      });
+    });
+
+    group('content source', () {
+      tearDown(() => debugDefaultTargetPlatformOverride = null);
+
+      test('reports the content type', () {
+        final video = EditorVideo.content(_contentUrl);
+
+        expect(video.type, EditorVideoType.content);
+        expect(video.typePreferredFile, EditorVideoType.content);
+      });
+
+      test('takes part in equality and copyWith', () {
+        final video = EditorVideo.content(_contentUrl);
+
+        expect(video, EditorVideo.content(_contentUrl));
+        expect(video.hashCode, EditorVideo.content(_contentUrl).hashCode);
+        expect(video, isNot(EditorVideo.content('$_contentUrl/2')));
+        expect(video.copyWith().contentUrl, _contentUrl);
+      });
+
+      test('resolves to the content url on Android', () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+
+        expect(
+          await EditorVideo.content(_contentUrl).contentOrSafeFilePath(),
+          _contentUrl,
+        );
+      });
+
+      test('throws a clear error on other platforms', () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+
+        await expectLater(
+          EditorVideo.content(_contentUrl).contentOrSafeFilePath(),
+          throwsUnsupportedError,
+        );
+      });
+
+      test('has no file path or bytes', () async {
+        final video = EditorVideo.content(_contentUrl);
+
+        await expectLater(video.safeFilePath(), throwsUnsupportedError);
+        await expectLater(video.safeByteArray(), throwsUnsupportedError);
+      });
+
+      test('a local file is preferred over the content url', () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        final video = EditorVideo.autoSource(
+          contentUrl: _contentUrl,
+          file: '/tmp/video.mp4',
+        );
+
+        expect(await video.contentOrSafeFilePath(), '/tmp/video.mp4');
+      });
+
+      test('other sources resolve through safeFilePath', () async {
+        expect(
+          await EditorVideo.file('/tmp/video.mp4').contentOrSafeFilePath(),
+          '/tmp/video.mp4',
+        );
+      });
     });
   });
 }
+
+const _contentUrl = 'content://media/external/video/media/42';
