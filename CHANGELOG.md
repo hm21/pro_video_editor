@@ -1,3 +1,7 @@
+## 2.24.0
+- **FEAT**(android, iOS, macOS): A volume above 1.0 on a `VideoSegment` or a `VideoAudioTrack` no longer clips loud audio such as a mastered song; peaks that would pass -1 dBFS are limited instead. Volumes at or below 1.0 render as before.
+- **FIX**(iOS, macOS): A clip of 2 s or less plays at its own volume from the start. Before, it faded from the previous clip's volume across its whole length.
+
 ## 2.23.0
 - **FEAT**(android): `EditorVideo.safeFilePath` copies an `EditorVideo.content` video into a temporary file instead of throwing. Without that call, the plugin keeps reading the URI in place.
 - **FIX**(android): `EditorVideo.content` works with providers that stream the file without random access, as some cloud and archive providers do. Such a source is copied once into the cache; before, most calls failed with `setDataSource failed`.

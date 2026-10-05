@@ -55,7 +55,8 @@ class VideoSegment {
   ///
   /// - `0.0`: Mute
   /// - `1.0`: Original volume
-  /// - `> 1.0`: Amplified
+  /// - `> 1.0`: Amplified; peaks that would pass -1 dBFS are limited
+  ///   rather than clipped
   ///
   /// If null, the original volume is used.
   final double? volume;

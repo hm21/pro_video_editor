@@ -44,6 +44,9 @@ func applyAudioTracks(
 
       let trackParams = AVMutableAudioMixInputParameters(track: result.track)
       trackParams.setVolume(trackConfig.volume, at: .zero)
+      // A track played above its own level is limited rather than clipped.
+      trackParams.audioTapProcessor = VolumeLimiterTap.make(
+        for: VolumeSchedule(constant: trackConfig.volume))
       params.append(trackParams)
       PluginLog.print(
         "🔊 Applied volume \(trackConfig.volume) to custom audio track: \(trackConfig.path)")

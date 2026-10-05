@@ -43,7 +43,8 @@ class VideoAudioTrack with TimeRangeMixin {
   ///
   /// - `0.0`: Mute
   /// - `1.0`: Full volume (default)
-  /// - `> 1.0`: Amplified
+  /// - `> 1.0`: Amplified; peaks that would pass -1 dBFS are limited
+  ///   rather than clipped
   final double volume;
 
   /// Whether to loop the audio if it is shorter than the time range.
