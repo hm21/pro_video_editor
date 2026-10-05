@@ -18,6 +18,7 @@ import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
+import ch.waio.pro_video_editor.src.features.render.models.LayerCensorConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
@@ -96,7 +97,12 @@ class VideoSequenceBuilder(
          * out at, relative to its image's own pixels. Only a clip of another
          * size than the composition frame sets it; see [scaledToClipFrame].
          */
-        val naturalSizeScale: Double = 1.0
+        val naturalSizeScale: Double = 1.0,
+        /**
+         * Blurs or pixelates the picture beneath the layer instead of drawing
+         * [image]; `null` draws the image. See [LayerCensorEffect].
+         */
+        val censor: LayerCensorConfig? = null
     )
 
     /**

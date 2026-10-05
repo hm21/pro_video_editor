@@ -89,6 +89,44 @@ struct ClipTransitionConfig {
   }
 }
 
+/// Turns an image layer into an area that blurs or pixelates the picture
+/// beneath it instead of drawing its image; see `LayerCensor` on the Dart side.
+public struct LayerCensorConfig: Sendable, Equatable {
+  enum CensorType: Sendable {
+    case blur
+    case pixelate
+  }
+
+  /// The strengths used when the channel sends none, those of the Dart
+  /// `LayerCensor.blur()` and `LayerCensor.pixelate()`.
+  static let defaultSigma = 24.0
+  static let defaultBlockSize = 32.0
+
+  /// How the area is hidden.
+  let type: CensorType
+  /// The blur's standard deviation, or the edge length of a pixelate block,
+  /// in pixels of the frame the layer is laid out in.
+  let strength: Double
+
+  /// The edge length of a pixelate block in whole pixels, at least two: one
+  /// pixel per block would leave the picture as it is.
+  var blockSize: Int { max(2, Int(strength.rounded())) }
+
+  /// Parses the `censor` entry of an image layer, or `nil` when the layer has
+  /// none and is drawn as an image.
+  ///
+  /// Any censor map yields a censor, so a layer that was meant to hide
+  /// something never shows its mask image instead.
+  static func fromArguments(_ args: [String: Any]?) -> LayerCensorConfig? {
+    guard let args = args else { return nil }
+    let type: CensorType = (args["type"] as? String) == "pixelate" ? .pixelate : .blur
+    let fallback = type == .pixelate ? defaultBlockSize : defaultSigma
+    var strength = (args["strength"] as? NSNumber)?.doubleValue ?? fallback
+    if !(strength > 0) || !strength.isFinite { strength = fallback }
+    return LayerCensorConfig(type: type, strength: strength)
+  }
+}
+
 public struct ImageLayerConfig: Sendable {
   /// Where this layer's encoded image lives — a path when the caller had it on
   /// disk, bytes otherwise.
@@ -113,6 +151,9 @@ public struct ImageLayerConfig: Sendable {
   let animationOffsetUs: Int64
   /// Animations to apply to this layer.
   let animations: [LayerAnimationConfig]
+  /// Blurs or pixelates the picture beneath the layer instead of drawing
+  /// [image], which then only marks the area. `nil` draws the image.
+  var censor: LayerCensorConfig? = nil
 
   static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
     guard let args = args,
@@ -145,7 +186,8 @@ public struct ImageLayerConfig: Sendable {
       rotation: rotation,
       loop: loop,
       animationOffsetUs: animationOffsetUs,
-      animations: animations
+      animations: animations,
+      censor: LayerCensorConfig.fromArguments(args["censor"] as? [String: Any])
     )
   }
 }

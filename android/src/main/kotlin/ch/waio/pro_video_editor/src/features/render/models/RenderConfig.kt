@@ -422,6 +422,8 @@ data class LayerAnimationConfig(
  * @property animationOffsetUs How far into an animated image (GIF) playback
  *   begins when the layer appears, in microseconds
  * @property animations List of animations to apply to this layer
+ * @property censor Blurs or pixelates the picture beneath the layer instead of
+ *   drawing [image], which then only marks the area (null = draw the image)
  */
 data class ImageLayer(
     val image: EncodedImage,
@@ -434,7 +436,8 @@ data class ImageLayer(
     val rotation: Double = 0.0,
     val loop: Boolean = true,
     val animationOffsetUs: Long = 0L,
-    val animations: List<LayerAnimationConfig> = emptyList()
+    val animations: List<LayerAnimationConfig> = emptyList(),
+    val censor: LayerCensorConfig? = null
 )
 
 data class RenderConfig(
@@ -549,13 +552,14 @@ data class RenderConfig(
                 @Suppress("UNCHECKED_CAST")
                 val animationsRaw = layerMap["animations"] as? List<Map<String, Any?>>
                 val animations = animationsRaw?.map { LayerAnimationConfig.fromMap(it) } ?: emptyList()
+                val censor = LayerCensorConfig.fromMap(layerMap["censor"] as? Map<*, *>)
 
                 if (image == null) {
                     null
                 } else {
                     ImageLayer(
                         image, startUs, endUs, x, y, width, height,
-                        rotation, loop, animationOffsetUs, animations
+                        rotation, loop, animationOffsetUs, animations, censor
                     )
                 }
             } ?: emptyList()

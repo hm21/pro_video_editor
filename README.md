@@ -127,6 +127,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🔄 **Segment Rotation**: Rotate a composition clip around its own center via `SegmentTransform.rotation` (radians). The `offset`/`size` keep describing the unrotated box, so a `pro_image_editor` layer rotation can be forwarded straight through.
 - 🎞️ **Animated GIF Layers**: Overlay animated GIFs — detected automatically and played frame by frame, with optional `loop`. `animationOffset` starts playback part-way in, so one animation can run on across several layers.
 - 🎬 **Layer Animations**: Animate image layers with fade, slide, and scale effects, configurable easing curves, and in/out/inOut phases. A slide travels to a canvas edge or to a start point you pick yourself.
+- 🫥 **Censor Layers**: Blur or pixelate the part of the picture an image layer covers instead of drawing the layer, e.g. to hide a face or a license plate, via `ImageLayer.censor`. The layer's image is the shape of the area, and image layers after it stay sharp on top.
 - 🎞️ **Clip Transitions**: Add transitions between adjacent clips — `dissolve`, `fadeToBlack`, `fadeToWhite`, `slide`, `push`, and `wipe` — with configurable duration, easing curve, and direction.
 - 🧮 **Color Matrix**: Apply one or multiple 4x5 color matrices (e.g., for filters).
 - 💧 **Blur**: Add a blur effect to the video.
@@ -161,6 +162,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 | `Layer Animations`          | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Clip Transitions`          | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Layer Size`                | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
+| `Censor Layers`             | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Multiple ColorMatrix 4x5` | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Cancel export task`       | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Blur background`          | 🧪      | 🧪  | 🧪     | ❌      | ❌     | 🚫   |
@@ -648,6 +650,14 @@ var task = VideoRenderData(
         rotation: 45 * pi / 180, // clockwise, in radians (like Transform.rotate)
         startTime: const Duration(seconds: 2),
         endTime: const Duration(seconds: 8),
+      ),
+      // Pixelates the area an opaque mask image covers, e.g. a face, instead
+      // of drawing the image. Layers after it draw on top as usual.
+      ImageLayer(
+        image: EditorLayerImage.memory(maskBytes),
+        offset: const Offset(320, 180),
+        size: const Size(240, 300),
+        censor: const LayerCensor.pixelate(blockSize: 32),
       ),
     ],
     outputFormat: VideoOutputFormat.mp4,

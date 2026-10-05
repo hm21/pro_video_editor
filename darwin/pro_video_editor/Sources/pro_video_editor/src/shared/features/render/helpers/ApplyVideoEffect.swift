@@ -264,7 +264,7 @@ private func waving(_ image: CIImage, _ frame: VideoEffectFrame, rect: CGRect) -
 /// an even block that point is a pixel corner, so the grid is moved by half a
 /// pixel: pixel centers stay in the same blocks, and every sample lands on the
 /// center of exactly the pixel the spec names.
-private func pixelated(_ image: CIImage, block: Int, rect: CGRect) -> CIImage {
+func pixelated(_ image: CIImage, block: Int, rect: CGRect) -> CIImage {
   let filter = CIFilter.pixellate()
   filter.inputImage = image.clampedToExtent().samplingNearest()
   let offset: CGFloat = block % 2 == 0 ? 0.5 : 0

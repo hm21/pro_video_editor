@@ -10,6 +10,7 @@ import 'package:pro_video_editor/shared/utils/parser/offset_parser.dart';
 
 import 'editor_layer_image_model.dart';
 import 'layer_animation_model.dart';
+import 'layer_censor_model.dart';
 
 /// A model representing a video overlay layer with timing information.
 class ImageLayer with TimeRangeMixin {
@@ -25,6 +26,7 @@ class ImageLayer with TimeRangeMixin {
     this.loop = true,
     this.animationOffset = Duration.zero,
     this.animations = const [],
+    this.censor,
   }) : assert(
          startTime == null || endTime == null || startTime < endTime,
          'startTime must be before endTime',
@@ -119,6 +121,16 @@ class ImageLayer with TimeRangeMixin {
   /// and optional [LayerAnimation.curve].
   final List<LayerAnimation> animations;
 
+  /// Blurs or pixelates the picture beneath the layer instead of drawing
+  /// [image], which then only marks the area to hide. See [LayerCensor].
+  ///
+  /// The area takes its place, size, [rotation], time range and [animations]
+  /// from the layer exactly as [image] would be drawn, and a fade animation
+  /// fades the censor in and out.
+  ///
+  /// **Default**: `null`, which draws [image].
+  final LayerCensor? censor;
+
   ImageLayer copyWith({
     EditorLayerImage? image,
     Duration? startTime,
@@ -129,6 +141,7 @@ class ImageLayer with TimeRangeMixin {
     bool? loop,
     Duration? animationOffset,
     List<LayerAnimation>? animations,
+    LayerCensor? censor,
   }) {
     return ImageLayer(
       image: image ?? this.image,
@@ -140,6 +153,7 @@ class ImageLayer with TimeRangeMixin {
       loop: loop ?? this.loop,
       animationOffset: animationOffset ?? this.animationOffset,
       animations: animations ?? this.animations,
+      censor: censor ?? this.censor,
     );
   }
 
@@ -156,6 +170,7 @@ class ImageLayer with TimeRangeMixin {
       'loop': loop,
       'animationOffset': animationOffset.inMicroseconds,
       'animations': animations.map((a) => a.toMap()).toList(),
+      'censor': censor?.toMap(),
     };
   }
 
@@ -189,6 +204,9 @@ class ImageLayer with TimeRangeMixin {
               ?.map((a) => LayerAnimation.fromMap(a as Map<String, dynamic>))
               .toList() ??
           const [],
+      censor: map['censor'] != null
+          ? LayerCensor.fromMap(map['censor'] as Map<String, dynamic>)
+          : null,
     );
   }
 
@@ -208,7 +226,8 @@ class ImageLayer with TimeRangeMixin {
         'rotation: $rotation, '
         'loop: $loop, '
         'animationOffset: $animationOffset, '
-        'animations: $animations'
+        'animations: $animations, '
+        'censor: $censor'
         ')';
   }
 
@@ -224,7 +243,8 @@ class ImageLayer with TimeRangeMixin {
         other.rotation == rotation &&
         other.loop == loop &&
         other.animationOffset == animationOffset &&
-        listEquals(other.animations, animations);
+        listEquals(other.animations, animations) &&
+        other.censor == censor;
   }
 
   @override
@@ -237,6 +257,7 @@ class ImageLayer with TimeRangeMixin {
         rotation.hashCode ^
         loop.hashCode ^
         animationOffset.hashCode ^
-        animations.hashCode;
+        animations.hashCode ^
+        censor.hashCode;
   }
 }

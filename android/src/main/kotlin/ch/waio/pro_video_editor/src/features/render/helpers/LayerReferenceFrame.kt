@@ -71,8 +71,8 @@ internal object LayerReferenceFrame {
 
 /**
  * This layer with every pixel value multiplied by [scale]: its offset, its
- * explicit size, its natural size when it has none, and a slide animation's
- * start point.
+ * explicit size, its natural size when it has none, a slide animation's start
+ * point and a censor's strength.
  *
  * A stretched layer (no offset) fills whatever frame it lands on, so only its
  * decode size changes. Rotation, timing and the slide edges are relative and
@@ -88,6 +88,7 @@ internal fun VideoSequenceBuilder.ImageLayerConfig.scaledToClipFrame(
         width = width?.times(scale),
         height = height?.times(scale),
         naturalSizeScale = naturalSizeScale * scale,
+        censor = censor?.scaled(scale),
         animations = animations.map { animation ->
             if (animation.slideFromX == null && animation.slideFromY == null) {
                 animation

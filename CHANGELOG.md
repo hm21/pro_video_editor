@@ -1,3 +1,6 @@
+## 2.25.0
+- **FEAT**(android, iOS, macOS): `ImageLayer.censor` blurs (`LayerCensor.blur`) or pixelates (`LayerCensor.pixelate`) the picture beneath an image layer instead of drawing it, e.g. to hide a face or a license plate. Image layers after it stay on top.
+
 ## 2.24.0
 - **FEAT**(android, iOS, macOS): A volume above 1.0 on a `VideoSegment` or a `VideoAudioTrack` no longer clips loud audio such as a mastered song; peaks that would pass -1 dBFS are limited instead. Volumes at or below 1.0 render as before.
 - **FIX**(iOS, macOS): A clip of 2 s or less plays at its own volume from the start. Before, it faded from the previous clip's volume across its whole length.

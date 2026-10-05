@@ -6,6 +6,7 @@ import android.graphics.Matrix
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
+import androidx.media3.effect.GlEffect
 import androidx.media3.effect.OverlayEffect
 import java.io.File
 import java.nio.ByteBuffer
@@ -202,6 +203,11 @@ fun applyTimedImageLayers(
                     config = Bitmap.Config.ARGB_8888,
                 )
                 if (layerBitmap == null) {
+                    if (layer.censor != null) {
+                        throw CensorLayerException(
+                            "the mask image did not decode (${image.describe()})"
+                        )
+                    }
                     Log.e(
                         RENDER_TAG,
                         "Layer: image did not decode (${image.describe()}); skipping layer"
@@ -241,16 +247,30 @@ fun applyTimedImageLayers(
                 }
             }
 
-            val overlayEffect = OverlayEffect(listOf(bitmapOverlay))
+            // A censor layer hides the frame composed so far where the overlay
+            // would have been drawn, instead of drawing it.
+            val censor = layer.censor
+            val layerEffect: GlEffect = if (censor != null) {
+                Log.d(RENDER_TAG, "Layer: censor (${censor.type}, strength ${censor.strength})")
+                LayerCensorEffect(bitmapOverlay, censor)
+            } else {
+                OverlayEffect(listOf(bitmapOverlay))
+            }
 
             if (startTimeUs == -1L && endTimeUs == -1L) {
                 // No time range set — show for the entire video
-                videoEffects += overlayEffect
+                videoEffects += layerEffect
             } else {
                 val effectiveStart = if (startTimeUs == -1L) 0L else startTimeUs
                 val effectiveEnd = if (endTimeUs == -1L) Long.MAX_VALUE else endTimeUs
+                if (censor != null && effectiveEnd <= effectiveStart) {
+                    // An empty window hides nothing; TimestampWrapper would
+                    // reject it, which a censor layer turns into a failure.
+                    Log.d(RENDER_TAG, "Layer: censor with an empty time range; skipping layer")
+                    continue
+                }
                 videoEffects += TimestampWrapper(
-                    overlayEffect, effectiveStart, effectiveEnd
+                    layerEffect, effectiveStart, effectiveEnd
                 )
             }
 
@@ -262,10 +282,27 @@ fun applyTimedImageLayers(
             // its sticker is worse than one that did not export.
             throw OverlayOutOfMemoryException(layer, videoWidth, videoHeight, e)
         } catch (e: Exception) {
+            // A censor layer hides what the creator does not want shown, such
+            // as a face or a license plate. Exporting without it would publish
+            // exactly that, so its failure fails the render instead.
+            if (layer.censor != null) {
+                throw e as? CensorLayerException ?: CensorLayerException(
+                    e.message ?: e.javaClass.simpleName, e
+                )
+            }
             Log.e(RENDER_TAG, "Failed to decode image layer: ${e.message}")
         }
     }
 }
+
+/**
+ * A censor layer could not be set up. The render fails rather than export the
+ * area the layer was meant to hide.
+ */
+internal class CensorLayerException(
+    message: String,
+    cause: Throwable? = null,
+) : RuntimeException("Censor layer: $message", cause)
 
 /**
  * An overlay could not be rastered because the Java heap could not hold it.

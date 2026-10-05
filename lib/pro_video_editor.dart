@@ -16,6 +16,7 @@ export 'features/video_effects/widgets/video_effect_preview.dart';
 export 'core/models/image/editor_layer_image_model.dart';
 export 'core/models/image/image_layer_model.dart';
 export 'core/models/image/layer_animation_model.dart';
+export 'core/models/image/layer_censor_model.dart';
 export 'core/models/video/chroma_key_model.dart';
 export 'core/utils/chroma_key_detector.dart';
 export 'core/models/video/color_filter_model.dart';

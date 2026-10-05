@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart';
 import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
+import 'package:pro_video_editor/core/models/image/layer_censor_model.dart';
 
 void main() {
   group('ImageLayer', () {
@@ -138,6 +139,39 @@ void main() {
         expect(restored.startTime, const Duration(seconds: 3));
         expect(restored.offset, const Offset(50.5, 75.0));
         expect(restored.size, const Size(200.0, 100.0));
+      });
+    });
+
+    group('censor', () {
+      test('is drawn as an image by default', () {
+        final layer = ImageLayer(image: image);
+
+        expect(layer.censor, isNull);
+        expect(layer.toMap()['censor'], isNull);
+        expect(ImageLayer.fromMap(layer.toMap()).censor, isNull);
+      });
+
+      test('roundtrips through toMap / fromMap', () {
+        final layer = ImageLayer(
+          image: image,
+          censor: const LayerCensor.pixelate(blockSize: 24),
+        );
+
+        expect(layer.toMap()['censor'], {'type': 'pixelate', 'strength': 24.0});
+        expect(
+          ImageLayer.fromMap(layer.toMap()).censor,
+          const LayerCensor.pixelate(blockSize: 24),
+        );
+      });
+
+      test('is kept by copyWith and tells layers apart', () {
+        final layer = ImageLayer(
+          image: image,
+          censor: const LayerCensor.blur(sigma: 9),
+        );
+
+        expect(layer.copyWith(loop: false).censor, layer.censor);
+        expect(layer == ImageLayer(image: image), isFalse);
       });
     });
 
