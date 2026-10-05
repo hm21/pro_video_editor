@@ -310,6 +310,7 @@ internal class CompositionBuilder {
 
       // Use setVolumeRamp for each clip's time range to ensure
       // volume changes are applied precisely per segment
+      var schedule: [(range: CMTimeRange, volume: Float)] = []
       for (index, clipInstruction) in clipInstructions.enumerated() {
         let clipVolume =
           index < videoClips.count
@@ -319,7 +320,10 @@ internal class CompositionBuilder {
           toEndVolume: clipVolume,
           timeRange: clipInstruction.timeRange
         )
+        schedule.append((clipInstruction.timeRange, clipVolume))
       }
+      // A clip played above its own level is limited rather than clipped.
+      inputParameters.audioTapProcessor = VolumeLimiterTap.make(for: VolumeSchedule(schedule))
 
       audioMixInputParameters.append(inputParameters)
       PluginLog.print("🔊 Applied per-clip volume to original audio track")

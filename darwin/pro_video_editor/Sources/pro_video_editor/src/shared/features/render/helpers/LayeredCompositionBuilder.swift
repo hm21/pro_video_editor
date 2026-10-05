@@ -277,6 +277,9 @@ internal class LayeredCompositionBuilder {
       for w in windows {
         p.setVolumeRamp(fromStartVolume: w.volume, toEndVolume: w.volume, timeRange: w.range)
       }
+      // A clip played above its own level is limited rather than clipped.
+      p.audioTapProcessor = VolumeLimiterTap.make(
+        for: VolumeSchedule(windows.map { (range: $0.range, volume: $0.volume) }))
       params.append(p)
     }
 

@@ -1,3 +1,6 @@
+## 2.24.0
+- **FEAT**(android, iOS, macOS): A volume above 1.0 on a `VideoSegment` or an `AudioTrack` no longer clips audio that is already near full scale, such as a mastered song. Frames that would pass -1 dBFS are turned down by a limiter instead, which recovers over 50 ms, so the export comes out louder without distortion. Volumes at or below 1.0 render exactly as before.
+
 ## 2.23.0
 - **FEAT**(android): `EditorVideo.safeFilePath` copies an `EditorVideo.content` video into a temporary file instead of throwing. Without that call, the plugin keeps reading the URI in place.
 - **FIX**(android): `EditorVideo.content` works with providers that stream the file without random access, as some cloud and archive providers do. Such a source is copied once into the cache; before, most calls failed with `setDataSource failed`.

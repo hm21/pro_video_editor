@@ -2662,3 +2662,86 @@ class VideoEffectTests: XCTestCase {
     XCTAssertEqual(merged.vignetteRadius, 0.4)
   }
 }
+
+/// The limiter that keeps a volume above 1.0 from clipping the export.
+final class VolumeLimiterTests: XCTestCase {
+
+  func testPeakLimiterLeavesMaterialUnderTheCeilingAlone() {
+    var limiter = PeakLimiter(sampleRate: 48_000)
+    XCTAssertEqual(limiter.gain(forPeak: 0.5), 1)
+  }
+
+  func testPeakLimiterTurnsAFrameThatWouldCrossDownToTheCeiling() {
+    var limiter = PeakLimiter(sampleRate: 48_000)
+    let gain = limiter.gain(forPeak: 2.7)
+    XCTAssertEqual(2.7 * gain, PeakLimiter.ceiling, accuracy: 1e-6)
+  }
+
+  func testPeakLimiterRecoversAfterAPeak() {
+    var limiter = PeakLimiter(sampleRate: 48_000)
+    _ = limiter.gain(forPeak: 2.7)
+    let rightAfter = limiter.gain(forPeak: 0.3)
+    for _ in 0..<48_000 { _ = limiter.gain(forPeak: 0.3) }
+    XCTAssertLessThan(rightAfter, 1)
+    XCTAssertEqual(limiter.gain, 1, accuracy: 1e-4)
+  }
+
+  func testVolumeScheduleReadsTheVolumeSetAtATime() {
+    let half = CMTime(seconds: 0.5, preferredTimescale: 600)
+    let schedule = VolumeSchedule([(CMTimeRange(start: half, duration: half), 3)])
+    XCTAssertEqual(schedule.volume(at: 0.25), 1)
+    XCTAssertEqual(schedule.volume(at: 0.75), 3)
+    XCTAssertTrue(schedule.amplifies)
+    XCTAssertFalse(VolumeSchedule(constant: 1).amplifies)
+    XCTAssertNil(VolumeLimiterTap.make(for: VolumeSchedule(constant: 0.8)))
+  }
+
+  /// A loud tone exported at volume 3 used to leave the encoder clipped on
+  /// most of its samples.
+  func testExportLimitsATrackPlayedAboveItsOwnLevel() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("limiter-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("tone.caf")
+    let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
+    let tone = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44_100)!
+    tone.frameLength = 44_100
+    for channel in 0..<2 {
+      for frame in 0..<44_100 {
+        tone.floatChannelData![channel][frame] = 0.8 * sin(Float(frame) * 2 * .pi * 440 / 44_100)
+      }
+    }
+    try AVAudioFile(forWriting: source, settings: format.settings).write(from: tone)
+
+    let asset = AVURLAsset(url: source)
+    let track = try XCTUnwrap(asset.tracks(withMediaType: .audio).first)
+    let parameters = AVMutableAudioMixInputParameters(track: track)
+    parameters.setVolume(3, at: .zero)
+    parameters.audioTapProcessor = VolumeLimiterTap.make(for: VolumeSchedule(constant: 3))
+    let mix = AVMutableAudioMix()
+    mix.inputParameters = [parameters]
+    let output = directory.appendingPathComponent("limited.m4a")
+    let export = try XCTUnwrap(
+      AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A))
+    export.audioMix = mix
+    export.outputURL = output
+    export.outputFileType = .m4a
+    let exported = expectation(description: "export finished")
+    export.exportAsynchronously { exported.fulfill() }
+    wait(for: [exported], timeout: 30)
+    XCTAssertEqual(export.status, .completed, String(describing: export.error))
+
+    let file = try AVAudioFile(forReading: output)
+    let read = AVAudioPCMBuffer(
+      pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length))!
+    try file.read(into: read)
+    var peak: Float = 0
+    for frame in 0..<Int(read.frameLength) {
+      peak = max(peak, abs(read.floatChannelData![0][frame]))
+    }
+    // Louder than the source, but under full scale: limited, not clipped.
+    XCTAssertGreaterThan(peak, 0.8)
+    XCTAssertLessThan(peak, 0.99)
+  }
+}
