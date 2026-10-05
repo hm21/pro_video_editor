@@ -2,6 +2,7 @@ package ch.waio.pro_video_editor.src.features.render
 
 import RENDER_TAG
 import android.content.Context
+import ch.waio.pro_video_editor.effects.CustomVideoEffects
 import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.util.UnstableApi
@@ -161,6 +162,17 @@ class RenderVideo(private val context: Context) {
         onComplete: (ByteArray?) -> Unit,
         onError: (Throwable) -> Unit
     ): RenderJobHandle {
+        // Before any pre-transcode, reverse or transition pass: a misspelled id
+        // should not cost minutes of work first.
+        config.customEffects.firstOrNull { !CustomVideoEffects.isRegistered(it.id) }?.let {
+            onError(
+                IllegalArgumentException(
+                    "No custom video effect is registered under \"${it.id}\""
+                )
+            )
+            return RenderJobHandle {}
+        }
+
         val shouldStopPolling = AtomicBoolean(false)
         val mainHandler = Handler(Looper.getMainLooper())
         var transcodedFiles: List<String> = emptyList()

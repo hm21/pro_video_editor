@@ -56,6 +56,19 @@ void main() {
           isNot(const CustomVideoEffect(id: 'a', params: {'x': 2})),
         );
       });
+
+      test('compares nested params by value', () {
+        CustomVideoEffect build(int last) => CustomVideoEffect(
+          id: 'a',
+          params: {
+            'colors': [1, 2, last],
+            'box': const {'x': 1},
+          },
+        );
+        expect(build(3), build(3));
+        expect(build(3).hashCode, build(3).hashCode);
+        expect(build(3), isNot(build(4)));
+      });
     });
   });
 }

@@ -98,22 +98,46 @@ class CustomVideoEffect with TimeRangeMixin {
   bool operator ==(Object other) =>
       other is CustomVideoEffect &&
       other.id == id &&
-      mapEquals(other.params, params) &&
+      _deepEquals(other.params, params) &&
       other.startTime == startTime &&
       other.endTime == endTime;
 
   @override
-  int get hashCode => Object.hash(
-    id,
-    Object.hashAllUnordered(
-      params.entries.map((e) => Object.hash(e.key, e.value)),
-    ),
-    startTime,
-    endTime,
-  );
+  int get hashCode => Object.hash(id, _deepHash(params), startTime, endTime);
 
   @override
   String toString() =>
       'CustomVideoEffect(id: $id, params: $params, '
       'startTime: $startTime, endTime: $endTime)';
+}
+
+/// Whether [a] and [b] hold the same values, looking into nested lists and
+/// maps, so params that were built twice still compare equal.
+bool _deepEquals(Object? a, Object? b) {
+  if (a is Map && b is Map) {
+    if (a.length != b.length) return false;
+    for (final key in a.keys) {
+      if (!b.containsKey(key) || !_deepEquals(a[key], b[key])) return false;
+    }
+    return true;
+  }
+  if (a is List && b is List) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!_deepEquals(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  return a == b;
+}
+
+/// A hash that agrees with [_deepEquals].
+int _deepHash(Object? value) {
+  if (value is Map) {
+    return Object.hashAllUnordered(
+      value.entries.map((e) => Object.hash(e.key, _deepHash(e.value))),
+    );
+  }
+  if (value is List) return Object.hashAll(value.map(_deepHash));
+  return value.hashCode;
 }
