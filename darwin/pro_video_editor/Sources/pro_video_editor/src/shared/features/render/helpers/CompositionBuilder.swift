@@ -308,22 +308,13 @@ internal class CompositionBuilder {
     for track in originalTracks {
       let inputParameters = AVMutableAudioMixInputParameters(track: track)
 
-      // Use setVolumeRamp for each clip's time range to ensure
-      // volume changes are applied precisely per segment
-      var schedule: [(range: CMTimeRange, volume: Float)] = []
-      for (index, clipInstruction) in clipInstructions.enumerated() {
-        let clipVolume =
-          index < videoClips.count
-          ? (videoClips[index].volume ?? 1.0) : 1.0
-        inputParameters.setVolumeRamp(
-          fromStartVolume: clipVolume,
-          toEndVolume: clipVolume,
-          timeRange: clipInstruction.timeRange
-        )
-        schedule.append((clipInstruction.timeRange, clipVolume))
-      }
-      // A clip played above its own level is limited rather than clipped.
-      inputParameters.audioTapProcessor = VolumeLimiterTap.make(for: VolumeSchedule(schedule))
+      // Each clip's volume over its own time range; a clip played above its
+      // own level is limited rather than clipped.
+      inputParameters.setVolumeSteps(
+        clipInstructions.enumerated().map { index, clipInstruction in
+          let clipVolume = index < videoClips.count ? (videoClips[index].volume ?? 1.0) : 1.0
+          return (clipInstruction.timeRange, clipVolume)
+        })
 
       audioMixInputParameters.append(inputParameters)
       PluginLog.print("🔊 Applied per-clip volume to original audio track")

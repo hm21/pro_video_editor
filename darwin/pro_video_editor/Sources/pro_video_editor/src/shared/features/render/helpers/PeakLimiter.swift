@@ -41,6 +41,13 @@ struct PeakLimiter {
     return gain
   }
 
+  /// Lifts the gain by [factor], up to 1, after the volume in front of the
+  /// limiter dropped by that factor: the reduction was only needed for the
+  /// louder volume, and releasing it slowly would duck what follows.
+  mutating func volumeDropped(by factor: Float) {
+    gain = min(1, gain * factor)
+  }
+
   /// Forgets any reduction in progress.
   mutating func reset() {
     gain = 1

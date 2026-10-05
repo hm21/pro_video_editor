@@ -31,10 +31,27 @@ internal class VolumeAudioProcessorTest {
         assertEquals(listOf<Short>(15000, -15000), output)
     }
 
+    @Test
+    fun `limits a buffer smaller than the one before it on its own samples`() {
+        val processor = VolumeAudioProcessor(3f)
+        processor.configure(AudioFormat(48000, 2, C.ENCODING_PCM_16BIT))
+        processor.flush()
+        queue(processor, shortArrayOf(30000, -30000, 30000, -30000))
+        processor.flush()
+
+        val output = queue(processor, shortArrayOf(1000, -1000))
+
+        assertEquals(listOf<Short>(3000, -3000), output)
+    }
+
     private fun process(volume: Float, samples: ShortArray): List<Short> {
         val processor = VolumeAudioProcessor(volume)
         processor.configure(AudioFormat(48000, 2, C.ENCODING_PCM_16BIT))
         processor.flush()
+        return queue(processor, samples)
+    }
+
+    private fun queue(processor: VolumeAudioProcessor, samples: ShortArray): List<Short> {
         val input = ByteBuffer.allocateDirect(samples.size * 2).order(ByteOrder.nativeOrder())
         samples.forEach { input.putShort(it) }
         input.flip()

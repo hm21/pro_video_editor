@@ -2686,11 +2686,28 @@ final class VolumeLimiterTests: XCTestCase {
     XCTAssertEqual(limiter.gain, 1, accuracy: 1e-4)
   }
 
+  func testPeakLimiterLiftsTheGainWhenTheVolumeDrops() {
+    var limiter = PeakLimiter(sampleRate: 48_000)
+    let gain = limiter.gain(forPeak: 2.7)
+    limiter.volumeDropped(by: 1.5)
+    XCTAssertEqual(limiter.gain, gain * 1.5, accuracy: 1e-6)
+    limiter.volumeDropped(by: 10)
+    XCTAssertEqual(limiter.gain, 1)
+  }
+
   func testVolumeScheduleReadsTheVolumeSetAtATime() {
-    let half = CMTime(seconds: 0.5, preferredTimescale: 600)
-    let schedule = VolumeSchedule([(CMTimeRange(start: half, duration: half), 3)])
+    func range(_ start: Double, _ end: Double) -> CMTimeRange {
+      CMTimeRange(
+        start: CMTime(seconds: start, preferredTimescale: 600),
+        end: CMTime(seconds: end, preferredTimescale: 600))
+    }
+    // Out of order, with a gap from 1 s to 2 s.
+    let schedule = VolumeSchedule([(range(2, 3), 0.5), (range(0.5, 1), 3)])
     XCTAssertEqual(schedule.volume(at: 0.25), 1)
     XCTAssertEqual(schedule.volume(at: 0.75), 3)
+    // A mix holds a volume through a gap.
+    XCTAssertEqual(schedule.volume(at: 1.5), 3)
+    XCTAssertEqual(schedule.volume(at: 2.5), 0.5)
     XCTAssertTrue(schedule.amplifies)
     XCTAssertFalse(VolumeSchedule(constant: 1).amplifies)
     XCTAssertNil(VolumeLimiterTap.make(for: VolumeSchedule(constant: 0.8)))
@@ -2743,5 +2760,95 @@ final class VolumeLimiterTests: XCTestCase {
     // Louder than the source, but under full scale: limited, not clipped.
     XCTAssertGreaterThan(peak, 0.8)
     XCTAssertLessThan(peak, 0.99)
+  }
+
+  /// Three 0.5 s clips at volumes 1, 3 and 1. Given one flat ramp per clip,
+  /// the mix faded from each volume to the next across the whole clip, so the
+  /// loud clip started quiet and the one after it played loud and unlimited.
+  func testVolumeStepsSwitchAtEachCutAndLimitOnlyTheLoudClip() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("limiter-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("tone.caf")
+    let clipFrames = 22_050
+    let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
+    let tone = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(clipFrames))!
+    tone.frameLength = AVAudioFrameCount(clipFrames)
+    for channel in 0..<2 {
+      for frame in 0..<clipFrames {
+        tone.floatChannelData![channel][frame] = 0.5 * sin(Float(frame) * 2 * .pi * 440 / 44_100)
+      }
+    }
+    try AVAudioFile(forWriting: source, settings: format.settings).write(from: tone)
+
+    let asset = AVURLAsset(url: source)
+    let sourceTrack = try XCTUnwrap(asset.tracks(withMediaType: .audio).first)
+    let composition = AVMutableComposition()
+    let track = try XCTUnwrap(
+      composition.addMutableTrack(
+        withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid))
+    let clip = CMTime(value: CMTimeValue(clipFrames), timescale: 44_100)
+    var steps: [(range: CMTimeRange, volume: Float)] = []
+    for (index, volume) in [Float(1), 3, 1].enumerated() {
+      let start = CMTimeMultiply(clip, multiplier: Int32(index))
+      try track.insertTimeRange(
+        CMTimeRange(start: .zero, duration: clip), of: sourceTrack, at: start)
+      steps.append((CMTimeRange(start: start, duration: clip), volume))
+    }
+    let parameters = AVMutableAudioMixInputParameters(track: track)
+    parameters.setVolumeSteps(steps)
+    let mix = AVMutableAudioMix()
+    mix.inputParameters = [parameters]
+
+    // Read the mix as float through an asset reader, the bitrate-capped
+    // export's path, so nothing clips or codes the level on the way out.
+    let reader = try AVAssetReader(asset: composition)
+    let output = AVAssetReaderAudioMixOutput(
+      audioTracks: [track],
+      audioSettings: [
+        AVFormatIDKey: kAudioFormatLinearPCM,
+        AVSampleRateKey: 44_100,
+        AVNumberOfChannelsKey: 2,
+        AVLinearPCMBitDepthKey: 32,
+        AVLinearPCMIsFloatKey: true,
+        AVLinearPCMIsBigEndianKey: false,
+        AVLinearPCMIsNonInterleaved: false,
+      ])
+    output.audioMix = mix
+    reader.add(output)
+    XCTAssertTrue(reader.startReading())
+    var left: [Float] = []
+    while let buffer = output.copyNextSampleBuffer(),
+      let block = CMSampleBufferGetDataBuffer(buffer)
+    {
+      var interleaved = [Float](repeating: 0, count: CMBlockBufferGetDataLength(block) / 4)
+      CMBlockBufferCopyDataBytes(
+        block, atOffset: 0, dataLength: interleaved.count * 4, destination: &interleaved)
+      left += stride(from: 0, to: interleaved.count, by: 2).map { interleaved[$0] }
+    }
+    XCTAssertEqual(reader.status, .completed, String(describing: reader.error))
+
+    /// The lowest and highest peak of each 440 Hz cycle from [from] to [to] s.
+    func level(_ from: Double, _ to: Double) -> (low: Float, high: Float) {
+      var peaks: [Float] = []
+      var start = Int(from * 44_100)
+      while start + 101 <= min(Int(to * 44_100), left.count) {
+        peaks.append(left[start..<start + 101].map(abs).max()!)
+        start += 101
+      }
+      return (peaks.min() ?? 0, peaks.max() ?? 0)
+    }
+    // The quiet clips keep their level, also right after the loud one.
+    let first = level(0.05, 0.49)
+    XCTAssertEqual(first.low, 0.5, accuracy: 0.005)
+    XCTAssertEqual(first.high, 0.5, accuracy: 0.005)
+    let last = level(1.1, 1.5)
+    XCTAssertEqual(last.low, 0.5, accuracy: 0.005)
+    XCTAssertEqual(last.high, 0.5, accuracy: 0.005)
+    // The loud clip is at the ceiling from early on, and nothing passes it.
+    let loud = level(0.6, 0.99)
+    XCTAssertEqual(loud.low, PeakLimiter.ceiling, accuracy: 0.005)
+    XCTAssertLessThanOrEqual(left.map(abs).max() ?? 0, PeakLimiter.ceiling + 0.005)
   }
 }

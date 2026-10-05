@@ -53,6 +53,9 @@ class VolumeAudioProcessor(private val volumeMultiplier: Float) : BaseAudioProce
     /** Set while the volume amplifies; see the class documentation. */
     private var limiter: PeakLimiter? = null
 
+    /** The samples [queueLimited] works on, kept so a buffer allocates nothing. */
+    private var limitSamples = FloatArray(0)
+
     override fun onFlush(streamMetadata: AudioProcessor.StreamMetadata) {
         limiter?.reset()
     }
@@ -126,16 +129,19 @@ class VolumeAudioProcessor(private val volumeMultiplier: Float) : BaseAudioProce
         limiter: PeakLimiter,
     ) {
         val isFloat = inputAudioFormat.encoding == C.ENCODING_PCM_FLOAT
-        val samples = FloatArray(inputBuffer.remaining() / if (isFloat) 4 else 2) {
-            if (isFloat) inputBuffer.float else inputBuffer.short / SHORT_SCALE
+        val count = inputBuffer.remaining() / if (isFloat) 4 else 2
+        if (limitSamples.size < count) limitSamples = FloatArray(count)
+        val samples = limitSamples
+        for (i in 0 until count) {
+            samples[i] = if (isFloat) inputBuffer.float else inputBuffer.short / SHORT_SCALE
         }
-        limiter.process(samples, inputAudioFormat.channelCount, volumeMultiplier)
-        for (sample in samples) {
+        limiter.process(samples, inputAudioFormat.channelCount, volumeMultiplier, count)
+        for (i in 0 until count) {
             if (isFloat) {
-                outputBuffer.putFloat(sample)
+                outputBuffer.putFloat(samples[i])
             } else {
                 outputBuffer.putShort(
-                    (sample * SHORT_SCALE).roundToInt()
+                    (samples[i] * SHORT_SCALE).roundToInt()
                         .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
                         .toShort(),
                 )

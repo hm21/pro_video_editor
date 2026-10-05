@@ -45,13 +45,20 @@ class PeakLimiter(sampleRate: Int) {
     }
 
     /**
-     * Applies [volume] to the interleaved [samples] of [channelCount]
-     * channels in place, limiting every frame that would cross the ceiling.
+     * Applies [volume] to the first [sampleCount] interleaved [samples] of
+     * [channelCount] channels in place, limiting every frame that would cross
+     * the ceiling.
      */
-    fun process(samples: FloatArray, channelCount: Int, volume: Float) {
+    fun process(
+        samples: FloatArray,
+        channelCount: Int,
+        volume: Float,
+        sampleCount: Int = samples.size,
+    ) {
         val channels = channelCount.coerceAtLeast(1)
+        val end = sampleCount.coerceAtMost(samples.size)
         var frame = 0
-        while (frame + channels <= samples.size) {
+        while (frame + channels <= end) {
             var peak = 0f
             for (c in 0 until channels) {
                 peak = maxOf(peak, abs(samples[frame + c] * volume))
