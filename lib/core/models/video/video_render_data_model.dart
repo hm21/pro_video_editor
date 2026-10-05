@@ -499,6 +499,7 @@ class VideoRenderData {
                 'loop': layer.loop,
                 'animationOffsetUs': layer.animationOffset.inMicroseconds,
                 'animations': layer.animations.map((a) => a.toMap()).toList(),
+                'censor': layer.censor?.toMap(),
               },
             ),
           );

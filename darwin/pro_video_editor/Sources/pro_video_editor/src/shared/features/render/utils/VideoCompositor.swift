@@ -27,6 +27,8 @@ struct ImageLayer {
   let rotation: Double
   /// Animations applied to this layer.
   let animations: [LayerAnimationConfig]
+  /// Blurs or pixelates the picture beneath the layer instead of drawing it.
+  var censor: LayerCensorConfig? = nil
 
   /// The frame to display at composition time [currentTimeUs].
   ///
@@ -157,6 +159,9 @@ func applyingAVFoundationTransform(
 class VideoCompositor: NSObject, AVVideoCompositing {
   var blurSigma: Double = 0.0
   var overlayImageLayers: [ImageLayer] = []
+  /// Set when a censor layer's mask did not decode. Every frame then fails:
+  /// exporting without the layer would show what it was meant to hide.
+  var hasUnreadableCensorMask = false
   var imageBytesWithCropping: Bool = false
 
   var rotateRadians: Double = 0
@@ -341,6 +346,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
   func setOverlayImageLayers(from layers: [ImageLayerConfig]) {
     overlayImageLayers = []
+    hasUnreadableCensorMask = false
     for layer in layers {
       let frames: [CIImage]
       let frameEndsUs: [Int64]
@@ -352,7 +358,10 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       } else {
         // Static image: decode the single frame, honoring its EXIF orientation
         // so a gallery photo is laid in upright rather than sideways.
-        guard let image = decodeOrientedImage(layer.image) else { continue }
+        guard let image = decodeOrientedImage(layer.image) else {
+          if layer.censor != nil { hasUnreadableCensorMask = true }
+          continue
+        }
         frames = [image]
         frameEndsUs = [0]
       }
@@ -370,9 +379,53 @@ class VideoCompositor: NSObject, AVVideoCompositing {
           width: layer.width,
           height: layer.height,
           rotation: layer.rotation,
-          animations: layer.animations
+          animations: layer.animations,
+          censor: layer.censor
         ))
     }
+  }
+
+  /// Draws [layer] at [currentTimeUs] over [outputImage], laid out in
+  /// [imageRect]; a censor layer instead hides the part of [outputImage] it
+  /// covers.
+  private func drawImageLayer(
+    _ layer: ImageLayer, over outputImage: CIImage, imageRect: CGRect, currentTimeUs: Int64
+  ) -> CIImage {
+    var img = layer.currentFrame(atUs: currentTimeUs)
+
+    if let w = layer.width, let h = layer.height {
+      let sx = CGFloat(w) / img.extent.width
+      let sy = CGFloat(h) / img.extent.height
+      img = img.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+    }
+
+    let overlay: CIImage
+    if layer.x == nil && layer.y == nil {
+      overlay = img.transformed(
+        by: CGAffineTransform(
+          scaleX: imageRect.width / img.extent.width,
+          y: imageRect.height / img.extent.height))
+    } else {
+      let posX = CGFloat(layer.x ?? 0)
+      let posY = CGFloat(layer.y ?? 0)
+      let cgY = imageRect.height - posY - img.extent.height
+      overlay = img.transformed(
+        by: CGAffineTransform(translationX: posX, y: cgY))
+    }
+
+    let rotated = rotateOverlayAroundCenter(overlay, radians: layer.rotation)
+    let (opacity, animTransform) = computeAnimation(
+      layer: layer,
+      currentTimeUs: currentTimeUs,
+      overlayExtent: rotated.extent,
+      frameExtent: imageRect
+    )
+    guard let censor = layer.censor else {
+      return compositeOverlay(
+        rotated, over: outputImage, opacity: opacity, transform: animTransform)
+    }
+    let mask = placedOverlay(rotated, opacity: opacity, transform: animTransform)
+    return applyLayerCensor(censor, to: outputImage, mask: mask, frame: imageRect)
   }
 
   /// Computes the color-filter cube active at the given composition time.
@@ -735,6 +788,17 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
     configureIfNeeded(from: request.videoCompositionInstruction)
 
+    if hasUnreadableCensorMask {
+      request.finish(
+        with: NSError(
+          domain: "VideoCompositor", code: -4,
+          userInfo: [
+            NSLocalizedDescriptionKey:
+              "A censor layer's mask image did not decode, so the area it hides cannot be hidden"
+          ]))
+      return
+    }
+
     var outputImage: CIImage
 
     if let layeredInstruction = request.videoCompositionInstruction
@@ -900,37 +964,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
           && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
 
         if inTimeRange {
-          var img = layer.currentFrame(atUs: currentTimeUs)
-
-          if let w = layer.width, let h = layer.height {
-            let sx = CGFloat(w) / img.extent.width
-            let sy = CGFloat(h) / img.extent.height
-            img = img.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
-          }
-
-          let overlay: CIImage
-          if layer.x == nil && layer.y == nil {
-            overlay = img.transformed(
-              by: CGAffineTransform(
-                scaleX: imageRect.width / img.extent.width,
-                y: imageRect.height / img.extent.height))
-          } else {
-            let posX = CGFloat(layer.x ?? 0)
-            let posY = CGFloat(layer.y ?? 0)
-            let cgY = imageRect.height - posY - img.extent.height
-            overlay = img.transformed(
-              by: CGAffineTransform(translationX: posX, y: cgY))
-          }
-
-          let rotated = rotateOverlayAroundCenter(overlay, radians: layer.rotation)
-          let (opacity, animTransform) = computeAnimation(
-            layer: layer,
-            currentTimeUs: currentTimeUs,
-            overlayExtent: rotated.extent,
-            frameExtent: imageRect
-          )
-          outputImage = compositeOverlay(
-            rotated, over: outputImage, opacity: opacity, transform: animTransform)
+          outputImage = drawImageLayer(
+            layer, over: outputImage, imageRect: imageRect, currentTimeUs: currentTimeUs)
         }
       }
 
@@ -1021,37 +1056,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
           (layer.startUs == -1 || currentTimeUs >= layer.startUs)
           && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
         if inTimeRange {
-          var img = layer.currentFrame(atUs: currentTimeUs)
-
-          if let w = layer.width, let h = layer.height {
-            let sx = CGFloat(w) / img.extent.width
-            let sy = CGFloat(h) / img.extent.height
-            img = img.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
-          }
-
-          let overlay: CIImage
-          if layer.x == nil && layer.y == nil {
-            overlay = img.transformed(
-              by: CGAffineTransform(
-                scaleX: imageRect.width / img.extent.width,
-                y: imageRect.height / img.extent.height))
-          } else {
-            let posX = CGFloat(layer.x ?? 0)
-            let posY = CGFloat(layer.y ?? 0)
-            let cgY = imageRect.height - posY - img.extent.height
-            overlay = img.transformed(
-              by: CGAffineTransform(translationX: posX, y: cgY))
-          }
-
-          let rotated = rotateOverlayAroundCenter(overlay, radians: layer.rotation)
-          let (opacity, animTransform) = computeAnimation(
-            layer: layer,
-            currentTimeUs: currentTimeUs,
-            overlayExtent: rotated.extent,
-            frameExtent: imageRect
-          )
-          outputImage = compositeOverlay(
-            rotated, over: outputImage, opacity: opacity, transform: animTransform)
+          outputImage = drawImageLayer(
+            layer, over: outputImage, imageRect: imageRect, currentTimeUs: currentTimeUs)
         }
       }
 

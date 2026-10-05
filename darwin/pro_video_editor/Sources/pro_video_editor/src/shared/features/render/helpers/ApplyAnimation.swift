@@ -211,6 +211,16 @@ func compositeOverlay(
   opacity: Double,
   transform: CGAffineTransform
 ) -> CIImage {
+  placedOverlay(overlay, opacity: opacity, transform: transform).composited(over: outputImage)
+}
+
+/// [overlay] with its animation applied: moved and scaled by [transform] and
+/// faded to [opacity].
+func placedOverlay(
+  _ overlay: CIImage,
+  opacity: Double,
+  transform: CGAffineTransform
+) -> CIImage {
   var result = overlay
 
   // Apply animation transform (slide, scale)
@@ -227,5 +237,5 @@ func compositeOverlay(
       ])
   }
 
-  return result.composited(over: outputImage)
+  return result
 }

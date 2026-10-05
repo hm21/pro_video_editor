@@ -192,13 +192,13 @@ internal class VideoEffectGlow {
             return binding[0]
         }
 
-        private const val VERTEX_SHADER =
+        internal const val VERTEX_SHADER =
             "attribute vec4 aFramePosition;\n" +
             "void main() {\n" +
             "  gl_Position = aFramePosition;\n" +
             "}"
 
-        private const val PRECISION =
+        internal const val PRECISION =
             "#ifdef GL_FRAGMENT_PRECISION_HIGH\n" +
             "precision highp float;\n" +
             "#else\n" +
@@ -236,7 +236,7 @@ internal class VideoEffectGlow {
         // One direction of the Gaussian, reaching ceil(3 sigma) pixels to each
         // side, at most MAX_REACH. The margin keeps it inside the texture; the
         // clamp only guards the reads.
-        private const val BLUR_SHADER = PRECISION +
+        internal const val BLUR_SHADER = PRECISION +
             "uniform sampler2D uSource;\n" +
             "uniform vec2 uSize;\n" +
             "uniform vec2 uDirection;\n" +

@@ -95,7 +95,8 @@ class CompositionBuilder(
                     rotation = imageLayer.rotation,
                     loop = imageLayer.loop,
                     animationOffsetUs = imageLayer.animationOffsetUs,
-                    animations = imageLayer.animations
+                    animations = imageLayer.animations,
+                    censor = imageLayer.censor
                 )
             })
             .setEnableAudio(config.enableAudio)

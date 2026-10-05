@@ -1,3 +1,6 @@
+## 2.25.0
+- **FEAT**(android, iOS, macOS): `ImageLayer.censor` turns an image layer into an area that blurs (`LayerCensor.blur`) or pixelates (`LayerCensor.pixelate`) the picture beneath it, e.g. to hide a face, a license plate or a message on a screen. The layer's image is the mask of the area and is not drawn. The area hides the video and every image layer before it, while image layers after it stay on top, and it takes its place, rotation, time range and animations from the layer like any other image layer. Pixelate blocks start at the layer's top-left corner. A censor layer that cannot be set up fails the render instead of exporting the area unhidden.
+
 ## 2.24.0
 - **FEAT**(android, iOS, macOS): A volume above 1.0 on a `VideoSegment` or a `VideoAudioTrack` no longer clips loud audio such as a mastered song; peaks that would pass -1 dBFS are limited instead. Volumes at or below 1.0 render as before.
 - **FIX**(iOS, macOS): A clip of 2 s or less plays at its own volume from the start. Before, it faded from the previous clip's volume across its whole length.
