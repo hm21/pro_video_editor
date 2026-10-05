@@ -48,6 +48,10 @@ public struct VideoCompositorConfig {
   /// color filters, with each frame's operations picked by composition time.
   var videoEffects: [VideoEffectConfig] = []
 
+  /// Effects the app registered itself, applied on the oriented frame before
+  /// `videoEffects`. Single-track path only.
+  var customEffects: [CustomVideoEffectStage] = []
+
   /// Dip-to-color windows for `fadeToBlack` / `fadeToWhite` clip transitions.
   var fadeWindows: [FadeWindow] = []
 

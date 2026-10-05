@@ -7,6 +7,7 @@ import 'package:pro_video_editor/core/models/audio/audio_track_model.dart';
 import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart';
 import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
 import 'package:pro_video_editor/core/models/video/chroma_key_model.dart';
+import 'package:pro_video_editor/core/models/video/custom_video_effect_model.dart';
 import 'package:pro_video_editor/core/models/video/editor_video_model.dart';
 import 'package:pro_video_editor/core/models/video/video_composition_model.dart';
 import 'package:pro_video_editor/core/models/video/video_effect_frame_model.dart';
@@ -403,6 +404,57 @@ void main() {
         throwsA(
           isA<FileSystemException>().having((e) => e.path, 'path', missing),
         ),
+      );
+    });
+  });
+
+  group('VideoRenderData customEffects', () {
+    test('defaults to none', () async {
+      final data = VideoRenderData(
+        id: 'test',
+        videoSegments: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+      );
+      expect(data.customEffects, isEmpty);
+      expect((await data.toAsyncMap())['customEffects'], isEmpty);
+    });
+
+    test('toAsyncMap sends each custom effect in order', () async {
+      final data = VideoRenderData(
+        id: 'test',
+        videoSegments: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+        customEffects: const [
+          CustomVideoEffect(id: 'a', params: {'x': 1}),
+          CustomVideoEffect(id: 'b', startTime: Duration(milliseconds: 500)),
+        ],
+      );
+      final maps = (await data.toAsyncMap())['customEffects'] as List;
+      expect(maps, [
+        {
+          'id': 'a',
+          'params': {'x': 1},
+          'startUs': null,
+          'endUs': null,
+        },
+        {
+          'id': 'b',
+          'params': <String, Object?>{},
+          'startUs': 500000,
+          'endUs': null,
+        },
+      ]);
+    });
+
+    test('survives toMap and fromMap', () {
+      final data = VideoRenderData(
+        id: 'test',
+        videoSegments: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+        customEffects: const [
+          CustomVideoEffect(id: 'a', params: {'x': 1}),
+        ],
+      );
+      expect(
+        VideoRenderData.fromMap(data.toMap()).customEffects,
+        data.customEffects,
       );
     });
   });

@@ -51,6 +51,7 @@ internal enum BitrateCapPolicy {
       config.imageLayers.isEmpty,
       config.colorFilters.isEmpty,
       config.effects.isEmpty,
+      config.customEffects.isEmpty,
       config.audioTracks.isEmpty,
       config.enableAudio,
       config.rotateTurns == nil || config.rotateTurns == 0,

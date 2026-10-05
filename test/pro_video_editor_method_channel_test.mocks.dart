@@ -392,6 +392,14 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
           as List<_i4.VideoEffect>);
 
   @override
+  List<_i4.CustomVideoEffect> get customEffects =>
+      (super.noSuchMethod(
+            Invocation.getter(#customEffects),
+            returnValue: <_i4.CustomVideoEffect>[],
+          )
+          as List<_i4.CustomVideoEffect>);
+
+  @override
   List<_i4.VideoAudioTrack> get audioTracks =>
       (super.noSuchMethod(
             Invocation.getter(#audioTracks),
@@ -448,6 +456,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
     Duration? endTime,
     List<_i4.ColorFilter>? colorFilters,
     List<_i4.VideoEffect>? effects,
+    List<_i4.CustomVideoEffect>? customEffects,
     List<_i4.VideoAudioTrack>? audioTracks,
     double? blur,
     _i4.ChromaKey? chromaKey,
@@ -471,6 +480,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
               #endTime: endTime,
               #colorFilters: colorFilters,
               #effects: effects,
+              #customEffects: customEffects,
               #audioTracks: audioTracks,
               #blur: blur,
               #chromaKey: chromaKey,
@@ -495,6 +505,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
                 #endTime: endTime,
                 #colorFilters: colorFilters,
                 #effects: effects,
+                #customEffects: customEffects,
                 #audioTracks: audioTracks,
                 #blur: blur,
                 #chromaKey: chromaKey,

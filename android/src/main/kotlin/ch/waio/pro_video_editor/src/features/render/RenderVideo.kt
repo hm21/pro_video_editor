@@ -103,8 +103,9 @@ class RenderVideo(private val context: Context) {
                     layer.chromaKey != null || layer.clips.any { it.chromaKey != null }
                 } == true
 
-        // The video effects shader is ES 2.0 SDR too.
-        val hasEffects = config.effects.isNotEmpty()
+        // The video effects shader is ES 2.0 SDR too, and so is every custom
+        // effect's history and pass-through.
+        val hasEffects = config.effects.isNotEmpty() || config.customEffects.isNotEmpty()
 
         return hasImageLayers || hasBlur || hasColorFilters || hasChromaKey || hasEffects
     }
@@ -722,8 +723,14 @@ class RenderVideo(private val context: Context) {
             }
         outputFileRef.set(outputFile)
 
-        // Process effects from configuration
-        val (videoEffects, audioEffects) = effectsProcessor.process(config)
+        // Process effects from configuration. A custom effect nothing is
+        // registered under fails the render here, before it holds anything.
+        val (videoEffects, audioEffects) = try {
+            effectsProcessor.process(config)
+        } catch (e: IllegalArgumentException) {
+            onError(e)
+            return
+        }
 
         val outputMimeType = mapFormatToMimeType(config.outputFormat)
         // Resilient factory tries Media3's fast default first (operating-rate =

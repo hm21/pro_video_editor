@@ -561,6 +561,10 @@ struct RenderConfig: Sendable {
   /// Glitch, VHS, pixelate and other pixel effects, applied before `colorFilters`
   let effects: [VideoEffectConfig]
 
+  /// Effects the app registered with `CustomVideoEffects`, applied before
+  /// `effects`, in list order.
+  let customEffects: [CustomVideoEffectConfig]
+
   /// List of audio tracks with timing, volume and looping configuration
   let audioTracks: [AudioTrackConfig]
 
@@ -616,6 +620,7 @@ struct RenderConfig: Sendable {
       playbackSpeed: self.playbackSpeed,
       colorFilters: self.colorFilters,
       effects: self.effects,
+      customEffects: self.customEffects,
       audioTracks: self.audioTracks,
       blur: self.blur,
       chromaKey: self.chromaKey,
@@ -654,6 +659,16 @@ struct RenderConfig: Sendable {
       effects = effectsRaw.compactMap { VideoEffectConfig.fromArguments($0) }
       if effects.count != effectsRaw.count {
         PluginLog.print("⚠️ Skipped \(effectsRaw.count - effects.count) unreadable video effect(s)")
+      }
+    }
+
+    // Parse custom video effects
+    var customEffects: [CustomVideoEffectConfig] = []
+    if let customRaw = args["customEffects"] as? [[String: Any]] {
+      customEffects = customRaw.compactMap { CustomVideoEffectConfig.fromArguments($0) }
+      if customEffects.count != customRaw.count {
+        PluginLog.print(
+          "⚠️ Skipped \(customRaw.count - customEffects.count) custom video effect(s) without an id")
       }
     }
 
@@ -697,6 +712,7 @@ struct RenderConfig: Sendable {
       playbackSpeed: (args["playbackSpeed"] as? NSNumber)?.floatValue,
       colorFilters: colorFilters,
       effects: effects,
+      customEffects: customEffects,
       audioTracks: audioTracks,
       blur: (args["blur"] as? NSNumber)?.doubleValue,
       chromaKey: ChromaKeyConfig.fromArguments(args["chromaKey"] as? [String: Any]),
