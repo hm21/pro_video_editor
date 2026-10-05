@@ -97,8 +97,10 @@ public struct LayerCensorConfig: Sendable, Equatable {
     case pixelate
   }
 
-  /// The strength used when the channel sends none.
-  static let defaultStrength = 24.0
+  /// The strengths used when the channel sends none, those of the Dart
+  /// `LayerCensor.blur()` and `LayerCensor.pixelate()`.
+  static let defaultSigma = 24.0
+  static let defaultBlockSize = 32.0
 
   /// How the area is hidden.
   let type: CensorType
@@ -118,8 +120,9 @@ public struct LayerCensorConfig: Sendable, Equatable {
   static func fromArguments(_ args: [String: Any]?) -> LayerCensorConfig? {
     guard let args = args else { return nil }
     let type: CensorType = (args["type"] as? String) == "pixelate" ? .pixelate : .blur
-    var strength = (args["strength"] as? NSNumber)?.doubleValue ?? defaultStrength
-    if !(strength > 0) || !strength.isFinite { strength = defaultStrength }
+    let fallback = type == .pixelate ? defaultBlockSize : defaultSigma
+    var strength = (args["strength"] as? NSNumber)?.doubleValue ?? fallback
+    if !(strength > 0) || !strength.isFinite { strength = fallback }
     return LayerCensorConfig(type: type, strength: strength)
   }
 }

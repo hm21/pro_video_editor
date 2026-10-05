@@ -5,10 +5,6 @@ import androidx.media3.common.util.GlProgram
 import androidx.media3.common.util.GlUtil
 import androidx.media3.common.util.UnstableApi
 import ch.waio.pro_video_editor.src.features.render.models.VideoEffectFrame
-import kotlin.math.ceil
-import kotlin.math.floor
-import kotlin.math.max
-import kotlin.math.min
 
 /**
  * The glow step of the video effects on the GPU: the bright parts of the
@@ -18,38 +14,27 @@ import kotlin.math.min
  * The effect pass draws into [beginPicture]'s intermediate instead of the
  * output. [finish] then runs four passes: a bright pass that averages blocks
  * of `scale` pixels into a small texture, a Gaussian over its rows and one
- * over its columns, and a screen pass that reads the halo back with bilinear
- * filtering and lays it over the picture into the output.
+ * over its columns ([DownscaledGaussian]), and a screen pass that reads the
+ * halo back with bilinear filtering and lays it over the picture into the
+ * output.
  *
- * Blurring at a lower resolution keeps the cost down. The scale leaves at
- * least four small pixels per standard deviation, which keeps the halo within
- * a step or two of [VideoEffectMath.gaussianBlur], the deviation the spec
- * allows for this step.
- *
+ * The downscaled Gaussian stays within a step or two of
+ * [VideoEffectMath.gaussianBlur], the deviation the spec allows for this step.
  * The spec repeats the edge pixels beyond the frame, so a thin bright line
- * right at the edge glows as strongly as a wide bright area there. Repeating
- * the small texture's edge instead would first spread the line over a whole
- * block. So the small texture has a margin as wide as the blur reaches, whose
- * blocks average the repeated edge pixels, and the blur stays inside it.
+ * right at the edge glows as strongly as a wide bright area there, which the
+ * small texture's margin of repeated edge pixels keeps.
  */
 @UnstableApi
 internal class VideoEffectGlow {
 
     private val brightProgram = GlProgram(VERTEX_SHADER, BRIGHT_SHADER)
-    private val blurProgram = GlProgram(VERTEX_SHADER, BLUR_SHADER)
     private val screenProgram = GlProgram(VERTEX_SHADER, SCREEN_SHADER)
+    private val halo = DownscaledGaussian()
 
     private var width = 0
     private var height = 0
     private var pictureTexture = NONE
     private var pictureFbo = NONE
-
-    private var scale = 0
-    private var margin = 0
-    private var smallWidth = 0
-    private var smallHeight = 0
-    private val smallTextures = intArrayOf(NONE, NONE)
-    private val smallFbos = intArrayOf(NONE, NONE)
 
     /** Points the next draw at the full-size intermediate the glow reads. */
     fun beginPicture(width: Int, height: Int) {
@@ -70,81 +55,40 @@ internal class VideoEffectGlow {
      */
     fun finish(frame: VideoEffectFrame, outputFbo: Int) {
         val sigma = frame.glowRadius * height
-        ensureSmall(sigma)
         val threshold = frame.glowThreshold.coerceIn(0.0, 0.99).toFloat()
 
-        GlUtil.focusFramebufferUsingCurrentContext(smallFbos[0], smallWidth, smallHeight)
+        halo.beginDownsample(width, height, sigma)
         brightProgram.use()
         brightProgram.setSamplerTexIdUniform("uPicture", pictureTexture, 0)
         brightProgram.setFloatsUniform("uPictureSize", floatArrayOf(width.toFloat(), height.toFloat()))
-        brightProgram.setFloatUniform("uScale", scale.toFloat())
-        brightProgram.setFloatUniform("uMargin", margin.toFloat())
+        brightProgram.setFloatUniform("uScale", halo.scale.toFloat())
+        brightProgram.setFloatUniform("uMargin", halo.margin.toFloat())
         brightProgram.setFloatUniform("uGlow", frame.glow.toFloat())
         brightProgram.setFloatUniform("uThreshold", threshold)
-        draw(brightProgram)
+        DownscaledGaussian.draw(brightProgram)
 
-        if (sigma >= 0.5) {
-            blur(from = 0, to = 1, direction = floatArrayOf(1f, 0f), sigma = sigma / scale)
-            blur(from = 1, to = 0, direction = floatArrayOf(0f, 1f), sigma = sigma / scale)
-        }
+        halo.blur(sigma)
 
         GlUtil.focusFramebufferUsingCurrentContext(outputFbo, width, height)
         screenProgram.use()
         screenProgram.setSamplerTexIdUniform("uPicture", pictureTexture, 0)
-        screenProgram.setSamplerTexIdUniform("uHalo", smallTextures[0], 1)
+        screenProgram.setSamplerTexIdUniform("uHalo", halo.texture, 1)
         screenProgram.setFloatsUniform("uPictureSize", floatArrayOf(width.toFloat(), height.toFloat()))
         screenProgram.setFloatsUniform(
-            "uHaloSize", floatArrayOf(smallWidth.toFloat(), smallHeight.toFloat())
+            "uHaloSize", floatArrayOf(halo.width.toFloat(), halo.height.toFloat())
         )
-        screenProgram.setFloatUniform("uScale", scale.toFloat())
-        screenProgram.setFloatUniform("uMargin", margin.toFloat())
-        draw(screenProgram)
+        screenProgram.setFloatUniform("uScale", halo.scale.toFloat())
+        screenProgram.setFloatUniform("uMargin", halo.margin.toFloat())
+        DownscaledGaussian.draw(screenProgram)
         // The halo was bound on the second unit; hand the first back active.
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
     }
 
     fun release() {
         deletePicture()
-        deleteSmall()
+        halo.release()
         brightProgram.delete()
-        blurProgram.delete()
         screenProgram.delete()
-    }
-
-    private fun blur(from: Int, to: Int, direction: FloatArray, sigma: Double) {
-        GlUtil.focusFramebufferUsingCurrentContext(smallFbos[to], smallWidth, smallHeight)
-        blurProgram.use()
-        blurProgram.setSamplerTexIdUniform("uSource", smallTextures[from], 0)
-        blurProgram.setFloatsUniform("uSize", floatArrayOf(smallWidth.toFloat(), smallHeight.toFloat()))
-        blurProgram.setFloatsUniform("uDirection", direction)
-        blurProgram.setFloatUniform("uSigma", sigma.toFloat())
-        draw(blurProgram)
-    }
-
-    private fun draw(program: GlProgram) {
-        val vertices = GlUtil.getNormalizedCoordinateBounds()
-        program.setBufferAttribute("aFramePosition", vertices, if (vertices.size == 8) 2 else 4)
-        program.bindAttributesAndUniforms()
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-        GlUtil.checkGlError()
-    }
-
-    /** Sizes the small textures for a blur of [sigma] pixels. */
-    private fun ensureSmall(sigma: Double) {
-        val scale = scaleFor(sigma)
-        val margin = marginFor(sigma, scale)
-        val w = (width + scale - 1) / scale + 2 * margin
-        val h = (height + scale - 1) / scale + 2 * margin
-        this.margin = margin
-        if (scale == this.scale && w == smallWidth && h == smallHeight && smallTextures[0] != NONE) return
-        deleteSmall()
-        for (i in 0..1) {
-            smallTextures[i] = GlUtil.createTexture(w, h, /* useHighPrecisionColorComponents= */ false)
-            smallFbos[i] = GlUtil.createFboForTexture(smallTextures[i])
-        }
-        this.scale = scale
-        smallWidth = w
-        smallHeight = h
     }
 
     private fun deletePicture() {
@@ -154,36 +98,8 @@ internal class VideoEffectGlow {
         pictureTexture = NONE
     }
 
-    private fun deleteSmall() {
-        for (i in 0..1) {
-            if (smallFbos[i] != NONE) GlUtil.deleteFbo(smallFbos[i])
-            if (smallTextures[i] != NONE) GlUtil.deleteTexture(smallTextures[i])
-            smallFbos[i] = NONE
-            smallTextures[i] = NONE
-        }
-    }
-
     companion object {
         private const val NONE = -1
-
-        /** The largest block the bright pass averages; its loops stop here. */
-        private const val MAX_SCALE = 32
-
-        /** The farthest the blur reaches, in small pixels; its loop stops here. */
-        private const val MAX_REACH = 64
-
-        /**
-         * The downscale for a blur of [sigma] pixels: at least four small
-         * pixels per standard deviation, at most [MAX_SCALE].
-         */
-        fun scaleFor(sigma: Double): Int = min(MAX_SCALE, max(1, floor(sigma / 4).toInt()))
-
-        /**
-         * The small pixels the blur of [sigma] pixels reaches at [scale], which
-         * the small texture adds around the picture; none without a blur.
-         */
-        fun marginFor(sigma: Double, scale: Int): Int =
-            if (sigma < 0.5) 0 else min(MAX_REACH, ceil(3 * sigma / scale).toInt())
 
         /** The framebuffer the caller drew into last, so the glow can return to it. */
         fun currentFramebuffer(): Int {
@@ -231,30 +147,6 @@ internal class VideoEffectGlow {
             "    }\n" +
             "  }\n" +
             "  gl_FragColor = vec4(sum / (uScale * uScale), 1.0);\n" +
-            "}"
-
-        // One direction of the Gaussian, reaching ceil(3 sigma) pixels to each
-        // side, at most MAX_REACH. The margin keeps it inside the texture; the
-        // clamp only guards the reads.
-        internal const val BLUR_SHADER = PRECISION +
-            "uniform sampler2D uSource;\n" +
-            "uniform vec2 uSize;\n" +
-            "uniform vec2 uDirection;\n" +
-            "uniform float uSigma;\n" +
-            "void main() {\n" +
-            "  vec2 p = floor(gl_FragCoord.xy);\n" +
-            "  float reach = ceil(3.0 * uSigma);\n" +
-            "  vec3 sum = vec3(0.0);\n" +
-            "  float total = 0.0;\n" +
-            "  for (int k = -64; k <= 64; k++) {\n" +
-            "    float offset = float(k);\n" +
-            "    if (abs(offset) > reach) continue;\n" +
-            "    float weight = exp(-offset * offset / (2.0 * uSigma * uSigma));\n" +
-            "    vec2 texel = clamp(p + uDirection * offset, vec2(0.0), uSize - 1.0);\n" +
-            "    sum += weight * texture2D(uSource, (texel + 0.5) / uSize).rgb;\n" +
-            "    total += weight;\n" +
-            "  }\n" +
-            "  gl_FragColor = vec4(sum / total, 1.0);\n" +
             "}"
 
         // The halo, read with bilinear filtering where the full-size pixel's

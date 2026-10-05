@@ -26,7 +26,7 @@ import kotlin.math.roundToInt
  * times the overlay's alpha scale, is how much of the hidden picture replaces
  * the original one. See [CensorMaskPlacement] for the mapping.
  *
- * The blur reuses the glow's downscaled Gaussian ([VideoEffectGlow]): blocks
+ * The blur is the glow's downscaled Gaussian ([DownscaledGaussian]): blocks
  * of `scale` pixels are averaged into a small texture with a margin that
  * repeats the edge pixels, blurred over its rows and its columns, and read
  * back with bilinear filtering. Pixelate needs no extra pass: every pixel of a
@@ -64,18 +64,10 @@ internal class LayerCensorEffect(
         )
         private val downsampleProgram =
             if (isBlur) GlProgram(VideoEffectGlow.VERTEX_SHADER, DOWNSAMPLE_SHADER) else null
-        private val blurProgram =
-            if (isBlur) GlProgram(VideoEffectGlow.VERTEX_SHADER, VideoEffectGlow.BLUR_SHADER) else null
+        private val hidden = if (isBlur) DownscaledGaussian() else null
 
         private var width = 0
         private var height = 0
-
-        private var scale = 0
-        private var margin = 0
-        private var smallWidth = 0
-        private var smallHeight = 0
-        private val smallTextures = intArrayOf(NONE, NONE)
-        private val smallFbos = intArrayOf(NONE, NONE)
 
         override fun configure(inputWidth: Int, inputHeight: Int): Size {
             width = inputWidth
@@ -99,10 +91,14 @@ internal class LayerCensorEffect(
                     frameWidth = width,
                     frameHeight = height,
                 )
-                val alpha = settings.alphaScale
-                val sigma = censor.strength
+                // Nothing is hidden while the layer is faded out, scaled down
+                // to nothing (a scale animation from 0) or wholly off the
+                // frame (a slide from an edge). The shader then copies the
+                // picture without dividing by the zero extent, and the blur
+                // is skipped.
+                val alpha = if (placement.coversFrame()) settings.alphaScale else 0f
 
-                if (isBlur && alpha > 0f) blurIntoSmall(inputTexId, sigma)
+                if (hidden != null && alpha > 0f) blurIntoSmall(hidden, inputTexId)
 
                 GlUtil.focusFramebufferUsingCurrentContext(outputFbo, width, height)
                 val program = combineProgram
@@ -113,22 +109,22 @@ internal class LayerCensorEffect(
                 program.setFloatsUniform("uMaskOrigin", placement.origin)
                 program.setFloatsUniform("uMaskExtent", placement.extent)
                 program.setFloatUniform("uAlpha", alpha)
-                if (isBlur) {
+                if (hidden != null) {
                     // Without a blur pass (alpha 0) the small texture may not
                     // exist yet; the shader never reads it then, but every
                     // sampler has to be bound, so it gets the picture instead.
-                    val hidden = if (alpha > 0f) smallTextures[0] else inputTexId
-                    program.setSamplerTexIdUniform("uHidden", hidden, 2)
+                    val hiddenTexId = if (alpha > 0f) hidden.texture else inputTexId
+                    program.setSamplerTexIdUniform("uHidden", hiddenTexId, 2)
                     program.setFloatsUniform(
-                        "uHiddenSize", floatArrayOf(smallWidth.toFloat(), smallHeight.toFloat())
+                        "uHiddenSize", floatArrayOf(hidden.width.toFloat(), hidden.height.toFloat())
                     )
-                    program.setFloatUniform("uScale", scale.toFloat())
-                    program.setFloatUniform("uMargin", margin.toFloat())
+                    program.setFloatUniform("uScale", hidden.scale.toFloat())
+                    program.setFloatUniform("uMargin", hidden.margin.toFloat())
                 } else {
                     program.setFloatUniform("uBlock", censor.blockSize.toFloat())
                     program.setFloatsUniform("uAnchor", placement.topLeftPixel(width, height))
                 }
-                draw(program)
+                DownscaledGaussian.draw(program)
                 // The mask and the blur were bound on later units; hand the
                 // first back active.
                 GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -137,76 +133,24 @@ internal class LayerCensorEffect(
             }
         }
 
-        /** Averages the picture into the small texture and blurs it there. */
-        private fun blurIntoSmall(inputTexId: Int, sigma: Double) {
-            ensureSmall(sigma)
+        /** Averages the picture into [hidden]'s small texture and blurs it there. */
+        private fun blurIntoSmall(hidden: DownscaledGaussian, inputTexId: Int) {
+            val sigma = censor.strength
+            hidden.beginDownsample(width, height, sigma)
             val downsample = downsampleProgram!!
-            GlUtil.focusFramebufferUsingCurrentContext(smallFbos[0], smallWidth, smallHeight)
             downsample.use()
             downsample.setSamplerTexIdUniform("uPicture", inputTexId, 0)
             downsample.setFloatsUniform("uPictureSize", floatArrayOf(width.toFloat(), height.toFloat()))
-            downsample.setFloatUniform("uScale", scale.toFloat())
-            downsample.setFloatUniform("uMargin", margin.toFloat())
-            draw(downsample)
-
-            if (sigma >= 0.5) {
-                blur(from = 0, to = 1, direction = floatArrayOf(1f, 0f), sigma = sigma / scale)
-                blur(from = 1, to = 0, direction = floatArrayOf(0f, 1f), sigma = sigma / scale)
-            }
-        }
-
-        private fun blur(from: Int, to: Int, direction: FloatArray, sigma: Double) {
-            val program = blurProgram!!
-            GlUtil.focusFramebufferUsingCurrentContext(smallFbos[to], smallWidth, smallHeight)
-            program.use()
-            program.setSamplerTexIdUniform("uSource", smallTextures[from], 0)
-            program.setFloatsUniform("uSize", floatArrayOf(smallWidth.toFloat(), smallHeight.toFloat()))
-            program.setFloatsUniform("uDirection", direction)
-            program.setFloatUniform("uSigma", sigma.toFloat())
-            draw(program)
-        }
-
-        private fun draw(program: GlProgram) {
-            val vertices = GlUtil.getNormalizedCoordinateBounds()
-            program.setBufferAttribute("aFramePosition", vertices, if (vertices.size == 8) 2 else 4)
-            program.bindAttributesAndUniforms()
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-            GlUtil.checkGlError()
-        }
-
-        /** Sizes the small textures for a blur of [sigma] pixels. */
-        private fun ensureSmall(sigma: Double) {
-            val scale = VideoEffectGlow.scaleFor(sigma)
-            val margin = VideoEffectGlow.marginFor(sigma, scale)
-            val w = (width + scale - 1) / scale + 2 * margin
-            val h = (height + scale - 1) / scale + 2 * margin
-            this.margin = margin
-            if (scale == this.scale && w == smallWidth && h == smallHeight && smallTextures[0] != NONE) {
-                return
-            }
-            deleteSmall()
-            for (i in 0..1) {
-                smallTextures[i] = GlUtil.createTexture(w, h, /* useHighPrecisionColorComponents= */ false)
-                smallFbos[i] = GlUtil.createFboForTexture(smallTextures[i])
-            }
-            this.scale = scale
-            smallWidth = w
-            smallHeight = h
-        }
-
-        private fun deleteSmall() {
-            for (i in 0..1) {
-                if (smallFbos[i] != NONE) GlUtil.deleteFbo(smallFbos[i])
-                if (smallTextures[i] != NONE) GlUtil.deleteTexture(smallTextures[i])
-                smallFbos[i] = NONE
-                smallTextures[i] = NONE
-            }
+            downsample.setFloatUniform("uScale", hidden.scale.toFloat())
+            downsample.setFloatUniform("uMargin", hidden.margin.toFloat())
+            DownscaledGaussian.draw(downsample)
+            hidden.blur(sigma)
         }
 
         override fun release() {
             super.release()
             try {
-                deleteSmall()
+                hidden?.release()
                 // The overlay owns the mask texture, as it would inside an
                 // OverlayEffect, whose program releases it the same way.
                 mask.release()
@@ -216,7 +160,6 @@ internal class LayerCensorEffect(
                 try {
                     combineProgram.delete()
                     downsampleProgram?.delete()
-                    blurProgram?.delete()
                 } catch (e: Exception) {
                     throw VideoFrameProcessingException(e)
                 }
@@ -225,8 +168,6 @@ internal class LayerCensorEffect(
     }
 
     private companion object {
-        private const val NONE = -1
-
         private fun OverlaySettings.backgroundAnchor(): FloatArray =
             floatArrayOf(backgroundFrameAnchor.first, backgroundFrameAnchor.second)
 
@@ -240,12 +181,15 @@ internal class LayerCensorEffect(
         // coordinates: v = (P - origin) / extent, with P the pixel center in
         // normalized device coordinates. A bitmap's row 0 is uploaded at t = 0,
         // so t runs downwards. Outside the quad the layer is not there at all.
+        // uAlpha is 0 whenever the extent may be (see coversFrame), so the
+        // division never sees it.
         private const val MASK_FUNCTION =
             "uniform sampler2D uMask;\n" +
             "uniform vec2 uMaskOrigin;\n" +
             "uniform vec2 uMaskExtent;\n" +
             "uniform float uAlpha;\n" +
             "float maskAt(vec2 p, vec2 size) {\n" +
+            "  if (uAlpha <= 0.0) return 0.0;\n" +
             "  vec2 v = (2.0 * p / size - 1.0 - uMaskOrigin) / uMaskExtent;\n" +
             "  vec2 st = vec2(0.5 * v.x + 0.5, 0.5 - 0.5 * v.y);\n" +
             "  if (st.x < 0.0 || st.x > 1.0 || st.y < 0.0 || st.y > 1.0) return 0.0;\n" +
@@ -348,6 +292,16 @@ internal data class CensorMaskPlacement(val origin: FloatArray, val extent: Floa
      */
     fun quadCoordinateOf(ndcX: Float, ndcY: Float): Pair<Float, Float> =
         (ndcX - origin[0]) / extent[0] to (ndcY - origin[1]) / extent[1]
+
+    /**
+     * Whether the quad covers any of the frame: not when it is scaled down to
+     * nothing, as a scale animation from 0 starts, or lies wholly beyond an
+     * edge, as a layer sliding in from off the frame does.
+     */
+    fun coversFrame(): Boolean =
+        extent[0] > 0f && extent[1] > 0f &&
+            origin[0] - extent[0] < 1f && origin[0] + extent[0] > -1f &&
+            origin[1] - extent[1] < 1f && origin[1] + extent[1] > -1f
 
     /**
      * The quad's top-left corner in whole pixels of a [frameWidth] by

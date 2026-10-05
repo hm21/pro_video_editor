@@ -26,8 +26,12 @@ data class LayerCensorConfig(val type: Type, val strength: Double) {
         if (scale == 1.0) this else copy(strength = strength * scale)
 
     companion object {
-        /** The strength used when the channel sends none. */
-        private const val DEFAULT_STRENGTH = 24.0
+        /**
+         * The strengths used when the channel sends none, those of the Dart
+         * `LayerCensor.blur()` and `LayerCensor.pixelate()`.
+         */
+        private const val DEFAULT_SIGMA = 24.0
+        private const val DEFAULT_BLOCK_SIZE = 32.0
 
         /**
          * Parses the `censor` entry of an image layer, or `null` when the layer
@@ -40,7 +44,8 @@ data class LayerCensorConfig(val type: Type, val strength: Double) {
             map ?: return null
             val type = if (map["type"] == "pixelate") Type.PIXELATE else Type.BLUR
             val strength = (map["strength"] as? Number)?.toDouble()
-                ?.takeIf { it > 0 && it.isFinite() } ?: DEFAULT_STRENGTH
+                ?.takeIf { it > 0 && it.isFinite() }
+                ?: if (type == Type.PIXELATE) DEFAULT_BLOCK_SIZE else DEFAULT_SIGMA
             return LayerCensorConfig(type, strength)
         }
     }

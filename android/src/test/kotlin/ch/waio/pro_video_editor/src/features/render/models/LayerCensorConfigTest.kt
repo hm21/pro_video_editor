@@ -35,6 +35,18 @@ internal class LayerCensorConfigTest {
     }
 
     @Test
+    fun aMissingStrengthFallsBackToTheDartDefaultOfItsType() {
+        assertEquals(
+            LayerCensorConfig(LayerCensorConfig.Type.PIXELATE, 32.0),
+            LayerCensorConfig.fromMap(mapOf("type" to "pixelate", "strength" to 0)),
+        )
+        assertEquals(
+            LayerCensorConfig(LayerCensorConfig.Type.BLUR, 24.0),
+            LayerCensorConfig.fromMap(mapOf("type" to "blur")),
+        )
+    }
+
+    @Test
     fun aBlockIsWholePixelsAndNeverSmallerThanTwo() {
         assertEquals(5, LayerCensorConfig(LayerCensorConfig.Type.PIXELATE, 4.6).blockSize)
         assertEquals(2, LayerCensorConfig(LayerCensorConfig.Type.PIXELATE, 0.4).blockSize)

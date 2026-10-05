@@ -246,6 +246,79 @@ void main() {
       }
     });
 
+    testWidgets('hides only where its mask is opaque, the right way up', (
+      tester,
+    ) async {
+      // Opaque in its top half only: a mask turned upside down would hide
+      // the bottom half of the area instead.
+      final mask = await paintPng(const Size(64, 64), (c, size) {
+        c.drawRect(
+          Rect.fromLTWH(0, 0, size.width, size.height / 2),
+          Paint()..color = const Color(0xFFFFFFFF),
+        );
+      });
+      final out = await frameOf(
+        await render(ramp, [
+          ImageLayer(
+            image: EditorLayerImage.memory(mask),
+            offset: area.topLeft,
+            size: area.size,
+            censor: const LayerCensor.pixelate(blockSize: 32),
+          ),
+        ]),
+      );
+
+      // The top half, y 96..175: one block from x 160 to 191.
+      expect(
+        (grey(pixel(out, 162, 130)) - grey(pixel(out, 189, 130))).abs(),
+        lessThan(5),
+      );
+      // The bottom half, y 176..255: the ramp as it was.
+      for (final x in [162, 189, 250]) {
+        expect(
+          (grey(pixel(out, x, 230)) - grey(pixel(source, x, 230))).abs(),
+          lessThan(6),
+          reason: 'pixel ($x, 230) below the mask changed',
+        );
+      }
+    });
+
+    testWidgets('hides nothing while a scale animation starts from 0', (
+      tester,
+    ) async {
+      final video = await render(ramp, [
+        ImageLayer(
+          image: EditorLayerImage.memory(
+            await solidPng(const Color(0xFFFFFFFF)),
+          ),
+          offset: area.topLeft,
+          size: area.size,
+          censor: const LayerCensor.pixelate(blockSize: 32),
+          animations: const [
+            LayerAnimation(
+              type: LayerAnimationType.scale,
+              phase: AnimationPhase.animateIn,
+              duration: Duration(seconds: 1),
+              scaleFrom: 0,
+            ),
+          ],
+        ),
+      ]);
+
+      final start = await frameOf(video, Duration.zero);
+      for (final (x, y) in [(60, 180), (162, 180), (320, 180), (580, 300)]) {
+        expect(
+          (grey(pixel(start, x, y)) - grey(pixel(source, x, y))).abs(),
+          lessThan(6),
+          reason: 'pixel ($x, $y) changed while the area is scaled to nothing',
+        );
+      }
+      expect(
+        isPixelated(await frameOf(video, const Duration(milliseconds: 1500))),
+        isTrue,
+      );
+    });
+
     testWidgets('applies only inside its time range', (tester) async {
       final video = await render(ramp, [
         await censorLayer(
@@ -268,6 +341,23 @@ void main() {
         isFalse,
       );
     });
+  });
+
+  testWidgets('fails the render when the mask does not decode', (tester) async {
+    // Exporting without the layer would show what it was meant to hide.
+    await expectLater(
+      render(EditorVideo.asset('assets/tests/test_d.mp4'), [
+        ImageLayer(
+          image: EditorLayerImage.memory(
+            Uint8List.fromList(List.filled(64, 7)),
+          ),
+          offset: area.topLeft,
+          size: area.size,
+          censor: const LayerCensor.blur(),
+        ),
+      ]),
+      throwsA(anything),
+    );
   });
 
   group('edges', () {

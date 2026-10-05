@@ -2,6 +2,8 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * Pins [CensorMaskPlacement] to the spot Media3 draws the same overlay at, so
@@ -116,5 +118,39 @@ internal class CensorMaskPlacementTest {
         // Media3 puts the quad's center at bg - extent * oa = 1.1: a quarter
         // of the box's width past the right edge.
         assertQuad(0f to 0f, placement.quadCoordinateOf(1.1f, 0f))
+    }
+
+    /** A 200 x 100 mask anchored on its center at [centerX], [centerY] (NDC). */
+    private fun box(centerX: Float, centerY: Float, scale: Float = 1f) = CensorMaskPlacement.of(
+        backgroundAnchor = floatArrayOf(centerX, centerY),
+        overlayAnchor = floatArrayOf(0f, 0f),
+        scale = floatArrayOf(scale, scale),
+        maskWidth = 200,
+        maskHeight = 100,
+        frameWidth = frameWidth,
+        frameHeight = frameHeight,
+    )
+
+    @Test
+    fun aBoxOnTheFrameCoversIt() {
+        assertTrue(box(-0.6f, 0.6f).coversFrame())
+        // Mostly past the right edge, its left fifth still on the frame.
+        assertTrue(box(1.1f, 0f).coversFrame())
+    }
+
+    @Test
+    fun aBoxScaledToNothingCoversNothing() {
+        // A scale animation from 0 starts here; the shader would divide by
+        // the zero extent.
+        assertFalse(box(-0.6f, 0.6f, scale = 0f).coversFrame())
+    }
+
+    @Test
+    fun aBoxWhollyOffTheFrameCoversNothing() {
+        // A slide in from an edge starts beyond it.
+        assertFalse(box(1.3f, 0f).coversFrame())
+        assertFalse(box(-1.3f, 0f).coversFrame())
+        assertFalse(box(0f, 1.3f).coversFrame())
+        assertFalse(box(0f, -1.3f).coversFrame())
     }
 }
