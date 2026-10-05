@@ -1,3 +1,6 @@
+## 2.26.0
+- **FEAT**(android, iOS, macOS): `VideoRenderData.customEffects` renders video effects the app writes itself in native code: a GLSL shader on Android, Core Image on iOS and macOS, registered under an id with `CustomVideoEffects.register` and named by a `CustomVideoEffect`, with its own params and time range. An effect can ask for earlier frames of the same clip, counted on the rendered video, so an effect such as an echo trail exports the same however the clip was played. A render that names an id nothing is registered under fails. On iOS and macOS a render with a `VideoRenderData.composition` skips them for now.
+
 ## 2.25.0
 - **FEAT**(android, iOS, macOS): `ImageLayer.censor` blurs (`LayerCensor.blur`) or pixelates (`LayerCensor.pixelate`) the picture beneath an image layer instead of drawing it, e.g. to hide a face or a license plate. Image layers after it stay on top.
 

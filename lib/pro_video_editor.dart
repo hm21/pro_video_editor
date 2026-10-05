@@ -20,6 +20,7 @@ export 'core/models/image/layer_censor_model.dart';
 export 'core/models/video/chroma_key_model.dart';
 export 'core/utils/chroma_key_detector.dart';
 export 'core/models/video/color_filter_model.dart';
+export 'core/models/video/custom_video_effect_model.dart';
 export 'core/models/video/video_effect_model.dart';
 export 'core/models/video/video_effect_frame_model.dart';
 export 'core/models/video/progress_model.dart';

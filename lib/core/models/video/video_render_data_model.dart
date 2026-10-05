@@ -36,6 +36,7 @@ class VideoRenderData {
     this.endTime,
     this.colorFilters = const [],
     this.effects = const [],
+    this.customEffects = const [],
     this.audioTracks = const [],
     this.blur,
     this.chromaKey,
@@ -134,6 +135,7 @@ class VideoRenderData {
     int? maxFrameRate,
     List<ColorFilter> colorFilters = const [],
     List<VideoEffect> effects = const [],
+    List<CustomVideoEffect> customEffects = const [],
     List<VideoAudioTrack> audioTracks = const [],
     bool shouldOptimizeForNetworkUse = false,
     bool imageBytesWithCropping = false,
@@ -158,6 +160,7 @@ class VideoRenderData {
       maxFrameRate: maxFrameRate,
       colorFilters: colorFilters,
       effects: effects,
+      customEffects: customEffects,
       audioTracks: audioTracks,
       qualityConfig: qualityConfig,
       shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
@@ -277,6 +280,16 @@ class VideoRenderData {
   ///
   /// **Note:** Ignored on Web, Windows and Linux.
   final List<VideoEffect> effects;
+
+  /// Effects the app implements itself, in native code registered under each
+  /// effect's [CustomVideoEffect.id].
+  ///
+  /// They run first, on the oriented frame and in list order, before
+  /// [effects] and [colorFilters]. See [CustomVideoEffect].
+  ///
+  /// **Note:** Android, iOS and macOS render them; iOS and macOS not yet
+  /// together with a [composition].
+  final List<CustomVideoEffect> customEffects;
 
   /// A list of audio tracks with optional time ranges.
   ///
@@ -514,6 +527,7 @@ class VideoRenderData {
       'imageLayers': imageLayerMaps,
       'colorFilters': colorFilterMaps,
       'effects': effectMaps,
+      'customEffects': customEffects.map((e) => e.toChannelMap()).toList(),
       'audioTracks': audioTrackMaps,
       'enableAudio': enableAudio,
       'trimToCommonTrackEnd': trimToCommonTrackEnd,
@@ -552,6 +566,7 @@ class VideoRenderData {
     Duration? endTime,
     List<ColorFilter>? colorFilters,
     List<VideoEffect>? effects,
+    List<CustomVideoEffect>? customEffects,
     List<VideoAudioTrack>? audioTracks,
     double? blur,
     ChromaKey? chromaKey,
@@ -574,6 +589,7 @@ class VideoRenderData {
       endTime: endTime ?? this.endTime,
       colorFilters: colorFilters ?? this.colorFilters,
       effects: effects ?? this.effects,
+      customEffects: customEffects ?? this.customEffects,
       audioTracks: audioTracks ?? this.audioTracks,
       blur: blur ?? this.blur,
       chromaKey: chromaKey ?? this.chromaKey,
@@ -601,6 +617,7 @@ class VideoRenderData {
       'endTime': endTime?.inMicroseconds,
       'colorFilters': colorFilters.map((x) => x.toMap()).toList(),
       'effects': effects.map((x) => x.toMap()).toList(),
+      'customEffects': customEffects.map((x) => x.toMap()).toList(),
       'audioTracks': audioTracks.map((x) => x.toMap()).toList(),
       'blur': blur,
       'chromaKey': chromaKey?.toMap(),
@@ -662,6 +679,13 @@ class VideoRenderData {
               ),
             )
           : const [],
+      customEffects: map['customEffects'] != null
+          ? List<CustomVideoEffect>.from(
+              (map['customEffects'] as List).map<CustomVideoEffect>(
+                (x) => CustomVideoEffect.fromMap(x as Map<String, dynamic>),
+              ),
+            )
+          : const [],
       audioTracks: List<VideoAudioTrack>.from(
         (map['audioTracks'] as List).map<VideoAudioTrack>(
           (x) => VideoAudioTrack.fromMap(x as Map<String, dynamic>),
@@ -700,6 +724,7 @@ class VideoRenderData {
         'endTime: $endTime, '
         'colorFilters: $colorFilters, '
         'effects: $effects, '
+        'customEffects: $customEffects, '
         'audioTracks: $audioTracks, '
         'blur: $blur, '
         'chromaKey: $chromaKey, '
@@ -726,6 +751,7 @@ class VideoRenderData {
         other.endTime == endTime &&
         listEquals(other.colorFilters, colorFilters) &&
         listEquals(other.effects, effects) &&
+        listEquals(other.customEffects, customEffects) &&
         listEquals(other.audioTracks, audioTracks) &&
         other.blur == blur &&
         other.chromaKey == chromaKey &&
@@ -750,6 +776,7 @@ class VideoRenderData {
         endTime.hashCode ^
         colorFilters.hashCode ^
         effects.hashCode ^
+        customEffects.hashCode ^
         audioTracks.hashCode ^
         blur.hashCode ^
         chromaKey.hashCode ^

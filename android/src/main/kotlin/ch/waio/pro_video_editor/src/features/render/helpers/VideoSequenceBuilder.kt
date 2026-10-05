@@ -586,11 +586,16 @@ class VideoSequenceBuilder(
             flattenTransparency = true,
         )
 
-        // The video effects run ahead of this clip's speed change (added below)
-        // but have to follow the output timeline, so they learn its speed.
+        // The video effects, custom ones included, run ahead of this clip's
+        // speed change (added below) but have to follow the output timeline,
+        // so they learn its speed.
         clipVideoEffects.addAll(
             videoEffects.map {
-                if (it is VideoEffectGlEffect) it.withSpeedChange(clip.playbackSpeed) else it
+                when (it) {
+                    is VideoEffectGlEffect -> it.withSpeedChange(clip.playbackSpeed)
+                    is CustomVideoEffectGlEffect -> it.withSpeedChange(clip.playbackSpeed)
+                    else -> it
+                }
             }
         )
 

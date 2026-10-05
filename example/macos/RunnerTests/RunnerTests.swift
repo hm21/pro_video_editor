@@ -2852,3 +2852,166 @@ final class VolumeLimiterTests: XCTestCase {
     XCTAssertLessThanOrEqual(left.map(abs).max() ?? 0, PeakLimiter.ceiling + 0.005)
   }
 }
+
+/// A renderer that leaves the frame as it is and asks for fixed offsets.
+private final class OffsetsOnlyRenderer: CustomVideoEffectRenderer {
+  let historyOffsetsUs: [Int64]
+  init(_ offsets: [Int64]) { historyOffsetsUs = offsets }
+  func render(_ frame: CustomVideoEffectFrame) -> CIImage { frame.image }
+}
+
+class CustomVideoEffectTests: XCTestCase {
+  private var assets: [AVURLAsset] = []
+
+  private func config(_ id: String) -> CustomVideoEffectConfig {
+    CustomVideoEffectConfig(id: id, params: [:], startUs: nil, endUs: nil)
+  }
+
+  /// A composition track holding one clip per speed back to back, each the
+  /// first two seconds of a video played at that speed, and one instruction
+  /// per clip.
+  private func composition(speeds: [Double]) async throws -> (
+    AVMutableComposition, CMPersistentTrackID, [AVVideoCompositionInstructionProtocol]
+  ) {
+    let composition = AVMutableComposition()
+    let track = composition.addMutableTrack(
+      withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)!
+    var instructions: [AVVideoCompositionInstructionProtocol] = []
+    var start = CMTime.zero
+    for speed in speeds {
+      let url = try ThumbnailTimestampFixture.makeColorVideo(
+        colors: [(200, 40, 40), (40, 200, 40), (40, 40, 200)])
+      // A track cannot be inserted once its asset is gone.
+      let asset = AVURLAsset(url: url)
+      assets.append(asset)
+      let source = try await asset.loadTracks(withMediaType: .video)[0]
+      let range = CMTimeRange(start: .zero, duration: CMTime(value: 2, timescale: 1))
+      try track.insertTimeRange(range, of: source, at: start)
+      var duration = range.duration
+      if speed != 1 {
+        duration = CMTimeMultiplyByFloat64(duration, multiplier: 1 / speed)
+        track.scaleTimeRange(CMTimeRange(start: start, duration: range.duration), toDuration: duration)
+      }
+      instructions.append(
+        CustomVideoCompositionInstruction(
+          timeRange: CMTimeRange(start: start, duration: duration),
+          sourceTrackID: track.trackID,
+          layerInstructions: []))
+      start = start + duration
+    }
+    return (composition, track.trackID, instructions)
+  }
+
+  /// The non-empty segments of `track` as (target start, target end, source
+  /// start, source end) in seconds.
+  private func spans(of track: AVCompositionTrack) -> [[Double]] {
+    track.segments.filter { !$0.isEmpty }.map {
+      let t = $0.timeMapping.target
+      let s = $0.timeMapping.source
+      return [t.start.seconds, CMTimeRangeGetEnd(t).seconds, s.start.seconds, CMTimeRangeGetEnd(s).seconds]
+    }
+  }
+
+  private func assertSpans(
+    _ actual: [[Double]], _ expected: [[Double]], file: StaticString = #filePath, line: UInt = #line
+  ) {
+    XCTAssertEqual(actual.count, expected.count, "\(actual)", file: file, line: line)
+    for (a, e) in zip(actual, expected) {
+      for (x, y) in zip(a, e) {
+        XCTAssertEqual(x, y, accuracy: 0.001, "\(actual)", file: file, line: line)
+      }
+    }
+  }
+
+  func testTheDelayedCopyRepeatsEachClipWithinItselfOnly() async throws {
+    let (composition, trackID, instructions) = try await composition(speeds: [1, 1])
+    let stage = CustomVideoEffectStage(
+      config: config("test"), renderer: OffsetsOnlyRenderer([100_000]))
+
+    let updated = try await applyCustomVideoEffectHistory(
+      stages: [stage], composition: composition, videoTrackID: trackID,
+      instructions: instructions)
+
+    let delayed = composition.track(withTrackID: stage.historyTrackIDs[0])!
+    // Clip 2 starts at 2 s: the copy is empty for its first 100 ms instead of
+    // carrying clip 1 over the cut.
+    assertSpans(spans(of: delayed), [[0.1, 2.0, 0.0, 1.9], [2.1, 4.0, 0.0, 1.9]])
+    XCTAssertEqual(delayed.timeRange.end.seconds, 4.0, accuracy: 0.001)
+
+    let first = updated[0] as! CustomVideoCompositionInstruction
+    XCTAssertEqual(first.primaryTrackID, trackID)
+    XCTAssertEqual(first.historyTrackIDs, [stage.historyTrackIDs[0]])
+    XCTAssertEqual(
+      first.requiredSourceTrackIDs?.map { ($0 as! NSNumber).int32Value },
+      [trackID, stage.historyTrackIDs[0]])
+  }
+
+  func testTheOffsetIsMeasuredOnTheSpedUpClip() async throws {
+    // At 2x the clip lasts 1 s and the copy 100 ms behind it shows the source
+    // 200 ms behind.
+    let (composition, trackID, instructions) = try await composition(speeds: [2])
+    let stage = CustomVideoEffectStage(
+      config: config("test"), renderer: OffsetsOnlyRenderer([100_000]))
+
+    _ = try await applyCustomVideoEffectHistory(
+      stages: [stage], composition: composition, videoTrackID: trackID,
+      instructions: instructions)
+
+    let delayed = composition.track(withTrackID: stage.historyTrackIDs[0])!
+    assertSpans(spans(of: delayed), [[0.1, 1.0, 0.0, 1.8]])
+  }
+
+  func testEffectsShareOneCopyPerOffset() async throws {
+    let (composition, trackID, instructions) = try await composition(speeds: [1])
+    let a = CustomVideoEffectStage(
+      config: config("a"), renderer: OffsetsOnlyRenderer([200_000, 100_000]))
+    let b = CustomVideoEffectStage(config: config("b"), renderer: OffsetsOnlyRenderer([100_000]))
+
+    _ = try await applyCustomVideoEffectHistory(
+      stages: [a, b], composition: composition, videoTrackID: trackID,
+      instructions: instructions)
+
+    XCTAssertEqual(composition.tracks(withMediaType: .video).count, 3)
+    XCTAssertEqual(a.historyTrackIDs[1], b.historyTrackIDs[0])
+    XCTAssertNotEqual(a.historyTrackIDs[0], a.historyTrackIDs[1])
+  }
+
+  func testWithoutOffsetsNothingIsAdded() async throws {
+    let (composition, trackID, instructions) = try await composition(speeds: [1])
+    let stage = CustomVideoEffectStage(config: config("a"), renderer: OffsetsOnlyRenderer([]))
+
+    let updated = try await applyCustomVideoEffectHistory(
+      stages: [stage], composition: composition, videoTrackID: trackID,
+      instructions: instructions)
+
+    XCTAssertEqual(composition.tracks(withMediaType: .video).count, 1)
+    XCTAssertTrue((updated[0] as! CustomVideoCompositionInstruction).historyTrackIDs.isEmpty)
+  }
+
+  func testAnUnregisteredIdFailsTheRender() {
+    XCTAssertThrowsError(try makeCustomVideoEffectStages([config("nothing.here")]))
+  }
+
+  func testARegisteredFactoryGetsTheParams() throws {
+    var received: [String: Any] = [:]
+    CustomVideoEffects.register("test.params") { params in
+      received = params
+      return OffsetsOnlyRenderer([])
+    }
+    defer { CustomVideoEffects.unregister("test.params") }
+
+    let effect = CustomVideoEffectConfig.fromArguments([
+      "id": "test.params", "params": ["intensity": 0.7], "startUs": 1_000_000,
+    ])!
+    _ = try makeCustomVideoEffectStages([effect])
+
+    XCTAssertEqual(received["intensity"] as? Double, 0.7)
+    XCTAssertTrue(effect.isActive(atUs: 1_000_000))
+    XCTAssertFalse(effect.isActive(atUs: 999_999))
+  }
+
+  func testAnEntryWithoutAnIdIsSkipped() {
+    XCTAssertNil(CustomVideoEffectConfig.fromArguments(["params": [:]]))
+    XCTAssertNil(CustomVideoEffectConfig.fromArguments(["id": ""]))
+  }
+}

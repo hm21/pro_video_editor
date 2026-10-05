@@ -132,6 +132,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🧮 **Color Matrix**: Apply one or multiple 4x5 color matrices (e.g., for filters).
 - 💧 **Blur**: Add a blur effect to the video.
 - ✨ **Video Effects**: `glitch` (channel split and slices that jump sideways), `rgbSplit` (a pulsing color fringe), `vhs` (scanlines, grain and a rolling tracking band), `tvStatic` (heavy flickering grain), `oldFilm` (sepia, grain and flicker), `pixelate`, `pixelPulse` (blocks that sharpen again every second), `strobe`, `negativeFlash`, `vignette`, `blockGlitch` (coarse blocks and slipping slices in short bursts), `filmGrain` (fine, calm grain), `signalInterference` (thin flickering slices and bursts of noise), `crt` (strong scanlines and a slight fringe), `shake`, `zoomPulse` (punches in every half second), `mirror`, `kaleidoscope`, `splitScreen` (the picture four times in a 2×2 grid), `wave` (rows bending along a rolling wave) and `glow` (the brightest areas bloom softly), each with an intensity and an optional time range. `VideoEffectPreview` shows the same frames live over a video player.
+- 🧩 **Custom Video Effects**: Write an effect yourself in native code — a GLSL shader on Android, Core Image on iOS and macOS — register it under an id, and add it to a render with `CustomVideoEffect`. It can ask for earlier frames of the clip, for effects such as an echo trail.
 - 🟩 **Chroma Key**: Remove a green (or blue, or any saturated hue) screen, or a bright white or light grey wall, with a soft edge and spill suppression, and fill it with a color, an image, or — in a `VideoComposition` — the layer below. `ChromaKey.autoDetect` measures the key straight off the footage; `greenScreen()`/`blueScreen()` presets are there when you already know. Configurable globally, per `VideoLayer`, or per `VideoSegment`.
 - 📡 **Bitrate**: Cap the video bitrate. Sources already below the cap are exported losslessly over the fast path; sources above it are re-encoded down to the cap. If constant bitrate (CBR) isn't supported, it will gracefully fall back to the next available mode.
 - 🌐 **Streaming Optimization**: Optimize video for progressive playback by placing metadata (moov atom) at the start of the file.
@@ -168,6 +169,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 | `Blur background`          | 🧪      | 🧪  | 🧪     | ❌      | ❌     | 🚫   |
 | `Chroma Key (Greenscreen)` | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Video Effects`            | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
+| `Custom Video Effects`     | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Custom Audio Tracks`      | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Merge Videos`             | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Stop-Motion (Images→Video)`| ✅     | ✅  | ✅     | ❌      | ❌     | 🚫   |
@@ -444,6 +446,77 @@ Uint8List result = await ProVideoEditor.instance.renderVideo(data);
 /// Per-clip `transition`, `playbackSpeed` and `reverseVideo` are not applied
 /// inside a composition — use `videoSegments` if you need those.
 ```
+
+#### Custom Video Effect Example
+Write the effect in native code and register it under an id before the first render. On Android it draws with a fragment shader:
+
+```kotlin
+// MainActivity.configureFlutterEngine
+CustomVideoEffects.register("my.invert") { params -> InvertEffect(params) }
+
+class InvertEffect(params: Map<String, Any?>) : CustomVideoEffectRenderer() {
+    private val amount = (params["amount"] as? Number)?.toFloat() ?: 1f
+    private val shader = CustomVideoEffectShader(
+        """
+        precision mediump float;
+        uniform sampler2D uFrame;
+        uniform float uAmount;
+        varying vec2 vTexCoord;
+        void main() {
+          vec4 color = texture2D(uFrame, vTexCoord);
+          gl_FragColor = vec4(mix(color.rgb, 1.0 - color.rgb, uAmount), color.a);
+        }
+        """.trimIndent()
+    )
+
+    override fun render(frame: CustomVideoEffectFrame) {
+        shader.use()
+        shader.setTexture("uFrame", frame.textureId, 0)
+        shader.setFloat("uAmount", amount)
+        shader.draw()
+    }
+
+    override fun release() = shader.release()
+}
+```
+
+On iOS and macOS it returns a Core Image image:
+
+```swift
+// AppDelegate
+CustomVideoEffects.register("my.invert") { params in InvertEffect(params) }
+
+final class InvertEffect: CustomVideoEffectRenderer {
+  private let amount: Double
+  init(_ params: [String: Any]) { amount = (params["amount"] as? NSNumber)?.doubleValue ?? 1 }
+
+  func render(_ frame: CustomVideoEffectFrame) -> CIImage {
+    frame.image.applyingFilter("CIColorInvert").applyingFilter(
+      "CIDissolveTransition",
+      parameters: [kCIInputTargetImageKey: frame.image, kCIInputTimeKey: 1 - amount]
+    )
+  }
+}
+```
+
+Then name it in a render:
+
+```dart
+final bytes = await ProVideoEditor.instance.renderVideo(
+  VideoRenderData(
+    videoSegments: [VideoSegment(video: EditorVideo.file(path))],
+    customEffects: const [
+      CustomVideoEffect(
+        id: 'my.invert',
+        params: {'amount': 0.8},
+        startTime: Duration(seconds: 1),
+      ),
+    ],
+  ),
+);
+```
+
+An effect that needs earlier frames of the clip lists how far back each lies in `historyOffsetsUs`, in microseconds of the rendered video, and reads them from `frame.history`; `historyScale` keeps them smaller to save memory. The example app registers two such effects for its integration tests in `example/android/.../ExampleVideoEffects.kt`, `example/ios/Runner/AppDelegate.swift` and `example/macos/Runner/MainFlutterWindow.swift`.
 
 #### Extract Audio Example
 

@@ -190,6 +190,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// Video effects (glitch, VHS, pixelate, …) with their time ranges.
   private var videoEffects: [VideoEffectConfig] = []
 
+  /// Effects the app registered itself, with the tracks of their earlier frames.
+  private var customEffects: [CustomVideoEffectStage] = []
+
   /// Dip-to-color windows for fadeToBlack / fadeToWhite clip transitions
   private var fadeWindows: [FadeWindow] = []
 
@@ -276,6 +279,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     self.setOverlayImageLayers(from: config.imageLayerConfigs)
     self.colorFilterConfigs = config.colorFilterConfigs
     self.videoEffects = config.videoEffects
+    self.customEffects = config.customEffects
     self.fadeWindows = config.fadeWindows
     self.chromaKeyWindows = config.chromaKeyWindows
   }
@@ -489,6 +493,58 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     lutFilter.setValue(lut.data, forKey: "inputCubeData")
     lutFilter.setValue(image, forKey: kCIInputImageKey)
     return lutFilter.outputImage ?? image
+  }
+
+  /// Applies the custom effects active at the request's time, in order, to
+  /// the oriented frame.
+  ///
+  /// Each effect's earlier frames come from the delayed copies of the video
+  /// track (see `applyCustomVideoEffectHistory`) and go through the same
+  /// chroma key and orientation as the frame itself, then are resampled to
+  /// the effect's history scale. A copy without a frame at this time, at the
+  /// start of a clip, hands the effect `nil`.
+  private func applyCustomEffectStage(
+    to image: CIImage, request: AVAsynchronousVideoCompositionRequest,
+    orientation: CGAffineTransform?
+  ) -> CIImage {
+    guard !customEffects.isEmpty else { return image }
+    let tUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
+    let extent = image.extent
+    var output = image
+    for stage in customEffects where stage.config.isActive(atUs: tUs) {
+      let history: [CIImage?] = stage.historyTrackIDs.map { trackID in
+        guard trackID != kCMPersistentTrackID_Invalid,
+          let buffer = request.sourceFrame(byTrackID: trackID)
+        else { return nil }
+        var frame = applyChromaKeyStage(
+          to: CIImage(cvPixelBuffer: buffer), at: request.compositionTime)
+        if let orientation {
+          frame = applyingAVFoundationTransform(orientation, to: frame)
+        }
+        return resampled(frame, scale: stage.historyScale).cropped(to: extent)
+      }
+      let frame = CustomVideoEffectFrame(
+        image: output,
+        timeUs: tUs,
+        effectTimeUs: tUs - (stage.config.startUs ?? 0),
+        history: history)
+      output = stage.renderer.render(frame).cropped(to: extent)
+    }
+    return output
+  }
+
+  /// `image` brought down to `scale` of its size and back up, the detail an
+  /// earlier frame kept at that scale has on Android.
+  private func resampled(_ image: CIImage, scale: CGFloat) -> CIImage {
+    guard scale < 1 else { return image }
+    let extent = image.extent
+    let small = image.applyingFilter(
+      "CILanczosScaleTransform",
+      parameters: [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1])
+    let size = small.extent
+    guard size.width > 0, size.height > 0 else { return image }
+    return small.samplingLinear().transformed(
+      by: CGAffineTransform(scaleX: extent.width / size.width, y: extent.height / size.height))
   }
 
   /// Applies the video effects active at the given composition time.
@@ -816,7 +872,15 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       // Try to get source buffer from the first available track
       var sourceBuffer: CVPixelBuffer?
 
-      if !request.sourceTrackIDs.isEmpty {
+      // With delayed copies of the video track required as well, the first
+      // source track is not necessarily the video itself; ask for it by id.
+      if let custom = request.videoCompositionInstruction as? CustomVideoCompositionInstruction,
+        !custom.historyTrackIDs.isEmpty
+      {
+        sourceBuffer = request.sourceFrame(byTrackID: custom.primaryTrackID)
+      }
+
+      if sourceBuffer == nil, !request.sourceTrackIDs.isEmpty {
         sourceBuffer = request.sourceFrame(byTrackID: request.sourceTrackIDs[0].int32Value)
       }
 
@@ -887,6 +951,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         layerInstruction = firstLayerInstruction
       }
 
+      var orientation: CGAffineTransform?
       if let layerInstruction = layerInstruction {
         var startTransform = CGAffineTransform.identity
         var endTransform = CGAffineTransform.identity
@@ -902,8 +967,12 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
         if hasTransform && !startTransform.isIdentity {
           outputImage = applyingAVFoundationTransform(startTransform, to: outputImage)
+          orientation = startTransform
         }
       }
+
+      outputImage = applyCustomEffectStage(
+        to: outputImage, request: request, orientation: orientation)
     }
 
     var center = CGPoint(x: outputImage.extent.midX, y: outputImage.extent.midY)

@@ -237,6 +237,25 @@ class RenderVideo {
             composition: composition, instructions: videoCompConfig.instructions,
             speed: workingConfig.playbackSpeed)
 
+          // Custom effects get one renderer each for this render, and the ones
+          // that read earlier frames get delayed copies of the video track.
+          // After the speed change, so their offsets are on the rendered video.
+          if !workingConfig.customEffects.isEmpty {
+            let stages = try makeCustomVideoEffectStages(workingConfig.customEffects)
+            if workingConfig.composition != nil {
+              PluginLog.print(
+                "⚠️ Custom video effects are not supported on the layered path yet; "
+                  + "skipped \(stages.count)")
+            } else {
+              videoCompConfig.instructions = try await applyCustomVideoEffectHistory(
+                stages: stages,
+                composition: composition,
+                videoTrackID: sourceTrackID,
+                instructions: videoCompConfig.instructions)
+              effectsConfig.customEffects = stages
+            }
+          }
+
           // Resolved once, so the export keeps exactly the window the custom
           // audio tracks are laid over below.
           let trimRange = try await resolveTrimTimeRange(

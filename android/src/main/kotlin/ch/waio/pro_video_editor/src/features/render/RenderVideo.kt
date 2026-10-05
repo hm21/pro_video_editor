@@ -2,6 +2,7 @@ package ch.waio.pro_video_editor.src.features.render
 
 import RENDER_TAG
 import android.content.Context
+import ch.waio.pro_video_editor.effects.CustomVideoEffects
 import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.util.UnstableApi
@@ -103,8 +104,9 @@ class RenderVideo(private val context: Context) {
                     layer.chromaKey != null || layer.clips.any { it.chromaKey != null }
                 } == true
 
-        // The video effects shader is ES 2.0 SDR too.
-        val hasEffects = config.effects.isNotEmpty()
+        // The video effects shader is ES 2.0 SDR too, and so is every custom
+        // effect's history and pass-through.
+        val hasEffects = config.effects.isNotEmpty() || config.customEffects.isNotEmpty()
 
         return hasImageLayers || hasBlur || hasColorFilters || hasChromaKey || hasEffects
     }
@@ -160,6 +162,17 @@ class RenderVideo(private val context: Context) {
         onComplete: (ByteArray?) -> Unit,
         onError: (Throwable) -> Unit
     ): RenderJobHandle {
+        // Before any pre-transcode, reverse or transition pass: a misspelled id
+        // should not cost minutes of work first.
+        config.customEffects.firstOrNull { !CustomVideoEffects.isRegistered(it.id) }?.let {
+            onError(
+                IllegalArgumentException(
+                    "No custom video effect is registered under \"${it.id}\""
+                )
+            )
+            return RenderJobHandle {}
+        }
+
         val shouldStopPolling = AtomicBoolean(false)
         val mainHandler = Handler(Looper.getMainLooper())
         var transcodedFiles: List<String> = emptyList()
@@ -722,8 +735,14 @@ class RenderVideo(private val context: Context) {
             }
         outputFileRef.set(outputFile)
 
-        // Process effects from configuration
-        val (videoEffects, audioEffects) = effectsProcessor.process(config)
+        // Process effects from configuration. A custom effect nothing is
+        // registered under fails the render here, before it holds anything.
+        val (videoEffects, audioEffects) = try {
+            effectsProcessor.process(config)
+        } catch (e: IllegalArgumentException) {
+            onError(e)
+            return
+        }
 
         val outputMimeType = mapFormatToMimeType(config.outputFormat)
         // Resilient factory tries Media3's fast default first (operating-rate =

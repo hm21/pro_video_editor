@@ -14,6 +14,7 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        ExampleVideoEffects.register()
 
         // Used by integration_test/content_uri_test.dart only: publishes a
         // local media file to MediaStore so the tests can feed the plugin a

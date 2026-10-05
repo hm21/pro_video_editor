@@ -525,6 +525,13 @@ internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionIn
   /// Per-layer placement for layered instructions, ordered bottom-to-top.
   let layerPlacements: [LayerPlacement]
 
+  /// The single-track path's video track: the first required track.
+  let primaryTrackID: CMPersistentTrackID
+
+  /// Copies of the video track, delayed for custom effects that read earlier
+  /// frames; empty unless a custom effect asks for them.
+  let historyTrackIDs: [CMPersistentTrackID]
+
   private let _requiredSourceTrackIDs: [NSValue]
   var requiredSourceTrackIDs: [NSValue]? {
     return _requiredSourceTrackIDs
@@ -538,15 +545,29 @@ internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionIn
     timeRange: CMTimeRange,
     sourceTrackID: CMPersistentTrackID,
     layerInstructions: [AVVideoCompositionLayerInstruction],
-    backgroundColor: CGColor? = nil
+    backgroundColor: CGColor? = nil,
+    historyTrackIDs: [CMPersistentTrackID] = []
   ) {
     self.timeRange = timeRange
-    self._requiredSourceTrackIDs = [NSNumber(value: sourceTrackID)]
+    self._requiredSourceTrackIDs = ([sourceTrackID] + historyTrackIDs).map { NSNumber(value: $0) }
     self.layerInstructions = layerInstructions
     self.backgroundColor = backgroundColor
     self.isLayered = false
     self.layerPlacements = []
+    self.primaryTrackID = sourceTrackID
+    self.historyTrackIDs = historyTrackIDs
     super.init()
+  }
+
+  /// This single-track instruction, also requiring `trackIDs`, the delayed
+  /// copies of the video track custom effects read earlier frames from.
+  func addingHistoryTracks(_ trackIDs: [CMPersistentTrackID]) -> CustomVideoCompositionInstruction {
+    CustomVideoCompositionInstruction(
+      timeRange: timeRange,
+      sourceTrackID: primaryTrackID,
+      layerInstructions: layerInstructions,
+      backgroundColor: backgroundColor,
+      historyTrackIDs: historyTrackIDs + trackIDs)
   }
 
   /// Layered initializer. `placements` lists every layer visible during
@@ -563,6 +584,8 @@ internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionIn
     self.backgroundColor = backgroundColor
     self.isLayered = true
     self.layerPlacements = layerPlacements
+    self.primaryTrackID = layerPlacements.first?.trackID ?? kCMPersistentTrackID_Invalid
+    self.historyTrackIDs = []
     super.init()
   }
 }
