@@ -62,6 +62,8 @@ func resolveOpenEndedOutAnimations(
       rotation: layer.rotation, loop: layer.loop,
       animationOffsetUs: layer.animationOffsetUs,
       animations: layer.animations,
-      censor: layer.censor)
+      censor: layer.censor,
+      animationStartUs: layer.animationStartUs,
+      animationEndUs: layer.animationEndUs)
   }
 }

@@ -249,6 +249,121 @@ void main() {
         final restored = LayerAnimation.fromMap(original.toMap());
         expect(restored, original);
       });
+
+      test('wiggle loop roundtrip preserves its angle', () {
+        const original = LayerAnimation(
+          type: LayerAnimationType.wiggle,
+          phase: AnimationPhase.loop,
+          duration: Duration(milliseconds: 600),
+          curve: AnimationCurve.easeIn,
+          wiggleAngle: 0.3,
+        );
+        final restored = LayerAnimation.fromMap(original.toMap());
+        expect(restored, original);
+        expect(restored.wiggleAngle, 0.3);
+      });
+
+      test('bounce roundtrip preserves its height', () {
+        const original = LayerAnimation(
+          type: LayerAnimationType.bounce,
+          phase: AnimationPhase.animateIn,
+          duration: Duration(milliseconds: 800),
+          curve: AnimationCurve.bounceOut,
+          bounceHeight: 1.25,
+        );
+        final restored = LayerAnimation.fromMap(original.toMap());
+        expect(restored, original);
+        expect(restored.bounceHeight, 1.25);
+      });
+
+      test('text reveals round-trip', () {
+        for (final type in [
+          LayerAnimationType.typewriter,
+          LayerAnimationType.wordByWord,
+        ]) {
+          final original = LayerAnimation(
+            type: type,
+            phase: AnimationPhase.animateOut,
+            duration: const Duration(seconds: 1),
+          );
+          expect(LayerAnimation.fromMap(original.toMap()), original);
+        }
+      });
+
+      test('reads a whole-number angle and height sent as an int', () {
+        final restored = LayerAnimation.fromMap({
+          'type': 'wiggle',
+          'phase': 'loop',
+          'durationUs': 500000,
+          'wiggleAngle': 1,
+          'bounceHeight': 2,
+        });
+        expect(restored.wiggleAngle, 1.0);
+        expect(restored.bounceHeight, 2.0);
+      });
+    });
+
+    group('wiggle and bounce', () {
+      test('leave angle and height unset by default', () {
+        const anim = LayerAnimation(
+          type: LayerAnimationType.wiggle,
+          phase: AnimationPhase.loop,
+          duration: Duration(milliseconds: 500),
+        );
+        expect(anim.wiggleAngle, isNull);
+        expect(anim.bounceHeight, isNull);
+        expect(anim.toMap()['wiggleAngle'], isNull);
+        expect(anim.toMap()['bounceHeight'], isNull);
+      });
+
+      test('defaults to a 10 degree tilt and half the layer height', () {
+        expect(
+          LayerAnimation.defaultWiggleAngle,
+          closeTo(10 * 3.14159265 / 180, 1e-6),
+        );
+        expect(LayerAnimation.defaultBounceHeight, 0.5);
+      });
+
+      test('differ by angle and height', () {
+        const a = LayerAnimation(
+          type: LayerAnimationType.wiggle,
+          phase: AnimationPhase.loop,
+          duration: Duration(milliseconds: 500),
+          wiggleAngle: 0.1,
+        );
+        const b = LayerAnimation(
+          type: LayerAnimationType.wiggle,
+          phase: AnimationPhase.loop,
+          duration: Duration(milliseconds: 500),
+          wiggleAngle: 0.2,
+        );
+        const c = LayerAnimation(
+          type: LayerAnimationType.bounce,
+          phase: AnimationPhase.loop,
+          duration: Duration(milliseconds: 500),
+          bounceHeight: 0.5,
+        );
+        const d = LayerAnimation(
+          type: LayerAnimationType.bounce,
+          phase: AnimationPhase.loop,
+          duration: Duration(milliseconds: 500),
+          bounceHeight: 1,
+        );
+        expect(a, isNot(b));
+        expect(c, isNot(d));
+      });
+
+      test('name angle and height in toString', () {
+        const anim = LayerAnimation(
+          type: LayerAnimationType.bounce,
+          phase: AnimationPhase.loop,
+          duration: Duration(milliseconds: 500),
+          wiggleAngle: 0.1,
+          bounceHeight: 0.75,
+        );
+        expect(anim.toString(), contains('wiggleAngle: 0.1'));
+        expect(anim.toString(), contains('bounceHeight: 0.75'));
+      });
     });
 
     group('equality', () {
@@ -444,6 +559,10 @@ void main() {
         LayerAnimationType.fade,
         LayerAnimationType.slide,
         LayerAnimationType.scale,
+        LayerAnimationType.wiggle,
+        LayerAnimationType.bounce,
+        LayerAnimationType.typewriter,
+        LayerAnimationType.wordByWord,
       ]);
     });
 
@@ -479,6 +598,7 @@ void main() {
         AnimationPhase.animateIn,
         AnimationPhase.animateOut,
         AnimationPhase.animateInOut,
+        AnimationPhase.loop,
       ]);
     });
   });

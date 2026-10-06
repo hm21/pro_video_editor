@@ -6,6 +6,12 @@ import 'package:pro_video_editor/shared/utils/parser/offset_parser.dart';
 import 'image_layer_model.dart';
 
 /// The type of animation to apply to an image layer.
+///
+/// Every type moves the layer away from its resting state by an amount that
+/// follows the animation's progress: fully away at the start of an
+/// [AnimationPhase.animateIn], at rest once it ends, and back again over an
+/// [AnimationPhase.animateOut]. [AnimationPhase.loop] swings between the two
+/// over and over.
 enum LayerAnimationType {
   /// Fade opacity from 0 to 1 (in) or 1 to 0 (out).
   fade,
@@ -15,6 +21,39 @@ enum LayerAnimationType {
 
   /// Scale the layer from small to full size (in) or full to small (out).
   scale,
+
+  /// Tilt the layer around its center by up to [LayerAnimation.wiggleAngle].
+  ///
+  /// In and out, the layer turns between the tilted and the upright position;
+  /// an elastic or bounce [AnimationCurve] makes it wobble into place. In a
+  /// [AnimationPhase.loop] it tilts to one side and then to the other within
+  /// every cycle, so it wiggles for as long as it is visible.
+  wiggle,
+
+  /// Lift the layer by [LayerAnimation.bounceHeight] times its own height.
+  ///
+  /// In, the layer drops onto its resting place, out it rises from it; a
+  /// bounce [AnimationCurve] makes it bounce on landing. In a
+  /// [AnimationPhase.loop] it hops up and lands once per cycle.
+  bounce,
+
+  /// Reveal a text letter by letter (in), or take it away from the last
+  /// letter back (out).
+  ///
+  /// The renderer draws an [ImageLayer] as one fixed image, so it cannot
+  /// reveal the text inside it and skips this type. An app shows the reveal by
+  /// passing one layer per step with the text revealed so far, all sharing the
+  /// same [ImageLayer.animationStartTime] and [ImageLayer.animationEndTime];
+  /// `pro_image_editor` captures exactly those images for a text layer. The
+  /// type exists here so a layer's animations convert between the two
+  /// packages unchanged.
+  typewriter,
+
+  /// Reveal a text word by word (in), or take it away from the last word back
+  /// (out).
+  ///
+  /// Skipped by the renderer for the same reason as [typewriter].
+  wordByWord,
 }
 
 /// Slide direction for slide animations.
@@ -75,7 +114,7 @@ enum AnimationCurve {
 }
 
 /// Whether the animation plays at the start, end, or both ends of the layer's
-/// time range.
+/// time range, or repeats throughout it.
 enum AnimationPhase {
   /// Animation plays at the beginning of the layer's visible range.
   animateIn,
@@ -85,6 +124,22 @@ enum AnimationPhase {
 
   /// Animation plays at both the beginning and end using the same duration.
   animateInOut,
+
+  /// Animation repeats for as long as the layer is visible, one cycle every
+  /// [LayerAnimation.duration], counted from the start of the layer (or from
+  /// [ImageLayer.animationStartTime]).
+  ///
+  /// Each cycle leaves the resting state and comes back to it: halfway
+  /// through, a fade has the layer invisible, a scale has it at
+  /// [LayerAnimation.scaleFrom] and a slide has it at the edge or the
+  /// [LayerAnimation.slideFrom] point. A [LayerAnimationType.wiggle] tilts to
+  /// one side in the first half of the cycle and to the other in the second.
+  ///
+  /// The [LayerAnimation.curve] shapes the way out like an [animateOut] and
+  /// the way back like an [animateIn]: with [AnimationCurve.easeIn] the layer
+  /// moves fastest at rest and slowest at the turning point, like a pendulum
+  /// or a hop.
+  loop,
 }
 
 /// A single animation applied to an [ImageLayer].
@@ -133,6 +188,19 @@ enum AnimationPhase {
 ///   curve: AnimationCurve.easeOutCubic,
 /// )
 /// ```
+///
+/// A [AnimationPhase.loop] keeps a layer moving while it is on screen — this
+/// one wiggles by up to 8° each side, twice a second:
+///
+/// ```dart
+/// LayerAnimation(
+///   type: LayerAnimationType.wiggle,
+///   phase: AnimationPhase.loop,
+///   duration: const Duration(milliseconds: 500),
+///   curve: AnimationCurve.easeIn,
+///   wiggleAngle: 8 * math.pi / 180,
+/// )
+/// ```
 class LayerAnimation {
   /// Creates a [LayerAnimation].
   const LayerAnimation({
@@ -143,6 +211,8 @@ class LayerAnimation {
     this.slideDirection,
     this.slideFrom,
     this.scaleFrom,
+    this.wiggleAngle,
+    this.bounceHeight,
   }) : assert(
          type != LayerAnimationType.slide ||
              slideDirection != null ||
@@ -150,13 +220,22 @@ class LayerAnimation {
          'slide animations need either a slideDirection or a slideFrom point',
        );
 
-  /// The kind of animation (fade, slide, scale).
+  /// How far a [LayerAnimationType.wiggle] tilts when [wiggleAngle] is not
+  /// set: 10°, in radians.
+  static const double defaultWiggleAngle = 0.17453292519943295;
+
+  /// How high a [LayerAnimationType.bounce] lifts the layer when
+  /// [bounceHeight] is not set: half its own height.
+  static const double defaultBounceHeight = 0.5;
+
+  /// The kind of animation (fade, slide, scale, wiggle, bounce, ...).
   final LayerAnimationType type;
 
-  /// Whether this animation plays at the start or end of the layer.
+  /// Whether this animation plays at the start or end of the layer, or
+  /// repeats while it is visible.
   final AnimationPhase phase;
 
-  /// How long the animation lasts.
+  /// How long the animation lasts, or one cycle of a [AnimationPhase.loop].
   final Duration duration;
 
   /// The easing curve for the animation.
@@ -196,6 +275,18 @@ class LayerAnimation {
   /// A value of `0.5` means the layer starts at half size.
   final double? scaleFrom;
 
+  /// How far a [LayerAnimationType.wiggle] tilts the layer, in **radians**.
+  ///
+  /// Positive values tilt clockwise first, like [ImageLayer.rotation].
+  /// Defaults to [defaultWiggleAngle] when not set.
+  final double? wiggleAngle;
+
+  /// How high a [LayerAnimationType.bounce] lifts the layer, as a multiple of
+  /// the layer's own height: `0.5` lifts it by half its height.
+  ///
+  /// Defaults to [defaultBounceHeight] when not set.
+  final double? bounceHeight;
+
   Map<String, dynamic> toMap() {
     return <String, dynamic>{
       'type': type.name,
@@ -207,6 +298,8 @@ class LayerAnimation {
           ? {'dx': slideFrom!.dx, 'dy': slideFrom!.dy}
           : null,
       'scaleFrom': scaleFrom,
+      'wiggleAngle': wiggleAngle,
+      'bounceHeight': bounceHeight,
     };
   }
 
@@ -225,6 +318,8 @@ class LayerAnimation {
           ? safeParseOffset(map['slideFrom'] as Map<String, dynamic>)
           : null,
       scaleFrom: map['scaleFrom'] as double?,
+      wiggleAngle: (map['wiggleAngle'] as num?)?.toDouble(),
+      bounceHeight: (map['bounceHeight'] as num?)?.toDouble(),
     );
   }
 
@@ -234,7 +329,9 @@ class LayerAnimation {
         'duration: $duration, curve: $curve'
         '${slideDirection != null ? ', slideDirection: $slideDirection' : ''}'
         '${slideFrom != null ? ', slideFrom: $slideFrom' : ''}'
-        '${scaleFrom != null ? ', scaleFrom: $scaleFrom' : ''})';
+        '${scaleFrom != null ? ', scaleFrom: $scaleFrom' : ''}'
+        '${wiggleAngle != null ? ', wiggleAngle: $wiggleAngle' : ''}'
+        '${bounceHeight != null ? ', bounceHeight: $bounceHeight' : ''})';
   }
 
   @override
@@ -246,7 +343,9 @@ class LayerAnimation {
         other.curve == curve &&
         other.slideDirection == slideDirection &&
         other.slideFrom == slideFrom &&
-        other.scaleFrom == scaleFrom;
+        other.scaleFrom == scaleFrom &&
+        other.wiggleAngle == wiggleAngle &&
+        other.bounceHeight == bounceHeight;
   }
 
   @override
@@ -257,6 +356,8 @@ class LayerAnimation {
         curve.hashCode ^
         slideDirection.hashCode ^
         slideFrom.hashCode ^
-        scaleFrom.hashCode;
+        scaleFrom.hashCode ^
+        wiggleAngle.hashCode ^
+        bounceHeight.hashCode;
   }
 }

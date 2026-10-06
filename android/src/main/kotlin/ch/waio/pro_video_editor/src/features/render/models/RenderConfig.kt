@@ -369,9 +369,13 @@ data class AudioTrackConfig(
 /**
  * Represents a single animation configuration for an image layer.
  *
- * @property type The kind of animation: "fade", "slide", or "scale"
- * @property phase When the animation plays: "animateIn", "animateOut", or "animateInOut"
- * @property durationUs Duration of the animation in microseconds
+ * @property type The kind of animation: "fade", "slide", "scale", "wiggle",
+ *   "bounce", or "typewriter" / "wordByWord", which the renderer skips because a
+ *   layer is one fixed image
+ * @property phase When the animation plays: "animateIn", "animateOut",
+ *   "animateInOut", or "loop" for as long as the layer is visible
+ * @property durationUs Duration of the animation in microseconds, or of one
+ *   cycle of a loop
  * @property curve Easing curve name (e.g. "linear", "easeIn", "bounceOut")
  * @property slideDirection Slide direction: "left", "right", "top", or "bottom"
  * @property slideFromX Custom slide start point, X in pixels from the frame's
@@ -379,6 +383,10 @@ data class AudioTrackConfig(
  *   Overrides [slideDirection] when set.
  * @property slideFromY Y counterpart of [slideFromX], from the frame's top edge
  * @property scaleFrom Starting scale factor for scale animations
+ * @property wiggleAngle How far a wiggle tilts the layer, in radians, clockwise
+ *   first (null = [DEFAULT_WIGGLE_ANGLE])
+ * @property bounceHeight How high a bounce lifts the layer, as a multiple of its
+ *   own height (null = [DEFAULT_BOUNCE_HEIGHT])
  */
 data class LayerAnimationConfig(
     val type: String,
@@ -388,9 +396,17 @@ data class LayerAnimationConfig(
     val slideDirection: String? = null,
     val slideFromX: Double? = null,
     val slideFromY: Double? = null,
-    val scaleFrom: Double? = null
+    val scaleFrom: Double? = null,
+    val wiggleAngle: Double? = null,
+    val bounceHeight: Double? = null
 ) {
     companion object {
+        /** 10°, the tilt of a wiggle without its own [wiggleAngle]. */
+        const val DEFAULT_WIGGLE_ANGLE = 0.17453292519943295
+
+        /** Half the layer's height, the lift of a bounce without its own [bounceHeight]. */
+        const val DEFAULT_BOUNCE_HEIGHT = 0.5
+
         fun fromMap(map: Map<String, Any?>): LayerAnimationConfig {
             val slideFrom = map["slideFrom"] as? Map<*, *>
             return LayerAnimationConfig(
@@ -401,7 +417,9 @@ data class LayerAnimationConfig(
                 slideDirection = map["slideDirection"] as? String,
                 slideFromX = (slideFrom?.get("dx") as? Number)?.toDouble(),
                 slideFromY = (slideFrom?.get("dy") as? Number)?.toDouble(),
-                scaleFrom = (map["scaleFrom"] as? Number)?.toDouble()
+                scaleFrom = (map["scaleFrom"] as? Number)?.toDouble(),
+                wiggleAngle = (map["wiggleAngle"] as? Number)?.toDouble(),
+                bounceHeight = (map["bounceHeight"] as? Number)?.toDouble()
             )
         }
     }
@@ -422,6 +440,10 @@ data class LayerAnimationConfig(
  * @property animationOffsetUs How far into an animated image (GIF) playback
  *   begins when the layer appears, in microseconds
  * @property animations List of animations to apply to this layer
+ * @property animationStartUs Where the animations count from, when that is not
+ *   [startUs] (-1 = [startUs])
+ * @property animationEndUs Where the animations end, when that is not [endUs]
+ *   (-1 = [endUs])
  * @property censor Blurs or pixelates the picture beneath the layer instead of
  *   drawing [image], which then only marks the area (null = draw the image)
  */
@@ -437,6 +459,8 @@ data class ImageLayer(
     val loop: Boolean = true,
     val animationOffsetUs: Long = 0L,
     val animations: List<LayerAnimationConfig> = emptyList(),
+    val animationStartUs: Long = -1L,
+    val animationEndUs: Long = -1L,
     val censor: LayerCensorConfig? = null
 )
 
@@ -558,13 +582,16 @@ data class RenderConfig(
                 val animationsRaw = layerMap["animations"] as? List<Map<String, Any?>>
                 val animations = animationsRaw?.map { LayerAnimationConfig.fromMap(it) } ?: emptyList()
                 val censor = LayerCensorConfig.fromMap(layerMap["censor"] as? Map<*, *>)
+                val animationStartUs = (layerMap["animationStartUs"] as? Number)?.toLong() ?: -1L
+                val animationEndUs = (layerMap["animationEndUs"] as? Number)?.toLong() ?: -1L
 
                 if (image == null) {
                     null
                 } else {
                     ImageLayer(
                         image, startUs, endUs, x, y, width, height,
-                        rotation, loop, animationOffsetUs, animations, censor
+                        rotation, loop, animationOffsetUs, animations,
+                        animationStartUs, animationEndUs, censor
                     )
                 }
             } ?: emptyList()

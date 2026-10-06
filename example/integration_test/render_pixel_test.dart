@@ -648,6 +648,134 @@ void main() {
     }, skip: kIsWeb);
   });
 
+  group('Wiggle, bounce and animation ranges', () {
+    // The 1280x720 source, read back at 200 px high; a point is given in
+    // source pixels.
+    bool magentaAt(_Frame f, double x, double y) =>
+        _isMagenta(f.at(x / 1280, y / 720));
+
+    Future<EditorVideo> render(List<ImageLayer> layers) async {
+      final bytes = await pve.renderVideo(
+        VideoRenderData(
+          videoSegments: [
+            VideoSegment(video: h264Video, endTime: const Duration(seconds: 3)),
+          ],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: layers,
+        ),
+      );
+      return EditorVideo.memory(bytes);
+    }
+
+    testWidgets('a bounce lifts the layer by a multiple of its height', (
+      tester,
+    ) async {
+      // 200x100 at rest on y 310..410; lifted by twice its height at first.
+      final out = await render([
+        ImageLayer(
+          image: EditorLayerImage.memory(
+            await _solidPng(_magenta, width: 200, height: 100),
+          ),
+          offset: const Offset(540, 310),
+          size: const Size(200, 100),
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 3),
+          animations: const [
+            LayerAnimation(
+              type: LayerAnimationType.bounce,
+              phase: AnimationPhase.animateIn,
+              duration: Duration(seconds: 2),
+              bounceHeight: 2,
+            ),
+          ],
+        ),
+      ]);
+
+      // Half way: lifted by one height, onto y 210..310.
+      final mid = await frameOf(out, at: const Duration(milliseconds: 1000));
+      expect(magentaAt(mid, 640, 260), isTrue, reason: 'lifted');
+      expect(magentaAt(mid, 640, 380), isFalse, reason: 'not yet landed');
+
+      final rest = await frameOf(out, at: const Duration(milliseconds: 2500));
+      expect(magentaAt(rest, 640, 380), isTrue, reason: 'landed');
+      expect(magentaAt(rest, 640, 260), isFalse, reason: 'landed');
+    }, skip: kIsWeb);
+
+    testWidgets('a wiggle loop tilts to one side and then the other', (
+      tester,
+    ) async {
+      // A needle pointing up from the middle of the frame, turned around
+      // the centre of its 40x400 box: 90° clockwise at a quarter of each 2 s
+      // cycle, 90° counter-clockwise at three quarters.
+      final out = await render([
+        ImageLayer(
+          image: EditorLayerImage.memory(await _needlePng()),
+          offset: const Offset(620, 160),
+          size: const Size(40, 400),
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 3),
+          animations: const [
+            LayerAnimation(
+              type: LayerAnimationType.wiggle,
+              phase: AnimationPhase.loop,
+              duration: Duration(seconds: 2),
+              wiggleAngle: 1.5707963267948966,
+            ),
+          ],
+        ),
+      ]);
+
+      final right = await frameOf(out, at: const Duration(milliseconds: 500));
+      expect(magentaAt(right, 740, 360), isTrue, reason: 'points right');
+      expect(magentaAt(right, 640, 260), isFalse, reason: 'points right');
+
+      final up = await frameOf(out, at: const Duration(milliseconds: 1000));
+      expect(magentaAt(up, 640, 260), isTrue, reason: 'upright');
+
+      final left = await frameOf(out, at: const Duration(milliseconds: 1500));
+      expect(magentaAt(left, 540, 360), isTrue, reason: 'points left');
+      expect(magentaAt(left, 740, 360), isFalse, reason: 'points left');
+    }, skip: kIsWeb);
+
+    testWidgets('layers sharing an animation range carry one animation on', (
+      tester,
+    ) async {
+      final image = EditorLayerImage.memory(
+        await _solidPng(_magenta, width: 200, height: 100),
+      );
+      // One overlay split at 1 s into two layers, the way a text that types
+      // itself out is split into its steps. Both count the 2 s bounce from
+      // 0 s; on its own, the second would start its bounce over at 1 s.
+      ImageLayer part(Duration start, Duration end) => ImageLayer(
+        image: image,
+        offset: const Offset(540, 310),
+        size: const Size(200, 100),
+        startTime: start,
+        endTime: end,
+        animationStartTime: Duration.zero,
+        animationEndTime: const Duration(seconds: 3),
+        animations: const [
+          LayerAnimation(
+            type: LayerAnimationType.bounce,
+            phase: AnimationPhase.animateIn,
+            duration: Duration(seconds: 2),
+            bounceHeight: 2,
+          ),
+        ],
+      );
+      final out = await render([
+        part(Duration.zero, const Duration(seconds: 1)),
+        part(const Duration(seconds: 1), const Duration(seconds: 3)),
+      ]);
+
+      // Three quarters in: lifted by half its height, onto y 260..360.
+      // Restarted, it would be lifted by one and a half, onto y 160..260.
+      final f = await frameOf(out, at: const Duration(milliseconds: 1500));
+      expect(magentaAt(f, 640, 290), isTrue);
+      expect(magentaAt(f, 640, 230), isFalse);
+    }, skip: kIsWeb);
+  });
+
   group('Dip transition on a letterboxed canvas', () {
     testWidgets('fadeToWhite dips the whole output frame, bars included', (
       tester,
@@ -1048,4 +1176,16 @@ int _sharpness(_Frame f) {
     }
   }
   return sum;
+}
+
+/// A 40x400 PNG whose upper half is [_magenta] and lower half transparent: a
+/// needle pointing up from the centre of its box.
+Future<Uint8List> _needlePng() async {
+  final recorder = PictureRecorder();
+  Canvas(
+    recorder,
+  ).drawRect(const Rect.fromLTWH(0, 0, 40, 200), Paint()..color = _magenta);
+  final image = await recorder.endRecording().toImage(40, 400);
+  final data = await image.toByteData(format: ImageByteFormat.png);
+  return data!.buffer.asUint8List();
 }

@@ -102,8 +102,99 @@ func slideFromOffset(
   )
 }
 
+/// How far an animation has brought a layer back to rest at one moment:
+/// `value` is 1 at rest and 0 fully away (faded out, at the edge, tilted all
+/// the way), and may overshoot either end with an elastic or bounce curve.
+///
+/// `swing` is the side a wiggle tilts to: -1 in the second half of a loop
+/// cycle, 1 otherwise.
+struct AnimationProgress: Equatable {
+  let value: Double
+  var swing: Double = 1
+}
+
+/// The progress of [anim] at [currentTimeUs], or `nil` when it does not play
+/// then.
+///
+/// [startUs] and [endUs] are the range the animation counts from and towards
+/// (-1 = the start / the end of the video): an in-animation plays over the
+/// first `durationUs` of it and an out-animation over the last. With
+/// "animateInOut" both apply and the one further from rest wins.
+///
+/// A "loop" plays over the whole range, one cycle per duration counted from
+/// [startUs]: the eased value runs from rest to fully away at half a cycle and
+/// back. A wiggle runs that twice per cycle, once to each side. The cycle
+/// position is taken from the remainder of whole microseconds, so a long video
+/// does not lose precision. Mirrors `animationProgress` on Android.
+func animationProgress(
+  _ anim: LayerAnimationConfig,
+  currentTimeUs: Int64,
+  startUs: Int64,
+  endUs: Int64
+) -> AnimationProgress? {
+  let durationUs = anim.durationUs
+  guard durationUs > 0 else { return nil }
+
+  let effectiveStartUs = startUs == -1 ? Int64(0) : startUs
+  let effectiveEndUs = endUs == -1 ? Int64.max : endUs
+
+  if anim.phase == "loop" {
+    let elapsed = max(0, currentTimeUs - effectiveStartUs)
+    let inCycle = elapsed % durationUs
+    if anim.type == "wiggle" {
+      // Each half of the cycle is one swing out and back.
+      let inSwing = (2 * inCycle) % durationUs
+      let x = abs(1 - 2 * Double(inSwing) / Double(durationUs))
+      return AnimationProgress(
+        value: applyEasing(x, curve: anim.curve),
+        swing: 2 * inCycle < durationUs ? 1 : -1)
+    }
+    let x = abs(1 - 2 * Double(inCycle) / Double(durationUs))
+    return AnimationProgress(value: applyEasing(x, curve: anim.curve))
+  }
+
+  var inProgress: Double? = nil
+  var outProgress: Double? = nil
+
+  if anim.phase == "animateIn" || anim.phase == "animateInOut" {
+    let elapsed = currentTimeUs - effectiveStartUs
+    if elapsed < durationUs {
+      inProgress = applyEasing(
+        max(0, min(1, Double(elapsed) / Double(durationUs))),
+        curve: anim.curve
+      )
+    }
+  }
+
+  if anim.phase == "animateOut" || anim.phase == "animateInOut" {
+    let remaining = effectiveEndUs - currentTimeUs
+    if remaining < durationUs {
+      outProgress = applyEasing(
+        max(0, min(1, Double(remaining) / Double(durationUs))),
+        curve: anim.curve
+      )
+    }
+  }
+
+  // Use the minimum progress (most visible animation effect)
+  if let inp = inProgress, let outp = outProgress {
+    return AnimationProgress(value: min(inp, outp))
+  }
+  guard let progress = inProgress ?? outProgress else { return nil }
+  return AnimationProgress(value: progress)
+}
+
 /// Computes animation transforms and opacity for overlaying an image layer.
 /// Returns (opacity, additionalTransform) to apply to the overlay.
+///
+/// The animations count from the layer's `animationStartUs` / `animationEndUs`
+/// where set, else from its own time range. Opacity and scale multiply, slide
+/// offsets add up. A wiggle tilts the overlay around its own center before
+/// anything else moves it, and a bounce lifts it by a multiple of its own
+/// height after it is scaled, the order the editor preview composes them in.
+/// Text reveals ("typewriter", "wordByWord") change what the image shows,
+/// which a fixed image cannot do, so they are skipped; the caller passes one
+/// layer per step instead.
 func computeAnimation(
   layer: ImageLayer,
   currentTimeUs: Int64,
@@ -112,47 +203,20 @@ func computeAnimation(
 ) -> (opacity: Double, transform: CGAffineTransform) {
   var opacity = 1.0
   var animTransform = CGAffineTransform.identity
+  // Clockwise, in radians, like Flutter's rotation.
+  var wiggle = 0.0
+  // Upwards, in Core Graphics pixels.
+  var lift: CGFloat = 0
+
+  let startUs = layer.animationStartUs == -1 ? layer.startUs : layer.animationStartUs
+  let endUs = layer.animationEndUs == -1 ? layer.endUs : layer.animationEndUs
 
   for anim in layer.animations {
-    let durationUs = anim.durationUs
-    guard durationUs > 0 else { continue }
-
-    let layerStartUs = layer.startUs == -1 ? Int64(0) : layer.startUs
-    let layerEndUs = layer.endUs == -1 ? Int64.max : layer.endUs
-
-    // Determine raw progress for animateIn and/or animateOut
-    var inProgress: Double? = nil
-    var outProgress: Double? = nil
-
-    if anim.phase == "animateIn" || anim.phase == "animateInOut" {
-      let elapsed = currentTimeUs - layerStartUs
-      if elapsed < durationUs {
-        inProgress = applyEasing(
-          max(0, min(1, Double(elapsed) / Double(durationUs))),
-          curve: anim.curve
-        )
-      }
-    }
-
-    if anim.phase == "animateOut" || anim.phase == "animateInOut" {
-      let remaining = layerEndUs - currentTimeUs
-      if remaining < durationUs {
-        outProgress = applyEasing(
-          max(0, min(1, Double(remaining) / Double(durationUs))),
-          curve: anim.curve
-        )
-      }
-    }
-
-    // Use the minimum progress (most visible animation effect)
-    let progress: Double?
-    if let inp = inProgress, let outp = outProgress {
-      progress = min(inp, outp)
-    } else {
-      progress = inProgress ?? outProgress
-    }
-
-    guard let p = progress else { continue }
+    guard
+      let progress = animationProgress(
+        anim, currentTimeUs: currentTimeUs, startUs: startUs, endUs: endUs)
+    else { continue }
+    let p = progress.value
 
     switch anim.type {
     case "fade":
@@ -193,6 +257,14 @@ func computeAnimation(
         .scaledBy(x: currentScale, y: currentScale)
         .translatedBy(x: -cx, y: -cy)
 
+    case "wiggle":
+      let angle = anim.wiggleAngle ?? LayerAnimationConfig.defaultWiggleAngle
+      wiggle += progress.swing * (1 - p) * angle
+
+    case "bounce":
+      let height = anim.bounceHeight ?? LayerAnimationConfig.defaultBounceHeight
+      lift += CGFloat((1 - p) * height) * overlayExtent.height
+
     default:
       break
     }
@@ -201,7 +273,21 @@ func computeAnimation(
   // Clamp values — elastic/bounce curves can overshoot [0,1]
   opacity = max(0, min(1, opacity))
 
-  return (opacity, animTransform)
+  var transform = animTransform
+  if wiggle != 0 {
+    // Core Graphics turns counter-clockwise, so the angle is negated.
+    let cx = overlayExtent.midX
+    let cy = overlayExtent.midY
+    let tilt = CGAffineTransform(translationX: cx, y: cy)
+      .rotated(by: CGFloat(-wiggle))
+      .translatedBy(x: -cx, y: -cy)
+    transform = tilt.concatenating(transform)
+  }
+  if lift != 0 {
+    transform = transform.concatenating(CGAffineTransform(translationX: 0, y: lift))
+  }
+
+  return (opacity, transform)
 }
 
 /// Composites an overlay image onto the output with animation effects applied.

@@ -396,6 +396,24 @@ void main() {
       expect(maps[1]['animationOffsetUs'], 0);
     });
 
+    test('sends the animation range in microseconds', () async {
+      final maps = await layerMaps([
+        ImageLayer(
+          image: EditorLayerImage.memory(Uint8List.fromList([1])),
+          startTime: const Duration(milliseconds: 500),
+          endTime: const Duration(milliseconds: 700),
+          animationStartTime: Duration.zero,
+          animationEndTime: const Duration(seconds: 2),
+        ),
+        ImageLayer(image: EditorLayerImage.memory(Uint8List.fromList([1]))),
+      ]);
+
+      expect(maps[0]['animationStartUs'], 0);
+      expect(maps[0]['animationEndUs'], 2000000);
+      expect(maps[1]['animationStartUs'], isNull);
+      expect(maps[1]['animationEndUs'], isNull);
+    });
+
     test('throws naming the path when a layer image is gone', () async {
       final missing = '${tempDir.path}/gone.png';
 

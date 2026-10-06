@@ -29,6 +29,11 @@ struct ImageLayer {
   let animations: [LayerAnimationConfig]
   /// Blurs or pixelates the picture beneath the layer instead of drawing it.
   var censor: LayerCensorConfig? = nil
+  /// Where the animations count from, when that is not `startUs` (-1 =
+  /// `startUs`).
+  var animationStartUs: Int64 = -1
+  /// Where the animations end, when that is not `endUs` (-1 = `endUs`).
+  var animationEndUs: Int64 = -1
 
   /// The frame to display at composition time [currentTimeUs].
   ///
@@ -384,7 +389,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
           height: layer.height,
           rotation: layer.rotation,
           animations: layer.animations,
-          censor: layer.censor
+          censor: layer.censor,
+          animationStartUs: layer.animationStartUs,
+          animationEndUs: layer.animationEndUs
         ))
     }
   }

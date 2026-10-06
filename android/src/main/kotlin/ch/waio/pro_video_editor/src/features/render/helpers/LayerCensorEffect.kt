@@ -13,7 +13,10 @@ import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.GlEffect
 import androidx.media3.effect.GlShaderProgram
 import ch.waio.pro_video_editor.src.features.render.models.LayerCensorConfig
+import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * An image layer that hides the picture beneath it instead of drawing its
@@ -22,7 +25,8 @@ import kotlin.math.roundToInt
  *
  * [mask] is the overlay the layer would otherwise be drawn as, so the area
  * lands exactly where that overlay would: its position, its size, its rotation
- * (baked into the bitmap by `prepareOverlay`) and its animations. Its alpha,
+ * (baked into the bitmap by `prepareOverlay`) and its animations, including
+ * the tilt of a wiggle. Its alpha,
  * times the overlay's alpha scale, is how much of the hidden picture replaces
  * the original one. See [CensorMaskPlacement] for the mapping.
  *
@@ -90,6 +94,7 @@ internal class LayerCensorEffect(
                     maskHeight = maskSize.height,
                     frameWidth = width,
                     frameHeight = height,
+                    rotationDegrees = settings.rotationDegrees,
                 )
                 // Nothing is hidden while the layer is faded out, scaled down
                 // to nothing (a scale animation from 0) or wholly off the
@@ -108,6 +113,8 @@ internal class LayerCensorEffect(
                 program.setFloatsUniform("uPictureSize", floatArrayOf(width.toFloat(), height.toFloat()))
                 program.setFloatsUniform("uMaskOrigin", placement.origin)
                 program.setFloatsUniform("uMaskExtent", placement.extent)
+                program.setFloatUniform("uMaskRotation", placement.rotation)
+                program.setFloatUniform("uMaskAspect", placement.aspect)
                 program.setFloatUniform("uAlpha", alpha)
                 if (hidden != null) {
                     // Without a blur pass (alpha 0) the small texture may not
@@ -182,15 +189,25 @@ internal class LayerCensorEffect(
         // normalized device coordinates. A bitmap's row 0 is uploaded at t = 0,
         // so t runs downwards. Outside the quad the layer is not there at all.
         // uAlpha is 0 whenever the extent may be (see coversFrame), so the
-        // division never sees it.
+        // division never sees it. A tilted quad is turned back around its
+        // center, where v = 0, in units that are as wide as they are tall:
+        // uMaskAspect is the quad's width over its height.
         private const val MASK_FUNCTION =
             "uniform sampler2D uMask;\n" +
             "uniform vec2 uMaskOrigin;\n" +
             "uniform vec2 uMaskExtent;\n" +
+            "uniform float uMaskRotation;\n" +
+            "uniform float uMaskAspect;\n" +
             "uniform float uAlpha;\n" +
             "float maskAt(vec2 p, vec2 size) {\n" +
             "  if (uAlpha <= 0.0) return 0.0;\n" +
             "  vec2 v = (2.0 * p / size - 1.0 - uMaskOrigin) / uMaskExtent;\n" +
+            "  if (uMaskRotation != 0.0) {\n" +
+            "    float c = cos(uMaskRotation);\n" +
+            "    float s = sin(uMaskRotation);\n" +
+            "    vec2 q = vec2(v.x * uMaskAspect, v.y);\n" +
+            "    v = vec2((c * q.x + s * q.y) / uMaskAspect, c * q.y - s * q.x);\n" +
+            "  }\n" +
             "  vec2 st = vec2(0.5 * v.x + 0.5, 0.5 - 0.5 * v.y);\n" +
             "  if (st.x < 0.0 || st.x > 1.0 || st.y < 0.0 || st.y > 1.0) return 0.0;\n" +
             "  return texture2D(uMask, st).a * uAlpha;\n" +
@@ -281,32 +298,59 @@ internal class LayerCensorEffect(
  * `extent = (mask / frame) * scale`. The censor shader evaluates that at every
  * pixel center and samples the mask where `v` falls inside the quad.
  *
- * The overlay's rotation is not part of it: `prepareOverlay` turns the bitmap
- * itself and never sets a rotation on the settings.
+ * A layer's own rotation is not part of it: `prepareOverlay` turns the bitmap
+ * itself. The tilt of a wiggle animation is: Media3 turns the quad by
+ * [rotation] around its own center, `v = 0`, in units as wide as they are tall,
+ * before it is placed. [aspect] is the quad's width over its height in frame
+ * pixels, which converts between those units and the quad's.
  */
-internal data class CensorMaskPlacement(val origin: FloatArray, val extent: FloatArray) {
+internal data class CensorMaskPlacement(
+    val origin: FloatArray,
+    val extent: FloatArray,
+    /** Counter-clockwise, in radians. */
+    val rotation: Float = 0f,
+    val aspect: Float = 1f,
+) {
 
     /**
      * The quad coordinates of the frame point [ndcX], [ndcY] (normalized
      * device coordinates, y up), the same arithmetic as the shader's.
      */
-    fun quadCoordinateOf(ndcX: Float, ndcY: Float): Pair<Float, Float> =
-        (ndcX - origin[0]) / extent[0] to (ndcY - origin[1]) / extent[1]
+    fun quadCoordinateOf(ndcX: Float, ndcY: Float): Pair<Float, Float> {
+        val vx = (ndcX - origin[0]) / extent[0]
+        val vy = (ndcY - origin[1]) / extent[1]
+        if (rotation == 0f) return vx to vy
+        val c = cos(rotation)
+        val s = sin(rotation)
+        val qx = vx * aspect
+        return (c * qx + s * vy) / aspect to c * vy - s * qx
+    }
 
     /**
      * Whether the quad covers any of the frame: not when it is scaled down to
      * nothing, as a scale animation from 0 starts, or lies wholly beyond an
-     * edge, as a layer sliding in from off the frame does.
+     * edge, as a layer sliding in from off the frame does. A tilted quad is
+     * measured by the box around it.
      */
-    fun coversFrame(): Boolean =
-        extent[0] > 0f && extent[1] > 0f &&
-            origin[0] - extent[0] < 1f && origin[0] + extent[0] > -1f &&
-            origin[1] - extent[1] < 1f && origin[1] + extent[1] > -1f
+    fun coversFrame(): Boolean {
+        if (extent[0] <= 0f || extent[1] <= 0f) return false
+        var halfX = extent[0]
+        var halfY = extent[1]
+        if (rotation != 0f) {
+            val c = abs(cos(rotation))
+            val s = abs(sin(rotation))
+            halfX = extent[0] * (c + s / aspect)
+            halfY = extent[1] * (c + s * aspect)
+        }
+        return origin[0] - halfX < 1f && origin[0] + halfX > -1f &&
+            origin[1] - halfY < 1f && origin[1] + halfY > -1f
+    }
 
     /**
      * The quad's top-left corner in whole pixels of a [frameWidth] by
      * [frameHeight] frame, counted from its top-left corner: where a censor
-     * layer's pixelate blocks start.
+     * layer's pixelate blocks start. The blocks stay upright on a tilted quad,
+     * starting at the corner it has untilted.
      */
     fun topLeftPixel(frameWidth: Int, frameHeight: Int): FloatArray {
         // The corner v = (-1, 1) of the quad, P = origin + extent * v.
@@ -321,9 +365,13 @@ internal data class CensorMaskPlacement(val origin: FloatArray, val extent: Floa
     override fun equals(other: Any?): Boolean =
         other is CensorMaskPlacement &&
             origin.contentEquals(other.origin) &&
-            extent.contentEquals(other.extent)
+            extent.contentEquals(other.extent) &&
+            rotation == other.rotation &&
+            aspect == other.aspect
 
-    override fun hashCode(): Int = 31 * origin.contentHashCode() + extent.contentHashCode()
+    override fun hashCode(): Int =
+        ((31 * origin.contentHashCode() + extent.contentHashCode()) * 31 +
+            rotation.hashCode()) * 31 + aspect.hashCode()
 
     companion object {
         fun of(
@@ -334,6 +382,7 @@ internal data class CensorMaskPlacement(val origin: FloatArray, val extent: Floa
             maskHeight: Int,
             frameWidth: Int,
             frameHeight: Int,
+            rotationDegrees: Float = 0f,
         ): CensorMaskPlacement {
             val extent = floatArrayOf(
                 maskWidth.toFloat() / frameWidth * scale[0],
@@ -343,7 +392,14 @@ internal data class CensorMaskPlacement(val origin: FloatArray, val extent: Floa
                 backgroundAnchor[0] - extent[0] * overlayAnchor[0],
                 backgroundAnchor[1] - extent[1] * overlayAnchor[1],
             )
-            return CensorMaskPlacement(origin, extent)
+            val displayHeight = maskHeight * scale[1]
+            val aspect = if (displayHeight > 0f) maskWidth * scale[0] / displayHeight else 1f
+            return CensorMaskPlacement(
+                origin,
+                extent,
+                rotation = Math.toRadians(rotationDegrees.toDouble()).toFloat(),
+                aspect = aspect,
+            )
         }
     }
 }
