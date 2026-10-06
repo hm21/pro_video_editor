@@ -175,6 +175,8 @@ fun applyTimedImageLayers(
                     layerEndUs = endTimeUs,
                     loop = layer.loop,
                     animationOffsetUs = layer.animationOffsetUs,
+                    animationStartUs = layer.animationStartUs,
+                    animationEndUs = layer.animationEndUs,
                     animations = layer.animations,
                     rasterScaleX = first.rasterScaleX,
                     rasterScaleY = first.rasterScaleY
@@ -238,7 +240,9 @@ fun applyTimedImageLayers(
                         layerEndUs = endTimeUs,
                         animations = layer.animations,
                         rasterScaleX = prepared.rasterScaleX,
-                        rasterScaleY = prepared.rasterScaleY
+                        rasterScaleY = prepared.rasterScaleY,
+                        animationStartUs = layer.animationStartUs,
+                        animationEndUs = layer.animationEndUs
                     )
                 } else {
                     BitmapOverlay.createStaticBitmapOverlay(

@@ -26,6 +26,8 @@ class ImageLayer with TimeRangeMixin {
     this.loop = true,
     this.animationOffset = Duration.zero,
     this.animations = const [],
+    this.animationStartTime,
+    this.animationEndTime,
     this.censor,
   }) : assert(
          startTime == null || endTime == null || startTime < endTime,
@@ -34,6 +36,12 @@ class ImageLayer with TimeRangeMixin {
        assert(
          animationOffset >= Duration.zero,
          'animationOffset must not be negative',
+       ),
+       assert(
+         animationStartTime == null ||
+             animationEndTime == null ||
+             animationStartTime < animationEndTime,
+         'animationStartTime must be before animationEndTime',
        );
 
   /// The image to overlay on the video.
@@ -121,6 +129,27 @@ class ImageLayer with TimeRangeMixin {
   /// and optional [LayerAnimation.curve].
   final List<LayerAnimation> animations;
 
+  /// Where the [animations] count from, when that is not [startTime].
+  ///
+  /// An [AnimationPhase.animateIn] plays from here and an
+  /// [AnimationPhase.loop] starts its first cycle here; the layer itself still
+  /// shows only from [startTime] to [endTime]. Set it, together with
+  /// [animationEndTime], to keep one set of animations running across several
+  /// layers that each show the content for part of the time, such as the
+  /// steps of a text that types itself out or the words of a karaoke caption
+  /// lighting up one by one: every part carries the same animations and the
+  /// same range, so a fade in carries on over the first parts and a wiggle
+  /// does not restart at each one.
+  ///
+  /// **Default**: `null`, which counts from [startTime].
+  final Duration? animationStartTime;
+
+  /// Where the [animations] end, when that is not [endTime]: an
+  /// [AnimationPhase.animateOut] finishes here. See [animationStartTime].
+  ///
+  /// **Default**: `null`, which ends at [endTime].
+  final Duration? animationEndTime;
+
   /// Blurs or pixelates the picture beneath the layer instead of drawing
   /// [image], which then only marks the area to hide. See [LayerCensor].
   ///
@@ -141,6 +170,8 @@ class ImageLayer with TimeRangeMixin {
     bool? loop,
     Duration? animationOffset,
     List<LayerAnimation>? animations,
+    Duration? animationStartTime,
+    Duration? animationEndTime,
     LayerCensor? censor,
   }) {
     return ImageLayer(
@@ -153,6 +184,8 @@ class ImageLayer with TimeRangeMixin {
       loop: loop ?? this.loop,
       animationOffset: animationOffset ?? this.animationOffset,
       animations: animations ?? this.animations,
+      animationStartTime: animationStartTime ?? this.animationStartTime,
+      animationEndTime: animationEndTime ?? this.animationEndTime,
       censor: censor ?? this.censor,
     );
   }
@@ -170,6 +203,8 @@ class ImageLayer with TimeRangeMixin {
       'loop': loop,
       'animationOffset': animationOffset.inMicroseconds,
       'animations': animations.map((a) => a.toMap()).toList(),
+      'animationStartTime': animationStartTime?.inMicroseconds,
+      'animationEndTime': animationEndTime?.inMicroseconds,
       'censor': censor?.toMap(),
     };
   }
@@ -204,6 +239,12 @@ class ImageLayer with TimeRangeMixin {
               ?.map((a) => LayerAnimation.fromMap(a as Map<String, dynamic>))
               .toList() ??
           const [],
+      animationStartTime: map['animationStartTime'] != null
+          ? Duration(microseconds: safeParseInt(map['animationStartTime']))
+          : null,
+      animationEndTime: map['animationEndTime'] != null
+          ? Duration(microseconds: safeParseInt(map['animationEndTime']))
+          : null,
       censor: map['censor'] != null
           ? LayerCensor.fromMap(map['censor'] as Map<String, dynamic>)
           : null,
@@ -227,6 +268,8 @@ class ImageLayer with TimeRangeMixin {
         'loop: $loop, '
         'animationOffset: $animationOffset, '
         'animations: $animations, '
+        'animationStartTime: $animationStartTime, '
+        'animationEndTime: $animationEndTime, '
         'censor: $censor'
         ')';
   }
@@ -244,6 +287,8 @@ class ImageLayer with TimeRangeMixin {
         other.loop == loop &&
         other.animationOffset == animationOffset &&
         listEquals(other.animations, animations) &&
+        other.animationStartTime == animationStartTime &&
+        other.animationEndTime == animationEndTime &&
         other.censor == censor;
   }
 
@@ -258,6 +303,8 @@ class ImageLayer with TimeRangeMixin {
         loop.hashCode ^
         animationOffset.hashCode ^
         animations.hashCode ^
+        animationStartTime.hashCode ^
+        animationEndTime.hashCode ^
         censor.hashCode;
   }
 }

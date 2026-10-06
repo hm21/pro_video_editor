@@ -92,6 +92,10 @@ class VideoSequenceBuilder(
         /** How far into an animated image (GIF) playback begins, in µs. */
         val animationOffsetUs: Long = 0L,
         val animations: List<LayerAnimationConfig> = emptyList(),
+        /** Where [animations] count from, when not [startUs] (-1 = [startUs]). */
+        val animationStartUs: Long = -1L,
+        /** Where [animations] end, when not [endUs] (-1 = [endUs]). */
+        val animationEndUs: Long = -1L,
         /**
          * Size a positioned layer without an explicit [width]/[height] is laid
          * out at, relative to its image's own pixels. Only a clip of another

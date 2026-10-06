@@ -29,6 +29,11 @@ struct ImageLayer {
   let animations: [LayerAnimationConfig]
   /// Blurs or pixelates the picture beneath the layer instead of drawing it.
   var censor: LayerCensorConfig? = nil
+  /// Where the animations count from, when that is not `startUs` (-1 =
+  /// `startUs`).
+  var animationStartUs: Int64 = -1
+  /// Where the animations end, when that is not `endUs` (-1 = `endUs`).
+  var animationEndUs: Int64 = -1
 
   /// The frame to display at composition time [currentTimeUs].
   ///
@@ -384,7 +389,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
           height: layer.height,
           rotation: layer.rotation,
           animations: layer.animations,
-          censor: layer.censor
+          censor: layer.censor,
+          animationStartUs: layer.animationStartUs,
+          animationEndUs: layer.animationEndUs
         ))
     }
   }
@@ -418,7 +425,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     }
 
     let rotated = rotateOverlayAroundCenter(overlay, radians: layer.rotation)
-    let (opacity, animTransform) = computeAnimation(
+    let (opacity, animTransform, untilted) = computeAnimation(
       layer: layer,
       currentTimeUs: currentTimeUs,
       overlayExtent: rotated.extent,
@@ -429,7 +436,12 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         rotated, over: outputImage, opacity: opacity, transform: animTransform)
     }
     let mask = placedOverlay(rotated, opacity: opacity, transform: animTransform)
-    return applyLayerCensor(censor, to: outputImage, mask: mask, frame: imageRect)
+    // A wiggle tilts the hidden area, but its pixelate blocks stay put where
+    // the upright area starts them, as on Android, instead of following the
+    // corner of the box around it.
+    return applyLayerCensor(
+      censor, to: outputImage, mask: mask, frame: imageRect,
+      blockArea: rotated.extent.applying(untilted))
   }
 
   /// Computes the color-filter cube active at the given composition time.

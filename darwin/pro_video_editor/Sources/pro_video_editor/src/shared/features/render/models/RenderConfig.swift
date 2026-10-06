@@ -9,11 +9,20 @@ import Foundation
 
 /// Configuration for a single animation on an image layer.
 struct LayerAnimationConfig {
-  /// The kind of animation: "fade", "slide", or "scale".
+  /// 10°, the tilt of a wiggle without its own `wiggleAngle`.
+  static let defaultWiggleAngle = 0.17453292519943295
+  /// Half the layer's height, the lift of a bounce without its own
+  /// `bounceHeight`.
+  static let defaultBounceHeight = 0.5
+
+  /// The kind of animation: "fade", "slide", "scale", "wiggle", "bounce", or
+  /// "typewriter" / "wordByWord", which the renderer skips because a layer is
+  /// one fixed image.
   let type: String
-  /// When the animation plays: "animateIn", "animateOut", or "animateInOut".
+  /// When the animation plays: "animateIn", "animateOut", "animateInOut", or
+  /// "loop" for as long as the layer is visible.
   let phase: String
-  /// Duration in microseconds.
+  /// Duration in microseconds, or of one cycle of a loop.
   let durationUs: Int64
   /// Easing curve: "linear", "easeIn", "easeOut", or "easeInOut".
   let curve: String
@@ -25,6 +34,10 @@ struct LayerAnimationConfig {
   let slideFrom: CGPoint?
   /// Starting scale factor for scale animations (e.g. 0.0 = invisible, 0.5 = half size).
   let scaleFrom: Double?
+  /// How far a wiggle tilts the layer, in radians, clockwise first.
+  var wiggleAngle: Double? = nil
+  /// How high a bounce lifts the layer, as a multiple of its own height.
+  var bounceHeight: Double? = nil
 
   static func fromArguments(_ args: [String: Any]?) -> LayerAnimationConfig? {
     guard let args = args,
@@ -48,7 +61,9 @@ struct LayerAnimationConfig {
       curve: args["curve"] as? String ?? "linear",
       slideDirection: args["slideDirection"] as? String,
       slideFrom: slideFrom,
-      scaleFrom: (args["scaleFrom"] as? NSNumber)?.doubleValue
+      scaleFrom: (args["scaleFrom"] as? NSNumber)?.doubleValue,
+      wiggleAngle: (args["wiggleAngle"] as? NSNumber)?.doubleValue,
+      bounceHeight: (args["bounceHeight"] as? NSNumber)?.doubleValue
     )
   }
 }
@@ -154,6 +169,11 @@ public struct ImageLayerConfig: Sendable {
   /// Blurs or pixelates the picture beneath the layer instead of drawing
   /// [image], which then only marks the area. `nil` draws the image.
   var censor: LayerCensorConfig? = nil
+  /// Where the animations count from, when that is not `startUs` (-1 =
+  /// `startUs`).
+  var animationStartUs: Int64 = -1
+  /// Where the animations end, when that is not `endUs` (-1 = `endUs`).
+  var animationEndUs: Int64 = -1
 
   static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
     guard let args = args,
@@ -187,7 +207,9 @@ public struct ImageLayerConfig: Sendable {
       loop: loop,
       animationOffsetUs: animationOffsetUs,
       animations: animations,
-      censor: LayerCensorConfig.fromArguments(args["censor"] as? [String: Any])
+      censor: LayerCensorConfig.fromArguments(args["censor"] as? [String: Any]),
+      animationStartUs: (args["animationStartUs"] as? NSNumber)?.int64Value ?? -1,
+      animationEndUs: (args["animationEndUs"] as? NSNumber)?.int64Value ?? -1
     )
   }
 }

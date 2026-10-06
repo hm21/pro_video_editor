@@ -60,6 +60,8 @@ fun applyComposition(
                 loop = imageLayer.loop,
                 animationOffsetUs = imageLayer.animationOffsetUs,
                 animations = imageLayer.animations,
+                animationStartUs = imageLayer.animationStartUs,
+                animationEndUs = imageLayer.animationEndUs,
                 censor = imageLayer.censor
             )
         }

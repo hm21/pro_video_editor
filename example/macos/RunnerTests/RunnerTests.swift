@@ -280,6 +280,155 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(off.y, 0, accuracy: 1e-6)
   }
 
+  // MARK: - Loop, wiggle and bounce
+
+  private func animation(
+    _ type: String, _ phase: String, durationUs: Int64 = 1_000_000, curve: String = "linear",
+    wiggleAngle: Double? = nil, bounceHeight: Double? = nil
+  ) -> LayerAnimationConfig {
+    LayerAnimationConfig(
+      type: type, phase: phase, durationUs: durationUs, curve: curve, slideDirection: nil,
+      slideFrom: nil, scaleFrom: nil, wiggleAngle: wiggleAngle, bounceHeight: bounceHeight)
+  }
+
+  private func animatedLayer(
+    _ animations: [LayerAnimationConfig], startUs: Int64 = 0, endUs: Int64 = 10_000_000,
+    animationStartUs: Int64 = -1, animationEndUs: Int64 = -1
+  ) -> ImageLayer {
+    ImageLayer(
+      frames: [CIImage.empty()], frameEndsUs: [0], loop: true, animationOffsetUs: 0,
+      startUs: startUs, endUs: endUs, x: 0, y: 0, width: nil, height: nil, rotation: 0,
+      animations: animations, censor: nil, animationStartUs: animationStartUs,
+      animationEndUs: animationEndUs)
+  }
+
+  private let animatedOverlay = CGRect(x: 0, y: 0, width: 200, height: 100)
+  private let animatedFrame = CGRect(x: 0, y: 0, width: 1000, height: 500)
+
+  func testLoopRunsFromRestToFullyAwayAndBackOncePerCycle() {
+    let loop = animation("scale", "loop")
+    func value(_ t: Int64) -> Double {
+      animationProgress(loop, currentTimeUs: t, startUs: 0, endUs: -1)!.value
+    }
+    XCTAssertEqual(value(0), 1, accuracy: 1e-9)
+    XCTAssertEqual(value(250_000), 0.5, accuracy: 1e-9)
+    XCTAssertEqual(value(500_000), 0, accuracy: 1e-9)
+    XCTAssertEqual(value(750_000), 0.5, accuracy: 1e-9)
+    XCTAssertEqual(value(7_000_000), 1, accuracy: 1e-9)
+    XCTAssertEqual(value(7_500_000), 0, accuracy: 1e-9)
+  }
+
+  func testLoopCurveShapesTheWayOutLikeAnOutAnimation() {
+    // easeIn: x², with x = 1 at rest. A quarter cycle has x = 0.5.
+    let loop = animation("fade", "loop", curve: "easeIn")
+    let progress = animationProgress(loop, currentTimeUs: 250_000, startUs: 0, endUs: -1)!
+    XCTAssertEqual(progress.value, 0.25, accuracy: 1e-9)
+  }
+
+  func testWiggleLoopSwingsToOneSideAndThenTheOther() {
+    let wiggle = animation("wiggle", "loop")
+    let first = animationProgress(wiggle, currentTimeUs: 250_000, startUs: 0, endUs: -1)!
+    let second = animationProgress(wiggle, currentTimeUs: 750_000, startUs: 0, endUs: -1)!
+    XCTAssertEqual(first.value, 0, accuracy: 1e-9)
+    XCTAssertEqual(first.swing, 1)
+    XCTAssertEqual(second.value, 0, accuracy: 1e-9)
+    XCTAssertEqual(second.swing, -1)
+  }
+
+  func testWiggleTiltsClockwiseAroundTheOverlayCenter() {
+    let layer = animatedLayer([animation("wiggle", "loop", wiggleAngle: .pi / 2)])
+    let (_, transform, _) = computeAnimation(
+      layer: layer, currentTimeUs: 250_000, overlayExtent: animatedOverlay,
+      frameExtent: animatedFrame)
+
+    // Clockwise on screen: the right edge's middle swings down, which is
+    // towards smaller Y in Core Graphics. The center stays put.
+    let rightEdge = CGPoint(x: 200, y: 50).applying(transform)
+    XCTAssertEqual(rightEdge.x, 100, accuracy: 1e-9)
+    XCTAssertEqual(rightEdge.y, -50, accuracy: 1e-9)
+    let center = CGPoint(x: 100, y: 50).applying(transform)
+    XCTAssertEqual(center.x, 100, accuracy: 1e-9)
+    XCTAssertEqual(center.y, 50, accuracy: 1e-9)
+  }
+
+  func testBounceLiftsByAMultipleOfTheOverlayHeight() {
+    let layer = animatedLayer([animation("bounce", "animateIn", bounceHeight: 1.5)])
+    func lift(_ t: Int64) -> CGFloat {
+      computeAnimation(
+        layer: layer, currentTimeUs: t, overlayExtent: animatedOverlay,
+        frameExtent: animatedFrame
+      ).transform.ty
+    }
+    XCTAssertEqual(lift(0), 150, accuracy: 1e-9)
+    XCTAssertEqual(lift(500_000), 75, accuracy: 1e-9)
+    XCTAssertEqual(lift(1_000_000), 0, accuracy: 1e-9)
+  }
+
+  func testScaleAndSlideComposeTheSameInEitherOrder() {
+    // Half way in: half size and half way back from the left edge. The scale
+    // grows the overlay around its center whatever the list order, so the
+    // slide is not shrunk with it, as on Android.
+    let scale = LayerAnimationConfig(
+      type: "scale", phase: "animateIn", durationUs: 1_000_000, curve: "linear",
+      slideDirection: nil, slideFrom: nil, scaleFrom: 0)
+    let slide = LayerAnimationConfig(
+      type: "slide", phase: "animateIn", durationUs: 1_000_000, curve: "linear",
+      slideDirection: "left", slideFrom: nil, scaleFrom: nil)
+    for animations in [[scale, slide], [slide, scale]] {
+      let transform = computeAnimation(
+        layer: animatedLayer(animations), currentTimeUs: 500_000,
+        overlayExtent: animatedOverlay, frameExtent: animatedFrame
+      ).transform
+      let center = CGPoint(x: 100, y: 50).applying(transform)
+      XCTAssertEqual(center.x, 0, accuracy: 1e-9)
+      XCTAssertEqual(center.y, 50, accuracy: 1e-9)
+      let rightEdge = CGPoint(x: 200, y: 50).applying(transform)
+      XCTAssertEqual(rightEdge.x, 50, accuracy: 1e-9)
+    }
+  }
+
+  func testUntiltedPlacementLeavesOutOnlyTheWiggle() {
+    // A quarter into the wiggle cycle it is tilted 90° clockwise; the bounce
+    // still lifts by three quarters of the overlay's height.
+    let layer = animatedLayer([
+      animation("wiggle", "loop", wiggleAngle: .pi / 2),
+      animation("bounce", "animateIn", bounceHeight: 1),
+    ])
+    let (_, transform, untilted) = computeAnimation(
+      layer: layer, currentTimeUs: 250_000, overlayExtent: animatedOverlay,
+      frameExtent: animatedFrame)
+
+    let tilted = CGPoint(x: 200, y: 50).applying(transform)
+    XCTAssertEqual(tilted.x, 100, accuracy: 1e-9)
+    XCTAssertEqual(tilted.y, 25, accuracy: 1e-9)
+    let upright = CGPoint(x: 200, y: 50).applying(untilted)
+    XCTAssertEqual(upright.x, 200, accuracy: 1e-9)
+    XCTAssertEqual(upright.y, 125, accuracy: 1e-9)
+  }
+
+  func testTextRevealsLeaveTheImageAsItIs() {
+    let layer = animatedLayer([
+      animation("typewriter", "animateIn"), animation("wordByWord", "animateOut"),
+    ])
+    let (opacity, transform, _) = computeAnimation(
+      layer: layer, currentTimeUs: 0, overlayExtent: animatedOverlay,
+      frameExtent: animatedFrame)
+    XCTAssertEqual(opacity, 1)
+    XCTAssertTrue(transform.isIdentity)
+  }
+
+  func testAnimationsCountFromTheirOwnRange() {
+    // One part of a layer split over time: it shows from 0.5 s, but its fade
+    // in started with the whole layer at 0 and is halfway there.
+    let layer = animatedLayer(
+      [animation("fade", "animateIn")], startUs: 500_000, endUs: 700_000,
+      animationStartUs: 0, animationEndUs: 2_000_000)
+    let (opacity, _, _) = computeAnimation(
+      layer: layer, currentTimeUs: 500_000, overlayExtent: animatedOverlay,
+      frameExtent: animatedFrame)
+    XCTAssertEqual(opacity, 0.5, accuracy: 1e-9)
+  }
+
   // MARK: - Animated layer frame lookup
 
   // Four frames of 500 ms each: one playthrough lasts 2 s.

@@ -153,4 +153,45 @@ internal class CensorMaskPlacementTest {
         assertFalse(box(0f, 1.3f).coversFrame())
         assertFalse(box(0f, -1.3f).coversFrame())
     }
+
+    @Test
+    fun aWiggleTurnsTheQuadAroundItsCenter() {
+        // The 200 x 100 box in the middle of the frame, turned a quarter
+        // counter-clockwise, as Media3 turns an overlay with 90 degrees: its
+        // right edge now points up, 100 pixels above the center.
+        val placement = CensorMaskPlacement.of(
+            backgroundAnchor = floatArrayOf(0f, 0f),
+            overlayAnchor = floatArrayOf(0f, 0f),
+            scale = floatArrayOf(1f, 1f),
+            maskWidth = 200,
+            maskHeight = 100,
+            frameWidth = frameWidth,
+            frameHeight = frameHeight,
+            rotationDegrees = 90f,
+        )
+
+        assertQuad(1f to 0f, placement.quadCoordinateOf(0f, 0.4f))
+        assertQuad(0f to 0f, placement.quadCoordinateOf(0f, 0f))
+        // Its top edge points left, 50 pixels from the center.
+        assertQuad(0f to 1f, placement.quadCoordinateOf(-0.1f, 0f))
+    }
+
+    @Test
+    fun aTurnedBoxIsMeasuredByTheBoxAroundIt() {
+        fun turned(degrees: Float) = CensorMaskPlacement.of(
+            backgroundAnchor = floatArrayOf(1.15f, 0f),
+            overlayAnchor = floatArrayOf(0f, 0f),
+            scale = floatArrayOf(1f, 1f),
+            maskWidth = 200,
+            maskHeight = 100,
+            frameWidth = frameWidth,
+            frameHeight = frameHeight,
+            rotationDegrees = degrees,
+        )
+
+        // Upright, its left 25 pixels are on the frame; turned upright on its
+        // side, it is only 100 wide and lies wholly past the right edge.
+        assertTrue(turned(0f).coversFrame())
+        assertFalse(turned(90f).coversFrame())
+    }
 }

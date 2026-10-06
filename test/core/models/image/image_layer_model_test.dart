@@ -100,6 +100,27 @@ void main() {
         expect(restored.animationOffset, const Duration(milliseconds: 1250));
       });
 
+      test('restores the animation range', () {
+        final layer = ImageLayer(
+          image: image,
+          startTime: const Duration(seconds: 2),
+          endTime: const Duration(seconds: 3),
+          animationStartTime: const Duration(seconds: 1),
+          animationEndTime: const Duration(seconds: 5),
+        );
+        final restored = ImageLayer.fromMap(layer.toMap());
+
+        expect(restored.animationStartTime, const Duration(seconds: 1));
+        expect(restored.animationEndTime, const Duration(seconds: 5));
+      });
+
+      test('leaves the animation range unset when absent from map', () {
+        final restored = ImageLayer.fromMap({'image': image.toMap()});
+
+        expect(restored.animationStartTime, isNull);
+        expect(restored.animationEndTime, isNull);
+      });
+
       test('defaults animationOffset to zero when absent from map', () {
         final restored = ImageLayer.fromMap({'image': image.toMap()});
 

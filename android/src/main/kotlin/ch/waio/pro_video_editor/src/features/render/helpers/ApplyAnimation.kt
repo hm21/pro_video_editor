@@ -5,6 +5,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.StaticOverlaySettings
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -57,6 +58,195 @@ internal fun applyEasing(t: Double, curve: String): Double {
         }
         else -> t // "linear"
     }
+}
+
+/**
+ * How far an animation has brought a layer back to rest at one moment: [value]
+ * is `1` at rest and `0` fully away (faded out, at the edge, tilted all the
+ * way), and may overshoot either end with an elastic or bounce curve.
+ *
+ * [swing] is the side a wiggle tilts to: `-1` in the second half of a loop
+ * cycle, `1` otherwise.
+ */
+internal data class AnimationProgress(val value: Double, val swing: Float = 1f)
+
+/**
+ * The progress of [anim] at [timeUs], or `null` when it does not play then.
+ *
+ * [startUs] and [endUs] are the range the animation counts from and towards
+ * (`-1` = the start / the end of the video): an in-animation plays over the
+ * first [LayerAnimationConfig.durationUs] of it and an out-animation over the
+ * last. With `animateInOut` both apply and the one further from rest wins.
+ *
+ * A `loop` plays over the whole range, one cycle per duration counted from
+ * [startUs]: the eased value runs from rest to fully away at half a cycle and
+ * back. A wiggle runs that twice per cycle, once to each side (see
+ * [AnimationProgress.swing]). The cycle position is taken from the remainder
+ * of whole microseconds, so a long video does not lose precision.
+ */
+internal fun animationProgress(
+    anim: LayerAnimationConfig,
+    timeUs: Long,
+    startUs: Long,
+    endUs: Long,
+): AnimationProgress? {
+    val durationUs = anim.durationUs
+    if (durationUs <= 0) return null
+
+    val effectiveStartUs = if (startUs == -1L) 0L else startUs
+    val effectiveEndUs = if (endUs == -1L) Long.MAX_VALUE else endUs
+
+    if (anim.phase == "loop") {
+        val elapsed = (timeUs - effectiveStartUs).coerceAtLeast(0L)
+        val inCycle = elapsed % durationUs
+        return if (anim.type == "wiggle") {
+            // Each half of the cycle is one swing out and back.
+            val inSwing = (2 * inCycle) % durationUs
+            val x = abs(1.0 - 2.0 * inSwing / durationUs)
+            AnimationProgress(
+                applyEasing(x, anim.curve),
+                if (2 * inCycle < durationUs) 1f else -1f
+            )
+        } else {
+            val x = abs(1.0 - 2.0 * inCycle / durationUs)
+            AnimationProgress(applyEasing(x, anim.curve))
+        }
+    }
+
+    var inProgress: Double? = null
+    var outProgress: Double? = null
+
+    if (anim.phase == "animateIn" || anim.phase == "animateInOut") {
+        val elapsed = timeUs - effectiveStartUs
+        if (elapsed < durationUs) {
+            inProgress = applyEasing(
+                max(0.0, min(1.0, elapsed.toDouble() / durationUs)),
+                anim.curve
+            )
+        }
+    }
+
+    if (anim.phase == "animateOut" || anim.phase == "animateInOut") {
+        val remaining = effectiveEndUs - timeUs
+        if (remaining < durationUs) {
+            outProgress = applyEasing(
+                max(0.0, min(1.0, remaining.toDouble() / durationUs)),
+                anim.curve
+            )
+        }
+    }
+
+    // Use the minimum progress (most visible animation effect)
+    val progress = when {
+        inProgress != null && outProgress != null -> min(inProgress, outProgress)
+        else -> inProgress ?: outProgress
+    } ?: return null
+    return AnimationProgress(progress)
+}
+
+/**
+ * The composed look of an animated layer at one moment, before Media3 places
+ * it: opacity, the slide and bounce offset in normalized device coordinates
+ * ([-1, 1], +y up), the scale factor and the wiggle tilt.
+ *
+ * [rotationDegrees] is counter-clockwise, as Media3 turns an overlay; a
+ * clockwise wiggle, like Flutter's rotation, is negative here.
+ */
+internal data class OverlayAnimationState(
+    val alpha: Float,
+    val offsetX: Float,
+    val offsetY: Float,
+    val scale: Float,
+    val rotationDegrees: Float,
+)
+
+/**
+ * Composes every animation of a layer at [timeUs]; see [animationProgress]
+ * for when each one plays.
+ *
+ * Opacity and scale multiply, slide and bounce offsets add up and wiggle
+ * angles add up. A bounce lifts the layer by a multiple of its own height
+ * ([halfNormH] is half of it), a wiggle tilts it around its own center. Text
+ * reveals (`typewriter`, `wordByWord`) change what the image shows, which a
+ * fixed image cannot do, so they are skipped here; the caller passes one layer
+ * per step instead.
+ *
+ * Values that an elastic or bounce curve can push out of range are clamped:
+ * opacity to [0, 1] and scale to at least 0.
+ */
+internal fun overlayAnimationState(
+    animations: List<LayerAnimationConfig>,
+    timeUs: Long,
+    startUs: Long,
+    endUs: Long,
+    baseNormX: Float,
+    baseNormY: Float,
+    halfNormW: Float,
+    halfNormH: Float,
+    layerX: Float,
+    layerY: Float,
+    videoWidth: Int,
+    videoHeight: Int,
+): OverlayAnimationState {
+    var alpha = 1.0f
+    var offsetX = 0f
+    var offsetY = 0f
+    var scale = 1f
+    var rotation = 0.0
+
+    for (anim in animations) {
+        val progress = animationProgress(anim, timeUs, startUs, endUs) ?: continue
+        val p = progress.value
+        val invP = (1.0 - p).toFloat()
+
+        when (anim.type) {
+            "fade" -> alpha *= p.toFloat()
+            "slide" -> {
+                val slideFromX = anim.slideFromX
+                val slideFromY = anim.slideFromY
+                // A caller-chosen start point wins over the edge the
+                // direction would otherwise pick.
+                val off = if (slideFromX != null && slideFromY != null) {
+                    slideFromOffset(
+                        invP,
+                        slideFromX.toFloat(), slideFromY.toFloat(),
+                        layerX, layerY,
+                        videoWidth, videoHeight
+                    )
+                } else {
+                    slideOffset(
+                        anim.slideDirection, invP,
+                        baseNormX, baseNormY, halfNormW, halfNormH
+                    )
+                }
+                offsetX += off.x
+                offsetY += off.y
+            }
+            "scale" -> {
+                val scaleFrom = anim.scaleFrom?.toFloat() ?: 0f
+                scale *= scaleFrom + (1f - scaleFrom) * p.toFloat()
+            }
+            "wiggle" -> {
+                val angle = anim.wiggleAngle ?: LayerAnimationConfig.DEFAULT_WIGGLE_ANGLE
+                rotation += progress.swing * (1.0 - p) * angle
+            }
+            "bounce" -> {
+                val height = anim.bounceHeight ?: LayerAnimationConfig.DEFAULT_BOUNCE_HEIGHT
+                // Y counts upwards; the layer's height is twice halfNormH.
+                offsetY += (invP * height * 2.0 * halfNormH).toFloat()
+            }
+            // "typewriter", "wordByWord": see the function's documentation.
+        }
+    }
+
+    return OverlayAnimationState(
+        alpha = alpha.coerceIn(0f, 1f),
+        offsetX = offsetX,
+        offsetY = offsetY,
+        scale = scale.coerceAtLeast(0f),
+        // Flutter turns clockwise, Media3 counter-clockwise.
+        rotationDegrees = -Math.toDegrees(rotation).toFloat(),
+    )
 }
 
 /**
@@ -226,6 +416,12 @@ internal class AnimatedBitmapOverlay(
     private val layerStartUs: Long,
     private val layerEndUs: Long,
     private val loop: Boolean,
+    /**
+     * The range [animations] count from and towards, when it is not the
+     * layer's own (`-1` = [layerStartUs] / [layerEndUs]).
+     */
+    private val animationStartUs: Long = -1L,
+    private val animationEndUs: Long = -1L,
     /** How far into the animation playback begins; see [animatedFrameIndex]. */
     private val animationOffsetUs: Long = 0L,
     private val animations: List<LayerAnimationConfig>,
@@ -254,7 +450,9 @@ internal class AnimatedBitmapOverlay(
         layerEndUs: Long,
         animations: List<LayerAnimationConfig>,
         rasterScaleX: Float = 1f,
-        rasterScaleY: Float = 1f
+        rasterScaleY: Float = 1f,
+        animationStartUs: Long = -1L,
+        animationEndUs: Long = -1L
     ) : this(
         frames = listOf(bitmap),
         frameDurationsUs = listOf(0L),
@@ -269,6 +467,8 @@ internal class AnimatedBitmapOverlay(
         layerStartUs = layerStartUs,
         layerEndUs = layerEndUs,
         loop = false,
+        animationStartUs = animationStartUs,
+        animationEndUs = animationEndUs,
         animations = animations,
         rasterScaleX = rasterScaleX,
         rasterScaleY = rasterScaleY
@@ -290,103 +490,38 @@ internal class AnimatedBitmapOverlay(
     ]
 
     override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings {
-        var alpha = 1.0f
-        var offsetX = 0f
-        var offsetY = 0f
-        var scaleX = rasterScaleX
-        var scaleY = rasterScaleY
-
         // Layer half-size in [-1, 1] units (canvas spans [-1, 1]).
         val halfNormW = imageWidth.toFloat() / videoWidth
         val halfNormH = imageHeight.toFloat() / videoHeight
 
-        val effectiveStartUs = if (layerStartUs == -1L) 0L else layerStartUs
-        val effectiveEndUs = if (layerEndUs == -1L) Long.MAX_VALUE else layerEndUs
-
-        for (anim in animations) {
-            val durationUs = anim.durationUs
-            if (durationUs <= 0) continue
-
-            // Determine progress for animateIn and/or animateOut
-            var inProgress: Double? = null
-            var outProgress: Double? = null
-
-            if (anim.phase == "animateIn" || anim.phase == "animateInOut") {
-                val elapsed = presentationTimeUs - effectiveStartUs
-                if (elapsed < durationUs) {
-                    inProgress = applyEasing(
-                        max(0.0, min(1.0, elapsed.toDouble() / durationUs)),
-                        anim.curve
-                    )
-                }
-            }
-
-            if (anim.phase == "animateOut" || anim.phase == "animateInOut") {
-                val remaining = effectiveEndUs - presentationTimeUs
-                if (remaining < durationUs) {
-                    outProgress = applyEasing(
-                        max(0.0, min(1.0, remaining.toDouble() / durationUs)),
-                        anim.curve
-                    )
-                }
-            }
-
-            // Use the minimum progress (most visible animation effect)
-            val progress: Double? = when {
-                inProgress != null && outProgress != null -> min(inProgress, outProgress)
-                else -> inProgress ?: outProgress
-            }
-
-            if (progress == null) continue
-
-            when (anim.type) {
-                "fade" -> alpha *= progress.toFloat()
-                "slide" -> {
-                    val invP = (1.0 - progress).toFloat()
-                    val slideFromX = anim.slideFromX
-                    val slideFromY = anim.slideFromY
-                    // A caller-chosen start point wins over the edge the
-                    // direction would otherwise pick.
-                    val off = if (slideFromX != null && slideFromY != null) {
-                        slideFromOffset(
-                            invP,
-                            slideFromX.toFloat(), slideFromY.toFloat(),
-                            layerX, layerY,
-                            videoWidth, videoHeight
-                        )
-                    } else {
-                        slideOffset(
-                            anim.slideDirection, invP,
-                            baseNormX, baseNormY, halfNormW, halfNormH
-                        )
-                    }
-                    offsetX += off.x
-                    offsetY += off.y
-                }
-                "scale" -> {
-                    val scaleFrom = anim.scaleFrom?.toFloat() ?: 0f
-                    val factor = scaleFrom + (1f - scaleFrom) * progress.toFloat()
-                    scaleX *= factor
-                    scaleY *= factor
-                }
-            }
-        }
-
-        // Clamp values — elastic/bounce curves can overshoot [0,1]
-        val clampedAlpha = alpha.coerceIn(0f, 1f)
-        val clampedScaleX = scaleX.coerceAtLeast(0f)
-        val clampedScaleY = scaleY.coerceAtLeast(0f)
+        val state = overlayAnimationState(
+            animations = animations,
+            timeUs = presentationTimeUs,
+            startUs = if (animationStartUs == -1L) layerStartUs else animationStartUs,
+            endUs = if (animationEndUs == -1L) layerEndUs else animationEndUs,
+            baseNormX = baseNormX,
+            baseNormY = baseNormY,
+            halfNormW = halfNormW,
+            halfNormH = halfNormH,
+            layerX = layerX,
+            layerY = layerY,
+            videoWidth = videoWidth,
+            videoHeight = videoHeight,
+        )
 
         // Media3 clamps each anchor to [-1, 1], so a fully off-screen slide is
         // split across the background and overlay anchors (see resolveAnchor).
-        val anchorX = resolveAnchor(baseNormX + offsetX, halfNormW)
-        val anchorY = resolveAnchor(baseNormY + offsetY, halfNormH)
+        val anchorX = resolveAnchor(baseNormX + state.offsetX, halfNormW)
+        val anchorY = resolveAnchor(baseNormY + state.offsetY, halfNormH)
 
+        // Media3 turns the overlay around its own center, in pixels rather
+        // than in the stretched [-1, 1] square, so the tilt keeps its shape.
         return StaticOverlaySettings.Builder()
-            .setAlphaScale(clampedAlpha)
+            .setAlphaScale(state.alpha)
             .setBackgroundFrameAnchor(anchorX.backgroundAnchor, anchorY.backgroundAnchor)
             .setOverlayFrameAnchor(anchorX.overlayAnchor, anchorY.overlayAnchor)
-            .setScale(clampedScaleX, clampedScaleY)
+            .setScale(rasterScaleX * state.scale, rasterScaleY * state.scale)
+            .setRotationDegrees(state.rotationDegrees)
             .build()
     }
 }

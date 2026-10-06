@@ -1,3 +1,10 @@
+## 2.27.0
+- **FEAT**(android, iOS, macOS): `LayerAnimationType.wiggle` tilts an image layer by `LayerAnimation.wiggleAngle` and `LayerAnimationType.bounce` lifts it by `LayerAnimation.bounceHeight` times its height, censor layers included.
+- **FEAT**(android, iOS, macOS): `AnimationPhase.loop` repeats an animation for as long as the layer is visible, one cycle per `duration`.
+- **FEAT**(android, iOS, macOS): `ImageLayer.animationStartTime`/`animationEndTime` let several layers that each show part of one overlay share one run of animations instead of restarting them.
+- **FEAT**: `LayerAnimationType.typewriter` and `wordByWord` mirror `pro_image_editor`'s text reveals so animations convert between the packages; the renderer skips them.
+- **FIX**(iOS, macOS): A slide and a scale on the same layer now compose the same in either list order, as on Android.
+
 ## 2.26.0
 - **FEAT**(android, iOS, macOS): `VideoRenderData.customEffects` renders video effects the app writes itself in native code: a GLSL shader on Android, Core Image on iOS and macOS, registered under an id with `CustomVideoEffects.register` and named by a `CustomVideoEffect`, with its own params and time range. An effect can ask for earlier frames of the same clip, counted on the rendered video, so an effect such as an echo trail exports the same however the clip was played. A render that names an id nothing is registered under fails. On iOS and macOS a render with a `VideoRenderData.composition` skips them for now.
 
