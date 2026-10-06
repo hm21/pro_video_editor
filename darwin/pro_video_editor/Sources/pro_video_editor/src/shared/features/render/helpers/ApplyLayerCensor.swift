@@ -11,11 +11,13 @@ import Foundation
 /// animation's opacity folded into the alpha.
 ///
 /// The blur repeats the frame's edge pixels beyond it, so an area at the edge
-/// does not darken. Pixelate counts its blocks from the top-left corner of the
-/// mask's extent, so the area starts on whole blocks, and fills each with the
-/// pixel at its start + `block / 2`, as the Android renderer does.
+/// does not darken. Pixelate counts its blocks from the top-left corner of
+/// [blockArea], the mask's extent unless a wiggle tilts the mask, so the area
+/// starts on whole blocks, and fills each with the pixel at its start +
+/// `block / 2`, as the Android renderer does.
 func applyLayerCensor(
-  _ censor: LayerCensorConfig, to image: CIImage, mask: CIImage, frame: CGRect
+  _ censor: LayerCensorConfig, to image: CIImage, mask: CIImage, frame: CGRect,
+  blockArea: CGRect? = nil
 ) -> CIImage {
   // Whole pixels: a crop through a pixel leaves it partly transparent, which
   // the blend below would darken into a seam along the area's edge. Outside
@@ -29,7 +31,8 @@ func applyLayerCensor(
   case .blur:
     hidden = censorBlurred(image, sigma: censor.strength, frame: frame)
   case .pixelate:
-    let anchor = CGPoint(x: mask.extent.minX.rounded(), y: mask.extent.maxY.rounded())
+    let blocks = blockArea ?? mask.extent
+    let anchor = CGPoint(x: blocks.minX.rounded(), y: blocks.maxY.rounded())
     hidden = censorPixelated(image, block: censor.blockSize, frame: frame, anchor: anchor)
   }
 

@@ -336,7 +336,7 @@ class RunnerTests: XCTestCase {
 
   func testWiggleTiltsClockwiseAroundTheOverlayCenter() {
     let layer = animatedLayer([animation("wiggle", "loop", wiggleAngle: .pi / 2)])
-    let (_, transform) = computeAnimation(
+    let (_, transform, _) = computeAnimation(
       layer: layer, currentTimeUs: 250_000, overlayExtent: animatedOverlay,
       frameExtent: animatedFrame)
 
@@ -363,11 +363,53 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(lift(1_000_000), 0, accuracy: 1e-9)
   }
 
+  func testScaleAndSlideComposeTheSameInEitherOrder() {
+    // Half way in: half size and half way back from the left edge. The scale
+    // grows the overlay around its center whatever the list order, so the
+    // slide is not shrunk with it, as on Android.
+    let scale = LayerAnimationConfig(
+      type: "scale", phase: "animateIn", durationUs: 1_000_000, curve: "linear",
+      slideDirection: nil, slideFrom: nil, scaleFrom: 0)
+    let slide = LayerAnimationConfig(
+      type: "slide", phase: "animateIn", durationUs: 1_000_000, curve: "linear",
+      slideDirection: "left", slideFrom: nil, scaleFrom: nil)
+    for animations in [[scale, slide], [slide, scale]] {
+      let transform = computeAnimation(
+        layer: animatedLayer(animations), currentTimeUs: 500_000,
+        overlayExtent: animatedOverlay, frameExtent: animatedFrame
+      ).transform
+      let center = CGPoint(x: 100, y: 50).applying(transform)
+      XCTAssertEqual(center.x, 0, accuracy: 1e-9)
+      XCTAssertEqual(center.y, 50, accuracy: 1e-9)
+      let rightEdge = CGPoint(x: 200, y: 50).applying(transform)
+      XCTAssertEqual(rightEdge.x, 50, accuracy: 1e-9)
+    }
+  }
+
+  func testUntiltedPlacementLeavesOutOnlyTheWiggle() {
+    // A quarter into the wiggle cycle it is tilted 90° clockwise; the bounce
+    // still lifts by three quarters of the overlay's height.
+    let layer = animatedLayer([
+      animation("wiggle", "loop", wiggleAngle: .pi / 2),
+      animation("bounce", "animateIn", bounceHeight: 1),
+    ])
+    let (_, transform, untilted) = computeAnimation(
+      layer: layer, currentTimeUs: 250_000, overlayExtent: animatedOverlay,
+      frameExtent: animatedFrame)
+
+    let tilted = CGPoint(x: 200, y: 50).applying(transform)
+    XCTAssertEqual(tilted.x, 100, accuracy: 1e-9)
+    XCTAssertEqual(tilted.y, 25, accuracy: 1e-9)
+    let upright = CGPoint(x: 200, y: 50).applying(untilted)
+    XCTAssertEqual(upright.x, 200, accuracy: 1e-9)
+    XCTAssertEqual(upright.y, 125, accuracy: 1e-9)
+  }
+
   func testTextRevealsLeaveTheImageAsItIs() {
     let layer = animatedLayer([
       animation("typewriter", "animateIn"), animation("wordByWord", "animateOut"),
     ])
-    let (opacity, transform) = computeAnimation(
+    let (opacity, transform, _) = computeAnimation(
       layer: layer, currentTimeUs: 0, overlayExtent: animatedOverlay,
       frameExtent: animatedFrame)
     XCTAssertEqual(opacity, 1)
@@ -380,7 +422,7 @@ class RunnerTests: XCTestCase {
     let layer = animatedLayer(
       [animation("fade", "animateIn")], startUs: 500_000, endUs: 700_000,
       animationStartUs: 0, animationEndUs: 2_000_000)
-    let (opacity, _) = computeAnimation(
+    let (opacity, _, _) = computeAnimation(
       layer: layer, currentTimeUs: 500_000, overlayExtent: animatedOverlay,
       frameExtent: animatedFrame)
     XCTAssertEqual(opacity, 0.5, accuracy: 1e-9)

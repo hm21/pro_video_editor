@@ -301,6 +301,17 @@ void main() {
         expect(restored.wiggleAngle, 1.0);
         expect(restored.bounceHeight, 2.0);
       });
+
+      test('reads a whole-number scale and a duration sent as numbers', () {
+        final restored = LayerAnimation.fromMap({
+          'type': 'scale',
+          'phase': 'animateIn',
+          'durationUs': 500000.0,
+          'scaleFrom': 1,
+        });
+        expect(restored.scaleFrom, 1.0);
+        expect(restored.duration, const Duration(milliseconds: 500));
+      });
     });
 
     group('wiggle and bounce', () {

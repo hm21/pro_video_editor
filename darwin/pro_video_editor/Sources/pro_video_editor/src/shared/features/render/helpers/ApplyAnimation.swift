@@ -185,28 +185,29 @@ func animationProgress(
 }
 
 /// Computes animation transforms and opacity for overlaying an image layer.
-/// Returns (opacity, additionalTransform) to apply to the overlay.
+/// Returns the opacity and the transform to apply to the overlay, and
+/// `untilted`, the same transform without a wiggle's tilt.
 ///
 /// The animations count from the layer's `animationStartUs` / `animationEndUs`
 /// where set, else from its own time range. Opacity and scale multiply, slide
-/// offsets add up. A wiggle tilts the overlay around its own center before
-/// anything else moves it, and a bounce lifts it by a multiple of its own
-/// height after it is scaled, the order the editor preview composes them in.
-/// Text reveals ("typewriter", "wordByWord") change what the image shows,
-/// which a fixed image cannot do, so they are skipped; the caller passes one
-/// layer per step instead.
+/// and bounce offsets add up. Whatever their order in the list, a wiggle tilts
+/// and a scale grows the overlay around its own center before slides and
+/// bounces move it, as on Android and in the editor preview; a bounce lifts it
+/// by a multiple of its unscaled height. Text reveals ("typewriter",
+/// "wordByWord") change what the image shows, which a fixed image cannot do,
+/// so they are skipped; the caller passes one layer per step instead.
 func computeAnimation(
   layer: ImageLayer,
   currentTimeUs: Int64,
   overlayExtent: CGRect,
   frameExtent: CGRect
-) -> (opacity: Double, transform: CGAffineTransform) {
+) -> (opacity: Double, transform: CGAffineTransform, untilted: CGAffineTransform) {
   var opacity = 1.0
-  var animTransform = CGAffineTransform.identity
+  var scale: CGFloat = 1
+  // Core Graphics pixels, Y up.
+  var offset = CGPoint.zero
   // Clockwise, in radians, like Flutter's rotation.
   var wiggle = 0.0
-  // Upwards, in Core Graphics pixels.
-  var lift: CGFloat = 0
 
   let startUs = layer.animationStartUs == -1 ? layer.startUs : layer.animationStartUs
   let endUs = layer.animationEndUs == -1 ? layer.endUs : layer.animationEndUs
@@ -244,18 +245,12 @@ func computeAnimation(
         // never asked to move.
         off = .zero
       }
-      animTransform = animTransform.translatedBy(x: off.x, y: off.y)
+      offset.x += off.x
+      offset.y += off.y
 
     case "scale":
       let scaleFrom = CGFloat(anim.scaleFrom ?? 0.0)
-      let currentScale = scaleFrom + (1.0 - scaleFrom) * CGFloat(p)
-      let cx = overlayExtent.midX
-      let cy = overlayExtent.midY
-      animTransform =
-        animTransform
-        .translatedBy(x: cx, y: cy)
-        .scaledBy(x: currentScale, y: currentScale)
-        .translatedBy(x: -cx, y: -cy)
+      scale *= scaleFrom + (1.0 - scaleFrom) * CGFloat(p)
 
     case "wiggle":
       let angle = anim.wiggleAngle ?? LayerAnimationConfig.defaultWiggleAngle
@@ -263,31 +258,32 @@ func computeAnimation(
 
     case "bounce":
       let height = anim.bounceHeight ?? LayerAnimationConfig.defaultBounceHeight
-      lift += CGFloat((1 - p) * height) * overlayExtent.height
+      offset.y += CGFloat((1 - p) * height) * overlayExtent.height
 
     default:
       break
     }
   }
 
-  // Clamp values — elastic/bounce curves can overshoot [0,1]
+  // Clamp values — elastic/bounce curves can overshoot [0,1]; a scale below
+  // 0 would turn the overlay inside out, where Android draws nothing.
   opacity = max(0, min(1, opacity))
+  scale = max(0, scale)
 
-  var transform = animTransform
-  if wiggle != 0 {
-    // Core Graphics turns counter-clockwise, so the angle is negated.
-    let cx = overlayExtent.midX
-    let cy = overlayExtent.midY
-    let tilt = CGAffineTransform(translationX: cx, y: cy)
-      .rotated(by: CGFloat(-wiggle))
+  let cx = overlayExtent.midX
+  let cy = overlayExtent.midY
+  let move = CGAffineTransform(translationX: offset.x, y: offset.y)
+  func placed(tilt: Double) -> CGAffineTransform {
+    guard scale != 1 || tilt != 0 else { return move }
+    // Core Graphics turns counter-clockwise, so the clockwise tilt is negated.
+    return CGAffineTransform(translationX: cx, y: cy)
+      .rotated(by: CGFloat(-tilt))
+      .scaledBy(x: scale, y: scale)
       .translatedBy(x: -cx, y: -cy)
-    transform = tilt.concatenating(transform)
-  }
-  if lift != 0 {
-    transform = transform.concatenating(CGAffineTransform(translationX: 0, y: lift))
+      .concatenating(move)
   }
 
-  return (opacity, transform)
+  return (opacity, placed(tilt: wiggle), placed(tilt: 0))
 }
 
 /// Composites an overlay image onto the output with animation effects applied.

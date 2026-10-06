@@ -282,7 +282,8 @@ class LayerAnimation {
   final double? wiggleAngle;
 
   /// How high a [LayerAnimationType.bounce] lifts the layer, as a multiple of
-  /// the layer's own height: `0.5` lifts it by half its height.
+  /// the layer's own height: `0.5` lifts it by half its height. A layer turned
+  /// by [ImageLayer.rotation] counts the height of the box around it.
   ///
   /// Defaults to [defaultBounceHeight] when not set.
   final double? bounceHeight;
@@ -307,7 +308,7 @@ class LayerAnimation {
     return LayerAnimation(
       type: LayerAnimationType.values.byName(map['type'] as String),
       phase: AnimationPhase.values.byName(map['phase'] as String),
-      duration: Duration(microseconds: map['durationUs'] as int),
+      duration: Duration(microseconds: (map['durationUs'] as num).toInt()),
       curve: AnimationCurve.values.byName(
         (map['curve'] as String?) ?? 'linear',
       ),
@@ -317,7 +318,7 @@ class LayerAnimation {
       slideFrom: map['slideFrom'] != null
           ? safeParseOffset(map['slideFrom'] as Map<String, dynamic>)
           : null,
-      scaleFrom: map['scaleFrom'] as double?,
+      scaleFrom: (map['scaleFrom'] as num?)?.toDouble(),
       wiggleAngle: (map['wiggleAngle'] as num?)?.toDouble(),
       bounceHeight: (map['bounceHeight'] as num?)?.toDouble(),
     );
