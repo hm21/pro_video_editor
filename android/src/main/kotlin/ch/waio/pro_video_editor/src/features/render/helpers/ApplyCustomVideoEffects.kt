@@ -14,8 +14,6 @@ import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
  *
  * @param videoEffects List to add the effects to
  * @param effects The custom effects of the render, each with its time range
- * @param playbackSpeed The render-wide speed change that follows later in the
- *   chain, so the effects follow the output timeline
  * @throws IllegalArgumentException when nothing is registered under an
  *   effect's id, so the render fails before it starts instead of exporting
  *   without the effect
@@ -24,7 +22,6 @@ import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 fun applyCustomVideoEffects(
     videoEffects: MutableList<Effect>,
     effects: List<CustomVideoEffectConfig>,
-    playbackSpeed: Float?,
 ) {
     if (effects.isEmpty()) return
     for (effect in effects) {
@@ -34,6 +31,6 @@ fun applyCustomVideoEffects(
     }
     Log.d(RENDER_TAG, "Applying ${effects.size} custom video effect(s): ${effects.joinToString { it.id }}")
     for (effect in effects) {
-        videoEffects += CustomVideoEffectGlEffect(effect).withSpeedChange(playbackSpeed)
+        videoEffects += CustomVideoEffectGlEffect(effect)
     }
 }

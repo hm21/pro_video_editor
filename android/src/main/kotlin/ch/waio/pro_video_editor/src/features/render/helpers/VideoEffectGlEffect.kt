@@ -2,7 +2,6 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import android.content.Context
 import android.opengl.GLES20
-import androidx.media3.common.C
 import androidx.media3.common.VideoFrameProcessingException
 import androidx.media3.common.util.GlProgram
 import androidx.media3.common.util.GlUtil
@@ -26,25 +25,14 @@ import ch.waio.pro_video_editor.src.features.render.models.VideoEffectFrame
  *
  * A frame with a glow takes extra passes, see [VideoEffectGlow].
  *
- * The effect runs ahead of a clip's `SpeedChangeEffect`, so a clip with a
- * [playbackSpeed] hands it timestamps from before the speed change. They are
- * moved to where that effect puts the frame, so the effects follow the
- * rendered video, as on iOS and in the preview, and a flashing effect keeps
- * its rate on a sped-up clip.
+ * Every speed change runs ahead of it, so it sees each frame on the rendered
+ * timeline, as on iOS and in the preview, and a flashing effect keeps its
+ * rate on sped-up video.
  */
 @UnstableApi
 class VideoEffectGlEffect(
     private val effects: List<VideoEffectConfig>,
-    private val playbackSpeed: Float = 1f,
 ) : GlEffect {
-
-    /**
-     * This effect ahead of one more `SpeedChangeEffect` of [speed], on top of
-     * [playbackSpeed]: a clip's own speed, or the render-wide one.
-     */
-    fun withSpeedChange(speed: Float?): VideoEffectGlEffect =
-        if (speed == null || speed <= 0f || speed == 1f) this
-        else VideoEffectGlEffect(effects, playbackSpeed * speed)
 
     override fun toGlShaderProgram(context: Context, useHdr: Boolean): GlShaderProgram {
         if (useHdr) {
@@ -53,7 +41,7 @@ class VideoEffectGlEffect(
             // `RenderVideo.hasGpuEffects` counts effects; this guards that gate.
             throw VideoFrameProcessingException("Video effects do not support HDR input")
         }
-        return VideoEffectShaderProgram(useHdr, effects, playbackSpeed)
+        return VideoEffectShaderProgram(useHdr, effects)
     }
 
     override fun isNoOp(inputWidth: Int, inputHeight: Int): Boolean = effects.isEmpty()
@@ -62,15 +50,11 @@ class VideoEffectGlEffect(
     private class VideoEffectShaderProgram(
         useHdr: Boolean,
         private val effects: List<VideoEffectConfig>,
-        private val playbackSpeed: Float,
     ) : BaseGlShaderProgram(useHdr, /* texturePoolCapacity= */ 1) {
 
         private val glProgram: GlProgram
         private var width = 0
         private var height = 0
-
-        /** The first timestamp of the current input stream, where a speed change anchors. */
-        private var streamStartUs = C.TIME_UNSET
 
         /** The glow passes, created the first time a frame glows. */
         private var glow: VideoEffectGlow? = null
@@ -92,11 +76,7 @@ class VideoEffectGlEffect(
 
         override fun drawFrame(inputTexId: Int, presentationTimeUs: Long) {
             try {
-                if (streamStartUs == C.TIME_UNSET) streamStartUs = presentationTimeUs
-                val timelineUs = VideoEffectConfig.timeAfterSpeedChangeUs(
-                    presentationTimeUs, streamStartUs, playbackSpeed
-                )
-                val frame = VideoEffectConfig.resolve(effects, timelineUs)
+                val frame = VideoEffectConfig.resolve(effects, presentationTimeUs)
                 // A glowing frame is drawn into the glow's intermediate first,
                 // which then screens the halo over it into the output.
                 val glow = if (frame.glow > 0.0) glow ?: VideoEffectGlow().also { glow = it } else null
@@ -170,18 +150,6 @@ class VideoEffectGlEffect(
                     frame.wavePhase.toFloat(),
                 ),
             )
-        }
-
-        // A speed change starts over from the first frame of every input
-        // stream, and so does this effect's mapping.
-        override fun signalEndOfCurrentInputStream() {
-            super.signalEndOfCurrentInputStream()
-            streamStartUs = C.TIME_UNSET
-        }
-
-        override fun flush() {
-            super.flush()
-            streamStartUs = C.TIME_UNSET
         }
 
         override fun release() {

@@ -1,3 +1,6 @@
+## 2.29.1
+- **FIX**(android): On a sped-up segment, image layers with their animations and keyframes, timed color filters and the frame rate cap follow the output timeline, as on iOS and macOS.
+
 ## 2.29.0
 - **FEAT**(android, iOS, macOS): `ImageLayer.keyframes` and `VideoLayer.keyframes` move a layer between `TimelineKeyframe`s (position, size, rotation, opacity) with easing; layer animations play on top.
 - **FEAT**(android, iOS, macOS): `LayerAnimation.loopStart`/`loopEnd` limit a loop to part of a layer, e.g. the stretch between two keyframes.

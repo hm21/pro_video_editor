@@ -956,6 +956,199 @@ void main() {
     }, skip: kIsWeb);
   });
 
+  group('Sped-up segments', () {
+    // The 1280x720 source, read back at 200 px high; a point is given in
+    // source pixels.
+    bool magentaAt(_Frame f, double x, double y) =>
+        _isMagenta(f.at(x / 1280, y / 720));
+
+    // The first 4 s of the source at double speed: 2 s of output.
+    final spedUp = VideoSegment(
+      video: h264Video,
+      endTime: const Duration(seconds: 4),
+      playbackSpeed: 2,
+    );
+
+    Future<EditorVideo> render(
+      List<ImageLayer> layers, {
+      List<VideoSegment>? segments,
+    }) async {
+      final bytes = await pve.renderVideo(
+        VideoRenderData(
+          videoSegments: segments ?? [spedUp],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: layers,
+        ),
+      );
+      return EditorVideo.memory(bytes);
+    }
+
+    Future<ImageLayer> box({
+      Duration? start,
+      Duration? end,
+      List<TimelineKeyframe> keyframes = const [],
+    }) async => ImageLayer(
+      image: EditorLayerImage.memory(
+        await _solidPng(_magenta, width: 200, height: 100),
+      ),
+      offset: const Offset(540, 310),
+      size: const Size(200, 100),
+      startTime: start,
+      endTime: end,
+      keyframes: keyframes,
+    );
+
+    testWidgets('an image layer shows over its output time range', (
+      tester,
+    ) async {
+      final out = await render([
+        await box(
+          start: const Duration(seconds: 1),
+          end: const Duration(seconds: 2),
+        ),
+      ]);
+
+      // At 0.5 s of output the source is at 1 s, where a layer timed on the
+      // source would already show.
+      final before = await frameOf(out, at: const Duration(milliseconds: 500));
+      expect(magentaAt(before, 640, 360), isFalse, reason: 'not yet');
+      final inside = await frameOf(out, at: const Duration(milliseconds: 1500));
+      expect(magentaAt(inside, 640, 360), isTrue, reason: 'showing');
+    }, skip: kIsWeb);
+
+    testWidgets('keyframes move a layer on the output timeline', (
+      tester,
+    ) async {
+      // From (100, 100) at 0 s to (900, 500) at 2 s of output.
+      final out = await render([
+        await box(
+          keyframes: const [
+            TimelineKeyframe(time: Duration.zero, offset: Offset(100, 100)),
+            TimelineKeyframe(
+              time: Duration(seconds: 2),
+              offset: Offset(900, 500),
+            ),
+          ],
+        ),
+      ]);
+
+      // Half way at 1 s, centred on (600, 350); timed on the source it would
+      // already rest on (900, 500).
+      final mid = await frameOf(out, at: const Duration(milliseconds: 1000));
+      expect(magentaAt(mid, 600, 350), isTrue, reason: 'half way');
+      expect(magentaAt(mid, 1000, 550), isFalse, reason: 'not there yet');
+    }, skip: kIsWeb);
+
+    testWidgets('a layer after a sped-up segment keeps its time', (
+      tester,
+    ) async {
+      // 2 s of source at double speed, then 2 s at normal speed: the second
+      // segment runs from 1 s to 3 s of output.
+      final out = await render(
+        [
+          await box(
+            start: const Duration(milliseconds: 1500),
+            end: const Duration(seconds: 3),
+          ),
+        ],
+        segments: [
+          VideoSegment(
+            video: h264Video,
+            endTime: const Duration(seconds: 2),
+            playbackSpeed: 2,
+          ),
+          VideoSegment(
+            video: h264Video,
+            startTime: const Duration(seconds: 2),
+            endTime: const Duration(seconds: 4),
+          ),
+        ],
+      );
+
+      final first = await frameOf(out, at: const Duration(milliseconds: 800));
+      expect(magentaAt(first, 640, 360), isFalse, reason: 'first segment');
+      final early = await frameOf(out, at: const Duration(milliseconds: 1250));
+      expect(magentaAt(early, 640, 360), isFalse, reason: 'not yet');
+      final inside = await frameOf(out, at: const Duration(milliseconds: 2000));
+      expect(magentaAt(inside, 640, 360), isTrue, reason: 'showing');
+    }, skip: kIsWeb);
+
+    testWidgets('an image layer on a slowed-down segment keeps its time', (
+      tester,
+    ) async {
+      // The first 2 s of the source at half speed: 4 s of output.
+      final out = await render(
+        [
+          await box(
+            start: const Duration(seconds: 2),
+            end: const Duration(seconds: 3),
+          ),
+        ],
+        segments: [
+          VideoSegment(
+            video: h264Video,
+            endTime: const Duration(seconds: 2),
+            playbackSpeed: 0.5,
+          ),
+        ],
+      );
+
+      // At 2.5 s of output the source is at 1.25 s. Timed on the source, the
+      // layer would never show: the segment's source ends at 2 s.
+      final before = await frameOf(out, at: const Duration(milliseconds: 1500));
+      expect(magentaAt(before, 640, 360), isFalse, reason: 'not yet');
+      final inside = await frameOf(out, at: const Duration(milliseconds: 2500));
+      expect(magentaAt(inside, 640, 360), isTrue, reason: 'showing');
+      final after = await frameOf(out, at: const Duration(milliseconds: 3500));
+      expect(magentaAt(after, 640, 360), isFalse, reason: 'over');
+    }, skip: kIsWeb);
+
+    testWidgets('a timed color filter applies over its output time range', (
+      tester,
+    ) async {
+      final bytes = await pve.renderVideo(
+        VideoRenderData(
+          videoSegments: [spedUp],
+          outputFormat: VideoOutputFormat.mp4,
+          colorFilters: [
+            ColorFilter(
+              matrix: _grayscale,
+              startTime: const Duration(seconds: 1),
+              endTime: const Duration(seconds: 2),
+            ),
+          ],
+        ),
+      );
+      final out = EditorVideo.memory(bytes);
+
+      // Output time t shows the source at 2t.
+      Future<(int, int)> coloredAt(Duration at) async {
+        final source = await frameOf(h264Video, at: at * 2);
+        final frame = await frameOf(out, at: at);
+        var colored = 0, stillColored = 0;
+        for (final p in colorPoints) {
+          if (_spread(source.at(p.dx, p.dy)) > 25) {
+            colored++;
+            if (_spread(frame.at(p.dx, p.dy)) > 20) stillColored++;
+          }
+        }
+        return (colored, stillColored);
+      }
+
+      final (outsideColored, outsideKept) = await coloredAt(
+        const Duration(milliseconds: 500),
+      );
+      expect(outsideColored, greaterThan(0));
+      expect(outsideKept, outsideColored, reason: 'filter applied too early');
+
+      final (insideColored, insideKept) = await coloredAt(
+        const Duration(milliseconds: 1500),
+      );
+      expect(insideColored, greaterThan(0));
+      expect(insideKept, 0, reason: 'filter did not apply inside its window');
+    }, skip: kIsWeb);
+  });
+
   group('Dip transition on a letterboxed canvas', () {
     testWidgets('fadeToWhite dips the whole output frame, bars included', (
       tester,
