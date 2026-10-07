@@ -46,6 +46,8 @@ internal class LayeredCompositionBuilder {
     let preferredTransform: CGAffineTransform
     let displaySize: CGSize
     let chromaKey: ChromaKeyConfig?
+    /// The layer's placement over time, on the composition timeline.
+    let keyframes: [KeyframeConfig]
   }
 
   private struct AudioWindow {
@@ -161,7 +163,8 @@ internal class LayeredCompositionBuilder {
             transformConfig: clip.transform ?? layer.transform,
             preferredTransform: pt,
             displaySize: displaySize,
-            chromaKey: clip.chromaKey ?? layer.chromaKey ?? globalChromaKey))
+            chromaKey: clip.chromaKey ?? layer.chromaKey ?? globalChromaKey,
+            keyframes: layer.keyframes))
       }
     }
 
@@ -238,7 +241,8 @@ internal class LayeredCompositionBuilder {
           rotation: clip.transformConfig?.rotation ?? 0,
           preferredTransform: clip.preferredTransform,
           displaySize: clip.displaySize,
-          chromaKey: clip.chromaKey)
+          chromaKey: clip.chromaKey,
+          keyframes: clip.keyframes)
       }
 
       let timeRange = CMTimeRange(

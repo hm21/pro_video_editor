@@ -10,6 +10,8 @@ import androidx.media3.effect.GlEffect
 import androidx.media3.effect.OverlayEffect
 import java.io.File
 import java.nio.ByteBuffer
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import androidx.core.graphics.scale
@@ -130,7 +132,8 @@ fun applyTimedImageLayers(
             val image = layer.image ?: continue
             val startTimeUs = layer.startUs
             val endTimeUs = layer.endUs
-            val hasAnimations = layer.animations.isNotEmpty()
+            // Keyframes move the layer as animations do, frame by frame.
+            val isAnimated = layer.animations.isNotEmpty() || layer.keyframes.isNotEmpty()
 
             Log.d(
                 RENDER_TAG,
@@ -179,7 +182,8 @@ fun applyTimedImageLayers(
                     animationEndUs = layer.animationEndUs,
                     animations = layer.animations,
                     rasterScaleX = first.rasterScaleX,
-                    rasterScaleY = first.rasterScaleY
+                    rasterScaleY = first.rasterScaleY,
+                    keyframes = layer.keyframes
                 )
                 Log.d(
                     RENDER_TAG,
@@ -220,11 +224,12 @@ fun applyTimedImageLayers(
                     layerBitmap, layer, videoWidth, videoHeight, rasterScale, rasterBudget
                 )
 
-                bitmapOverlay = if (hasAnimations) {
+                bitmapOverlay = if (isAnimated) {
                     Log.d(
                         RENDER_TAG,
                         "Layer: using AnimatedBitmapOverlay with " +
-                                "${layer.animations.size} animation(s)"
+                                "${layer.animations.size} animation(s) and " +
+                                "${layer.keyframes.size} keyframe(s)"
                     )
                     AnimatedBitmapOverlay(
                         bitmap = prepared.bitmap,
@@ -242,7 +247,8 @@ fun applyTimedImageLayers(
                         rasterScaleX = prepared.rasterScaleX,
                         rasterScaleY = prepared.rasterScaleY,
                         animationStartUs = layer.animationStartUs,
-                        animationEndUs = layer.animationEndUs
+                        animationEndUs = layer.animationEndUs,
+                        keyframes = layer.keyframes
                     )
                 } else {
                     BitmapOverlay.createStaticBitmapOverlay(
@@ -437,7 +443,11 @@ internal fun overlayDecodeSize(
     val width = layer.width
     val height = layer.height
     if (width != null && height != null) {
-        return capRaster(width.toInt(), height.toInt(), rasterScale, rasterBudget)
+        val growth = keyframeRasterGrowth(layer)
+        return capRaster(
+            (width * growth).roundToInt(), (height * growth).roundToInt(),
+            rasterScale, rasterBudget
+        )
     }
     if (layer.x == null && layer.y == null) {
         return capRaster(videoWidth, videoHeight, rasterScale, rasterBudget)
@@ -545,6 +555,14 @@ internal fun rasterCompensation(displaySize: Int, rasterSize: Int): Float =
     else displaySize.toFloat() / rasterSize
 
 /**
+ * How much larger than its laid-out size a layer is drawn at most: the largest
+ * scale its keyframes give it, and never below 1. [prepareOverlay] rasters a
+ * sized layer at that size, which [overlayRasterBudget] still bounds.
+ */
+internal fun keyframeRasterGrowth(layer: VideoSequenceBuilder.ImageLayerConfig): Double =
+    layer.keyframes.maxOfOrNull { it.scale }?.coerceAtLeast(1.0) ?: 1.0
+
+/**
  * Scales, positions, unpremultiplies and rotates a single overlay [rawBitmap]
  * according to [layer], returning the final bitmap plus its anchor/settings.
  *
@@ -602,7 +620,24 @@ private fun prepareOverlay(
     }
 
     val (rasterWidth, rasterHeight) = if (cappable) {
-        capRaster(displayWidth, displayHeight, rasterScale, rasterBudget)
+        // A layer that keyframes grow is rastered at its largest size, so it
+        // stays sharp rather than stretching the pixels of its smaller self —
+        // but never above what the decoded image holds, which would only
+        // stretch them here instead.
+        val growth = min(
+            keyframeRasterGrowth(layer),
+            max(
+                1.0,
+                min(
+                    rawBitmap.width.toDouble() / displayWidth,
+                    rawBitmap.height.toDouble() / displayHeight
+                )
+            )
+        )
+        capRaster(
+            (displayWidth * growth).roundToInt(), (displayHeight * growth).roundToInt(),
+            rasterScale, rasterBudget
+        )
     } else {
         Pair(displayWidth, displayHeight)
     }
@@ -664,10 +699,13 @@ private fun prepareOverlay(
     // Rotate the overlay around its center. baseNormX/baseNormY describe the
     // (unrotated) layout center; rotating about the bitmap center keeps that
     // point fixed, so the anchor stays correct while the bounding box grows
-    // symmetrically.
-    val rotatedOverlay = rotateBitmap(
-        finalOverlay, Math.toDegrees(layer.rotation).toFloat()
-    )
+    // symmetrically. A keyframed layer is turned by its keyframes instead,
+    // frame by frame (see [AnimatedBitmapOverlay]), so its box stays upright.
+    val rotatedOverlay = if (layer.keyframes.isNotEmpty()) {
+        finalOverlay
+    } else {
+        rotateBitmap(finalOverlay, Math.toDegrees(layer.rotation).toFloat())
+    }
 
     // Rotation grows the bounding box. The display size grows with it, per
     // axis, so a caller laying out from [PreparedOverlay.displayWidth] sees the

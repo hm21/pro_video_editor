@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/core/models/audio/audio_track_model.dart';
 import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart';
 import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
+import 'package:pro_video_editor/core/models/image/timeline_keyframe_model.dart';
 import 'package:pro_video_editor/core/models/video/chroma_key_model.dart';
 import 'package:pro_video_editor/core/models/video/custom_video_effect_model.dart';
 import 'package:pro_video_editor/core/models/video/editor_video_model.dart';
@@ -413,6 +414,31 @@ void main() {
       expect(maps[0]['animationEndUs'], 2000000);
       expect(maps[1]['animationStartUs'], isNull);
       expect(maps[1]['animationEndUs'], isNull);
+    });
+
+    test('sends the keyframes sorted by time', () async {
+      final maps = await layerMaps([
+        ImageLayer(
+          image: EditorLayerImage.memory(Uint8List.fromList([1])),
+          offset: Offset.zero,
+          keyframes: const [
+            TimelineKeyframe(
+              time: Duration(seconds: 2),
+              offset: Offset(10, 20),
+              scale: 2,
+            ),
+            TimelineKeyframe(time: Duration.zero, offset: Offset(30, 40)),
+          ],
+        ),
+        ImageLayer(image: EditorLayerImage.memory(Uint8List.fromList([1]))),
+      ]);
+
+      final keyframes = (maps[0]['keyframes'] as List)
+          .cast<Map<String, dynamic>>();
+      expect(keyframes.map((k) => k['timeUs']), [0, 2000000]);
+      expect(keyframes.last['x'], 10);
+      expect(keyframes.last['scale'], 2);
+      expect(maps[1]['keyframes'], isEmpty);
     });
 
     test('throws naming the path when a layer image is gone', () async {

@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.StaticOverlaySettings
+import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import kotlin.math.abs
 import kotlin.math.max
@@ -61,6 +62,68 @@ internal fun applyEasing(t: Double, curve: String): Double {
 }
 
 /**
+ * A layer's placement at one moment, mixed from its keyframes; see
+ * [keyframePlacementAt]. [x] and [y] are the top-left corner of the unscaled
+ * box in frame pixels, [rotation] is clockwise in radians.
+ */
+internal data class KeyframePlacement(
+    val x: Double,
+    val y: Double,
+    val scale: Double,
+    val rotation: Double,
+    val opacity: Double,
+)
+
+private fun KeyframeConfig.placement() =
+    KeyframePlacement(x, y, scale, rotation, opacity)
+
+/**
+ * The placement [keyframes] give a layer at [timeUs], or `null` when there are
+ * none.
+ *
+ * [keyframes] must be sorted by time. Before the first keyframe the layer
+ * holds its placement, after the last one the last one's; between two the
+ * earlier one's curve eases from one to the other. An elastic or bounce curve
+ * may overshoot; only the opacity is kept within 0–1 and the scale at 0 or
+ * more. The rotation is mixed as it is, so a full turn stays a full turn.
+ *
+ * Mirrors `layerKeyframePlacementAt` in pro_image_editor, which the editor
+ * preview reads.
+ */
+internal fun keyframePlacementAt(
+    keyframes: List<KeyframeConfig>,
+    timeUs: Long,
+): KeyframePlacement? {
+    if (keyframes.isEmpty()) return null
+    val first = keyframes.first()
+    if (timeUs <= first.timeUs) return first.placement()
+    val last = keyframes.last()
+    if (timeUs >= last.timeUs) return last.placement()
+
+    // The last keyframe at or before [timeUs]; both ends are ruled out above,
+    // so a later one always exists.
+    var index = 0
+    for (i in 1 until keyframes.size) {
+        if (keyframes[i].timeUs > timeUs) break
+        index = i
+    }
+    val from = keyframes[index]
+    val to = keyframes[index + 1]
+    val spanUs = to.timeUs - from.timeUs
+    if (spanUs <= 0L) return to.placement()
+
+    val eased = applyEasing((timeUs - from.timeUs).toDouble() / spanUs, from.curve)
+    fun mix(a: Double, b: Double) = a + (b - a) * eased
+    return KeyframePlacement(
+        x = mix(from.x, to.x),
+        y = mix(from.y, to.y),
+        scale = max(0.0, mix(from.scale, to.scale)),
+        rotation = mix(from.rotation, to.rotation),
+        opacity = mix(from.opacity, to.opacity).coerceIn(0.0, 1.0),
+    )
+}
+
+/**
  * How far an animation has brought a layer back to rest at one moment: [value]
  * is `1` at rest and `0` fully away (faded out, at the edge, tilted all the
  * way), and may overshoot either end with an elastic or bounce curve.
@@ -79,7 +142,9 @@ internal data class AnimationProgress(val value: Double, val swing: Float = 1f)
  * last. With `animateInOut` both apply and the one further from rest wins.
  *
  * A `loop` plays over the whole range, one cycle per duration counted from
- * [startUs]: the eased value runs from rest to fully away at half a cycle and
+ * [startUs], or only from [LayerAnimationConfig.loopStartUs] to
+ * [LayerAnimationConfig.loopEndUs] when it names them, counting from the
+ * first: the eased value runs from rest to fully away at half a cycle and
  * back. A wiggle runs that twice per cycle, once to each side (see
  * [AnimationProgress.swing]). The cycle position is taken from the remainder
  * of whole microseconds, so a long video does not lose precision.
@@ -97,7 +162,10 @@ internal fun animationProgress(
     val effectiveEndUs = if (endUs == -1L) Long.MAX_VALUE else endUs
 
     if (anim.phase == "loop") {
-        val elapsed = (timeUs - effectiveStartUs).coerceAtLeast(0L)
+        if (anim.loopStartUs >= 0 && timeUs < anim.loopStartUs) return null
+        if (anim.loopEndUs >= 0 && timeUs >= anim.loopEndUs) return null
+        val fromUs = if (anim.loopStartUs >= 0) anim.loopStartUs else effectiveStartUs
+        val elapsed = (timeUs - fromUs).coerceAtLeast(0L)
         val inCycle = elapsed % durationUs
         return if (anim.type == "wiggle") {
             // Each half of the cycle is one swing out and back.
@@ -385,6 +453,99 @@ internal fun animatedFrameIndex(
 }
 
 /**
+ * Where Media3 draws an overlay at one moment: [alpha], the anchors it splits
+ * the position into (see [resolveAnchor]), the [scale] before any raster
+ * compensation and the counter-clockwise [rotationDegrees].
+ */
+internal data class OverlayFrame(
+    val alpha: Float,
+    val backgroundAnchorX: Float,
+    val backgroundAnchorY: Float,
+    val overlayAnchorX: Float,
+    val overlayAnchorY: Float,
+    val scale: Float,
+    val rotationDegrees: Float,
+)
+
+/**
+ * Composes an overlay's [keyframes] and [animations] at [timeUs].
+ *
+ * The keyframed placement comes first: its corner, size, turn and opacity
+ * replace the layer's resting ones ([baseNormX] / [baseNormY], the center in
+ * [-1, 1] units, and [layerX] / [layerY], the top-left corner in frame
+ * pixels). The animations play on top of it, as in the editor preview: a slide
+ * starts from the edge nearest the keyframed place, and a slide and a bounce
+ * measure the layer at its keyframed size. [imageWidth] x [imageHeight] is
+ * the layer's unscaled box in frame pixels.
+ */
+internal fun overlayFrame(
+    keyframes: List<KeyframeConfig>,
+    animations: List<LayerAnimationConfig>,
+    timeUs: Long,
+    animationStartUs: Long,
+    animationEndUs: Long,
+    baseNormX: Float,
+    baseNormY: Float,
+    imageWidth: Int,
+    imageHeight: Int,
+    videoWidth: Int,
+    videoHeight: Int,
+    layerX: Float,
+    layerY: Float,
+): OverlayFrame {
+    val keyframe = keyframePlacementAt(keyframes, timeUs)
+    val keyframeScale = keyframe?.scale?.toFloat() ?: 1f
+    val placedNormX: Float
+    val placedNormY: Float
+    if (keyframe != null && videoWidth > 0 && videoHeight > 0) {
+        val centerX = keyframe.x.toFloat() + imageWidth / 2f
+        val centerY = keyframe.y.toFloat() + imageHeight / 2f
+        placedNormX = (centerX / videoWidth) * 2f - 1f
+        placedNormY = 1f - (centerY / videoHeight) * 2f
+    } else {
+        placedNormX = baseNormX
+        placedNormY = baseNormY
+    }
+
+    // Layer half-size in [-1, 1] units (canvas spans [-1, 1]), as the
+    // keyframes size it.
+    val halfNormW = imageWidth.toFloat() / videoWidth * keyframeScale
+    val halfNormH = imageHeight.toFloat() / videoHeight * keyframeScale
+
+    val state = overlayAnimationState(
+        animations = animations,
+        timeUs = timeUs,
+        startUs = animationStartUs,
+        endUs = animationEndUs,
+        baseNormX = placedNormX,
+        baseNormY = placedNormY,
+        halfNormW = halfNormW,
+        halfNormH = halfNormH,
+        layerX = keyframe?.x?.toFloat() ?: layerX,
+        layerY = keyframe?.y?.toFloat() ?: layerY,
+        videoWidth = videoWidth,
+        videoHeight = videoHeight,
+    )
+
+    // Media3 clamps each anchor to [-1, 1], so a fully off-screen slide is
+    // split across the background and overlay anchors (see resolveAnchor).
+    val anchorX = resolveAnchor(placedNormX + state.offsetX, halfNormW)
+    val anchorY = resolveAnchor(placedNormY + state.offsetY, halfNormH)
+
+    return OverlayFrame(
+        alpha = state.alpha * (keyframe?.opacity?.toFloat() ?: 1f),
+        backgroundAnchorX = anchorX.backgroundAnchor,
+        backgroundAnchorY = anchorY.backgroundAnchor,
+        overlayAnchorX = anchorX.overlayAnchor,
+        overlayAnchorY = anchorY.overlayAnchor,
+        scale = state.scale * keyframeScale,
+        // Flutter turns clockwise, Media3 counter-clockwise.
+        rotationDegrees = state.rotationDegrees -
+            Math.toDegrees(keyframe?.rotation ?: 0.0).toFloat(),
+    )
+}
+
+/**
  * Custom BitmapOverlay that computes per-frame overlay settings for animations
  * and, for animated images (GIF), returns the correct frame for the current
  * presentation time.
@@ -432,7 +593,14 @@ internal class AnimatedBitmapOverlay(
      * rounds each axis to a whole pixel on its own. `1f` when uncapped.
      */
     private val rasterScaleX: Float = 1f,
-    private val rasterScaleY: Float = 1f
+    private val rasterScaleY: Float = 1f,
+    /**
+     * The layer's placement over time, sorted by time; empty keeps it on
+     * [baseNormX] / [baseNormY]. A keyframed layer's frames carry no rotation
+     * of their own: [imageWidth] x [imageHeight] is its unrotated box, which
+     * the keyframes place, turn and scale.
+     */
+    private val keyframes: List<KeyframeConfig> = emptyList()
 ) : BitmapOverlay() {
 
     /** Convenience constructor for a single static frame. */
@@ -452,7 +620,8 @@ internal class AnimatedBitmapOverlay(
         rasterScaleX: Float = 1f,
         rasterScaleY: Float = 1f,
         animationStartUs: Long = -1L,
-        animationEndUs: Long = -1L
+        animationEndUs: Long = -1L,
+        keyframes: List<KeyframeConfig> = emptyList()
     ) : this(
         frames = listOf(bitmap),
         frameDurationsUs = listOf(0L),
@@ -471,7 +640,8 @@ internal class AnimatedBitmapOverlay(
         animationEndUs = animationEndUs,
         animations = animations,
         rasterScaleX = rasterScaleX,
-        rasterScaleY = rasterScaleY
+        rasterScaleY = rasterScaleY,
+        keyframes = keyframes
     )
 
     // Cumulative end time of each frame within one playthrough.
@@ -490,38 +660,29 @@ internal class AnimatedBitmapOverlay(
     ]
 
     override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings {
-        // Layer half-size in [-1, 1] units (canvas spans [-1, 1]).
-        val halfNormW = imageWidth.toFloat() / videoWidth
-        val halfNormH = imageHeight.toFloat() / videoHeight
-
-        val state = overlayAnimationState(
+        val frame = overlayFrame(
+            keyframes = keyframes,
             animations = animations,
             timeUs = presentationTimeUs,
-            startUs = if (animationStartUs == -1L) layerStartUs else animationStartUs,
-            endUs = if (animationEndUs == -1L) layerEndUs else animationEndUs,
+            animationStartUs = if (animationStartUs == -1L) layerStartUs else animationStartUs,
+            animationEndUs = if (animationEndUs == -1L) layerEndUs else animationEndUs,
             baseNormX = baseNormX,
             baseNormY = baseNormY,
-            halfNormW = halfNormW,
-            halfNormH = halfNormH,
-            layerX = layerX,
-            layerY = layerY,
+            imageWidth = imageWidth,
+            imageHeight = imageHeight,
             videoWidth = videoWidth,
             videoHeight = videoHeight,
+            layerX = layerX,
+            layerY = layerY,
         )
-
-        // Media3 clamps each anchor to [-1, 1], so a fully off-screen slide is
-        // split across the background and overlay anchors (see resolveAnchor).
-        val anchorX = resolveAnchor(baseNormX + state.offsetX, halfNormW)
-        val anchorY = resolveAnchor(baseNormY + state.offsetY, halfNormH)
-
         // Media3 turns the overlay around its own center, in pixels rather
         // than in the stretched [-1, 1] square, so the tilt keeps its shape.
         return StaticOverlaySettings.Builder()
-            .setAlphaScale(state.alpha)
-            .setBackgroundFrameAnchor(anchorX.backgroundAnchor, anchorY.backgroundAnchor)
-            .setOverlayFrameAnchor(anchorX.overlayAnchor, anchorY.overlayAnchor)
-            .setScale(rasterScaleX * state.scale, rasterScaleY * state.scale)
-            .setRotationDegrees(state.rotationDegrees)
+            .setAlphaScale(frame.alpha)
+            .setBackgroundFrameAnchor(frame.backgroundAnchorX, frame.backgroundAnchorY)
+            .setOverlayFrameAnchor(frame.overlayAnchorX, frame.overlayAnchorY)
+            .setScale(rasterScaleX * frame.scale, rasterScaleY * frame.scale)
+            .setRotationDegrees(frame.rotationDegrees)
             .build()
     }
 }

@@ -70,6 +70,23 @@ internal class OverlayAnimationStateTest {
     }
 
     @Test
+    fun loopPlaysOnlyWithinItsWindowCountingFromItsStart() {
+        val loop = LayerAnimationConfig(
+            type = "fade",
+            phase = "loop",
+            durationUs = 1_000_000L,
+            loopStartUs = 3_000_000L,
+            loopEndUs = 5_000_000L,
+        )
+        assertNull(animationProgress(loop, 2_999_999L, 0L, -1L))
+        assertEquals(1.0, animationProgress(loop, 3_000_000L, 0L, -1L)!!.value, tol)
+        // Cycles count from the window, not from the layer's start.
+        assertEquals(0.0, animationProgress(loop, 3_500_000L, 0L, -1L)!!.value, tol)
+        assertEquals(0.0, animationProgress(loop, 4_500_000L, 0L, -1L)!!.value, tol)
+        assertNull(animationProgress(loop, 5_000_000L, 0L, -1L))
+    }
+
+    @Test
     fun loopCurveShapesTheWayOutLikeAnOutAnimation() {
         // easeIn: x², with x = 1 at rest. A quarter cycle has x = 0.5.
         val loop = anim("fade", "loop", curve = "easeIn")

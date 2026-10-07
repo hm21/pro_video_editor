@@ -23,6 +23,7 @@ class VideoLayer {
     this.opacity = 1.0,
     this.transform,
     this.chromaKey,
+    this.keyframes = const [],
   }) : assert(clips.length > 0, 'A layer must contain at least one clip'),
        assert(
          opacity >= 0 && opacity <= 1,
@@ -55,6 +56,19 @@ class VideoLayer {
   /// through — which is how you put a video behind a green screen.
   final ChromaKey? chromaKey;
 
+  /// The layer's placement over time; see [TimelineKeyframe].
+  ///
+  /// When not empty, the keyframes move every clip of the layer: a
+  /// keyframe's offset replaces the top-left corner of the clip's placement
+  /// box ([VideoSegment.transform], else [transform], else the whole canvas),
+  /// its scale grows or shrinks that box around its center, its rotation
+  /// replaces the box's rotation and its opacity replaces [opacity]. The box
+  /// keeps its [SegmentTransform.fit]. Their times are on the composition's
+  /// timeline, like [VideoSegment.timelineStart], and need not be in order.
+  ///
+  /// **Default**: empty, which keeps every clip where its transform puts it.
+  final List<TimelineKeyframe> keyframes;
+
   /// Converts this layer to a map for platform channel communication.
   ///
   /// Resolves each clip's input path and any chroma-key background image, so
@@ -77,6 +91,9 @@ class VideoLayer {
       'opacity': opacity,
       'transform': transform?.toMap(),
       'chromaKey': await chromaKey?.toAsyncMap(),
+      'keyframes': sortTimelineKeyframes(
+        keyframes,
+      ).map((k) => k.toMap()).toList(),
     };
   }
 
@@ -86,12 +103,14 @@ class VideoLayer {
     double? opacity,
     SegmentTransform? transform,
     ChromaKey? chromaKey,
+    List<TimelineKeyframe>? keyframes,
   }) {
     return VideoLayer(
       clips: clips ?? this.clips,
       opacity: opacity ?? this.opacity,
       transform: transform ?? this.transform,
       chromaKey: chromaKey ?? this.chromaKey,
+      keyframes: keyframes ?? this.keyframes,
     );
   }
 
@@ -101,6 +120,7 @@ class VideoLayer {
       'opacity': opacity,
       'transform': transform?.toMap(),
       'chromaKey': chromaKey?.toMap(),
+      'keyframes': keyframes.map((k) => k.toMap()).toList(),
     };
   }
 
@@ -118,6 +138,15 @@ class VideoLayer {
       chromaKey: map['chromaKey'] != null
           ? ChromaKey.fromMap(map['chromaKey'] as Map<String, dynamic>)
           : null,
+      keyframes:
+          (map['keyframes'] as List<dynamic>?)
+              ?.map(
+                (k) => TimelineKeyframe.fromMap(
+                  Map<String, dynamic>.from(k as Map),
+                ),
+              )
+              .toList() ??
+          const [],
     );
   }
 
@@ -129,7 +158,7 @@ class VideoLayer {
   @override
   String toString() =>
       'VideoLayer(clips: $clips, opacity: $opacity, transform: $transform, '
-      'chromaKey: $chromaKey)';
+      'chromaKey: $chromaKey, keyframes: $keyframes)';
 
   @override
   bool operator ==(covariant VideoLayer other) {
@@ -138,7 +167,8 @@ class VideoLayer {
     return listEquals(other.clips, clips) &&
         other.opacity == opacity &&
         other.transform == transform &&
-        other.chromaKey == chromaKey;
+        other.chromaKey == chromaKey &&
+        listEquals(other.keyframes, keyframes);
   }
 
   @override
@@ -146,5 +176,6 @@ class VideoLayer {
       clips.hashCode ^
       opacity.hashCode ^
       transform.hashCode ^
-      chromaKey.hashCode;
+      chromaKey.hashCode ^
+      Object.hashAll(keyframes);
 }

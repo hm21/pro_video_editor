@@ -517,6 +517,9 @@ class VideoRenderData {
                 'animationStartUs': layer.animationStartTime?.inMicroseconds,
                 'animationEndUs': layer.animationEndTime?.inMicroseconds,
                 'censor': layer.censor?.toMap(),
+                'keyframes': sortTimelineKeyframes(
+                  layer.keyframes,
+                ).map((k) => k.toMap()).toList(),
               },
             ),
           );

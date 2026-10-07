@@ -147,6 +147,9 @@ data class SegmentTransformConfig(
  * @property clips Time-ordered clips on this layer
  * @property opacity Opacity of the whole layer (0..1)
  * @property transform Default placement for clips without their own transform
+ * @property keyframes The layer's placement over time, sorted by time and on
+ *   the composition timeline; see [KeyframeConfig]. Empty = every clip stays
+ *   where its transform puts it
  */
 data class LayerConfig(
     val clips: List<VideoClip>,
@@ -156,7 +159,8 @@ data class LayerConfig(
      * Default chroma key for the clips on this layer. A clip's own key wins;
      * null falls back to the global key.
      */
-    val chromaKey: ChromaKeyConfig? = null
+    val chromaKey: ChromaKeyConfig? = null,
+    val keyframes: List<KeyframeConfig> = emptyList()
 ) {
     companion object {
         fun fromMap(map: Map<String, Any?>): LayerConfig? {
@@ -172,7 +176,8 @@ data class LayerConfig(
                 clips = clips,
                 opacity = (map["opacity"] as? Number)?.toFloat() ?: 1.0f,
                 transform = transformRaw?.let { SegmentTransformConfig.fromMap(it) },
-                chromaKey = ChromaKeyConfig.fromMap(chromaKeyRaw)
+                chromaKey = ChromaKeyConfig.fromMap(chromaKeyRaw),
+                keyframes = KeyframeConfig.listFrom(map["keyframes"])
             )
         }
     }
@@ -398,7 +403,11 @@ data class LayerAnimationConfig(
     val slideFromY: Double? = null,
     val scaleFrom: Double? = null,
     val wiggleAngle: Double? = null,
-    val bounceHeight: Double? = null
+    val bounceHeight: Double? = null,
+    /** Where a `loop` starts repeating, on the output timeline; `-1` = the layer's start. */
+    val loopStartUs: Long = -1L,
+    /** Where a `loop` stops, on the output timeline; `-1` = the layer's end. */
+    val loopEndUs: Long = -1L
 ) {
     companion object {
         /** 10°, the tilt of a wiggle without its own [wiggleAngle]. */
@@ -419,9 +428,52 @@ data class LayerAnimationConfig(
                 slideFromY = (slideFrom?.get("dy") as? Number)?.toDouble(),
                 scaleFrom = (map["scaleFrom"] as? Number)?.toDouble(),
                 wiggleAngle = (map["wiggleAngle"] as? Number)?.toDouble(),
-                bounceHeight = (map["bounceHeight"] as? Number)?.toDouble()
+                bounceHeight = (map["bounceHeight"] as? Number)?.toDouble(),
+                loopStartUs = (map["loopStartUs"] as? Number)?.toLong() ?: -1L,
+                loopEndUs = (map["loopEndUs"] as? Number)?.toLong() ?: -1L
             )
         }
+    }
+}
+
+/**
+ * A layer's placement at one point of the timeline, mirroring the Dart
+ * `TimelineKeyframe`.
+ *
+ * @property timeUs When the placement applies, on the layer's own timeline
+ * @property x Top-left x of the layer's unscaled box, in frame pixels
+ * @property y Top-left y of the layer's unscaled box, in frame pixels
+ * @property scale How much the box is grown around its center
+ * @property rotation Clockwise rotation around the box center, in radians
+ * @property opacity Opacity from 0 to 1
+ * @property curve Easing toward the next keyframe (see [applyEasing])
+ */
+data class KeyframeConfig(
+    val timeUs: Long,
+    val x: Double,
+    val y: Double,
+    val scale: Double = 1.0,
+    val rotation: Double = 0.0,
+    val opacity: Double = 1.0,
+    val curve: String = "linear"
+) {
+    companion object {
+        fun fromMap(map: Map<*, *>): KeyframeConfig = KeyframeConfig(
+            timeUs = (map["timeUs"] as? Number)?.toLong() ?: 0L,
+            x = (map["x"] as? Number)?.toDouble() ?: 0.0,
+            y = (map["y"] as? Number)?.toDouble() ?: 0.0,
+            scale = (map["scale"] as? Number)?.toDouble() ?: 1.0,
+            rotation = (map["rotation"] as? Number)?.toDouble() ?: 0.0,
+            opacity = (map["opacity"] as? Number)?.toDouble() ?: 1.0,
+            curve = map["curve"] as? String ?: "linear"
+        )
+
+        /** The keyframes in [raw], a list of maps, sorted by time. */
+        fun listFrom(raw: Any?): List<KeyframeConfig> =
+            (raw as? List<*>)
+                ?.mapNotNull { (it as? Map<*, *>)?.let(::fromMap) }
+                ?.sortedBy { it.timeUs }
+                ?: emptyList()
     }
 }
 
@@ -446,6 +498,9 @@ data class LayerAnimationConfig(
  *   (-1 = [endUs])
  * @property censor Blurs or pixelates the picture beneath the layer instead of
  *   drawing [image], which then only marks the area (null = draw the image)
+ * @property keyframes The layer's placement over time, sorted by time; they
+ *   replace [x], [y] and [rotation], scale the size around its center and set
+ *   the opacity (empty = the layer stays where [x] and [y] put it)
  */
 data class ImageLayer(
     val image: EncodedImage,
@@ -461,7 +516,8 @@ data class ImageLayer(
     val animations: List<LayerAnimationConfig> = emptyList(),
     val animationStartUs: Long = -1L,
     val animationEndUs: Long = -1L,
-    val censor: LayerCensorConfig? = null
+    val censor: LayerCensorConfig? = null,
+    val keyframes: List<KeyframeConfig> = emptyList()
 )
 
 data class RenderConfig(
@@ -591,7 +647,8 @@ data class RenderConfig(
                     ImageLayer(
                         image, startUs, endUs, x, y, width, height,
                         rotation, loop, animationOffsetUs, animations,
-                        animationStartUs, animationEndUs, censor
+                        animationStartUs, animationEndUs, censor,
+                        KeyframeConfig.listFrom(layerMap["keyframes"])
                     )
                 }
             } ?: emptyList()

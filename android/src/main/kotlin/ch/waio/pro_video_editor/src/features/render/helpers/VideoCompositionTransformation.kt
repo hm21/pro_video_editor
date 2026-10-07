@@ -37,9 +37,14 @@ import kotlin.math.roundToInt
  * being axis-aligned. A rotated draw therefore clips in the fragment shader, in
  * the quad's own unrotated space, instead of scissoring. The scissor is kept
  * for the unrotated case so nothing about the existing path changes.
+ *
+ * A [keyframeAnimator] replaces the fixed placement: every frame is placed,
+ * turned and faded where the clip's layer keyframes put it at that moment (see
+ * [SegmentKeyframeAnimator]). Its opacity is multiplied into the alpha the
+ * Media3 compositor blends with, so the layer needs no separate `AlphaScale`.
  */
 @UnstableApi
-class VideoCompositionTransformation(
+internal class VideoCompositionTransformation(
     private val x: Double?,
     private val y: Double?,
     private val width: Double?,
@@ -52,7 +57,8 @@ class VideoCompositionTransformation(
     private val clipY: Double? = null,
     private val clipWidth: Double? = null,
     private val clipHeight: Double? = null,
-    private val rotation: Double = 0.0
+    private val rotation: Double = 0.0,
+    private val keyframeAnimator: SegmentKeyframeAnimator? = null
 ) : GlEffect {
 
     override fun toGlShaderProgram(context: Context, useHdr: Boolean): GlShaderProgram {
@@ -67,6 +73,12 @@ class VideoCompositionTransformation(
     ) : BaseGlShaderProgram(useHdr, /* texturePoolCapacity= */ 1) {
 
         private val glProgram: GlProgram
+
+        /**
+         * The presentation time of the first frame drawn, which the keyframes
+         * measure every later frame from; see [SegmentKeyframeAnimator].
+         */
+        private var firstPresentationTimeUs = Long.MIN_VALUE
 
         companion object {
             private const val VERTEX_SHADER_SOURCE =
@@ -91,6 +103,7 @@ class VideoCompositionTransformation(
                 "precision mediump float;\n" +
                 "uniform sampler2D uTexSampler;\n" +
                 "uniform vec2 uClipHalf;\n" +
+                "uniform float uAlpha;\n" +
                 "varying vec2 vTexSamplingCoord;\n" +
                 "varying vec2 vQuadCoord;\n" +
                 "void main() {\n" +
@@ -98,7 +111,8 @@ class VideoCompositionTransformation(
                 "      abs(vQuadCoord.y) > uClipHalf.y) {\n" +
                 "    discard;\n" +
                 "  }\n" +
-                "  gl_FragColor = texture2D(uTexSampler, vTexSamplingCoord);\n" +
+                "  vec4 color = texture2D(uTexSampler, vTexSamplingCoord);\n" +
+                "  gl_FragColor = vec4(color.rgb, color.a * uAlpha);\n" +
                 "}"
         }
 
@@ -137,19 +151,37 @@ class VideoCompositionTransformation(
                 // which uses glBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA,
                 // ONE, ONE_MINUS_SRC_ALPHA) — correct straight-alpha source-over.
 
-                val targetWidth = (effect.width ?: effect.videoWidth.toDouble()).toFloat()
-                val targetHeight = (effect.height ?: effect.videoHeight.toDouble()).toFloat()
+                // The keyframed placement of this frame, or the fixed one.
+                val animator = effect.keyframeAnimator
+                val keyframed = animator?.let {
+                    if (firstPresentationTimeUs == Long.MIN_VALUE) {
+                        firstPresentationTimeUs = presentationTimeUs
+                    }
+                    it.at(it.compositionTimeUs(presentationTimeUs, firstPresentationTimeUs))
+                }
+                val draw = keyframed?.first?.draw
+                val box = keyframed?.first?.clip
+                val drawX = draw?.x ?: effect.x
+                val drawY = draw?.y ?: effect.y
+                val rotation = keyframed?.first?.rotation ?: effect.rotation
+                val clipX = if (keyframed != null) box?.x else effect.clipX
+                val clipY = if (keyframed != null) box?.y else effect.clipY
+                val clipW = if (keyframed != null) box?.w else effect.clipWidth
+                val clipH = if (keyframed != null) box?.h else effect.clipHeight
+
+                val targetWidth = (draw?.w ?: effect.width ?: effect.videoWidth.toDouble()).toFloat()
+                val targetHeight = (draw?.h ?: effect.height ?: effect.videoHeight.toDouble()).toFloat()
 
                 // Placement (and the turn, when there is one) is pure geometry;
                 // see [SegmentPlacementMatrix], which is unit-tested on the JVM.
                 val glMatrix = SegmentPlacementMatrix.build(
-                    x = (effect.x ?: 0.0).toFloat(),
-                    y = (effect.y ?: 0.0).toFloat(),
+                    x = (drawX ?: 0.0).toFloat(),
+                    y = (drawY ?: 0.0).toFloat(),
                     targetWidth = targetWidth,
                     targetHeight = targetHeight,
                     renderWidth = effect.renderWidth,
                     renderHeight = effect.renderHeight,
-                    rotation = effect.rotation
+                    rotation = rotation
                 )
 
                 glProgram.setFloatsUniform("uTransformationMatrix", glMatrix)
@@ -162,11 +194,9 @@ class VideoCompositionTransformation(
                 // quad's own pre-rotation space. Both express the same region
                 // when unrotated; the scissor is kept there so the existing
                 // path is untouched.
-                val clipW = effect.clipWidth
-                val clipH = effect.clipHeight
-                val hasClipBox = effect.clipX != null && effect.clipY != null &&
+                val hasClipBox = clipX != null && clipY != null &&
                     clipW != null && clipH != null && effect.renderHeight > 0
-                val clipInShader = hasClipBox && effect.rotation != 0.0 &&
+                val clipInShader = hasClipBox && rotation != 0.0 &&
                     targetWidth > 0f && targetHeight > 0f
                 // Must be set before bindAttributesAndUniforms(), which is what
                 // actually uploads the recorded uniform values.
@@ -181,6 +211,7 @@ class VideoCompositionTransformation(
                         floatArrayOf(1f, 1f)
                     }
                 )
+                glProgram.setFloatUniform("uAlpha", keyframed?.second ?: 1f)
 
                 // Set attribute buffers with robust size detection
                 val vertexData = GlUtil.getNormalizedCoordinateBounds()
@@ -193,14 +224,14 @@ class VideoCompositionTransformation(
 
                 glProgram.bindAttributesAndUniforms()
 
-                val applyScissor = hasClipBox && effect.rotation == 0.0
+                val applyScissor = hasClipBox && rotation == 0.0
                 if (applyScissor) {
                     // Convert the clip box (canvas px, top-left origin) to GL
                     // scissor space (px, bottom-left origin).
-                    val sx = effect.clipX!!.roundToInt()
+                    val sx = clipX!!.roundToInt()
                     val sw = clipW!!.roundToInt().coerceAtLeast(0)
                     val sh = clipH!!.roundToInt().coerceAtLeast(0)
-                    val sy = (effect.renderHeight - (effect.clipY!! + clipH!!)).roundToInt()
+                    val sy = (effect.renderHeight - (clipY!! + clipH)).roundToInt()
                     GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
                     GLES20.glScissor(sx, sy, sw, sh)
                 }

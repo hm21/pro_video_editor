@@ -11,6 +11,7 @@ import 'package:pro_video_editor/shared/utils/parser/offset_parser.dart';
 import 'editor_layer_image_model.dart';
 import 'layer_animation_model.dart';
 import 'layer_censor_model.dart';
+import 'timeline_keyframe_model.dart';
 
 /// A model representing a video overlay layer with timing information.
 class ImageLayer with TimeRangeMixin {
@@ -29,6 +30,7 @@ class ImageLayer with TimeRangeMixin {
     this.animationStartTime,
     this.animationEndTime,
     this.censor,
+    this.keyframes = const [],
   }) : assert(
          startTime == null || endTime == null || startTime < endTime,
          'startTime must be before endTime',
@@ -42,6 +44,10 @@ class ImageLayer with TimeRangeMixin {
              animationEndTime == null ||
              animationStartTime < animationEndTime,
          'animationStartTime must be before animationEndTime',
+       ),
+       assert(
+         keyframes.length == 0 || offset != null,
+         'keyframes place a positioned layer; set [offset]',
        );
 
   /// The image to overlay on the video.
@@ -160,6 +166,22 @@ class ImageLayer with TimeRangeMixin {
   /// **Default**: `null`, which draws [image].
   final LayerCensor? censor;
 
+  /// The layer's placement over time; see [TimelineKeyframe].
+  ///
+  /// When not empty, the keyframes set where the layer is, how big it is, how
+  /// far it is turned and how opaque it is at every point of its time range:
+  /// they replace [offset] and [rotation], scale [size] around its center and
+  /// fade the image. Their times are on the same timeline as [startTime] and
+  /// [endTime], and need not be in order. The [animations] play on top of the
+  /// keyframed placement: a slide starts from the edge nearest to it and a
+  /// bounce lifts by the keyframed height.
+  ///
+  /// A layer with keyframes needs an [offset]; a layer stretched over the
+  /// frame has no placement to move.
+  ///
+  /// **Default**: empty, which keeps the layer where [offset] puts it.
+  final List<TimelineKeyframe> keyframes;
+
   ImageLayer copyWith({
     EditorLayerImage? image,
     Duration? startTime,
@@ -173,6 +195,7 @@ class ImageLayer with TimeRangeMixin {
     Duration? animationStartTime,
     Duration? animationEndTime,
     LayerCensor? censor,
+    List<TimelineKeyframe>? keyframes,
   }) {
     return ImageLayer(
       image: image ?? this.image,
@@ -187,6 +210,7 @@ class ImageLayer with TimeRangeMixin {
       animationStartTime: animationStartTime ?? this.animationStartTime,
       animationEndTime: animationEndTime ?? this.animationEndTime,
       censor: censor ?? this.censor,
+      keyframes: keyframes ?? this.keyframes,
     );
   }
 
@@ -206,6 +230,7 @@ class ImageLayer with TimeRangeMixin {
       'animationStartTime': animationStartTime?.inMicroseconds,
       'animationEndTime': animationEndTime?.inMicroseconds,
       'censor': censor?.toMap(),
+      'keyframes': keyframes.map((k) => k.toMap()).toList(),
     };
   }
 
@@ -248,6 +273,15 @@ class ImageLayer with TimeRangeMixin {
       censor: map['censor'] != null
           ? LayerCensor.fromMap(map['censor'] as Map<String, dynamic>)
           : null,
+      keyframes:
+          (map['keyframes'] as List<dynamic>?)
+              ?.map(
+                (k) => TimelineKeyframe.fromMap(
+                  Map<String, dynamic>.from(k as Map),
+                ),
+              )
+              .toList() ??
+          const [],
     );
   }
 
@@ -270,7 +304,8 @@ class ImageLayer with TimeRangeMixin {
         'animations: $animations, '
         'animationStartTime: $animationStartTime, '
         'animationEndTime: $animationEndTime, '
-        'censor: $censor'
+        'censor: $censor, '
+        'keyframes: $keyframes'
         ')';
   }
 
@@ -289,7 +324,8 @@ class ImageLayer with TimeRangeMixin {
         listEquals(other.animations, animations) &&
         other.animationStartTime == animationStartTime &&
         other.animationEndTime == animationEndTime &&
-        other.censor == censor;
+        other.censor == censor &&
+        listEquals(other.keyframes, keyframes);
   }
 
   @override
@@ -305,6 +341,7 @@ class ImageLayer with TimeRangeMixin {
         animations.hashCode ^
         animationStartTime.hashCode ^
         animationEndTime.hashCode ^
-        censor.hashCode;
+        censor.hashCode ^
+        Object.hashAll(keyframes);
   }
 }

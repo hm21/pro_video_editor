@@ -317,6 +317,21 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(value(7_500_000), 0, accuracy: 1e-9)
   }
 
+  func testLoopPlaysOnlyWithinItsWindowCountingFromItsStart() {
+    var loop = animation("fade", "loop")
+    loop.loopStartUs = 3_000_000
+    loop.loopEndUs = 5_000_000
+    func progress(_ t: Int64) -> AnimationProgress? {
+      animationProgress(loop, currentTimeUs: t, startUs: 0, endUs: -1)
+    }
+    XCTAssertNil(progress(2_999_999))
+    XCTAssertEqual(progress(3_000_000)!.value, 1, accuracy: 1e-9)
+    // Cycles count from the window, not from the layer's start.
+    XCTAssertEqual(progress(3_500_000)!.value, 0, accuracy: 1e-9)
+    XCTAssertEqual(progress(4_500_000)!.value, 0, accuracy: 1e-9)
+    XCTAssertNil(progress(5_000_000))
+  }
+
   func testLoopCurveShapesTheWayOutLikeAnOutAnimation() {
     // easeIn: x², with x = 1 at rest. A quarter cycle has x = 0.5.
     let loop = animation("fade", "loop", curve: "easeIn")
@@ -1854,4 +1869,150 @@ private final class FakeJob: ChannelTask {
   func cancel() { isCanceled = true }
   func sendSuccess(_ payload: Any?) {}
   func sendError(_ error: FlutterError) {}
+}
+
+/// Pins how keyframes place a layer: `keyframePlacement(_:atUs:)`, an image
+/// layer's keyframed animation and a composition clip's keyframed box. The
+/// Android renderer and the editor preview in `pro_image_editor` place it the
+/// same way.
+final class KeyframeTests: XCTestCase {
+  private func keyframe(
+    _ timeUs: Int64, x: Double = 0, y: Double = 0, scale: Double = 1, rotation: Double = 0,
+    opacity: Double = 1, curve: String = "linear"
+  ) -> KeyframeConfig {
+    KeyframeConfig(
+      timeUs: timeUs, x: x, y: y, scale: scale, rotation: rotation, opacity: opacity,
+      curve: curve)
+  }
+
+  private lazy var path = [
+    keyframe(1_000_000, x: -100, opacity: 0.5),
+    keyframe(3_000_000, x: 100, y: 200, scale: 3, rotation: 2 * .pi),
+  ]
+
+  func testNoKeyframesPlaceNothing() {
+    XCTAssertNil(keyframePlacement([], atUs: 0))
+  }
+
+  func testHoldsTheFirstKeyframeBeforeItAndTheLastAfterIt() {
+    XCTAssertEqual(keyframePlacement(path, atUs: 0)!.x, -100, accuracy: 1e-9)
+    XCTAssertEqual(keyframePlacement(path, atUs: 9_000_000)!.scale, 3, accuracy: 1e-9)
+  }
+
+  func testMixesLinearlyAndKeepsAFullTurn() {
+    let placement = keyframePlacement(path, atUs: 2_000_000)!
+    XCTAssertEqual(placement.x, 0, accuracy: 1e-9)
+    XCTAssertEqual(placement.y, 100, accuracy: 1e-9)
+    XCTAssertEqual(placement.scale, 2, accuracy: 1e-9)
+    XCTAssertEqual(placement.opacity, 0.75, accuracy: 1e-9)
+    XCTAssertEqual(placement.rotation, .pi, accuracy: 1e-9)
+  }
+
+  func testEasesWithTheCurveOfTheEarlierKeyframe() {
+    let eased = [keyframe(0, curve: "easeIn"), keyframe(1_000_000, x: 100)]
+    XCTAssertEqual(keyframePlacement(eased, atUs: 500_000)!.x, 25, accuracy: 1e-9)
+  }
+
+  func testKeepsOpacityAndScaleInRangeWhenACurveOvershoots() {
+    let springy = [
+      keyframe(0, opacity: 0, curve: "elasticOut"), keyframe(1_000_000, scale: 0, opacity: 1),
+    ]
+    for t in stride(from: Int64(0), through: 1_000_000, by: 10_000) {
+      let placement = keyframePlacement(springy, atUs: t)!
+      XCTAssertTrue((0...1).contains(placement.opacity))
+      XCTAssertGreaterThanOrEqual(placement.scale, 0)
+    }
+  }
+
+  // MARK: Image layers
+
+  private func layer(_ animations: [LayerAnimationConfig] = []) -> ImageLayer {
+    ImageLayer(
+      frames: [CIImage.empty()], frameEndsUs: [0], loop: true, animationOffsetUs: 0,
+      startUs: 0, endUs: 10_000_000, x: 0, y: 0, width: nil, height: nil, rotation: 0,
+      animations: animations, censor: nil)
+  }
+
+  /// A 200 x 100 overlay placed by a keyframe at (300, 200) on a 1000 x 500
+  /// frame: in Core Graphics, y up, its box spans y 200...300.
+  private let keyframed = KeyframePlacement(x: 300, y: 200, scale: 2, rotation: .pi / 2, opacity: 0.25)
+  private let keyframedOverlay = CGRect(x: 300, y: 200, width: 200, height: 100)
+  private let frame = CGRect(x: 0, y: 0, width: 1000, height: 500)
+
+  func testAKeyframeScalesTurnsAndFadesTheOverlayAroundItsCenter() {
+    let (opacity, transform, _) = computeAnimation(
+      layer: layer(), currentTimeUs: 0, overlayExtent: keyframedOverlay, frameExtent: frame,
+      keyframe: keyframed)
+    XCTAssertEqual(opacity, 0.25, accuracy: 1e-9)
+    let center = CGPoint(x: 400, y: 250).applying(transform)
+    XCTAssertEqual(center.x, 400, accuracy: 1e-9)
+    XCTAssertEqual(center.y, 250, accuracy: 1e-9)
+    // The right edge's middle, doubled and turned a quarter clockwise: it
+    // ends up below the center, which is towards smaller Y here.
+    let rightEdge = CGPoint(x: 500, y: 250).applying(transform)
+    XCTAssertEqual(rightEdge.x, 400, accuracy: 1e-9)
+    XCTAssertEqual(rightEdge.y, 50, accuracy: 1e-9)
+  }
+
+  func testASlideStartsFromTheEdgeNearestTheKeyframedBox() {
+    let slide = LayerAnimationConfig(
+      type: "slide", phase: "animateIn", durationUs: 1_000_000, curve: "linear",
+      slideDirection: "left", slideFrom: nil, scaleFrom: nil)
+    let upright = KeyframePlacement(x: 300, y: 200, scale: 2, rotation: 0, opacity: 1)
+    let transform = computeAnimation(
+      layer: layer([slide]), currentTimeUs: 0, overlayExtent: keyframedOverlay,
+      frameExtent: frame, keyframe: upright
+    ).transform
+    // The doubled box's right edge, 600, sits on the frame's left edge.
+    let rightEdge = CGPoint(x: 500, y: 250).applying(transform)
+    XCTAssertEqual(rightEdge.x, 0, accuracy: 1e-9)
+  }
+
+  func testABounceLiftsByTheKeyframedHeight() {
+    let bounce = LayerAnimationConfig(
+      type: "bounce", phase: "animateIn", durationUs: 1_000_000, curve: "linear",
+      slideDirection: nil, slideFrom: nil, scaleFrom: nil, bounceHeight: 1)
+    let upright = KeyframePlacement(x: 300, y: 200, scale: 2, rotation: 0, opacity: 1)
+    let transform = computeAnimation(
+      layer: layer([bounce]), currentTimeUs: 0, overlayExtent: keyframedOverlay,
+      frameExtent: frame, keyframe: upright
+    ).transform
+    // Lifted by the doubled box's whole height.
+    let center = CGPoint(x: 400, y: 250).applying(transform)
+    XCTAssertEqual(center.y, 450, accuracy: 1e-9)
+  }
+
+  // MARK: Composition clips
+
+  private func placement(_ rect: CGRect?, keyframes: [KeyframeConfig]) -> LayerPlacement {
+    LayerPlacement(
+      trackID: 1, opacity: 0.8, targetRect: rect, fit: "contain", rotation: 0.3,
+      preferredTransform: .identity, displaySize: CGSize(width: 400, height: 300),
+      chromaKey: nil, keyframes: keyframes)
+  }
+
+  func testAKeyframeMovesTheBoxScalesItAroundItsCenterAndReplacesTurnAndOpacity() {
+    let box = CGRect(x: 100, y: 200, width: 400, height: 300)
+    let resolved = placement(
+      box, keyframes: [keyframe(0, x: 10, y: 20, scale: 2, rotation: 1, opacity: 0.5)]
+    ).resolved(atUs: 0, renderSize: CGSize(width: 1080, height: 1920))
+    XCTAssertEqual(resolved.rect, CGRect(x: -190, y: -130, width: 800, height: 600))
+    XCTAssertEqual(resolved.rotation, 1, accuracy: 1e-9)
+    XCTAssertEqual(resolved.opacity, 0.5, accuracy: 1e-6)
+  }
+
+  func testABoxlessClipIsTheWholeCanvas() {
+    let resolved = placement(nil, keyframes: [keyframe(0, scale: 0.5)])
+      .resolved(atUs: 0, renderSize: CGSize(width: 1080, height: 1920))
+    XCTAssertEqual(resolved.rect, CGRect(x: 270, y: 480, width: 540, height: 960))
+  }
+
+  func testWithoutKeyframesTheClipKeepsItsOwnPlacement() {
+    let box = CGRect(x: 100, y: 200, width: 400, height: 300)
+    let resolved = placement(box, keyframes: [])
+      .resolved(atUs: 0, renderSize: CGSize(width: 1080, height: 1920))
+    XCTAssertEqual(resolved.rect, box)
+    XCTAssertEqual(resolved.rotation, 0.3, accuracy: 1e-9)
+    XCTAssertEqual(resolved.opacity, 0.8, accuracy: 1e-6)
+  }
 }
