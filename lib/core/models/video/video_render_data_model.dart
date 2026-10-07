@@ -621,12 +621,16 @@ class VideoRenderData {
     );
     if (steps.isEmpty) return null;
     final length = videoEffectTriggeredLengthOf(effect.type, steps);
+    // The first microsecond past the table, rounded up: the renderers floor a
+    // time to its step, so every microsecond before it still falls in the
+    // table, as it does for the preview.
     final tableEnd =
         start +
         Duration(
           microseconds:
-              length *
-              Duration.microsecondsPerSecond ~/
+              (length * Duration.microsecondsPerSecond +
+                  videoEffectTriggerFrameRate -
+                  1) ~/
               videoEffectTriggerFrameRate,
         );
     final end = effect.endTime;
@@ -635,8 +639,10 @@ class VideoRenderData {
       'endUs': (end != null && end < tableEnd ? end : tableEnd).inMicroseconds,
       'frameRate': videoEffectTriggerFrameRate,
       'stride': VideoEffectFrame.stride,
-      'frames': Float64List.fromList(
-        bakeTriggeredVideoEffectFrames(effect.type, effect.intensity, steps),
+      'frames': bakeTriggeredVideoEffectFrames(
+        effect.type,
+        effect.intensity,
+        steps,
       ),
     };
   }

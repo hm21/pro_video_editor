@@ -856,6 +856,39 @@ void main() {
         expect(effect.frameAt(ms(0)).rgbShift, greaterThan(0));
         expect(effect.frameAt(ms(500)).rgbShift, lessThan(0));
       });
+
+      test('clamps the intensity of a glitch burst like any other frame', () {
+        for (final type in [
+          VideoEffectType.glitch,
+          VideoEffectType.blockGlitch,
+        ]) {
+          VideoEffectFrame hitAt(double intensity) =>
+              videoEffectTriggeredFrameFor(type, intensity, const [0], 0);
+          expect(hitAt(5), hitAt(1), reason: '$type');
+          expect(hitAt(double.infinity), hitAt(1), reason: '$type');
+          expect(hitAt(double.nan), VideoEffectFrame.none, reason: '$type');
+          expect(hitAt(0), VideoEffectFrame.none, reason: '$type');
+        }
+      });
+
+      test('the baked table holds the frame of every step', () {
+        // Hits that play out, hits the next trigger cuts short, and two
+        // triggers on the same step.
+        final triggers = [ms(0), ms(30), ms(100), ms(103), ms(1003), ms(1301)];
+        final steps = videoEffectTriggerSteps(triggers, start: Duration.zero);
+        for (final type in VideoEffectType.values) {
+          final table = bakeTriggeredVideoEffectFrames(type, 0.8, steps);
+          final length = videoEffectTriggeredLengthOf(type, steps);
+          expect(table, hasLength(length * VideoEffectFrame.stride));
+          for (var step = 0; step < length; step++) {
+            expect(
+              VideoEffectFrame.fromList(table, step * VideoEffectFrame.stride),
+              videoEffectTriggeredFrameFor(type, 0.8, steps, step),
+              reason: '$type at step $step',
+            );
+          }
+        }
+      });
     });
 
     group('resolve', () {

@@ -1,5 +1,5 @@
 ## 2.28.0
-- **FEAT**(android, iOS, macOS): `VideoEffect.triggers` fires an effect on given points in time instead of playing it continuously, for example on the beats of a song. From each trigger the effect plays one hit from the start of its animation: one zoom punch, one pixel pulse, one glitch burst, or a quarter second of an effect without a beat of its own. A strobe flashes once without dimming the picture afterwards and a negative flash without its echo, so each trigger is one flash. Triggers land on the nearest 1/120 s, and the native renderers get a triggered effect as a table at that rate, so the preview and the export start a hit on the same frame; no native code changes.
+- **FEAT**(android, iOS, macOS): `VideoEffect.triggers` fires an effect at given points in time instead of continuously, for example on the beats of a song: one zoom punch, flash or glitch burst per trigger. Preview and export start each hit on the same frame.
 
 ## 2.27.0
 - **FEAT**(android, iOS, macOS): `LayerAnimationType.wiggle` tilts an image layer by `LayerAnimation.wiggleAngle` and `LayerAnimationType.bounce` lifts it by `LayerAnimation.bounceHeight` times its height, censor layers included.

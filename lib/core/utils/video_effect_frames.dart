@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import '/core/models/video/video_effect_frame_model.dart';
 import '/core/models/video/video_effect_model.dart';
@@ -124,21 +125,42 @@ int videoEffectHitLengthOf(VideoEffectType type) => switch (type) {
 /// [videoEffectTriggerSteps]).
 ///
 /// [VideoEffectFrame.none] before the first trigger and once a hit has
-/// played; see [videoEffectHitLengthOf].
+/// played; see [videoEffectHitLengthOf]. [intensity] is clamped as
+/// [videoEffectFrameFor] clamps it.
 VideoEffectFrame videoEffectTriggeredFrameFor(
   VideoEffectType type,
   double intensity,
   List<int> triggerSteps,
   int step,
 ) {
-  var hit = -1;
-  while (hit + 1 < triggerSteps.length && triggerSteps[hit + 1] <= step) {
-    hit++;
+  // The last trigger at or before [step], found by binary search.
+  var low = 0;
+  var high = triggerSteps.length;
+  while (low < high) {
+    final middle = (low + high) >> 1;
+    if (triggerSteps[middle] <= step) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
   }
+  final hit = low - 1;
   if (hit < 0) return VideoEffectFrame.none;
   final bucket = (step - triggerSteps[hit]) ~/ _stepsPerBucket;
-  final length = videoEffectHitLengthOf(type);
-  if (bucket >= length) return VideoEffectFrame.none;
+  if (bucket >= videoEffectHitLengthOf(type)) return VideoEffectFrame.none;
+  return _hitFrame(type, intensity, hit, bucket);
+}
+
+/// The frame of [type] at [intensity] for [bucket] into hit number [hit].
+VideoEffectFrame _hitFrame(
+  VideoEffectType type,
+  double intensity,
+  int hit,
+  int bucket,
+) {
+  // The bursts below bypass [videoEffectFrameFor], which clamps on its own.
+  if (!(intensity > 0)) return VideoEffectFrame.none;
+  intensity = math.min(intensity, 1.0);
   // Seeds that differ from hit to hit, so no two glitches look the same.
   final seed = (hit + 1) * videoEffectCycleLength + bucket;
   return switch (type) {
@@ -252,21 +274,40 @@ int videoEffectTriggeredLengthOf(VideoEffectType type, List<int> triggerSteps) {
 
 /// Every trigger step of a triggered effect, from its start until its last
 /// hit has played, flattened for the native renderers.
-List<double> bakeTriggeredVideoEffectFrames(
+///
+/// The same frames as [videoEffectTriggeredFrameFor] gives step by step, but
+/// each worked out once per bucket and written straight into the table: a
+/// song's worth of beats runs to tens of thousands of steps.
+Float64List bakeTriggeredVideoEffectFrames(
   VideoEffectType type,
   double intensity,
   List<int> triggerSteps,
 ) {
+  const stride = VideoEffectFrame.stride;
   final length = videoEffectTriggeredLengthOf(type, triggerSteps);
-  return [
-    for (var step = 0; step < length; step++)
-      ...videoEffectTriggeredFrameFor(
+  // Zeroed, which is what [VideoEffectFrame.none] flattens to.
+  final table = Float64List(length * stride);
+  final hitLength = videoEffectHitLengthOf(type);
+  for (var hit = 0; hit < triggerSteps.length; hit++) {
+    final first = triggerSteps[hit];
+    final end = math.min(
+      first + hitLength * _stepsPerBucket,
+      hit + 1 < triggerSteps.length ? triggerSteps[hit + 1] : length,
+    );
+    for (var step = first; step < end; step += _stepsPerBucket) {
+      final values = _hitFrame(
         type,
         intensity,
-        triggerSteps,
-        step,
-      ).toList(),
-  ];
+        hit,
+        (step - first) ~/ _stepsPerBucket,
+      ).toList();
+      final bucketEnd = math.min(step + _stepsPerBucket, end);
+      for (var s = step; s < bucketEnd; s++) {
+        table.setAll(s * stride, values);
+      }
+    }
+  }
+  return table;
 }
 
 /// Calm stretches with a slight color fringe, broken by bursts in which the

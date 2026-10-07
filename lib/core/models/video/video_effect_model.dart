@@ -480,19 +480,21 @@ class VideoEffect with TimeRangeMixin {
   /// order. Empty plays the effect continuously.
   ///
   /// Otherwise the effect shows nothing until its first trigger, and from
-  /// each trigger plays one hit from the start of its animation: one zoom
-  /// punch, one strobe flash or one glitch burst, for example on every beat
-  /// of a song. A hit ends early where the next trigger starts the next one.
-  /// [VideoEffectType] describes each effect's hit; a flashing effect flashes
-  /// once per trigger, so keep triggers of [VideoEffectType.strobe] and
+  /// each trigger plays one hit from the start of its animation, for example
+  /// on every beat of a song: one zoom punch, pixel pulse or RGB split pulse
+  /// (on alternating sides), a glitch or block glitch burst that differs from
+  /// hit to hit, the noise burst a signal interference opens with, one strobe
+  /// flash without the dim and one negative flash without its echo. Every
+  /// other effect plays a quarter second. A hit ends early where the next
+  /// trigger starts the next one. A flashing effect flashes once per trigger,
+  /// so keep triggers of [VideoEffectType.strobe] and
   /// [VideoEffectType.negativeFlash] at least a third of a second apart to
   /// stay within the three flashes a second that WCAG 2.3.1 allows.
   ///
   /// A trigger before [startTime] or at or after [endTime] does nothing. Each
   /// trigger lands on the nearest 1/120 s, counted from [startTime]: the
-  /// renderers look a triggered effect up at that rate
-  /// ([videoEffectTriggerFrameRate]), so the preview and the export start a
-  /// hit on the same frame.
+  /// renderers look a triggered effect up 120 times a second, so the preview
+  /// and the export start a hit on the same frame.
   final List<Duration> triggers;
 
   /// Whether the effect applies at [position].

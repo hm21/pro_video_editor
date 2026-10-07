@@ -583,6 +583,23 @@ void main() {
       expect(sent.single['endUs'], 1300000);
     });
 
+    test('toAsyncMap rounds a triggered effect\'s end up to the microsecond '
+        'after its last step', () async {
+      // One step in, plus a strobe flash of 15 steps: the table ends 16/120 s
+      // = 133333.3 µs in, and the microsecond 133333 still falls in its last
+      // step.
+      final map = await buildData(const [
+        VideoEffect.strobe(triggers: [Duration(microseconds: 8333)]),
+      ]).toAsyncMap();
+      final sent = (map['effects'] as List<Map<String, dynamic>>).single;
+
+      expect(sent['endUs'], 133334);
+      expect(
+        (sent['frames'] as Float64List).length,
+        16 * VideoEffectFrame.stride,
+      );
+    });
+
     test('toAsyncMap leaves out effects at zero intensity', () async {
       final map = await buildData(const [
         VideoEffect.vhs(intensity: 0),
