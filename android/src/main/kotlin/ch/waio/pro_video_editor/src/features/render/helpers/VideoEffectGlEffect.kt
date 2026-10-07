@@ -26,11 +26,12 @@ import ch.waio.pro_video_editor.src.features.render.models.VideoEffectFrame
  *
  * A frame with a glow takes extra passes, see [VideoEffectGlow].
  *
- * The effect runs ahead of a clip's `SpeedChangeEffect`, so a clip with a
- * [playbackSpeed] hands it timestamps from before the speed change. They are
- * moved to where that effect puts the frame, so the effects follow the
- * rendered video, as on iOS and in the preview, and a flashing effect keeps
- * its rate on a sped-up clip.
+ * A clip's own `SpeedChangeEffect` runs ahead of it, so it already sees that
+ * clip's frames on the rendered timeline. A render-wide [playbackSpeed] runs
+ * after it instead and hands it timestamps from before that speed change.
+ * They are moved to where that effect puts the frame, so the effects follow
+ * the rendered video, as on iOS and in the preview, and a flashing effect
+ * keeps its rate on sped-up video.
  */
 @UnstableApi
 class VideoEffectGlEffect(
@@ -39,8 +40,8 @@ class VideoEffectGlEffect(
 ) : GlEffect {
 
     /**
-     * This effect ahead of one more `SpeedChangeEffect` of [speed], on top of
-     * [playbackSpeed]: a clip's own speed, or the render-wide one.
+     * This effect ahead of one more `SpeedChangeEffect` of [speed], the
+     * render-wide one, on top of [playbackSpeed].
      */
     fun withSpeedChange(speed: Float?): VideoEffectGlEffect =
         if (speed == null || speed <= 0f || speed == 1f) this

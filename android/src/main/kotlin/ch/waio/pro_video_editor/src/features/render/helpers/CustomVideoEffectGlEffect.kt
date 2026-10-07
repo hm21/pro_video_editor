@@ -30,9 +30,10 @@ import kotlin.math.roundToInt
  * frames of the same input stream: a clip in a sequence, so the history
  * starts over at every cut.
  *
- * Like [VideoEffectGlEffect] it runs ahead of a clip's `SpeedChangeEffect`,
- * so the times it sees are moved to where that effect puts the frame, and the
- * effect's time range and history offsets follow the rendered video.
+ * Like [VideoEffectGlEffect] it runs after a clip's own `SpeedChangeEffect`
+ * but ahead of a render-wide one, whose speed moves the times it sees to
+ * where that effect puts the frame, so the effect's time range and history
+ * offsets follow the rendered video.
  */
 @UnstableApi
 class CustomVideoEffectGlEffect(
@@ -41,8 +42,8 @@ class CustomVideoEffectGlEffect(
 ) : GlEffect {
 
     /**
-     * This effect ahead of one more `SpeedChangeEffect` of [speed], on top of
-     * [playbackSpeed]: a clip's own speed, or the render-wide one.
+     * This effect ahead of one more `SpeedChangeEffect` of [speed], the
+     * render-wide one, on top of [playbackSpeed].
      */
     fun withSpeedChange(speed: Float?): CustomVideoEffectGlEffect =
         if (speed == null || speed <= 0f || speed == 1f) this
