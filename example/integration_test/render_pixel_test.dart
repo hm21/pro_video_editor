@@ -1073,6 +1073,36 @@ void main() {
       expect(magentaAt(inside, 640, 360), isTrue, reason: 'showing');
     }, skip: kIsWeb);
 
+    testWidgets('an image layer on a slowed-down segment keeps its time', (
+      tester,
+    ) async {
+      // The first 2 s of the source at half speed: 4 s of output.
+      final out = await render(
+        [
+          await box(
+            start: const Duration(seconds: 2),
+            end: const Duration(seconds: 3),
+          ),
+        ],
+        segments: [
+          VideoSegment(
+            video: h264Video,
+            endTime: const Duration(seconds: 2),
+            playbackSpeed: 0.5,
+          ),
+        ],
+      );
+
+      // At 2.5 s of output the source is at 1.25 s. Timed on the source, the
+      // layer would never show: the segment's source ends at 2 s.
+      final before = await frameOf(out, at: const Duration(milliseconds: 1500));
+      expect(magentaAt(before, 640, 360), isFalse, reason: 'not yet');
+      final inside = await frameOf(out, at: const Duration(milliseconds: 2500));
+      expect(magentaAt(inside, 640, 360), isTrue, reason: 'showing');
+      final after = await frameOf(out, at: const Duration(milliseconds: 3500));
+      expect(magentaAt(after, 640, 360), isFalse, reason: 'over');
+    }, skip: kIsWeb);
+
     testWidgets('a timed color filter applies over its output time range', (
       tester,
     ) async {

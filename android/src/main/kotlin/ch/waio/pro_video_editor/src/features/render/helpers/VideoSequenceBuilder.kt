@@ -587,13 +587,14 @@ class VideoSequenceBuilder(
         // the frame on the output timeline: image layers, their animations and
         // keyframes, timed color filters, the video effects and the frame
         // rate cap all time themselves on it, as on iOS and in the preview.
+        // The render-wide speed and the cap lead the global effects below.
         val clipSpeed = clip.playbackSpeed?.takeIf { it > 0f && it != 1.0f }
         if (clipSpeed != null) {
             Log.d(RENDER_TAG, "Clip $index playback speed: ${clipSpeed}x")
             clipVideoEffects += SpeedChangeEffect(clipSpeed)
         }
 
-        // Chroma key first, so it sees the original decoded colors — before
+        // Chroma key next, so it sees the original decoded colors — before
         // rotation, flip, the color LUT and blur. A clip's own key wins over
         // the global one; they are never merged.
         //

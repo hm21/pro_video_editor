@@ -2,7 +2,6 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import android.content.Context
 import android.opengl.GLES20
-import androidx.media3.common.C
 import androidx.media3.common.VideoFrameProcessingException
 import androidx.media3.common.util.GlUtil
 import androidx.media3.common.util.Size
@@ -16,7 +15,6 @@ import ch.waio.pro_video_editor.effects.CustomVideoEffectRenderer
 import ch.waio.pro_video_editor.effects.CustomVideoEffectShader
 import ch.waio.pro_video_editor.effects.CustomVideoEffects
 import ch.waio.pro_video_editor.src.features.render.models.CustomVideoEffectConfig
-import ch.waio.pro_video_editor.src.features.render.models.VideoEffectConfig
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -30,24 +28,13 @@ import kotlin.math.roundToInt
  * frames of the same input stream: a clip in a sequence, so the history
  * starts over at every cut.
  *
- * Like [VideoEffectGlEffect] it runs after a clip's own `SpeedChangeEffect`
- * but ahead of a render-wide one, whose speed moves the times it sees to
- * where that effect puts the frame, so the effect's time range and history
- * offsets follow the rendered video.
+ * Like [VideoEffectGlEffect] it runs after every speed change, so the
+ * effect's time range and history offsets follow the rendered video.
  */
 @UnstableApi
 class CustomVideoEffectGlEffect(
     private val config: CustomVideoEffectConfig,
-    private val playbackSpeed: Float = 1f,
 ) : GlEffect {
-
-    /**
-     * This effect ahead of one more `SpeedChangeEffect` of [speed], the
-     * render-wide one, on top of [playbackSpeed].
-     */
-    fun withSpeedChange(speed: Float?): CustomVideoEffectGlEffect =
-        if (speed == null || speed <= 0f || speed == 1f) this
-        else CustomVideoEffectGlEffect(config, playbackSpeed * speed)
 
     override fun toGlShaderProgram(context: Context, useHdr: Boolean): GlShaderProgram {
         if (useHdr) {
@@ -62,7 +49,7 @@ class CustomVideoEffectGlEffect(
         } catch (e: Exception) {
             throw VideoFrameProcessingException(e)
         }
-        return CustomVideoEffectShaderProgram(renderer, config, playbackSpeed)
+        return CustomVideoEffectShaderProgram(renderer, config)
     }
 
     override fun isNoOp(inputWidth: Int, inputHeight: Int): Boolean = false
@@ -71,7 +58,6 @@ class CustomVideoEffectGlEffect(
     private class CustomVideoEffectShaderProgram(
         private val renderer: CustomVideoEffectRenderer,
         private val config: CustomVideoEffectConfig,
-        private val playbackSpeed: Float,
     ) : BaseGlShaderProgram(/* useHighPrecisionColorComponents= */ false, /* texturePoolCapacity= */ 1) {
 
         private val history = CustomVideoEffectHistory(renderer.historyOffsetsUs)
@@ -88,9 +74,6 @@ class CustomVideoEffectGlEffect(
         private val slotFbos = ArrayList<Int>()
         private val freeSlots = ArrayDeque<Int>()
 
-        /** The first timestamp of the current input stream, where a speed change anchors. */
-        private var streamStartUs = C.TIME_UNSET
-
         override fun configure(inputWidth: Int, inputHeight: Int): Size {
             if (inputWidth != width || inputHeight != height) {
                 history.clear()
@@ -106,14 +89,10 @@ class CustomVideoEffectGlEffect(
 
         override fun drawFrame(inputTexId: Int, presentationTimeUs: Long) {
             try {
-                if (streamStartUs == C.TIME_UNSET) streamStartUs = presentationTimeUs
-                val timeUs = VideoEffectConfig.timeAfterSpeedChangeUs(
-                    presentationTimeUs, streamStartUs, playbackSpeed
-                )
                 val outputFbo = VideoEffectGlow.currentFramebuffer()
 
-                if (config.isActiveAt(timeUs)) {
-                    val frames = history.lookup(timeUs).map { entry ->
+                if (config.isActiveAt(presentationTimeUs)) {
+                    val frames = history.lookup(presentationTimeUs).map { entry ->
                         entry?.let {
                             CustomVideoEffectHistoryFrame(
                                 textureId = slotTextures[it.slot],
@@ -128,8 +107,8 @@ class CustomVideoEffectGlEffect(
                             textureId = inputTexId,
                             width = width,
                             height = height,
-                            timeUs = timeUs,
-                            effectTimeUs = timeUs - (config.startUs ?: 0L),
+                            timeUs = presentationTimeUs,
+                            effectTimeUs = presentationTimeUs - (config.startUs ?: 0L),
                             history = frames,
                         )
                     )
@@ -137,8 +116,8 @@ class CustomVideoEffectGlEffect(
                     drawCopy(inputTexId)
                 }
 
-                if (history.isUsed && config.keepsFrameAt(timeUs, history.maxOffsetUs)) {
-                    keep(inputTexId, timeUs)
+                if (history.isUsed && config.keepsFrameAt(presentationTimeUs, history.maxOffsetUs)) {
+                    keep(inputTexId, presentationTimeUs)
                     GlUtil.focusFramebufferUsingCurrentContext(outputFbo, width, height)
                 }
                 GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -179,18 +158,16 @@ class CustomVideoEffectGlEffect(
             freeSlots.clear()
         }
 
-        // Every input stream is a clip of its own: its history and speed
-        // mapping start over with its first frame.
+        // Every input stream is a clip of its own: its history starts over
+        // with its first frame.
         override fun signalEndOfCurrentInputStream() {
             super.signalEndOfCurrentInputStream()
             freeSlots += history.clear()
-            streamStartUs = C.TIME_UNSET
         }
 
         override fun flush() {
             super.flush()
             freeSlots += history.clear()
-            streamStartUs = C.TIME_UNSET
         }
 
         override fun release() {
