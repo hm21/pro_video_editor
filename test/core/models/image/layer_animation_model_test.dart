@@ -154,6 +154,63 @@ void main() {
       });
     });
 
+    group('loop window', () {
+      test('survives a round trip', () {
+        const loop = LayerAnimation(
+          type: LayerAnimationType.wiggle,
+          phase: AnimationPhase.loop,
+          duration: Duration(milliseconds: 500),
+          loopStart: Duration(seconds: 1),
+          loopEnd: Duration(seconds: 3),
+        );
+
+        final map = loop.toMap();
+
+        expect(map['loopStartUs'], 1000000);
+        expect(map['loopEndUs'], 3000000);
+        expect(LayerAnimation.fromMap(map), loop);
+      });
+
+      test('writes null without a window', () {
+        const loop = LayerAnimation(
+          type: LayerAnimationType.wiggle,
+          phase: AnimationPhase.loop,
+          duration: Duration(milliseconds: 500),
+        );
+
+        final map = loop.toMap();
+
+        expect(map['loopStartUs'], isNull);
+        expect(map['loopEndUs'], isNull);
+        expect(LayerAnimation.fromMap(map).loopStart, isNull);
+      });
+
+      test('is a loop setting only', () {
+        expect(
+          () => LayerAnimation(
+            type: LayerAnimationType.fade,
+            phase: AnimationPhase.animateIn,
+            duration: const Duration(milliseconds: 500),
+            loopStart: Duration.zero,
+          ),
+          throwsAssertionError,
+        );
+      });
+
+      test('needs loopStart before loopEnd', () {
+        expect(
+          () => const LayerAnimation(
+            type: LayerAnimationType.wiggle,
+            phase: AnimationPhase.loop,
+            duration: Duration(milliseconds: 500),
+            loopStart: Duration(seconds: 2),
+            loopEnd: Duration(seconds: 2),
+          ).toMap(),
+          throwsAssertionError,
+        );
+      });
+    });
+
     group('fromMap', () {
       test('deserializes fade animation', () {
         final map = <String, dynamic>{

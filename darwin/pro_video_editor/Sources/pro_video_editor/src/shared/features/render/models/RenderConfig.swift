@@ -38,6 +38,11 @@ struct LayerAnimationConfig {
   var wiggleAngle: Double? = nil
   /// How high a bounce lifts the layer, as a multiple of its own height.
   var bounceHeight: Double? = nil
+  /// Where a loop starts repeating, on the output timeline; -1 = the layer's
+  /// start.
+  var loopStartUs: Int64 = -1
+  /// Where a loop stops, on the output timeline; -1 = the layer's end.
+  var loopEndUs: Int64 = -1
 
   static func fromArguments(_ args: [String: Any]?) -> LayerAnimationConfig? {
     guard let args = args,
@@ -63,7 +68,9 @@ struct LayerAnimationConfig {
       slideFrom: slideFrom,
       scaleFrom: (args["scaleFrom"] as? NSNumber)?.doubleValue,
       wiggleAngle: (args["wiggleAngle"] as? NSNumber)?.doubleValue,
-      bounceHeight: (args["bounceHeight"] as? NSNumber)?.doubleValue
+      bounceHeight: (args["bounceHeight"] as? NSNumber)?.doubleValue,
+      loopStartUs: (args["loopStartUs"] as? NSNumber)?.int64Value ?? -1,
+      loopEndUs: (args["loopEndUs"] as? NSNumber)?.int64Value ?? -1
     )
   }
 }
@@ -142,6 +149,42 @@ public struct LayerCensorConfig: Sendable, Equatable {
   }
 }
 
+/// A layer's placement at one point of the timeline, mirroring the Dart
+/// `TimelineKeyframe`.
+struct KeyframeConfig: Sendable, Equatable {
+  /// When the placement applies, on the layer's own timeline, in µs.
+  let timeUs: Int64
+  /// Top-left x of the layer's unscaled box, in frame pixels.
+  let x: Double
+  /// Top-left y of the layer's unscaled box, in frame pixels (top-left origin).
+  let y: Double
+  /// How much the box is grown around its center.
+  var scale: Double = 1
+  /// Clockwise rotation around the box center, in radians.
+  var rotation: Double = 0
+  /// Opacity from 0 to 1.
+  var opacity: Double = 1
+  /// Easing toward the next keyframe (see `applyEasing`).
+  var curve: String = "linear"
+
+  static func fromArguments(_ args: [String: Any]) -> KeyframeConfig {
+    KeyframeConfig(
+      timeUs: (args["timeUs"] as? NSNumber)?.int64Value ?? 0,
+      x: (args["x"] as? NSNumber)?.doubleValue ?? 0,
+      y: (args["y"] as? NSNumber)?.doubleValue ?? 0,
+      scale: (args["scale"] as? NSNumber)?.doubleValue ?? 1,
+      rotation: (args["rotation"] as? NSNumber)?.doubleValue ?? 0,
+      opacity: (args["opacity"] as? NSNumber)?.doubleValue ?? 1,
+      curve: args["curve"] as? String ?? "linear")
+  }
+
+  /// The keyframes in [raw], a list of maps, sorted by time.
+  static func list(from raw: Any?) -> [KeyframeConfig] {
+    guard let maps = raw as? [[String: Any]] else { return [] }
+    return maps.map { fromArguments($0) }.sorted { $0.timeUs < $1.timeUs }
+  }
+}
+
 public struct ImageLayerConfig: Sendable {
   /// Where this layer's encoded image lives — a path when the caller had it on
   /// disk, bytes otherwise.
@@ -174,6 +217,10 @@ public struct ImageLayerConfig: Sendable {
   var animationStartUs: Int64 = -1
   /// Where the animations end, when that is not `endUs` (-1 = `endUs`).
   var animationEndUs: Int64 = -1
+  /// The layer's placement over time, sorted by time. They replace `x`, `y`
+  /// and `rotation`, scale the size around its center and set the opacity;
+  /// empty keeps the layer where `x` and `y` put it.
+  var keyframes: [KeyframeConfig] = []
 
   static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
     guard let args = args,
@@ -209,7 +256,8 @@ public struct ImageLayerConfig: Sendable {
       animations: animations,
       censor: LayerCensorConfig.fromArguments(args["censor"] as? [String: Any]),
       animationStartUs: (args["animationStartUs"] as? NSNumber)?.int64Value ?? -1,
-      animationEndUs: (args["animationEndUs"] as? NSNumber)?.int64Value ?? -1
+      animationEndUs: (args["animationEndUs"] as? NSNumber)?.int64Value ?? -1,
+      keyframes: KeyframeConfig.list(from: args["keyframes"])
     )
   }
 }
@@ -453,6 +501,9 @@ struct LayerConfig: Sendable {
   /// Default chroma key for the clips on this layer. A clip's own key wins;
   /// `nil` falls back to the global key.
   let chromaKey: ChromaKeyConfig?
+  /// The layer's placement over time, sorted by time and on the composition
+  /// timeline; empty keeps every clip where its transform puts it.
+  var keyframes: [KeyframeConfig] = []
 
   static func fromArguments(_ args: [String: Any]?) -> LayerConfig? {
     guard let args = args,
@@ -464,7 +515,8 @@ struct LayerConfig: Sendable {
       clips: clips,
       opacity: (args["opacity"] as? NSNumber)?.floatValue ?? 1.0,
       transform: SegmentTransformConfig.fromArguments(args["transform"] as? [String: Any]),
-      chromaKey: ChromaKeyConfig.fromArguments(args["chromaKey"] as? [String: Any])
+      chromaKey: ChromaKeyConfig.fromArguments(args["chromaKey"] as? [String: Any]),
+      keyframes: KeyframeConfig.list(from: args["keyframes"])
     )
   }
 }

@@ -102,6 +102,61 @@ func slideFromOffset(
   )
 }
 
+/// A layer's placement at one moment, mixed from its keyframes; see
+/// `keyframePlacement(_:atUs:)`. `x` and `y` are the top-left corner of the
+/// unscaled box in frame pixels with a top-left origin, `rotation` is
+/// clockwise in radians.
+struct KeyframePlacement: Equatable {
+  let x: Double
+  let y: Double
+  let scale: Double
+  let rotation: Double
+  let opacity: Double
+}
+
+extension KeyframeConfig {
+  fileprivate var placement: KeyframePlacement {
+    KeyframePlacement(x: x, y: y, scale: scale, rotation: rotation, opacity: opacity)
+  }
+}
+
+/// The placement [keyframes] give a layer at [timeUs], or `nil` when there are
+/// none.
+///
+/// [keyframes] must be sorted by time. Before the first keyframe the layer
+/// holds its placement, after the last one the last one's; between two the
+/// earlier one's curve eases from one to the other. An elastic or bounce curve
+/// may overshoot; only the opacity is kept within 0–1 and the scale at 0 or
+/// more. The rotation is mixed as it is, so a full turn stays a full turn.
+/// Mirrors `keyframePlacementAt` on Android and `layerKeyframePlacementAt` in
+/// pro_image_editor, which the editor preview reads.
+func keyframePlacement(_ keyframes: [KeyframeConfig], atUs timeUs: Int64) -> KeyframePlacement? {
+  guard let first = keyframes.first, let last = keyframes.last else { return nil }
+  if timeUs <= first.timeUs { return first.placement }
+  if timeUs >= last.timeUs { return last.placement }
+
+  // The last keyframe at or before [timeUs]; both ends are ruled out above,
+  // so a later one always exists.
+  var index = 0
+  for i in 1..<keyframes.count {
+    if keyframes[i].timeUs > timeUs { break }
+    index = i
+  }
+  let from = keyframes[index]
+  let to = keyframes[index + 1]
+  let spanUs = to.timeUs - from.timeUs
+  guard spanUs > 0 else { return to.placement }
+
+  let eased = applyEasing(Double(timeUs - from.timeUs) / Double(spanUs), curve: from.curve)
+  func mix(_ a: Double, _ b: Double) -> Double { a + (b - a) * eased }
+  return KeyframePlacement(
+    x: mix(from.x, to.x),
+    y: mix(from.y, to.y),
+    scale: max(0, mix(from.scale, to.scale)),
+    rotation: mix(from.rotation, to.rotation),
+    opacity: min(1, max(0, mix(from.opacity, to.opacity))))
+}
+
 /// How far an animation has brought a layer back to rest at one moment:
 /// `value` is 1 at rest and 0 fully away (faded out, at the edge, tilted all
 /// the way), and may overshoot either end with an elastic or bounce curve.
@@ -122,8 +177,9 @@ struct AnimationProgress: Equatable {
 /// "animateInOut" both apply and the one further from rest wins.
 ///
 /// A "loop" plays over the whole range, one cycle per duration counted from
-/// [startUs]: the eased value runs from rest to fully away at half a cycle and
-/// back. A wiggle runs that twice per cycle, once to each side. The cycle
+/// [startUs], or only from `loopStartUs` to `loopEndUs` when it names them,
+/// counting from the first: the eased value runs from rest to fully away at
+/// half a cycle and back. A wiggle runs that twice per cycle, once to each side. The cycle
 /// position is taken from the remainder of whole microseconds, so a long video
 /// does not lose precision. Mirrors `animationProgress` on Android.
 func animationProgress(
@@ -139,7 +195,10 @@ func animationProgress(
   let effectiveEndUs = endUs == -1 ? Int64.max : endUs
 
   if anim.phase == "loop" {
-    let elapsed = max(0, currentTimeUs - effectiveStartUs)
+    if anim.loopStartUs >= 0 && currentTimeUs < anim.loopStartUs { return nil }
+    if anim.loopEndUs >= 0 && currentTimeUs >= anim.loopEndUs { return nil }
+    let fromUs = anim.loopStartUs >= 0 ? anim.loopStartUs : effectiveStartUs
+    let elapsed = max(0, currentTimeUs - fromUs)
     let inCycle = elapsed % durationUs
     if anim.type == "wiggle" {
       // Each half of the cycle is one swing out and back.
@@ -186,7 +245,7 @@ func animationProgress(
 
 /// Computes animation transforms and opacity for overlaying an image layer.
 /// Returns the opacity and the transform to apply to the overlay, and
-/// `untilted`, the same transform without a wiggle's tilt.
+/// `untilted`, the same transform without a wiggle's tilt or a keyframe's turn.
 ///
 /// The animations count from the layer's `animationStartUs` / `animationEndUs`
 /// where set, else from its own time range. Opacity and scale multiply, slide
@@ -196,18 +255,32 @@ func animationProgress(
 /// by a multiple of its unscaled height. Text reveals ("typewriter",
 /// "wordByWord") change what the image shows, which a fixed image cannot do,
 /// so they are skipped; the caller passes one layer per step instead.
+///
+/// A [keyframe] places the layer first: [overlayExtent] is then its upright,
+/// unscaled box at the keyframed corner, which the keyframe's scale grows and
+/// its rotation turns around the box center, together with any scale
+/// animation and wiggle, and its opacity fades. The animations play on top of
+/// it: a slide starts from the frame edge nearest the keyframed box and a
+/// bounce lifts by its keyframed height, as on Android and in the editor
+/// preview.
 func computeAnimation(
   layer: ImageLayer,
   currentTimeUs: Int64,
   overlayExtent: CGRect,
-  frameExtent: CGRect
+  frameExtent: CGRect,
+  keyframe: KeyframePlacement? = nil
 ) -> (opacity: Double, transform: CGAffineTransform, untilted: CGAffineTransform) {
-  var opacity = 1.0
-  var scale: CGFloat = 1
+  let keyframeScale = CGFloat(keyframe?.scale ?? 1)
+  var opacity = keyframe?.opacity ?? 1.0
+  var scale: CGFloat = keyframeScale
   // Core Graphics pixels, Y up.
   var offset = CGPoint.zero
   // Clockwise, in radians, like Flutter's rotation.
   var wiggle = 0.0
+  // The box as the keyframes size it, which the slides and bounces measure.
+  let sizedExtent = overlayExtent.insetBy(
+    dx: overlayExtent.width * (1 - keyframeScale) / 2,
+    dy: overlayExtent.height * (1 - keyframeScale) / 2)
 
   let startUs = layer.animationStartUs == -1 ? layer.startUs : layer.animationStartUs
   let endUs = layer.animationEndUs == -1 ? layer.endUs : layer.animationEndUs
@@ -228,14 +301,17 @@ func computeAnimation(
       let off: CGPoint
       // A caller-chosen start point wins over the edge the direction picks.
       if let slideFrom = anim.slideFrom {
-        // A stretched layer (no x/y) rests on the frame origin.
-        let layerOrigin = CGPoint(x: CGFloat(layer.x ?? 0), y: CGFloat(layer.y ?? 0))
+        // A stretched layer (no x/y) rests on the frame origin; a keyframed one
+        // on its keyframed corner.
+        let layerOrigin =
+          keyframe.map { CGPoint(x: $0.x, y: $0.y) }
+          ?? CGPoint(x: CGFloat(layer.x ?? 0), y: CGFloat(layer.y ?? 0))
         off = slideFromOffset(invP: invP, slideFrom: slideFrom, layerOrigin: layerOrigin)
       } else if let direction = anim.slideDirection {
         off = slideOffset(
           direction: direction,
           invP: invP,
-          overlayExtent: overlayExtent,
+          overlayExtent: sizedExtent,
           frameExtent: frameExtent
         )
       } else {
@@ -258,7 +334,7 @@ func computeAnimation(
 
     case "bounce":
       let height = anim.bounceHeight ?? LayerAnimationConfig.defaultBounceHeight
-      offset.y += CGFloat((1 - p) * height) * overlayExtent.height
+      offset.y += CGFloat((1 - p) * height) * sizedExtent.height
 
     default:
       break
@@ -283,7 +359,11 @@ func computeAnimation(
       .concatenating(move)
   }
 
-  return (opacity, placed(tilt: wiggle), placed(tilt: 0))
+  // `untilted` leaves out the keyframes' turn as well as the wiggle's: a
+  // pixelate censor starts its blocks at the corner of the upright box, as
+  // Android's `CensorMaskPlacement.topLeftPixel` does for any Media3 turn.
+  let turn = keyframe?.rotation ?? 0
+  return (opacity, placed(tilt: turn + wiggle), placed(tilt: 0))
 }
 
 /// Composites an overlay image onto the output with animation effects applied.

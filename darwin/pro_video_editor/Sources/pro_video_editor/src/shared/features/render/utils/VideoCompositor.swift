@@ -34,6 +34,9 @@ struct ImageLayer {
   var animationStartUs: Int64 = -1
   /// Where the animations end, when that is not `endUs` (-1 = `endUs`).
   var animationEndUs: Int64 = -1
+  /// The layer's placement over time, sorted by time; they replace `x`, `y`
+  /// and `rotation`. See `keyframePlacement(_:atUs:)`.
+  var keyframes: [KeyframeConfig] = []
 
   /// The frame to display at composition time [currentTimeUs].
   ///
@@ -391,7 +394,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
           animations: layer.animations,
           censor: layer.censor,
           animationStartUs: layer.animationStartUs,
-          animationEndUs: layer.animationEndUs
+          animationEndUs: layer.animationEndUs,
+          keyframes: layer.keyframes
         ))
     }
   }
@@ -410,8 +414,16 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       img = img.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
     }
 
+    // A keyframed layer is placed and turned by its keyframes instead of its
+    // own x, y and rotation; computeAnimation applies the turn and the scale.
+    let keyframe = keyframePlacement(layer.keyframes, atUs: currentTimeUs)
+
     let overlay: CIImage
-    if layer.x == nil && layer.y == nil {
+    if let keyframe {
+      let cgY = imageRect.height - CGFloat(keyframe.y) - img.extent.height
+      overlay = img.transformed(
+        by: CGAffineTransform(translationX: CGFloat(keyframe.x), y: cgY))
+    } else if layer.x == nil && layer.y == nil {
       overlay = img.transformed(
         by: CGAffineTransform(
           scaleX: imageRect.width / img.extent.width,
@@ -424,21 +436,23 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         by: CGAffineTransform(translationX: posX, y: cgY))
     }
 
-    let rotated = rotateOverlayAroundCenter(overlay, radians: layer.rotation)
+    let rotated =
+      keyframe == nil ? rotateOverlayAroundCenter(overlay, radians: layer.rotation) : overlay
     let (opacity, animTransform, untilted) = computeAnimation(
       layer: layer,
       currentTimeUs: currentTimeUs,
       overlayExtent: rotated.extent,
-      frameExtent: imageRect
+      frameExtent: imageRect,
+      keyframe: keyframe
     )
     guard let censor = layer.censor else {
       return compositeOverlay(
         rotated, over: outputImage, opacity: opacity, transform: animTransform)
     }
     let mask = placedOverlay(rotated, opacity: opacity, transform: animTransform)
-    // A wiggle tilts the hidden area, but its pixelate blocks stay put where
-    // the upright area starts them, as on Android, instead of following the
-    // corner of the box around it.
+    // A wiggle or a keyframe turn tilts the hidden area, but its pixelate
+    // blocks stay put where the upright area starts them, as on Android,
+    // instead of following the corner of the box around it.
     return applyLayerCensor(
       censor, to: outputImage, mask: mask, frame: imageRect,
       blockArea: rotated.extent.applying(untilted))
@@ -755,8 +769,13 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     let bg = instruction.backgroundColor ?? CGColor(red: 0, green: 0, blue: 0, alpha: 1)
     var canvas = CIImage(color: CIColor(cgColor: bg))
       .cropped(to: CGRect(origin: .zero, size: renderSize))
+    let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
 
     for placement in instruction.layerPlacements {
+      // Where the layer's keyframes put it on this frame, if it has any.
+      let (targetRect, rotation, opacity) = placement.resolved(
+        atUs: currentTimeUs, renderSize: renderSize)
+
       guard let buffer = request.sourceFrame(byTrackID: placement.trackID) else { continue }
       var img = CIImage(cvPixelBuffer: buffer)
 
@@ -780,7 +799,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       guard srcSize.width > 0, srcSize.height > 0 else { continue }
 
       // 2. Destination rect in canvas pixels (top-left origin); nil = full canvas.
-      let topLeftRect = placement.targetRect ?? CGRect(origin: .zero, size: renderSize)
+      let topLeftRect = targetRect ?? CGRect(origin: .zero, size: renderSize)
       // Convert to CoreImage's bottom-left origin.
       let ciRect = CGRect(
         x: topLeftRect.minX,
@@ -828,11 +847,11 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       //     is given. Either way the helper's centre is the box centre.
       //     Turning *after* the crop is what keeps `cover` overflow cut at
       //     the box edge instead of swinging back into view.
-      img = rotateOverlayAroundCenter(img, radians: placement.rotation)
+      img = rotateOverlayAroundCenter(img, radians: rotation)
 
       // 5. Apply opacity and composite over the canvas.
       canvas = compositeOverlay(
-        img, over: canvas, opacity: Double(placement.opacity), transform: .identity)
+        img, over: canvas, opacity: Double(opacity), transform: .identity)
     }
 
     return canvas.cropped(to: CGRect(origin: .zero, size: renderSize))

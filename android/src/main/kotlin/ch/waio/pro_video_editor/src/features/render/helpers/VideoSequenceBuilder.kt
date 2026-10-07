@@ -18,6 +18,7 @@ import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
+import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerCensorConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
@@ -106,7 +107,12 @@ class VideoSequenceBuilder(
          * Blurs or pixelates the picture beneath the layer instead of drawing
          * [image]; `null` draws the image. See [LayerCensorEffect].
          */
-        val censor: LayerCensorConfig? = null
+        val censor: LayerCensorConfig? = null,
+        /**
+         * The layer's placement over time, sorted by time; they replace [x],
+         * [y] and [rotation]. See [keyframePlacementAt].
+         */
+        val keyframes: List<KeyframeConfig> = emptyList()
     )
 
     /**

@@ -213,11 +213,17 @@ class LayerAnimation {
     this.scaleFrom,
     this.wiggleAngle,
     this.bounceHeight,
+    this.loopStart,
+    this.loopEnd,
   }) : assert(
          type != LayerAnimationType.slide ||
              slideDirection != null ||
              slideFrom != null,
          'slide animations need either a slideDirection or a slideFrom point',
+       ),
+       assert(
+         phase == AnimationPhase.loop || (loopStart == null && loopEnd == null),
+         'only a loop repeats between loopStart and loopEnd',
        );
 
   /// How far a [LayerAnimationType.wiggle] tilts when [wiggleAngle] is not
@@ -288,7 +294,27 @@ class LayerAnimation {
   /// Defaults to [defaultBounceHeight] when not set.
   final double? bounceHeight;
 
+  /// Where a [AnimationPhase.loop] starts repeating, on the output timeline
+  /// like [ImageLayer.startTime]. It counts its cycles from here and does not
+  /// play before it.
+  ///
+  /// `null` repeats from the layer's own start. Together with [loopEnd] a
+  /// loop can play over part of a layer only, such as the stretch between two
+  /// [ImageLayer.keyframes]: a [duration] that fits a whole number of cycles
+  /// between the two leaves the layer at rest on both.
+  final Duration? loopStart;
+
+  /// Where a [AnimationPhase.loop] stops, on the output timeline like
+  /// [ImageLayer.endTime]; it does not play from here on. `null` repeats to
+  /// the layer's own end. Comes after [loopStart] when both are set.
+  final Duration? loopEnd;
+
   Map<String, dynamic> toMap() {
+    // Checked here: Durations cannot be compared in a const constructor.
+    assert(
+      loopStart == null || loopEnd == null || loopStart! < loopEnd!,
+      'loopStart must be before loopEnd',
+    );
     return <String, dynamic>{
       'type': type.name,
       'phase': phase.name,
@@ -301,6 +327,8 @@ class LayerAnimation {
       'scaleFrom': scaleFrom,
       'wiggleAngle': wiggleAngle,
       'bounceHeight': bounceHeight,
+      'loopStartUs': loopStart?.inMicroseconds,
+      'loopEndUs': loopEnd?.inMicroseconds,
     };
   }
 
@@ -321,6 +349,12 @@ class LayerAnimation {
       scaleFrom: (map['scaleFrom'] as num?)?.toDouble(),
       wiggleAngle: (map['wiggleAngle'] as num?)?.toDouble(),
       bounceHeight: (map['bounceHeight'] as num?)?.toDouble(),
+      loopStart: map['loopStartUs'] != null
+          ? Duration(microseconds: (map['loopStartUs'] as num).toInt())
+          : null,
+      loopEnd: map['loopEndUs'] != null
+          ? Duration(microseconds: (map['loopEndUs'] as num).toInt())
+          : null,
     );
   }
 
@@ -332,7 +366,9 @@ class LayerAnimation {
         '${slideFrom != null ? ', slideFrom: $slideFrom' : ''}'
         '${scaleFrom != null ? ', scaleFrom: $scaleFrom' : ''}'
         '${wiggleAngle != null ? ', wiggleAngle: $wiggleAngle' : ''}'
-        '${bounceHeight != null ? ', bounceHeight: $bounceHeight' : ''})';
+        '${bounceHeight != null ? ', bounceHeight: $bounceHeight' : ''}'
+        '${loopStart != null ? ', loopStart: $loopStart' : ''}'
+        '${loopEnd != null ? ', loopEnd: $loopEnd' : ''})';
   }
 
   @override
@@ -346,7 +382,9 @@ class LayerAnimation {
         other.slideFrom == slideFrom &&
         other.scaleFrom == scaleFrom &&
         other.wiggleAngle == wiggleAngle &&
-        other.bounceHeight == bounceHeight;
+        other.bounceHeight == bounceHeight &&
+        other.loopStart == loopStart &&
+        other.loopEnd == loopEnd;
   }
 
   @override
@@ -359,6 +397,8 @@ class LayerAnimation {
         slideFrom.hashCode ^
         scaleFrom.hashCode ^
         wiggleAngle.hashCode ^
-        bounceHeight.hashCode;
+        bounceHeight.hashCode ^
+        loopStart.hashCode ^
+        loopEnd.hashCode;
   }
 }

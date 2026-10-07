@@ -30,7 +30,6 @@ import ch.waio.pro_video_editor.src.shared.media.isContentUri
 import ch.waio.pro_video_editor.src.shared.media.readablePath
 import java.io.File
 import kotlin.math.max
-import kotlin.math.min
 
 /**
  * Builds a layered Media3 [Composition] from a [CompositionConfig].
@@ -95,8 +94,6 @@ class LayeredCompositionBuilder(
         val endsBeforeSource: Boolean
     )
 
-    private data class DrawRect(val x: Double, val y: Double, val w: Double, val h: Double)
-
     /**
      * A layer clip's audio, placed on the output timeline: the source range
      * [srcStartUs, srcEndUs) plays from [outputStartUs] to [outputEndUs].
@@ -108,20 +105,6 @@ class LayeredCompositionBuilder(
         val outputStartUs: Long,
         val outputEndUs: Long,
         val volume: Float
-    )
-
-    /**
-     * Where a clip is drawn on the canvas. [draw] is the (possibly oversized for
-     * `cover`) destination rectangle; [clip] is the target box the draw is
-     * scissored to so overflow can't bleed onto other layers. [clip] is `null`
-     * when the clip fills the whole canvas (no clipping needed). [rotation] is
-     * the clockwise turn of the whole placed box around its own centre, in
-     * radians — [draw] and [clip] stay the unrotated rectangles.
-     */
-    private data class Placement(
-        val draw: DrawRect,
-        val clip: DrawRect?,
-        val rotation: Double = 0.0
     )
 
     fun build(): Composition {
@@ -226,14 +209,28 @@ class LayeredCompositionBuilder(
                 }
                 pathsInThisLayer.add(clip.inputPath)
 
-                val placement = resolvePlacement(
-                    clip.transform ?: layer.transform, displayW, displayH, canvasW, canvasH
+                val transform = clip.transform ?: layer.transform
+                val placement = segmentPlacement(
+                    transform, displayW, displayH, canvasW, canvasH
                 )
+                // Keyframes move the clip frame by frame, measured on the
+                // untrimmed composition timeline its first frame lies on.
+                val keyframeAnimator = if (layer.keyframes.isEmpty()) null else {
+                    SegmentKeyframeAnimator(
+                        keyframes = layer.keyframes,
+                        transform = transform,
+                        displayW = displayW,
+                        displayH = displayH,
+                        canvasW = canvasW,
+                        canvasH = canvasH,
+                        clipStartUs = visibleStart
+                    )
+                }
                 seqBuilder.addItem(
                     buildClipItem(
                         clip, srcStartUs, srcEndUs, effectivePath, placement,
                         displayW, displayH, layer.opacity, canvasW, canvasH,
-                        layer.chromaKey
+                        layer.chromaKey, keyframeAnimator
                     )
                 )
                 val volume = clip.volume ?: 1.0f
@@ -359,13 +356,14 @@ class LayeredCompositionBuilder(
         srcStartUs: Long?,
         srcEndUs: Long?,
         inputPath: String,
-        placement: Placement,
+        placement: SegmentPlacement,
         displayW: Int,
         displayH: Int,
         opacity: Float,
         canvasW: Int,
         canvasH: Int,
-        layerChromaKey: ChromaKeyConfig?
+        layerChromaKey: ChromaKeyConfig?,
+        keyframeAnimator: SegmentKeyframeAnimator? = null
     ): EditedMediaItem {
         val mediaItemBuilder = MediaItem.Builder().contentUri(inputPath)
         if (srcStartUs != null || srcEndUs != null) {
@@ -409,9 +407,12 @@ class LayeredCompositionBuilder(
             clipY = clipBox?.y,
             clipWidth = clipBox?.w,
             clipHeight = clipBox?.h,
-            rotation = placement.rotation
+            rotation = placement.rotation,
+            keyframeAnimator = keyframeAnimator
         )
-        applyOpacity(effects, opacity)
+        // Keyframes carry the opacity of a layer that has them; the
+        // transformation applies it frame by frame.
+        if (keyframeAnimator == null) applyOpacity(effects, opacity)
 
         // Note: no setDurationUs here. For video, Media3's duration is the input
         // media length (pre-clip); the playable span is defined by the clipping
@@ -423,49 +424,6 @@ class LayeredCompositionBuilder(
             .setRemoveAudio(true)
             .setEffects(Effects(emptyList(), effects))
             .build()
-    }
-
-    /**
-     * Resolves the destination rectangle (canvas pixels, top-left origin) for a
-     * clip given its transform and source display size, together with the box it
-     * is clipped to. `null` transform fills the canvas (no clipping).
-     */
-    private fun resolvePlacement(
-        cfg: SegmentTransformConfig?,
-        displayW: Int,
-        displayH: Int,
-        canvasW: Int,
-        canvasH: Int
-    ): Placement {
-        if (cfg == null) {
-            return Placement(
-                DrawRect(0.0, 0.0, canvasW.toDouble(), canvasH.toDouble()),
-                clip = null
-            )
-        }
-        val dW = displayW.toDouble().coerceAtLeast(1.0)
-        val dH = displayH.toDouble().coerceAtLeast(1.0)
-        val boxX = cfg.offsetX ?: 0.0
-        val boxY = cfg.offsetY ?: 0.0
-        val boxW = cfg.width ?: dW
-        val boxH = cfg.height ?: dH
-        val box = DrawRect(boxX, boxY, boxW, boxH)
-        val draw = when (cfg.fit) {
-            "contain" -> {
-                val s = min(boxW / dW, boxH / dH)
-                val w = dW * s
-                val h = dH * s
-                DrawRect(boxX + (boxW - w) / 2, boxY + (boxH - h) / 2, w, h)
-            }
-            "cover" -> {
-                val s = max(boxW / dW, boxH / dH)
-                val w = dW * s
-                val h = dH * s
-                DrawRect(boxX + (boxW - w) / 2, boxY + (boxH - h) / 2, w, h)
-            }
-            else -> box // "fill"
-        }
-        return Placement(draw, box, cfg.rotation)
     }
 
     /**

@@ -135,6 +135,36 @@ void main() {
       );
     });
 
+    group('keyframes', () {
+      const keyframes = [
+        TimelineKeyframe(
+          time: Duration(seconds: 1),
+          offset: Offset(10, 20),
+          rotation: 0.5,
+          opacity: 0.25,
+        ),
+        TimelineKeyframe(time: Duration.zero, offset: Offset(30, 40)),
+      ];
+
+      test('toJson / fromJson roundtrip preserves them', () {
+        final keyed = layer.copyWith(keyframes: keyframes);
+
+        expect(VideoLayer.fromJson(keyed.toJson()), keyed);
+        expect(keyed, isNot(layer));
+      });
+
+      test('toAsyncMap sends them sorted by time', () async {
+        final map = await VideoLayer(
+          clips: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+          keyframes: keyframes,
+        ).toAsyncMap();
+
+        final sent = (map['keyframes'] as List).cast<Map<String, dynamic>>();
+        expect(sent.map((k) => k['timeUs']), [0, 1000000]);
+        expect(sent.last['opacity'], 0.25);
+      });
+    });
+
     group('chromaKey', () {
       const key = ChromaKey(similarity: 0.25);
 

@@ -5,10 +5,48 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart';
 import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
 import 'package:pro_video_editor/core/models/image/layer_censor_model.dart';
+import 'package:pro_video_editor/core/models/image/timeline_keyframe_model.dart';
 
 void main() {
   group('ImageLayer', () {
     final image = EditorLayerImage.memory(Uint8List.fromList([1, 2, 3]));
+
+    group('keyframes', () {
+      const keyframes = [
+        TimelineKeyframe(time: Duration(seconds: 2), offset: Offset(10, 20)),
+        TimelineKeyframe(
+          time: Duration.zero,
+          offset: Offset(30, 40),
+          scale: 2,
+          opacity: 0.5,
+        ),
+      ];
+
+      test('round-trip through toMap and fromMap', () {
+        final layer = ImageLayer(
+          image: image,
+          offset: const Offset(1, 2),
+          keyframes: keyframes,
+        );
+
+        expect(ImageLayer.fromMap(layer.toMap()).keyframes, keyframes);
+      });
+
+      test('take part in equality and copyWith', () {
+        final layer = ImageLayer(image: image, offset: Offset.zero);
+        final moved = layer.copyWith(keyframes: keyframes);
+
+        expect(moved, isNot(layer));
+        expect(moved.keyframes, keyframes);
+      });
+
+      test('need a positioned layer', () {
+        expect(
+          () => ImageLayer(image: image, keyframes: keyframes),
+          throwsAssertionError,
+        );
+      });
+    });
 
     group('toMap', () {
       test('serializes all fields correctly', () {

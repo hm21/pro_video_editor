@@ -62,7 +62,8 @@ fun applyComposition(
                 animations = imageLayer.animations,
                 animationStartUs = imageLayer.animationStartUs,
                 animationEndUs = imageLayer.animationEndUs,
-                censor = imageLayer.censor
+                censor = imageLayer.censor,
+                keyframes = imageLayer.keyframes
             )
         }
         val layeredBuilder = LayeredCompositionBuilder(

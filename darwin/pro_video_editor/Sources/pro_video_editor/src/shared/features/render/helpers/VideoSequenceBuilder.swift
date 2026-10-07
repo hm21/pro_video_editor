@@ -496,6 +496,37 @@ internal struct LayerPlacement: Sendable {
   /// Chroma key for this layer, resolved as `clip ?? layer ?? global`.
   /// Applied to the layer's own source frame, before it reaches the canvas.
   let chromaKey: ChromaKeyConfig?
+  /// The layer's placement over time, on the composition timeline; see
+  /// `resolved(atUs:renderSize:)`.
+  var keyframes: [KeyframeConfig] = []
+}
+
+extension LayerPlacement {
+  /// The destination box, turn and opacity of the layer at [timeUs] on the
+  /// composition timeline.
+  ///
+  /// Without keyframes these are `targetRect`, `rotation` and `opacity`. A
+  /// keyframe's corner replaces the box's top-left corner, its scale grows or
+  /// shrinks the box around its center, and its rotation and opacity replace
+  /// the layer's. A layer without a box fills the canvas of [renderSize],
+  /// which keyframes may then move off it. `fit` stays. Mirrors
+  /// `SegmentKeyframeAnimator` on Android.
+  func resolved(atUs timeUs: Int64, renderSize: CGSize)
+    -> (rect: CGRect?, rotation: Double, opacity: Float)
+  {
+    guard let keyframe = keyframePlacement(keyframes, atUs: timeUs) else {
+      return (targetRect, rotation, opacity)
+    }
+    let box = targetRect ?? CGRect(origin: .zero, size: renderSize)
+    let width = box.width * CGFloat(keyframe.scale)
+    let height = box.height * CGFloat(keyframe.scale)
+    let rect = CGRect(
+      x: CGFloat(keyframe.x) + (box.width - width) / 2,
+      y: CGFloat(keyframe.y) + (box.height - height) / 2,
+      width: width,
+      height: height)
+    return (rect, keyframe.rotation, Float(keyframe.opacity))
+  }
 }
 
 /// Custom video composition instruction that explicitly provides source track IDs.
