@@ -542,6 +542,44 @@ void main() {
     });
   });
 
+  group('triggers', () {
+    late EditorVideo darkGrey;
+
+    setUpAll(() async {
+      darkGrey = await videoFromImage(await solidPng(const Color(0xFF404040)));
+    });
+
+    // Triggers off the strobe's own half-second grid, as beats of a song
+    // would be. A frame is probed 40 ms after a trigger, so the clip's 30 fps
+    // frames put one inside the first, fully white bucket of the hit.
+    testWidgets('strobe flashes on each trigger, and nowhere else', (
+      tester,
+    ) async {
+      final video = await render(darkGrey, const [
+        VideoEffect.strobe(
+          triggers: [Duration(milliseconds: 300), Duration(milliseconds: 1100)],
+        ),
+      ]);
+
+      Future<int> greyAt(int milliseconds) async => grey(
+        pixel(
+          await frameOf(video, Duration(milliseconds: milliseconds)),
+          320,
+          180,
+        ),
+      );
+
+      // Untouched before the first trigger, between the hits (a triggered
+      // strobe does not dim) and after the last one (its table does not
+      // repeat).
+      expect(await greyAt(200), inInclusiveRange(54, 74));
+      expect(await greyAt(340), greaterThan(235));
+      expect(await greyAt(700), inInclusiveRange(54, 74));
+      expect(await greyAt(1140), greaterThan(235));
+      expect(await greyAt(1600), inInclusiveRange(54, 74));
+    });
+  });
+
   group('texture effects', () {
     late EditorVideo stripe;
     late EditorVideo midGrey;

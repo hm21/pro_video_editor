@@ -17,6 +17,7 @@ import 'package:pro_video_editor/core/models/video/video_quality_config.dart';
 import 'package:pro_video_editor/core/models/video/video_quality_preset.dart';
 import 'package:pro_video_editor/core/models/video/video_render_data_model.dart';
 import 'package:pro_video_editor/core/models/video/video_segment_model.dart';
+import 'package:pro_video_editor/core/utils/video_effect_frames.dart';
 
 void main() {
   group('VideoRenderData maxFrameRate', () {
@@ -533,6 +534,69 @@ void main() {
       expect(
         effects.last['frames'] as Float64List,
         hasLength(VideoEffectFrame.stride),
+      );
+    });
+
+    test('toAsyncMap sends a triggered effect at the trigger rate, until its '
+        'last hit has played', () async {
+      const effect = VideoEffect.zoomPulse(
+        startTime: Duration(seconds: 1),
+        triggers: [Duration(milliseconds: 1250), Duration(seconds: 2)],
+      );
+      final map = await buildData(const [effect]).toAsyncMap();
+      final sent = (map['effects'] as List<Map<String, dynamic>>).single;
+
+      expect(sent['startUs'], 1000000);
+      expect(sent['frameRate'], videoEffectTriggerFrameRate);
+      // The last trigger is 120 steps in, and one zoom punch is half a second.
+      expect(sent['endUs'], 2500000);
+      final frames = sent['frames'] as Float64List;
+      expect(frames, hasLength(180 * VideoEffectFrame.stride));
+      // The table holds exactly what the preview shows at the same time.
+      for (final step in [0, 30, 35, 119, 120, 179]) {
+        expect(
+          VideoEffectFrame.fromList(frames, step * VideoEffectFrame.stride),
+          effect.frameAt(
+            // The first microsecond of the step.
+            Duration(microseconds: 1000000 + (step * 1000000 + 119) ~/ 120),
+          ),
+          reason: 'step $step',
+        );
+      }
+    });
+
+    test('toAsyncMap ends a triggered effect at its own end when that comes '
+        'first, and leaves it out when no trigger fires', () async {
+      final map = await buildData(const [
+        VideoEffect.zoomPulse(
+          endTime: Duration(milliseconds: 1300),
+          triggers: [Duration(seconds: 1)],
+        ),
+        VideoEffect.strobe(
+          startTime: Duration(seconds: 1),
+          triggers: [Duration(milliseconds: 500)],
+        ),
+      ]).toAsyncMap();
+      final sent = map['effects'] as List<Map<String, dynamic>>;
+
+      expect(sent, hasLength(1));
+      expect(sent.single['endUs'], 1300000);
+    });
+
+    test('toAsyncMap rounds a triggered effect\'s end up to the microsecond '
+        'after its last step', () async {
+      // One step in, plus a strobe flash of 15 steps: the table ends 16/120 s
+      // = 133333.3 µs in, and the microsecond 133333 still falls in its last
+      // step.
+      final map = await buildData(const [
+        VideoEffect.strobe(triggers: [Duration(microseconds: 8333)]),
+      ]).toAsyncMap();
+      final sent = (map['effects'] as List<Map<String, dynamic>>).single;
+
+      expect(sent['endUs'], 133334);
+      expect(
+        (sent['frames'] as Float64List).length,
+        16 * VideoEffectFrame.stride,
       );
     });
 

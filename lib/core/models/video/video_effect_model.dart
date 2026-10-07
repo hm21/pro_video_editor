@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:pro_video_editor/core/models/video/video_effect_frame_model.dart';
 import 'package:pro_video_editor/core/utils/video_effect_frames.dart';
 import 'package:pro_video_editor/shared/models/time_range_mixin.dart';
@@ -106,7 +108,8 @@ enum VideoEffectType {
 ///
 /// Effects move, split and replace pixels, and most of them change over time.
 /// Their animation starts at [startTime] and repeats, after at most 20
-/// seconds.
+/// seconds. With [triggers], the effect fires on given points in time
+/// instead, for example on the beats of a song.
 ///
 /// ```dart
 /// VideoRenderData(
@@ -132,6 +135,7 @@ class VideoEffect with TimeRangeMixin {
     this.intensity = 1,
     this.startTime,
     this.endTime,
+    this.triggers = const [],
   }) : assert(
          intensity >= 0 && intensity <= 1,
          'intensity must be between 0 and 1',
@@ -142,11 +146,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.glitch,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.rgbSplit] effect.
@@ -154,11 +160,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.rgbSplit,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.vhs] effect.
@@ -166,11 +174,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.vhs,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.tvStatic] effect.
@@ -178,11 +188,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.tvStatic,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.pixelPulse] effect.
@@ -190,11 +202,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.pixelPulse,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.pixelate] effect.
@@ -202,11 +216,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.pixelate,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.oldFilm] effect.
@@ -214,11 +230,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.oldFilm,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.strobe] effect.
@@ -226,11 +244,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.strobe,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.negativeFlash] effect.
@@ -238,11 +258,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.negativeFlash,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.vignette] effect.
@@ -250,11 +272,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.vignette,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.blockGlitch] effect.
@@ -262,11 +286,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.blockGlitch,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.filmGrain] effect.
@@ -274,11 +300,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.filmGrain,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.signalInterference] effect.
@@ -286,11 +314,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.signalInterference,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.crt] effect.
@@ -298,11 +328,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.crt,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.shake] effect.
@@ -310,11 +342,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.shake,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.zoomPulse] effect.
@@ -322,11 +356,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.zoomPulse,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.mirror] effect.
@@ -334,11 +370,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.mirror,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.kaleidoscope] effect.
@@ -346,11 +384,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.kaleidoscope,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.splitScreen] effect.
@@ -358,11 +398,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.splitScreen,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.wave] effect.
@@ -370,11 +412,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.wave,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates a [VideoEffectType.glow] effect.
@@ -382,11 +426,13 @@ class VideoEffect with TimeRangeMixin {
     double intensity = 1,
     Duration? startTime,
     Duration? endTime,
+    List<Duration> triggers = const [],
   }) : this(
          type: VideoEffectType.glow,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
+         triggers: triggers,
        );
 
   /// Creates an effect from [toMap]'s output.
@@ -402,6 +448,10 @@ class VideoEffect with TimeRangeMixin {
       endTime: map['endTime'] != null
           ? Duration(microseconds: safeParseInt(map['endTime']))
           : null,
+      triggers: [
+        for (final trigger in map['triggers'] as List? ?? const [])
+          Duration(microseconds: safeParseInt(trigger)),
+      ],
     );
   }
 
@@ -426,6 +476,27 @@ class VideoEffect with TimeRangeMixin {
   @override
   final Duration? endTime;
 
+  /// When the effect fires, on the same timeline as [startTime], in any
+  /// order. Empty plays the effect continuously.
+  ///
+  /// Otherwise the effect shows nothing until its first trigger, and from
+  /// each trigger plays one hit from the start of its animation, for example
+  /// on every beat of a song: one zoom punch, pixel pulse or RGB split pulse
+  /// (on alternating sides), a glitch or block glitch burst that differs from
+  /// hit to hit, the noise burst a signal interference opens with, one strobe
+  /// flash without the dim and one negative flash without its echo. Every
+  /// other effect plays a quarter second. A hit ends early where the next
+  /// trigger starts the next one. A flashing effect flashes once per trigger,
+  /// so keep triggers of [VideoEffectType.strobe] and
+  /// [VideoEffectType.negativeFlash] at least a third of a second apart to
+  /// stay within the three flashes a second that WCAG 2.3.1 allows.
+  ///
+  /// A trigger before [startTime] or at or after [endTime] does nothing. Each
+  /// trigger lands on the nearest 1/120 s, counted from [startTime]: the
+  /// renderers look a triggered effect up 120 times a second, so the preview
+  /// and the export start a hit on the same frame.
+  final List<Duration> triggers;
+
   /// Whether the effect applies at [position].
   bool isActiveAt(Duration position) =>
       (startTime == null || position >= startTime!) &&
@@ -435,10 +506,16 @@ class VideoEffect with TimeRangeMixin {
   /// [VideoEffectFrame.none] where it is not active.
   VideoEffectFrame frameAt(Duration position) {
     if (!isActiveAt(position)) return VideoEffectFrame.none;
-    final bucket = videoEffectBucketOf(
-      type,
-      position - (startTime ?? Duration.zero),
-    );
+    final start = startTime ?? Duration.zero;
+    if (triggers.isNotEmpty) {
+      return videoEffectTriggeredFrameFor(
+        type,
+        intensity,
+        videoEffectTriggerSteps(triggers, start: start, end: endTime),
+        videoEffectTriggerStepOf(position - start),
+      );
+    }
+    final bucket = videoEffectBucketOf(type, position - start);
     return videoEffectFrameFor(type, intensity, bucket);
   }
 
@@ -461,12 +538,14 @@ class VideoEffect with TimeRangeMixin {
     double? intensity,
     Duration? startTime,
     Duration? endTime,
+    List<Duration>? triggers,
   }) {
     return VideoEffect(
       type: type ?? this.type,
       intensity: intensity ?? this.intensity,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
+      triggers: triggers ?? this.triggers,
     );
   }
 
@@ -477,6 +556,8 @@ class VideoEffect with TimeRangeMixin {
       'intensity': intensity,
       'startTime': startTime?.inMicroseconds,
       'endTime': endTime?.inMicroseconds,
+      if (triggers.isNotEmpty)
+        'triggers': [for (final trigger in triggers) trigger.inMicroseconds],
     };
   }
 
@@ -489,13 +570,20 @@ class VideoEffect with TimeRangeMixin {
       other.type == type &&
       other.intensity == intensity &&
       other.startTime == startTime &&
-      other.endTime == endTime;
+      other.endTime == endTime &&
+      listEquals(other.triggers, triggers);
 
   @override
-  int get hashCode => Object.hash(type, intensity, startTime, endTime);
+  int get hashCode => Object.hash(
+    type,
+    intensity,
+    startTime,
+    endTime,
+    Object.hashAll(triggers),
+  );
 
   @override
   String toString() =>
       'VideoEffect(type: ${type.name}, intensity: $intensity, '
-      'startTime: $startTime, endTime: $endTime)';
+      'startTime: $startTime, endTime: $endTime, triggers: $triggers)';
 }

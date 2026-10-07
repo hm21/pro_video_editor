@@ -1,3 +1,6 @@
+## 2.28.0
+- **FEAT**(android, iOS, macOS): `VideoEffect.triggers` fires an effect at given points in time instead of continuously, for example on the beats of a song: one zoom punch, flash or glitch burst per trigger. Preview and export start each hit on the same frame.
+
 ## 2.27.0
 - **FEAT**(android, iOS, macOS): `LayerAnimationType.wiggle` tilts an image layer by `LayerAnimation.wiggleAngle` and `LayerAnimationType.bounce` lifts it by `LayerAnimation.bounceHeight` times its height, censor layers included.
 - **FEAT**(android, iOS, macOS): `AnimationPhase.loop` repeats an animation for as long as the layer is visible, one cycle per `duration`.

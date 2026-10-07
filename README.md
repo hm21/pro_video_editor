@@ -131,7 +131,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🎞️ **Clip Transitions**: Add transitions between adjacent clips — `dissolve`, `fadeToBlack`, `fadeToWhite`, `slide`, `push`, and `wipe` — with configurable duration, easing curve, and direction.
 - 🧮 **Color Matrix**: Apply one or multiple 4x5 color matrices (e.g., for filters).
 - 💧 **Blur**: Add a blur effect to the video.
-- ✨ **Video Effects**: `glitch` (channel split and slices that jump sideways), `rgbSplit` (a pulsing color fringe), `vhs` (scanlines, grain and a rolling tracking band), `tvStatic` (heavy flickering grain), `oldFilm` (sepia, grain and flicker), `pixelate`, `pixelPulse` (blocks that sharpen again every second), `strobe`, `negativeFlash`, `vignette`, `blockGlitch` (coarse blocks and slipping slices in short bursts), `filmGrain` (fine, calm grain), `signalInterference` (thin flickering slices and bursts of noise), `crt` (strong scanlines and a slight fringe), `shake`, `zoomPulse` (punches in every half second), `mirror`, `kaleidoscope`, `splitScreen` (the picture four times in a 2×2 grid), `wave` (rows bending along a rolling wave) and `glow` (the brightest areas bloom softly), each with an intensity and an optional time range. `VideoEffectPreview` shows the same frames live over a video player.
+- ✨ **Video Effects**: `glitch` (channel split and slices that jump sideways), `rgbSplit` (a pulsing color fringe), `vhs` (scanlines, grain and a rolling tracking band), `tvStatic` (heavy flickering grain), `oldFilm` (sepia, grain and flicker), `pixelate`, `pixelPulse` (blocks that sharpen again every second), `strobe`, `negativeFlash`, `vignette`, `blockGlitch` (coarse blocks and slipping slices in short bursts), `filmGrain` (fine, calm grain), `signalInterference` (thin flickering slices and bursts of noise), `crt` (strong scanlines and a slight fringe), `shake`, `zoomPulse` (punches in every half second), `mirror`, `kaleidoscope`, `splitScreen` (the picture four times in a 2×2 grid), `wave` (rows bending along a rolling wave) and `glow` (the brightest areas bloom softly), each with an intensity and an optional time range. With `triggers` an effect fires on given points in time instead, such as the beats of a song: one zoom punch, flash or glitch burst per trigger. `VideoEffectPreview` shows the same frames live over a video player.
 - 🧩 **Custom Video Effects**: Write an effect yourself in native code — a GLSL shader on Android, Core Image on iOS and macOS — register it under an id, and add it to a render with `CustomVideoEffect`. It can ask for earlier frames of the clip, for effects such as an echo trail.
 - 🟩 **Chroma Key**: Remove a green (or blue, or any saturated hue) screen, or a bright white or light grey wall, with a soft edge and spill suppression, and fill it with a color, an image, or — in a `VideoComposition` — the layer below. `ChromaKey.autoDetect` measures the key straight off the footage; `greenScreen()`/`blueScreen()` presets are there when you already know. Configurable globally, per `VideoLayer`, or per `VideoSegment`.
 - 📡 **Bitrate**: Cap the video bitrate. Sources already below the cap are exported losslessly over the fast path; sources above it are re-encoded down to the cap. If constant bitrate (CBR) isn't supported, it will gracefully fall back to the next available mode.
@@ -233,6 +233,15 @@ final effectTask = VideoRenderData(
         VideoEffect.glitch(
             startTime: Duration(seconds: 2),
             endTime: Duration(milliseconds: 2500),
+        ),
+        /// Fires on given points in time instead, here a zoom punch on each
+        /// beat of a song.
+        VideoEffect.zoomPulse(
+            triggers: [
+                Duration(milliseconds: 480),
+                Duration(milliseconds: 960),
+                Duration(milliseconds: 1440),
+            ],
         ),
     ],
 );
@@ -823,6 +832,15 @@ final effectTask = VideoRenderData(
         VideoEffect.glitch(
             startTime: Duration(seconds: 2),
             endTime: Duration(milliseconds: 2500),
+        ),
+        /// Fires on given points in time instead, here a zoom punch on each
+        /// beat of a song.
+        VideoEffect.zoomPulse(
+            triggers: [
+                Duration(milliseconds: 480),
+                Duration(milliseconds: 960),
+                Duration(milliseconds: 1440),
+            ],
         ),
     ],
 );

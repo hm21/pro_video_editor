@@ -459,20 +459,22 @@ class VideoRenderData {
 
     // The native renderers get each effect as a table of frames to play back,
     // so what an effect looks like is defined here and nowhere else.
-    final effectMaps = effects
-        .where((effect) => effect.intensity > 0)
-        .map(
-          (effect) => {
-            'startUs': effect.startTime?.inMicroseconds,
-            'endUs': effect.endTime?.inMicroseconds,
-            'frameRate': videoEffectFrameRate,
-            'stride': VideoEffectFrame.stride,
-            'frames': Float64List.fromList(
-              bakeVideoEffectFrames(effect.type, effect.intensity),
-            ),
-          },
-        )
-        .toList();
+    final effectMaps = [
+      for (final effect in effects)
+        if (effect.intensity > 0)
+          if (effect.triggers.isEmpty)
+            {
+              'startUs': effect.startTime?.inMicroseconds,
+              'endUs': effect.endTime?.inMicroseconds,
+              'frameRate': videoEffectFrameRate,
+              'stride': VideoEffectFrame.stride,
+              'frames': Float64List.fromList(
+                bakeVideoEffectFrames(effect.type, effect.intensity),
+              ),
+            }
+          else
+            ?_triggeredEffectMap(effect),
+    ];
 
     final audioTrackMaps = audioTracks
         .map(
@@ -602,6 +604,47 @@ class VideoRenderData {
       imageBytesWithCropping:
           imageBytesWithCropping ?? this.imageBytesWithCropping,
     );
+  }
+
+  /// [effect]'s map for the native renderers when it has triggers, or `null`
+  /// when none of them fires.
+  ///
+  /// Its table covers every trigger step from the effect's start until the
+  /// last hit has played, and its window ends there too, so the renderers,
+  /// which repeat a table once it runs out, never play a hit twice.
+  static Map<String, dynamic>? _triggeredEffectMap(VideoEffect effect) {
+    final start = effect.startTime ?? Duration.zero;
+    final steps = videoEffectTriggerSteps(
+      effect.triggers,
+      start: start,
+      end: effect.endTime,
+    );
+    if (steps.isEmpty) return null;
+    final length = videoEffectTriggeredLengthOf(effect.type, steps);
+    // The first microsecond past the table, rounded up: the renderers floor a
+    // time to its step, so every microsecond before it still falls in the
+    // table, as it does for the preview.
+    final tableEnd =
+        start +
+        Duration(
+          microseconds:
+              (length * Duration.microsecondsPerSecond +
+                  videoEffectTriggerFrameRate -
+                  1) ~/
+              videoEffectTriggerFrameRate,
+        );
+    final end = effect.endTime;
+    return {
+      'startUs': start.inMicroseconds,
+      'endUs': (end != null && end < tableEnd ? end : tableEnd).inMicroseconds,
+      'frameRate': videoEffectTriggerFrameRate,
+      'stride': VideoEffectFrame.stride,
+      'frames': bakeTriggeredVideoEffectFrames(
+        effect.type,
+        effect.intensity,
+        steps,
+      ),
+    };
   }
 
   Map<String, dynamic> toMap() {
