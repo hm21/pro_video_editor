@@ -49,6 +49,119 @@ int videoEffectBucketOf(VideoEffectType type, Duration localTime) {
   return bucket % videoEffectCycleLengthOf(type);
 }
 
+/// Steps a second on which a triggered effect's hits start.
+///
+/// Every trigger lands on the nearest step, and the native renderers look a
+/// triggered effect up at this rate, so a hit starts within half a step
+/// (about 4 ms) of its trigger. Its animation still advances by buckets of
+/// [videoEffectFrameRate].
+const int videoEffectTriggerFrameRate = 120;
+
+/// Trigger steps in one bucket.
+const int _stepsPerBucket = videoEffectTriggerFrameRate ~/ videoEffectFrameRate;
+
+/// The trigger step [localTime] falls in, counting from the effect's start.
+int videoEffectTriggerStepOf(Duration localTime) =>
+    localTime.inMicroseconds *
+    videoEffectTriggerFrameRate ~/
+    Duration.microsecondsPerSecond;
+
+/// The steps, counted from [start], on which [triggers] fire: each rounded to
+/// the nearest step, in ascending order, without those before [start] or at
+/// or after [end] and without duplicates.
+List<int> videoEffectTriggerSteps(
+  List<Duration> triggers, {
+  required Duration start,
+  Duration? end,
+}) {
+  final steps = <int>{
+    for (final trigger in triggers)
+      if (trigger >= start && (end == null || trigger < end))
+        ((trigger - start).inMicroseconds * videoEffectTriggerFrameRate +
+                Duration.microsecondsPerSecond ~/ 2) ~/
+            Duration.microsecondsPerSecond,
+  };
+  return steps.toList()..sort();
+}
+
+/// The buckets one trigger of [type] plays; see [VideoEffect.triggers].
+///
+/// Effects that pulse play one pulse, effects that burst a burst through the
+/// whole hit, different on every trigger, and the others a quarter second.
+/// The flashing effects flash once: a strobe flashes without dimming the
+/// picture afterwards, and a negative flash without its echo.
+int videoEffectHitLengthOf(VideoEffectType type) => switch (type) {
+  // A burst: long enough to see on every beat, short enough to stay a hit.
+  VideoEffectType.glitch || VideoEffectType.blockGlitch => 4,
+  // The noise burst the effect always opens with.
+  VideoEffectType.signalInterference => 8,
+  // One pulse: the fringe settles, the blocks sharpen, the zoom eases out.
+  VideoEffectType.rgbSplit => videoEffectFrameRate,
+  VideoEffectType.pixelPulse => 10,
+  VideoEffectType.zoomPulse => _zoomPulsePeriod,
+  // The white flash and its fade, without the dim between flashes: going
+  // back from dim to the normal picture would be a flash of its own.
+  VideoEffectType.strobe => 3,
+  // The negative, which lasts at most four buckets, without the echo.
+  VideoEffectType.negativeFlash => videoEffectFrameRate ~/ 4,
+  VideoEffectType.vhs ||
+  VideoEffectType.tvStatic ||
+  VideoEffectType.oldFilm ||
+  VideoEffectType.pixelate ||
+  VideoEffectType.vignette ||
+  VideoEffectType.filmGrain ||
+  VideoEffectType.crt ||
+  VideoEffectType.shake ||
+  VideoEffectType.mirror ||
+  VideoEffectType.kaleidoscope ||
+  VideoEffectType.splitScreen ||
+  VideoEffectType.wave ||
+  VideoEffectType.glow => videoEffectFrameRate ~/ 4,
+};
+
+/// The frame of [type] at [intensity] on trigger step [step], counted from
+/// the effect's start, given the steps [triggerSteps] fire on (see
+/// [videoEffectTriggerSteps]).
+///
+/// [VideoEffectFrame.none] before the first trigger and once a hit has
+/// played; see [videoEffectHitLengthOf].
+VideoEffectFrame videoEffectTriggeredFrameFor(
+  VideoEffectType type,
+  double intensity,
+  List<int> triggerSteps,
+  int step,
+) {
+  var hit = -1;
+  while (hit + 1 < triggerSteps.length && triggerSteps[hit + 1] <= step) {
+    hit++;
+  }
+  if (hit < 0) return VideoEffectFrame.none;
+  final bucket = (step - triggerSteps[hit]) ~/ _stepsPerBucket;
+  final length = videoEffectHitLengthOf(type);
+  if (bucket >= length) return VideoEffectFrame.none;
+  // Seeds that differ from hit to hit, so no two glitches look the same.
+  final seed = (hit + 1) * videoEffectCycleLength + bucket;
+  return switch (type) {
+    // Played continuously, a glitch mostly stays calm between short bursts,
+    // so its opening alone would show for a single bucket: a hit bursts
+    // throughout.
+    VideoEffectType.glitch => _glitchBurst(intensity, seed),
+    VideoEffectType.blockGlitch => _blockGlitchBurst(
+      intensity,
+      seed,
+      window: seed - bucket,
+    ),
+    // The fringe swaps sides on every other hit, as it does every other
+    // second when the effect plays continuously.
+    VideoEffectType.rgbSplit => videoEffectFrameFor(
+      type,
+      intensity,
+      bucket + (hit.isOdd ? videoEffectFrameRate : 0),
+    ),
+    _ => videoEffectFrameFor(type, intensity, bucket),
+  };
+}
+
 /// The frame of [type] at [intensity] for [bucket].
 ///
 /// Deterministic: the same arguments always give the same frame, on every
@@ -127,6 +240,35 @@ List<double> bakeVideoEffectFrames(VideoEffectType type, double intensity) {
   ];
 }
 
+/// The number of trigger steps from a triggered effect's start until its
+/// last hit has played, or 0 when [triggerSteps] is empty.
+///
+/// The native renderers repeat a table once it runs out, so a triggered
+/// effect's table covers every step up to here and its window ends here.
+int videoEffectTriggeredLengthOf(VideoEffectType type, List<int> triggerSteps) {
+  if (triggerSteps.isEmpty) return 0;
+  return triggerSteps.last + videoEffectHitLengthOf(type) * _stepsPerBucket;
+}
+
+/// Every trigger step of a triggered effect, from its start until its last
+/// hit has played, flattened for the native renderers.
+List<double> bakeTriggeredVideoEffectFrames(
+  VideoEffectType type,
+  double intensity,
+  List<int> triggerSteps,
+) {
+  final length = videoEffectTriggeredLengthOf(type, triggerSteps);
+  return [
+    for (var step = 0; step < length; step++)
+      ...videoEffectTriggeredFrameFor(
+        type,
+        intensity,
+        triggerSteps,
+        step,
+      ).toList(),
+  ];
+}
+
 /// Calm stretches with a slight color fringe, broken by bursts in which the
 /// channels jump apart and one to three slices of the picture slip sideways.
 ///
@@ -142,7 +284,12 @@ VideoEffectFrame _glitch(double intensity, int bucket) {
   if (!burstsHere || bucket - window * 4 >= burstLength) {
     return VideoEffectFrame(rgbShift: 0.0025 * intensity);
   }
+  return _glitchBurst(intensity, bucket);
+}
 
+/// One bucket of a glitch burst: the channels jump apart and one to three
+/// slices of the picture slip sideways, all picked anew for every [bucket].
+VideoEffectFrame _glitchBurst(double intensity, int bucket) {
   final sign = _random(3, bucket) < 0.5 ? 1.0 : -1.0;
   final bands = <VideoEffectBand>[];
   final count = 1 + (_random(5, bucket) * 3).floor();
@@ -312,7 +459,16 @@ VideoEffectFrame _blockGlitch(double intensity, int bucket) {
   if (!burstsHere || bucket - window * 6 >= burstLength) {
     return VideoEffectFrame.none;
   }
+  return _blockGlitchBurst(intensity, bucket, window: window);
+}
 
+/// One bucket of a block glitch burst: blocks of a size [window] picks, and
+/// slices and a channel split picked anew for every [bucket].
+VideoEffectFrame _blockGlitchBurst(
+  double intensity,
+  int bucket, {
+  required int window,
+}) {
   final sign = _random(33, bucket) < 0.5 ? 1.0 : -1.0;
   final bands = <VideoEffectBand>[];
   final count = 1 + (_random(34, bucket) * 3).floor();

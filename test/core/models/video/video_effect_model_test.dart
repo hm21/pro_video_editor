@@ -88,6 +88,18 @@ void main() {
         expect(VideoEffect.fromMap(effect.toMap()), effect);
       });
 
+      test('toMap and fromMap round-trip the triggers', () {
+        const triggered = VideoEffect.zoomPulse(
+          triggers: [Duration(milliseconds: 500), Duration(seconds: 1)],
+        );
+        expect(triggered.toMap()['triggers'], [500000, 1000000]);
+        expect(VideoEffect.fromMap(triggered.toMap()), triggered);
+        expect(
+          VideoEffect.fromMap(triggered.toMap()..remove('triggers')),
+          const VideoEffect.zoomPulse(),
+        );
+      });
+
       test('toJson and fromJson round-trip', () {
         expect(VideoEffect.fromJson(effect.toJson()), effect);
       });
@@ -113,6 +125,11 @@ void main() {
         expect(copy.intensity, effect.intensity);
         expect(copy.startTime, effect.startTime);
         expect(copy.endTime, effect.endTime);
+        expect(copy.triggers, effect.triggers);
+        expect(
+          effect.copyWith(triggers: const [Duration(seconds: 2)]).triggers,
+          const [Duration(seconds: 2)],
+        );
       });
     });
 
@@ -734,6 +751,110 @@ void main() {
           // glow, glowThreshold, glowRadius
           for (var i = 0; i < 3; i++) '0.000000',
         ]);
+      });
+    });
+
+    group('triggers', () {
+      Duration ms(int milliseconds) => Duration(milliseconds: milliseconds);
+
+      test('shows nothing until the first trigger and once a hit has '
+          'played', () {
+        final effect = VideoEffect.zoomPulse(triggers: [ms(1000)]);
+        expect(effect.frameAt(ms(500)), VideoEffectFrame.none);
+        expect(
+          effect.frameAt(ms(1000)),
+          videoEffectFrameFor(VideoEffectType.zoomPulse, 1, 0),
+        );
+        // One zoom punch is half a second.
+        expect(effect.frameAt(ms(1490)), isNot(VideoEffectFrame.none));
+        expect(effect.frameAt(ms(1500)), VideoEffectFrame.none);
+      });
+
+      test('plays each hit from the start of its animation', () {
+        final effect = VideoEffect.zoomPulse(triggers: [ms(1000), ms(1300)]);
+        expect(
+          effect.frameAt(ms(1200)),
+          videoEffectFrameFor(VideoEffectType.zoomPulse, 1, 4),
+        );
+        expect(
+          effect.frameAt(ms(1300)),
+          videoEffectFrameFor(VideoEffectType.zoomPulse, 1, 0),
+        );
+      });
+
+      test('counts triggers from the start, in any order, on the nearest '
+          'step', () {
+        final effect = VideoEffect.zoomPulse(
+          startTime: ms(1000),
+          triggers: [const Duration(microseconds: 1503000), ms(1200)],
+        );
+        // 1.503 s lands on the step at 1.5 s.
+        expect(
+          effect.frameAt(ms(1500)),
+          videoEffectFrameFor(VideoEffectType.zoomPulse, 1, 0),
+        );
+        expect(
+          effect.frameAt(ms(1450)),
+          videoEffectFrameFor(VideoEffectType.zoomPulse, 1, 6),
+        );
+      });
+
+      test('ignores triggers outside its time range', () {
+        final effect = VideoEffect.zoomPulse(
+          startTime: ms(1000),
+          endTime: ms(2000),
+          triggers: [ms(500), ms(2000), ms(2500)],
+        );
+        for (var t = 0; t < 3000; t += 50) {
+          expect(effect.frameAt(ms(t)), VideoEffectFrame.none, reason: '$t');
+        }
+      });
+
+      test('a flashing effect flashes once per trigger, without dimming in '
+          'between', () {
+        final triggers = [for (var t = 0; t < 3000; t += 400) ms(t)];
+        for (final type in [
+          VideoEffectType.strobe,
+          VideoEffectType.negativeFlash,
+        ]) {
+          final effect = VideoEffect(type: type, triggers: triggers);
+          var onsets = 0;
+          var wasOn = false;
+          for (var step = 0; step < 3 * videoEffectTriggerFrameRate; step++) {
+            final frame = effect.frameAt(
+              Duration(microseconds: step * 1000000 ~/ 120),
+            );
+            final on = frame.flash >= 0.5 || frame.invert >= 0.5;
+            if (on && !wasOn) onsets++;
+            wasOn = on;
+            expect(frame.brightness, 0, reason: '$type at step $step');
+          }
+          expect(onsets, triggers.length, reason: '$type');
+        }
+      });
+
+      test('a glitch bursts through its whole hit, differently on each '
+          'hit', () {
+        for (final type in [
+          VideoEffectType.glitch,
+          VideoEffectType.blockGlitch,
+        ]) {
+          final effect = VideoEffect(type: type, triggers: [ms(0), ms(500)]);
+          for (final hit in [0, 500]) {
+            for (var bucket = 0; bucket < 4; bucket++) {
+              final frame = effect.frameAt(ms(hit + bucket * 1000 ~/ 24 + 1));
+              expect(frame.bands, isNotEmpty, reason: '$type $hit $bucket');
+              expect(frame.rgbShift.abs(), greaterThan(0.005));
+            }
+          }
+          expect(effect.frameAt(ms(1)), isNot(effect.frameAt(ms(501))));
+        }
+      });
+
+      test('rgbSplit swaps sides on every other hit', () {
+        final effect = VideoEffect.rgbSplit(triggers: [ms(0), ms(500)]);
+        expect(effect.frameAt(ms(0)).rgbShift, greaterThan(0));
+        expect(effect.frameAt(ms(500)).rgbShift, lessThan(0));
       });
     });
 
