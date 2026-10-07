@@ -175,6 +175,36 @@ internal class KeyframePlacementTest {
         assertEquals(0.4f, doubled.backgroundAnchorY, 1e-5f)
     }
 
+    @Test
+    fun `a turned layer wholly off the frame is hidden`() {
+        // Centered 500 px left of the frame: the anchors can only bring it to
+        // 100 px left of it, where its 45° corners would reach 6 px in.
+        val off = frame(listOf(keyframe(0L, x = -600.0, y = 450.0, rotation = PI / 4)), 0L)
+        assertEquals(0f, off.alpha, 1e-6f)
+    }
+
+    @Test
+    fun `a turned layer partly on the frame stays visible`() {
+        // Centered 50 px left of the frame, its 45° corner reaches 56 px in.
+        val partly = frame(
+            listOf(keyframe(0L, x = -150.0, y = 450.0, rotation = PI / 4, opacity = 0.5)),
+            0L,
+        )
+        assertEquals(0.5f, partly.alpha, 1e-6f)
+    }
+
+    @Test
+    fun `liesOffFrame measures a turned layer by the box around it`() {
+        // A 100 x 200 layer on a 1000 x 1000 frame, centered 80 px right of
+        // it: upright its left edge is 30 px out, a quarter turn brings it 20 px
+        // in, 45° 26 px in.
+        val centerX = 1f + 80f / 500f
+        assertTrue(liesOffFrame(centerX, 0f, 50f, 100f, 0f, 1000, 1000))
+        assertEquals(false, liesOffFrame(centerX, 0f, 50f, 100f, 90f, 1000, 1000))
+        assertEquals(false, liesOffFrame(centerX, 0f, 50f, 100f, -45f, 1000, 1000))
+        assertEquals(false, liesOffFrame(0f, 0f, 50f, 100f, 0f, 1000, 1000))
+    }
+
     // ---- Composition clips ---------------------------------------------------
 
     private val box = SegmentTransformConfig(

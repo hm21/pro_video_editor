@@ -776,6 +776,186 @@ void main() {
     }, skip: kIsWeb);
   });
 
+  group('Keyframes and loop windows', () {
+    // The 1280x720 source, read back at 200 px high; a point is given in
+    // source pixels.
+    bool magentaAt(_Frame f, double x, double y) =>
+        _isMagenta(f.at(x / 1280, y / 720));
+
+    Future<EditorVideo> render(List<ImageLayer> layers) async {
+      final bytes = await pve.renderVideo(
+        VideoRenderData(
+          videoSegments: [
+            VideoSegment(video: h264Video, endTime: const Duration(seconds: 3)),
+          ],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: layers,
+        ),
+      );
+      return EditorVideo.memory(bytes);
+    }
+
+    testWidgets('keyframes move a layer and hold the last one', (tester) async {
+      // 200x100 from (100, 100) at 0 s to (900, 500) at 2 s.
+      final out = await render([
+        ImageLayer(
+          image: EditorLayerImage.memory(
+            await _solidPng(_magenta, width: 200, height: 100),
+          ),
+          offset: const Offset(100, 100),
+          size: const Size(200, 100),
+          keyframes: const [
+            TimelineKeyframe(time: Duration.zero, offset: Offset(100, 100)),
+            TimelineKeyframe(
+              time: Duration(seconds: 2),
+              offset: Offset(900, 500),
+            ),
+          ],
+        ),
+      ]);
+
+      // Half way: on (500, 300), centred on (600, 350).
+      final mid = await frameOf(out, at: const Duration(milliseconds: 1000));
+      expect(magentaAt(mid, 600, 350), isTrue, reason: 'half way');
+      expect(magentaAt(mid, 200, 150), isFalse, reason: 'left its start');
+
+      final end = await frameOf(out, at: const Duration(milliseconds: 2500));
+      expect(magentaAt(end, 1000, 550), isTrue, reason: 'holds the last');
+      expect(magentaAt(end, 600, 350), isFalse, reason: 'holds the last');
+    }, skip: kIsWeb);
+
+    testWidgets('keyframes turn and scale a layer around its centre', (
+      tester,
+    ) async {
+      // The needle from the middle of the frame, turned a quarter clockwise
+      // and halved by 1 s: it then points right, 100 px long.
+      final out = await render([
+        ImageLayer(
+          image: EditorLayerImage.memory(await _needlePng()),
+          offset: const Offset(620, 160),
+          size: const Size(40, 400),
+          keyframes: const [
+            TimelineKeyframe(time: Duration.zero, offset: Offset(620, 160)),
+            TimelineKeyframe(
+              time: Duration(seconds: 1),
+              offset: Offset(620, 160),
+              rotation: 1.5707963267948966,
+              scale: 0.5,
+            ),
+          ],
+        ),
+      ]);
+
+      final start = await frameOf(out, at: Duration.zero);
+      expect(magentaAt(start, 640, 260), isTrue, reason: 'upright');
+
+      final turned = await frameOf(out, at: const Duration(milliseconds: 1500));
+      expect(magentaAt(turned, 690, 360), isTrue, reason: 'points right');
+      expect(magentaAt(turned, 790, 360), isFalse, reason: 'halved');
+      expect(magentaAt(turned, 640, 260), isFalse, reason: 'no longer up');
+    }, skip: kIsWeb);
+
+    testWidgets('keyframes fade a layer', (tester) async {
+      final out = await render([
+        ImageLayer(
+          image: EditorLayerImage.memory(
+            await _solidPng(_magenta, width: 200, height: 100),
+          ),
+          offset: const Offset(540, 310),
+          size: const Size(200, 100),
+          keyframes: const [
+            TimelineKeyframe(time: Duration.zero, offset: Offset(540, 310)),
+            TimelineKeyframe(
+              time: Duration(seconds: 2),
+              offset: Offset(540, 310),
+              opacity: 0,
+            ),
+          ],
+        ),
+      ]);
+
+      final start = await frameOf(out, at: Duration.zero);
+      expect(magentaAt(start, 640, 360), isTrue, reason: 'opaque');
+      final end = await frameOf(out, at: const Duration(milliseconds: 2500));
+      expect(magentaAt(end, 640, 360), isFalse, reason: 'faded out');
+    }, skip: kIsWeb);
+
+    testWidgets('turned layers centred off the frame show only their part '
+        'on it', (tester) async {
+      final square = EditorLayerImage.memory(
+        await _solidPng(_magenta, width: 400, height: 400),
+      );
+      // A 400x400 square turned 45°: its corners reach 283 px from its
+      // centre. Turned by a keyframe or by its own rotation.
+      ImageLayer turned(Offset offset, {bool keyframed = true}) => ImageLayer(
+        image: square,
+        offset: offset,
+        size: const Size(400, 400),
+        rotation: keyframed ? 0 : 0.7853981633974483,
+        keyframes: [
+          if (keyframed)
+            TimelineKeyframe(
+              time: Duration.zero,
+              offset: offset,
+              rotation: 0.7853981633974483,
+            ),
+        ],
+      );
+      final out = await render([
+        // Centred 800 px left of the frame, nowhere near it.
+        turned(const Offset(-1000, 0)),
+        // Centred 50 px left of the frame: its corner reaches 233 px in.
+        turned(const Offset(-250, 360)),
+        // Centred 50 px right of the frame: its corner reaches 233 px in.
+        turned(const Offset(1130, 0), keyframed: false),
+        // Centred 820 px right of the frame, nowhere near it.
+        turned(const Offset(1900, 360), keyframed: false),
+      ]);
+
+      final f = await frameOf(out, at: const Duration(milliseconds: 500));
+      expect(magentaAt(f, 20, 200), isFalse, reason: 'keyframed, off');
+      expect(magentaAt(f, 100, 560), isTrue, reason: 'keyframed, partly on');
+      expect(magentaAt(f, 1180, 200), isTrue, reason: 'rotated, partly on');
+      expect(magentaAt(f, 1260, 560), isFalse, reason: 'rotated, off');
+    }, skip: kIsWeb);
+
+    testWidgets('a loop plays only within its window, from its start', (
+      tester,
+    ) async {
+      // A 1 s wiggle between 1.5 s and 2.5 s: a quarter of a cycle in, at
+      // 1.75 s, it points right; counted from 0 s it would point left.
+      final out = await render([
+        ImageLayer(
+          image: EditorLayerImage.memory(await _needlePng()),
+          offset: const Offset(620, 160),
+          size: const Size(40, 400),
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 3),
+          animations: const [
+            LayerAnimation(
+              type: LayerAnimationType.wiggle,
+              phase: AnimationPhase.loop,
+              duration: Duration(seconds: 1),
+              wiggleAngle: 1.5707963267948966,
+              loopStart: Duration(milliseconds: 1500),
+              loopEnd: Duration(milliseconds: 2500),
+            ),
+          ],
+        ),
+      ]);
+
+      final before = await frameOf(out, at: const Duration(milliseconds: 1250));
+      expect(magentaAt(before, 640, 260), isTrue, reason: 'still before');
+
+      final inside = await frameOf(out, at: const Duration(milliseconds: 1750));
+      expect(magentaAt(inside, 740, 360), isTrue, reason: 'points right');
+      expect(magentaAt(inside, 540, 360), isFalse, reason: 'points right');
+
+      final after = await frameOf(out, at: const Duration(milliseconds: 2750));
+      expect(magentaAt(after, 640, 260), isTrue, reason: 'over');
+    }, skip: kIsWeb);
+  });
+
   group('Dip transition on a letterboxed canvas', () {
     testWidgets('fadeToWhite dips the whole output frame, bars included', (
       tester,

@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:pro_video_editor/core/models/image/timeline_keyframe_model.dart'
+    show sortTimelineKeyframes;
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 

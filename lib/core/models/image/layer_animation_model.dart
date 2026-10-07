@@ -310,6 +310,11 @@ class LayerAnimation {
   final Duration? loopEnd;
 
   Map<String, dynamic> toMap() {
+    // Checked here: Durations cannot be compared in a const constructor.
+    assert(
+      loopStart == null || loopEnd == null || loopStart! < loopEnd!,
+      'loopStart must be before loopEnd',
+    );
     return <String, dynamic>{
       'type': type.name,
       'phase': phase.name,

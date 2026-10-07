@@ -196,6 +196,19 @@ void main() {
           throwsAssertionError,
         );
       });
+
+      test('needs loopStart before loopEnd', () {
+        expect(
+          () => const LayerAnimation(
+            type: LayerAnimationType.wiggle,
+            phase: AnimationPhase.loop,
+            duration: Duration(milliseconds: 500),
+            loopStart: Duration(seconds: 2),
+            loopEnd: Duration(seconds: 2),
+          ).toMap(),
+          throwsAssertionError,
+        );
+      });
     });
 
     group('fromMap', () {

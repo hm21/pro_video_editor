@@ -177,7 +177,7 @@ class ImageLayer with TimeRangeMixin {
   /// bounce lifts by the keyframed height.
   ///
   /// A layer with keyframes needs an [offset]; a layer stretched over the
-  /// frame has no placement to move.
+  /// frame has no placement to move and ignores them.
   ///
   /// **Default**: empty, which keeps the layer where [offset] puts it.
   final List<TimelineKeyframe> keyframes;

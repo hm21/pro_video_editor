@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:pro_video_editor/core/models/image/timeline_keyframe_model.dart'
+    show sortTimelineKeyframes;
 import 'package:pro_video_editor/core/utils/video_effect_frames.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
@@ -517,9 +519,12 @@ class VideoRenderData {
                 'animationStartUs': layer.animationStartTime?.inMicroseconds,
                 'animationEndUs': layer.animationEndTime?.inMicroseconds,
                 'censor': layer.censor?.toMap(),
-                'keyframes': sortTimelineKeyframes(
-                  layer.keyframes,
-                ).map((k) => k.toMap()).toList(),
+                // A stretched layer has no placement for keyframes to move.
+                'keyframes': layer.offset == null
+                    ? const <Map<String, dynamic>>[]
+                    : sortTimelineKeyframes(
+                        layer.keyframes,
+                      ).map((k) => k.toMap()).toList(),
               },
             ),
           );

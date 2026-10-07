@@ -245,7 +245,7 @@ func animationProgress(
 
 /// Computes animation transforms and opacity for overlaying an image layer.
 /// Returns the opacity and the transform to apply to the overlay, and
-/// `untilted`, the same transform without a wiggle's tilt.
+/// `untilted`, the same transform without a wiggle's tilt or a keyframe's turn.
 ///
 /// The animations count from the layer's `animationStartUs` / `animationEndUs`
 /// where set, else from its own time range. Opacity and scale multiply, slide
@@ -359,8 +359,11 @@ func computeAnimation(
       .concatenating(move)
   }
 
+  // `untilted` leaves out the keyframes' turn as well as the wiggle's: a
+  // pixelate censor starts its blocks at the corner of the upright box, as
+  // Android's `CensorMaskPlacement.topLeftPixel` does for any Media3 turn.
   let turn = keyframe?.rotation ?? 0
-  return (opacity, placed(tilt: turn + wiggle), placed(tilt: turn))
+  return (opacity, placed(tilt: turn + wiggle), placed(tilt: 0))
 }
 
 /// Composites an overlay image onto the output with animation effects applied.

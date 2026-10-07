@@ -1029,6 +1029,170 @@ void main() {
       );
     }, skip: skipPlatform);
   });
+
+  group('Composition - Keyframes', () {
+    const canvas = Size(640, 360);
+    const magenta = Color(0xFFFF00FF);
+
+    /// Whether the canvas at ([x], [y]) shows the magenta background, which
+    /// no test clip contains.
+    Future<bool> backgroundAt(
+      Uint8List video,
+      double x,
+      double y,
+      Duration at,
+    ) async {
+      final c = await samplePixel(
+        video,
+        canvas,
+        x / canvas.width,
+        y / canvas.height,
+        at: at,
+      );
+      return c[0] > 180 && c[1] < 90 && c[2] > 180;
+    }
+
+    testWidgets('move every clip of a layer along one timeline', (
+      tester,
+    ) async {
+      // A 160x90 box from (0, 0) at 0 s to (480, 270) at 3 s, over two clips
+      // that meet at 1.5 s.
+      final result = await pve.renderVideo(
+        VideoRenderData(
+          composition: VideoComposition(
+            canvasSize: canvas,
+            backgroundColor: magenta,
+            layers: [
+              VideoLayer(
+                clips: [
+                  VideoSegment(
+                    video: EditorVideo.asset(testAPath),
+                    endTime: const Duration(milliseconds: 1500),
+                  ),
+                  VideoSegment(
+                    video: EditorVideo.asset(testAPath),
+                    startTime: const Duration(milliseconds: 1500),
+                    endTime: const Duration(seconds: 3),
+                  ),
+                ],
+                transform: const SegmentTransform(
+                  offset: Offset.zero,
+                  size: Size(160, 90),
+                ),
+                keyframes: const [
+                  TimelineKeyframe(time: Duration.zero, offset: Offset.zero),
+                  TimelineKeyframe(
+                    time: Duration(seconds: 3),
+                    offset: Offset(480, 270),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      // At 2.25 s the box is three quarters along, centred on (440, 247.5).
+      // Counted from the second clip's own start it would be a quarter
+      // along, centred on (200, 112.5).
+      const at = Duration(milliseconds: 2250);
+      expect(await backgroundAt(result, 440, 247, at), isFalse);
+      expect(await backgroundAt(result, 200, 112, at), isTrue);
+    });
+
+    testWidgets('turn and fade a composition layer', (tester) async {
+      // A 320x90 box centred on the canvas, turned a quarter clockwise by
+      // 1 s and faded out from 1 s to 2 s.
+      const box = Offset(160, 135);
+      final result = await pve.renderVideo(
+        VideoRenderData(
+          composition: VideoComposition(
+            canvasSize: canvas,
+            backgroundColor: magenta,
+            layers: [
+              VideoLayer(
+                clips: [
+                  VideoSegment(
+                    video: EditorVideo.asset(testAPath),
+                    endTime: const Duration(seconds: 3),
+                  ),
+                ],
+                transform: const SegmentTransform(
+                  offset: box,
+                  size: Size(320, 90),
+                ),
+                keyframes: const [
+                  TimelineKeyframe(time: Duration.zero, offset: box),
+                  TimelineKeyframe(
+                    time: Duration(seconds: 1),
+                    offset: box,
+                    rotation: 1.5707963267948966,
+                  ),
+                  TimelineKeyframe(
+                    time: Duration(seconds: 2),
+                    offset: box,
+                    rotation: 1.5707963267948966,
+                    opacity: 0,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      // Turned upright: x 275..365, y 20..340.
+      const turned = Duration(milliseconds: 1200);
+      expect(await backgroundAt(result, 320, 60, turned), isFalse);
+      expect(await backgroundAt(result, 190, 180, turned), isTrue);
+
+      const faded = Duration(milliseconds: 2500);
+      expect(await backgroundAt(result, 320, 180, faded), isTrue);
+    });
+
+    testWidgets('count on the untrimmed timeline of a trimmed render', (
+      tester,
+    ) async {
+      // The box goes from (0, 0) at 0 s to (480, 270) at 3 s; the render
+      // starts at 1 s, so its 0.5 s is the composition's 1.5 s.
+      final result = await pve.renderVideo(
+        VideoRenderData(
+          startTime: const Duration(seconds: 1),
+          composition: VideoComposition(
+            canvasSize: canvas,
+            backgroundColor: magenta,
+            layers: [
+              VideoLayer(
+                clips: [
+                  VideoSegment(
+                    video: EditorVideo.asset(testAPath),
+                    endTime: const Duration(seconds: 3),
+                  ),
+                ],
+                transform: const SegmentTransform(
+                  offset: Offset.zero,
+                  size: Size(160, 90),
+                ),
+                keyframes: const [
+                  TimelineKeyframe(time: Duration.zero, offset: Offset.zero),
+                  TimelineKeyframe(
+                    time: Duration(seconds: 3),
+                    offset: Offset(480, 270),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      // Half way, centred on (320, 180); on the output timeline it would be
+      // a sixth of the way, centred on (160, 90).
+      const at = Duration(milliseconds: 500);
+      expect(await backgroundAt(result, 320, 180, at), isFalse);
+      expect(await backgroundAt(result, 160, 90, at), isTrue);
+    });
+  });
 }
 
 const _swapRedBlue = <double>[

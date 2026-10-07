@@ -663,21 +663,13 @@ private fun prepareOverlay(
     if (unpremultiplied !== sizedBitmap) sizedBitmap.recycle()
     val finalOverlay: Bitmap = unpremultiplied
 
-    val overlaySettings: StaticOverlaySettings
     var baseNormX = 0f
     var baseNormY = 0f
 
-    if (isStretched) {
-        overlaySettings = StaticOverlaySettings.Builder()
-            .setOverlayFrameAnchor(0f, 0f)
-            .setBackgroundFrameAnchor(0f, 0f)
-            .setScale(overlayScaleX, overlayScaleY)
-            .build()
-    } else {
+    if (!isStretched) {
         val x = layer.x ?: 0
         val y = layer.y ?: 0
 
-        // Use OverlaySettings for positioning
         // Media3 uses OpenGL coordinates: x[-1,1] left→right, y[-1,1] bottom→top.
         // Input uses top-left origin, so y must be flipped.
         //
@@ -688,12 +680,6 @@ private fun prepareOverlay(
         val centerY = y.toFloat() + displayHeight / 2f
         baseNormX = (centerX / videoWidth) * 2f - 1f
         baseNormY = 1f - (centerY / videoHeight) * 2f
-
-        overlaySettings = StaticOverlaySettings.Builder()
-            .setBackgroundFrameAnchor(baseNormX, baseNormY)
-            .setOverlayFrameAnchor(0f, 0f)
-            .setScale(overlayScaleX, overlayScaleY)
-            .build()
     }
 
     // Rotate the overlay around its center. baseNormX/baseNormY describe the
@@ -712,6 +698,30 @@ private fun prepareOverlay(
     // rotated extent rather than the unrotated one.
     val grownWidth = (rotatedOverlay.width * overlayScaleX).roundToInt()
     val grownHeight = (rotatedOverlay.height * overlayScaleY).roundToInt()
+
+    val overlaySettings = if (isStretched) {
+        StaticOverlaySettings.Builder()
+            .setOverlayFrameAnchor(0f, 0f)
+            .setBackgroundFrameAnchor(0f, 0f)
+            .setScale(overlayScaleX, overlayScaleY)
+            .build()
+    } else {
+        // Media3 rejects an anchor outside [-1, 1], which dropped a layer
+        // centred off the frame; its position is split across both anchors
+        // instead (see [resolveAnchor]). One wholly off the frame is hidden.
+        val anchorX = resolveAnchor(baseNormX, grownWidth.toFloat() / videoWidth)
+        val anchorY = resolveAnchor(baseNormY, grownHeight.toFloat() / videoHeight)
+        val offFrame = liesOffFrame(
+            baseNormX, baseNormY, grownWidth / 2f, grownHeight / 2f, 0f,
+            videoWidth, videoHeight
+        )
+        StaticOverlaySettings.Builder()
+            .setBackgroundFrameAnchor(anchorX.backgroundAnchor, anchorY.backgroundAnchor)
+            .setOverlayFrameAnchor(anchorX.overlayAnchor, anchorY.overlayAnchor)
+            .setScale(overlayScaleX, overlayScaleY)
+            .setAlphaScale(if (offFrame) 0f else 1f)
+            .build()
+    }
 
     return PreparedOverlay(
         bitmap = rotatedOverlay,

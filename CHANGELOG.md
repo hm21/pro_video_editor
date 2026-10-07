@@ -1,7 +1,7 @@
 ## 2.29.0
-- **FEAT**(android, iOS, macOS): `ImageLayer.keyframes` and `VideoLayer.keyframes` move a layer between `TimelineKeyframe`s: position, size, rotation and opacity, eased with the same curves as the layer animations, which play on top of the keyframed placement. A composition layer's keyframes move every clip on it, frame by frame.
-- **FEAT**(android, iOS, macOS): `LayerAnimation.loopStart`/`loopEnd` make a loop repeat over part of a layer only, counting its cycles from `loopStart`, such as the stretch between two keyframes.
-- **FEAT**(android): An image layer that keyframes grow is rastered at its largest size, within the overlay raster budget, so it stays sharp.
+- **FEAT**(android, iOS, macOS): `ImageLayer.keyframes` and `VideoLayer.keyframes` move a layer between `TimelineKeyframe`s (position, size, rotation, opacity) with easing; layer animations play on top.
+- **FEAT**(android, iOS, macOS): `LayerAnimation.loopStart`/`loopEnd` limit a loop to part of a layer, e.g. the stretch between two keyframes.
+- **FIX**(android): An image layer centred outside the frame is drawn with the part that reaches into it instead of being dropped.
 
 ## 2.28.0
 - **FEAT**(android, iOS, macOS): `VideoEffect.triggers` fires an effect at given points in time instead of continuously, for example on the beats of a song: one zoom punch, flash or glitch burst per trigger. Preview and export start each hit on the same frame.

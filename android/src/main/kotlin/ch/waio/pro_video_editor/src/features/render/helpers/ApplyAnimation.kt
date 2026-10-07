@@ -7,6 +7,7 @@ import androidx.media3.effect.StaticOverlaySettings
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -394,8 +395,9 @@ internal data class OverlayAnchors(
  * Splits a desired layer-center position (in [-1, 1] NDC, possibly beyond the
  * canvas to place the layer off-screen) into the two anchors Media3 accepts.
  *
- * Media3 clamps both [StaticOverlaySettings.Builder.setBackgroundFrameAnchor]
- * and [StaticOverlaySettings.Builder.setOverlayFrameAnchor] to [-1, 1], so a
+ * Media3 accepts only [-1, 1] for both
+ * [StaticOverlaySettings.Builder.setBackgroundFrameAnchor] and
+ * [StaticOverlaySettings.Builder.setOverlayFrameAnchor], so a
  * single background anchor cannot move a layer fully off-screen. The background
  * anchor covers the on-canvas part; the overlay anchor supplies the remaining
  * off-canvas shift — its ±1 range maps to ±[halfNorm] of background travel,
@@ -529,20 +531,61 @@ internal fun overlayFrame(
 
     // Media3 clamps each anchor to [-1, 1], so a fully off-screen slide is
     // split across the background and overlay anchors (see resolveAnchor).
-    val anchorX = resolveAnchor(placedNormX + state.offsetX, halfNormW)
-    val anchorY = resolveAnchor(placedNormY + state.offsetY, halfNormH)
+    val centerNormX = placedNormX + state.offsetX
+    val centerNormY = placedNormY + state.offsetY
+    val anchorX = resolveAnchor(centerNormX, halfNormW)
+    val anchorY = resolveAnchor(centerNormY, halfNormH)
+    // Flutter turns clockwise, Media3 counter-clockwise.
+    val rotationDegrees = state.rotationDegrees -
+        Math.toDegrees(keyframe?.rotation ?: 0.0).toFloat()
+    val scale = state.scale * keyframeScale
+
+    // The anchors carry a layer at most one half-size past an edge, which
+    // hides it only while it is upright: turned, its corners would poke into
+    // the frame. A layer wholly off the frame is hidden instead.
+    val offFrame = liesOffFrame(
+        centerNormX, centerNormY,
+        halfWidthPx = imageWidth * scale / 2f,
+        halfHeightPx = imageHeight * scale / 2f,
+        rotationDegrees = rotationDegrees,
+        videoWidth = videoWidth,
+        videoHeight = videoHeight,
+    )
 
     return OverlayFrame(
-        alpha = state.alpha * (keyframe?.opacity?.toFloat() ?: 1f),
+        alpha = if (offFrame) 0f else state.alpha * (keyframe?.opacity?.toFloat() ?: 1f),
         backgroundAnchorX = anchorX.backgroundAnchor,
         backgroundAnchorY = anchorY.backgroundAnchor,
         overlayAnchorX = anchorX.overlayAnchor,
         overlayAnchorY = anchorY.overlayAnchor,
-        scale = state.scale * keyframeScale,
-        // Flutter turns clockwise, Media3 counter-clockwise.
-        rotationDegrees = state.rotationDegrees -
-            Math.toDegrees(keyframe?.rotation ?: 0.0).toFloat(),
+        scale = scale,
+        rotationDegrees = rotationDegrees,
     )
+}
+
+/**
+ * Whether a layer centered on [centerNormX] / [centerNormY] ([-1, 1] units,
+ * +y up), [halfWidthPx] x [halfHeightPx] frame pixels from its center to its
+ * edges and turned by [rotationDegrees], lies wholly outside the frame. A
+ * turned layer is measured by the box around it.
+ */
+internal fun liesOffFrame(
+    centerNormX: Float,
+    centerNormY: Float,
+    halfWidthPx: Float,
+    halfHeightPx: Float,
+    rotationDegrees: Float,
+    videoWidth: Int,
+    videoHeight: Int,
+): Boolean {
+    if (videoWidth <= 0 || videoHeight <= 0) return false
+    val radians = Math.toRadians(rotationDegrees.toDouble())
+    val c = abs(cos(radians)).toFloat()
+    val s = abs(sin(radians)).toFloat()
+    val halfNormX = (c * halfWidthPx + s * halfHeightPx) / videoWidth * 2f
+    val halfNormY = (s * halfWidthPx + c * halfHeightPx) / videoHeight * 2f
+    return centerNormX - halfNormX >= 1f || centerNormX + halfNormX <= -1f ||
+        centerNormY - halfNormY >= 1f || centerNormY + halfNormY <= -1f
 }
 
 /**

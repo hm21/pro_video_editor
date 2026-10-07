@@ -3263,6 +3263,20 @@ final class KeyframeTests: XCTestCase {
     XCTAssertEqual(rightEdge.y, 50, accuracy: 1e-9)
   }
 
+  func testAKeyframeTurnLeavesTheCensorBlockAreaUpright() {
+    // The pixelate blocks start at the upright, doubled box's corner, as
+    // Android's CensorMaskPlacement.topLeftPixel does, not at the corner of
+    // the box around the turned one.
+    let (_, _, untilted) = computeAnimation(
+      layer: layer(), currentTimeUs: 0, overlayExtent: keyframedOverlay, frameExtent: frame,
+      keyframe: keyframed)
+    let area = keyframedOverlay.applying(untilted)
+    XCTAssertEqual(area.minX, 200, accuracy: 1e-9)
+    XCTAssertEqual(area.minY, 150, accuracy: 1e-9)
+    XCTAssertEqual(area.width, 400, accuracy: 1e-9)
+    XCTAssertEqual(area.height, 200, accuracy: 1e-9)
+  }
+
   func testASlideStartsFromTheEdgeNearestTheKeyframedBox() {
     let slide = LayerAnimationConfig(
       type: "slide", phase: "animateIn", durationUs: 1_000_000, curve: "linear",

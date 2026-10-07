@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pro_video_editor/core/models/image/timeline_keyframe_model.dart'
+    show sortTimelineKeyframes;
 import 'package:pro_video_editor/pro_video_editor.dart';
 
 void main() {
