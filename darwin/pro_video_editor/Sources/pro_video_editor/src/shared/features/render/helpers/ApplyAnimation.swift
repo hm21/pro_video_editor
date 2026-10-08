@@ -178,10 +178,11 @@ struct AnimationProgress: Equatable {
 ///
 /// A "loop" plays over the whole range, one cycle per duration counted from
 /// [startUs], or only from `loopStartUs` to `loopEndUs` when it names them,
-/// counting from the first: the eased value runs from rest to fully away at
-/// half a cycle and back. A wiggle runs that twice per cycle, once to each side. The cycle
-/// position is taken from the remainder of whole microseconds, so a long video
-/// does not lose precision. Mirrors `animationProgress` on Android.
+/// counting from the first and `loopPhaseUs` into a cycle there: the eased
+/// value runs from rest to fully away at half a cycle and back. A wiggle runs
+/// that twice per cycle, once to each side. The cycle position is taken from
+/// the remainder of whole microseconds, so a long video does not lose
+/// precision. Mirrors `animationProgress` on Android.
 func animationProgress(
   _ anim: LayerAnimationConfig,
   currentTimeUs: Int64,
@@ -198,8 +199,9 @@ func animationProgress(
     if anim.loopStartUs >= 0 && currentTimeUs < anim.loopStartUs { return nil }
     if anim.loopEndUs >= 0 && currentTimeUs >= anim.loopEndUs { return nil }
     let fromUs = anim.loopStartUs >= 0 ? anim.loopStartUs : effectiveStartUs
-    let elapsed = max(0, currentTimeUs - fromUs)
-    let inCycle = elapsed % durationUs
+    let elapsed = max(0, currentTimeUs - fromUs) + anim.loopPhaseUs
+    // Floored, so a phase below zero still lands inside the cycle.
+    let inCycle = (elapsed % durationUs + durationUs) % durationUs
     if anim.type == "wiggle" {
       // Each half of the cycle is one swing out and back.
       let inSwing = (2 * inCycle) % durationUs

@@ -407,7 +407,9 @@ data class LayerAnimationConfig(
     /** Where a `loop` starts repeating, on the output timeline; `-1` = the layer's start. */
     val loopStartUs: Long = -1L,
     /** Where a `loop` stops, on the output timeline; `-1` = the layer's end. */
-    val loopEndUs: Long = -1L
+    val loopEndUs: Long = -1L,
+    /** How far into its cycle a `loop` already is where it starts, in µs. */
+    val loopPhaseUs: Long = 0L
 ) {
     companion object {
         /** 10°, the tilt of a wiggle without its own [wiggleAngle]. */
@@ -430,7 +432,8 @@ data class LayerAnimationConfig(
                 wiggleAngle = (map["wiggleAngle"] as? Number)?.toDouble(),
                 bounceHeight = (map["bounceHeight"] as? Number)?.toDouble(),
                 loopStartUs = (map["loopStartUs"] as? Number)?.toLong() ?: -1L,
-                loopEndUs = (map["loopEndUs"] as? Number)?.toLong() ?: -1L
+                loopEndUs = (map["loopEndUs"] as? Number)?.toLong() ?: -1L,
+                loopPhaseUs = (map["loopPhaseUs"] as? Number)?.toLong() ?: 0L
             )
         }
     }
