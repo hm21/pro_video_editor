@@ -332,6 +332,20 @@ class RunnerTests: XCTestCase {
     XCTAssertNil(progress(5_000_000))
   }
 
+  func testLoopStartsAtItsPhaseAndRunsOnFromThere() {
+    // A quarter cycle in at its start: half way out already.
+    var loop = animation("fade", "loop")
+    loop.loopStartUs = 3_000_000
+    loop.loopEndUs = 5_000_000
+    loop.loopPhaseUs = 250_000
+    func value(_ t: Int64) -> Double {
+      animationProgress(loop, currentTimeUs: t, startUs: 0, endUs: -1)!.value
+    }
+    XCTAssertEqual(value(3_000_000), 0.5, accuracy: 1e-9)
+    XCTAssertEqual(value(3_250_000), 0, accuracy: 1e-9)
+    XCTAssertEqual(value(3_750_000), 1, accuracy: 1e-9)
+  }
+
   func testLoopCurveShapesTheWayOutLikeAnOutAnimation() {
     // easeIn: x², with x = 1 at rest. A quarter cycle has x = 0.5.
     let loop = animation("fade", "loop", curve: "easeIn")

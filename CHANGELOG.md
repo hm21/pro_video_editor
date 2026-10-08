@@ -1,3 +1,6 @@
+## 2.30.0
+- **FEAT**(android, iOS, macOS): `LayerAnimation.loopPhase` starts a loop part way into its cycle, so a loop split into parts that each repeat at their own pace, such as across a clip transition that plays the timeline faster, runs on in step from one part to the next.
+
 ## 2.29.1
 - **FIX**(android): On a sped-up segment, image layers with their animations and keyframes, timed color filters and the frame rate cap follow the output timeline, as on iOS and macOS.
 

@@ -185,6 +185,25 @@ void main() {
         expect(LayerAnimation.fromMap(map).loopStart, isNull);
       });
 
+      test('carries the phase it starts at through a round trip', () {
+        const loop = LayerAnimation(
+          type: LayerAnimationType.bounce,
+          phase: AnimationPhase.loop,
+          duration: Duration(milliseconds: 500),
+          loopStart: Duration(seconds: 1),
+          loopPhase: Duration(milliseconds: 125),
+        );
+
+        final map = loop.toMap();
+
+        expect(map['loopPhaseUs'], 125000);
+        expect(LayerAnimation.fromMap(map), loop);
+        expect(
+          LayerAnimation.fromMap({...map, 'loopPhaseUs': null}).loopPhase,
+          isNull,
+        );
+      });
+
       test('is a loop setting only', () {
         expect(
           () => LayerAnimation(
@@ -192,6 +211,15 @@ void main() {
             phase: AnimationPhase.animateIn,
             duration: const Duration(milliseconds: 500),
             loopStart: Duration.zero,
+          ),
+          throwsAssertionError,
+        );
+        expect(
+          () => LayerAnimation(
+            type: LayerAnimationType.fade,
+            phase: AnimationPhase.animateIn,
+            duration: const Duration(milliseconds: 500),
+            loopPhase: Duration.zero,
           ),
           throwsAssertionError,
         );

@@ -43,6 +43,8 @@ struct LayerAnimationConfig {
   var loopStartUs: Int64 = -1
   /// Where a loop stops, on the output timeline; -1 = the layer's end.
   var loopEndUs: Int64 = -1
+  /// How far into its cycle a loop already is where it starts, in µs.
+  var loopPhaseUs: Int64 = 0
 
   static func fromArguments(_ args: [String: Any]?) -> LayerAnimationConfig? {
     guard let args = args,
@@ -70,7 +72,8 @@ struct LayerAnimationConfig {
       wiggleAngle: (args["wiggleAngle"] as? NSNumber)?.doubleValue,
       bounceHeight: (args["bounceHeight"] as? NSNumber)?.doubleValue,
       loopStartUs: (args["loopStartUs"] as? NSNumber)?.int64Value ?? -1,
-      loopEndUs: (args["loopEndUs"] as? NSNumber)?.int64Value ?? -1
+      loopEndUs: (args["loopEndUs"] as? NSNumber)?.int64Value ?? -1,
+      loopPhaseUs: (args["loopPhaseUs"] as? NSNumber)?.int64Value ?? 0
     )
   }
 }

@@ -87,6 +87,22 @@ internal class OverlayAnimationStateTest {
     }
 
     @Test
+    fun loopStartsAtItsPhaseAndRunsOnFromThere() {
+        // A quarter cycle in at its start: half way out already.
+        val loop = LayerAnimationConfig(
+            type = "fade",
+            phase = "loop",
+            durationUs = 1_000_000L,
+            loopStartUs = 3_000_000L,
+            loopEndUs = 5_000_000L,
+            loopPhaseUs = 250_000L,
+        )
+        assertEquals(0.5, animationProgress(loop, 3_000_000L, 0L, -1L)!!.value, tol)
+        assertEquals(0.0, animationProgress(loop, 3_250_000L, 0L, -1L)!!.value, tol)
+        assertEquals(1.0, animationProgress(loop, 3_750_000L, 0L, -1L)!!.value, tol)
+    }
+
+    @Test
     fun loopCurveShapesTheWayOutLikeAnOutAnimation() {
         // easeIn: x², with x = 1 at rest. A quarter cycle has x = 0.5.
         val loop = anim("fade", "loop", curve = "easeIn")
