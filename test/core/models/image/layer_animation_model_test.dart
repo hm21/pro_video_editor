@@ -225,6 +225,18 @@ void main() {
         );
       });
 
+      test('needs a phase that is not negative', () {
+        expect(
+          () => const LayerAnimation(
+            type: LayerAnimationType.fade,
+            phase: AnimationPhase.loop,
+            duration: Duration(milliseconds: 500),
+            loopPhase: Duration(milliseconds: -1),
+          ).toMap(),
+          throwsAssertionError,
+        );
+      });
+
       test('needs loopStart before loopEnd', () {
         expect(
           () => const LayerAnimation(

@@ -100,6 +100,9 @@ internal class OverlayAnimationStateTest {
         assertEquals(0.5, animationProgress(loop, 3_000_000L, 0L, -1L)!!.value, tol)
         assertEquals(0.0, animationProgress(loop, 3_250_000L, 0L, -1L)!!.value, tol)
         assertEquals(1.0, animationProgress(loop, 3_750_000L, 0L, -1L)!!.value, tol)
+        // A phase below zero lands inside the cycle, not past rest.
+        val behind = loop.copy(loopPhaseUs = -750_000L)
+        assertEquals(0.5, animationProgress(behind, 3_000_000L, 0L, -1L)!!.value, tol)
     }
 
     @Test

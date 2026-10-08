@@ -146,9 +146,10 @@ internal data class AnimationProgress(val value: Double, val swing: Float = 1f)
  * [startUs], or only from [LayerAnimationConfig.loopStartUs] to
  * [LayerAnimationConfig.loopEndUs] when it names them, counting from the
  * first and [LayerAnimationConfig.loopPhaseUs] into a cycle there: the eased
- * value runs from rest to fully away at half a cycle and back. A wiggle runs that twice per cycle, once to each side (see
- * [AnimationProgress.swing]). The cycle position is taken from the remainder
- * of whole microseconds, so a long video does not lose precision.
+ * value runs from rest to fully away at half a cycle and back. A wiggle runs
+ * that twice per cycle, once to each side (see [AnimationProgress.swing]).
+ * The cycle position is taken from the remainder of whole microseconds, so a
+ * long video does not lose precision.
  */
 internal fun animationProgress(
     anim: LayerAnimationConfig,
@@ -167,7 +168,8 @@ internal fun animationProgress(
         if (anim.loopEndUs >= 0 && timeUs >= anim.loopEndUs) return null
         val fromUs = if (anim.loopStartUs >= 0) anim.loopStartUs else effectiveStartUs
         val elapsed = (timeUs - fromUs).coerceAtLeast(0L) + anim.loopPhaseUs
-        val inCycle = elapsed % durationUs
+        // Floored, so a phase below zero still lands inside the cycle.
+        val inCycle = elapsed.mod(durationUs)
         return if (anim.type == "wiggle") {
             // Each half of the cycle is one swing out and back.
             val inSwing = (2 * inCycle) % durationUs

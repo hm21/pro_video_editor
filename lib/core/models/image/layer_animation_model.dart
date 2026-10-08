@@ -225,7 +225,7 @@ class LayerAnimation {
        assert(
          phase == AnimationPhase.loop ||
              (loopStart == null && loopEnd == null && loopPhase == null),
-         'only a loop repeats between loopStart and loopEnd from loopPhase',
+         'loopStart, loopEnd and loopPhase only apply to a loop',
        );
 
   /// How far a [LayerAnimationType.wiggle] tilts when [wiggleAngle] is not
@@ -313,7 +313,8 @@ class LayerAnimation {
 
   /// How far into its cycle a [AnimationPhase.loop] already is where it
   /// starts, at [loopStart] or the layer's own start; it plays on from there
-  /// instead of from rest. Between zero and [duration].
+  /// instead of from rest. Not negative; a phase of [duration] or more wraps
+  /// round into the cycle.
   ///
   /// Lets one loop be split into parts that each repeat at their own pace,
   /// such as where a clip transition plays the timeline faster, and still run
@@ -325,6 +326,10 @@ class LayerAnimation {
     assert(
       loopStart == null || loopEnd == null || loopStart! < loopEnd!,
       'loopStart must be before loopEnd',
+    );
+    assert(
+      loopPhase == null || !loopPhase!.isNegative,
+      'loopPhase must not be negative',
     );
     return <String, dynamic>{
       'type': type.name,

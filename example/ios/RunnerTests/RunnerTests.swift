@@ -344,6 +344,9 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(value(3_000_000), 0.5, accuracy: 1e-9)
     XCTAssertEqual(value(3_250_000), 0, accuracy: 1e-9)
     XCTAssertEqual(value(3_750_000), 1, accuracy: 1e-9)
+    // A phase below zero lands inside the cycle, not past rest.
+    loop.loopPhaseUs = -750_000
+    XCTAssertEqual(value(3_000_000), 0.5, accuracy: 1e-9)
   }
 
   func testLoopCurveShapesTheWayOutLikeAnOutAnimation() {
