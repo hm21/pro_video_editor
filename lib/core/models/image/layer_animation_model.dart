@@ -303,7 +303,9 @@ class LayerAnimation {
   /// `null` repeats from the layer's own start. Together with [loopEnd] a
   /// loop can play over part of a layer only, such as the stretch between two
   /// [ImageLayer.keyframes]: a [duration] that fits a whole number of cycles
-  /// between the two leaves the layer at rest on both.
+  /// between the two leaves the layer at rest on both. On a layer with an
+  /// [ImageLayer.keyframeClock], that stretch starts and ends where the clock
+  /// reaches the two keyframes on the output timeline, not at their own times.
   final Duration? loopStart;
 
   /// Where a [AnimationPhase.loop] stops, on the output timeline like

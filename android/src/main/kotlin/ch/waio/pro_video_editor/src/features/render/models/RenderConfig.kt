@@ -456,7 +456,11 @@ data class LayerAnimationConfig(
  * own curve exactly, however the two timelines differ.
  */
 data class KeyframeClock(val points: List<Pair<Long, Long>> = emptyList()) {
-    /** The keyframe time at [outputUs] on the output timeline. */
+    /**
+     * The keyframe time at [outputUs] on the output timeline. Where two points
+     * share an output time, the clock jumps: the earlier one holds at that
+     * time and the later one counts on from just after it.
+     */
     fun keyframeTimeUs(outputUs: Long): Long {
         if (points.isEmpty()) return outputUs
         val first = points.first()
@@ -464,10 +468,11 @@ data class KeyframeClock(val points: List<Pair<Long, Long>> = emptyList()) {
         for (i in 1 until points.size) {
             val (outputTo, keyframeTo) = points[i]
             if (outputUs > outputTo) continue
+            // outputFrom < outputUs <= outputTo, so the span is never empty.
             val (outputFrom, keyframeFrom) = points[i - 1]
-            if (outputTo == outputFrom) return keyframeTo
             val share = (outputUs - outputFrom).toDouble() / (outputTo - outputFrom)
-            return keyframeFrom + Math.round(share * (keyframeTo - keyframeFrom))
+            // Ties to even, as `rounded(.toNearestOrEven)` on iOS and macOS.
+            return keyframeFrom + kotlin.math.round(share * (keyframeTo - keyframeFrom)).toLong()
         }
         val last = points.last()
         return last.second + (outputUs - last.first)

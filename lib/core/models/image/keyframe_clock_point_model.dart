@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 
 /// One point of the clock a layer's keyframes are timed on: the layer is at
-/// [keyframe] on that clock when the rendered video is at [output].
+/// [keyframe] on that clock when the video is at [output].
 ///
 /// [ImageLayer.keyframeClock] and `VideoLayer.keyframeClock` map every frame's
 /// time to the keyframes' clock, linearly between two points. Before the first
@@ -27,7 +27,9 @@ class KeyframeClockPoint {
     );
   }
 
-  /// The time on the rendered video.
+  /// The time on the timeline the keyframes are timed on without a clock:
+  /// the video's for an [ImageLayer], like its start and end time, and the
+  /// composition's for a `VideoLayer`, like `VideoSegment.timelineStart`.
   final Duration output;
 
   /// The time on the keyframes' clock at [output].

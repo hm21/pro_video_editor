@@ -3365,6 +3365,38 @@ final class KeyframeTests: XCTestCase {
     XCTAssertEqual(KeyframeClock.output.keyframeTimeUs(1_234), 1_234)
   }
 
+  func testAKeyframeClockJumpsWhereTwoPointsShareAnOutputTime() {
+    let jump = KeyframeClock(points: [
+      KeyframeClock.Point(outputUs: 0, keyframeUs: 0),
+      KeyframeClock.Point(outputUs: 1_000_000, keyframeUs: 1_000_000),
+      KeyframeClock.Point(outputUs: 1_000_000, keyframeUs: 3_000_000),
+      KeyframeClock.Point(outputUs: 2_000_000, keyframeUs: 4_000_000),
+    ])
+    XCTAssertEqual(jump.keyframeTimeUs(1_000_000), 1_000_000)
+    XCTAssertEqual(jump.keyframeTimeUs(1_500_000), 3_500_000)
+    XCTAssertEqual(jump.keyframeTimeUs(3_000_000), 5_000_000)
+  }
+
+  func testAKeyframeClockRoundsTiesToEven() {
+    // Half way down from 1 µs to -2 µs is -0.5 µs, 1.5 µs below the start.
+    let falling = KeyframeClock(points: [
+      KeyframeClock.Point(outputUs: 0, keyframeUs: 1),
+      KeyframeClock.Point(outputUs: 2, keyframeUs: -2),
+    ])
+    XCTAssertEqual(falling.keyframeTimeUs(1), -1)
+  }
+
+  func testAKeyframeClockReadsItsPointsSortedAndSkipsBrokenOnes() {
+    let parsed = KeyframeClock.from([
+      ["outputUs": 1_500_000, "keyframeUs": 2_000_000],
+      "not a point",
+      ["outputUs": 1_000_000],
+      ["outputUs": 1_000_000, "keyframeUs": 1_000_000],
+    ] as [Any])
+    XCTAssertEqual(parsed, clock)
+    XCTAssertEqual(KeyframeClock.from(nil), .output)
+  }
+
   func testAClipIsPlacedAtItsTimeOnItsKeyframeClock() {
     let box = CGRect(x: 100, y: 200, width: 400, height: 300)
     let keyframes = [keyframe(0, x: 0, curve: "bounceOut"), keyframe(3_000_000, x: 100)]

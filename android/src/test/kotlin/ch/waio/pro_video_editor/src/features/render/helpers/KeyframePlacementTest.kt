@@ -297,6 +297,42 @@ internal class KeyframePlacementTest {
     }
 
     @Test
+    fun `a keyframe clock jumps where two points share an output time`() {
+        val jump = KeyframeClock(
+            listOf(
+                Pair(0L, 0L),
+                Pair(1_000_000L, 1_000_000L),
+                Pair(1_000_000L, 3_000_000L),
+                Pair(2_000_000L, 4_000_000L),
+            )
+        )
+        assertEquals(1_000_000L, jump.keyframeTimeUs(1_000_000L))
+        assertEquals(3_500_000L, jump.keyframeTimeUs(1_500_000L))
+        assertEquals(5_000_000L, jump.keyframeTimeUs(3_000_000L))
+    }
+
+    @Test
+    fun `a keyframe clock rounds ties to even`() {
+        // Half way down from 1 µs to -2 µs is -0.5 µs, 1.5 µs below the start.
+        val falling = KeyframeClock(listOf(Pair(0L, 1L), Pair(2L, -2L)))
+        assertEquals(-1L, falling.keyframeTimeUs(1L))
+    }
+
+    @Test
+    fun `a keyframe clock reads its points sorted and skips broken ones`() {
+        val parsed = KeyframeClock.from(
+            listOf(
+                mapOf("outputUs" to 1_500_000L, "keyframeUs" to 2_000_000L),
+                "not a point",
+                mapOf("outputUs" to 1_000_000),
+                mapOf("outputUs" to 1_000_000, "keyframeUs" to 1_000_000),
+            )
+        )
+        assertEquals(clock, parsed)
+        assertEquals(KeyframeClock.OUTPUT, KeyframeClock.from(null))
+    }
+
+    @Test
     fun `an overlay is placed at its time on its keyframe clock`() {
         val keyframes = listOf(
             keyframe(0L, x = 0.0, curve = "easeInOutCubic"),

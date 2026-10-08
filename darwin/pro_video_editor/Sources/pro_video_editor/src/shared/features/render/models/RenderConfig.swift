@@ -516,26 +516,32 @@ struct KeyframeClock: Sendable, Equatable {
 
   static let output = KeyframeClock(points: [])
 
-  /// The keyframe time at [outputUs] on the output timeline.
+  /// The keyframe time at [outputUs] on the output timeline. Where two points
+  /// share an output time, the clock jumps: the earlier one holds at that time
+  /// and the later one counts on from just after it.
   func keyframeTimeUs(_ outputUs: Int64) -> Int64 {
     guard let first = points.first, let last = points.last else { return outputUs }
     if outputUs <= first.outputUs { return first.keyframeUs + (outputUs - first.outputUs) }
     for i in 1..<points.count {
       let to = points[i]
       if outputUs > to.outputUs { continue }
+      // from.outputUs < outputUs <= to.outputUs, so the span is never empty.
       let from = points[i - 1]
-      if to.outputUs == from.outputUs { return to.keyframeUs }
       let share = Double(outputUs - from.outputUs) / Double(to.outputUs - from.outputUs)
-      return from.keyframeUs + Int64((share * Double(to.keyframeUs - from.keyframeUs)).rounded())
+      // Ties to even, as `kotlin.math.round` on Android.
+      return from.keyframeUs
+        + Int64((share * Double(to.keyframeUs - from.keyframeUs)).rounded(.toNearestOrEven))
     }
     return last.keyframeUs + (outputUs - last.outputUs)
   }
 
-  /// The clock in [raw], a list of `{outputUs, keyframeUs}` maps.
+  /// The clock in [raw], a list of `{outputUs, keyframeUs}` maps; an entry
+  /// that is not one is skipped, as on Android.
   static func from(_ raw: Any?) -> KeyframeClock {
-    guard let maps = raw as? [[String: Any]] else { return .output }
-    let points = maps.compactMap { map -> Point? in
-      guard let output = (map["outputUs"] as? NSNumber)?.int64Value,
+    guard let entries = raw as? [Any] else { return .output }
+    let points = entries.compactMap { entry -> Point? in
+      guard let map = entry as? [String: Any],
+        let output = (map["outputUs"] as? NSNumber)?.int64Value,
         let keyframe = (map["keyframeUs"] as? NSNumber)?.int64Value
       else { return nil }
       return Point(outputUs: output, keyframeUs: keyframe)
