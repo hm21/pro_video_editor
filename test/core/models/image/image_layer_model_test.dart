@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart';
 import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
+import 'package:pro_video_editor/core/models/image/keyframe_clock_point_model.dart';
 import 'package:pro_video_editor/core/models/image/layer_censor_model.dart';
 import 'package:pro_video_editor/core/models/image/timeline_keyframe_model.dart';
 
@@ -38,6 +39,28 @@ void main() {
 
         expect(moved, isNot(layer));
         expect(moved.keyframes, keyframes);
+      });
+
+      test('keep their clock through toMap and fromMap', () {
+        const clock = [
+          KeyframeClockPoint(
+            output: Duration(seconds: 1),
+            keyframe: Duration(seconds: 1),
+          ),
+          KeyframeClockPoint(
+            output: Duration(milliseconds: 1500),
+            keyframe: Duration(seconds: 2),
+          ),
+        ];
+        final layer = ImageLayer(
+          image: image,
+          offset: Offset.zero,
+          keyframes: keyframes,
+          keyframeClock: clock,
+        );
+
+        expect(ImageLayer.fromMap(layer.toMap()).keyframeClock, clock);
+        expect(layer, isNot(layer.copyWith(keyframeClock: const [])));
       });
 
       test('need a positioned layer', () {

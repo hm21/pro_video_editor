@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:pro_video_editor/core/models/image/keyframe_clock_point_model.dart'
+    show keyframeClockFromMap;
 import 'package:pro_video_editor/core/models/image/timeline_keyframe_model.dart'
     show sortTimelineKeyframes;
 import 'package:pro_video_editor/pro_video_editor.dart';
@@ -26,6 +28,7 @@ class VideoLayer {
     this.transform,
     this.chromaKey,
     this.keyframes = const [],
+    this.keyframeClock = const [],
   }) : assert(clips.length > 0, 'A layer must contain at least one clip'),
        assert(
          opacity >= 0 && opacity <= 1,
@@ -71,6 +74,15 @@ class VideoLayer {
   /// **Default**: empty, which keeps every clip where its transform puts it.
   final List<TimelineKeyframe> keyframes;
 
+  /// The clock [keyframes] are timed on; see [KeyframeClockPoint].
+  ///
+  /// When not empty, every frame is placed by the keyframes at its time on
+  /// this clock instead of at its time on the composition.
+  ///
+  /// **Default**: empty, which times [keyframes] on the composition's
+  /// timeline.
+  final List<KeyframeClockPoint> keyframeClock;
+
   /// Converts this layer to a map for platform channel communication.
   ///
   /// Resolves each clip's input path and any chroma-key background image, so
@@ -96,6 +108,7 @@ class VideoLayer {
       'keyframes': sortTimelineKeyframes(
         keyframes,
       ).map((k) => k.toMap()).toList(),
+      'keyframeClock': keyframeClock.map((p) => p.toMap()).toList(),
     };
   }
 
@@ -106,6 +119,7 @@ class VideoLayer {
     SegmentTransform? transform,
     ChromaKey? chromaKey,
     List<TimelineKeyframe>? keyframes,
+    List<KeyframeClockPoint>? keyframeClock,
   }) {
     return VideoLayer(
       clips: clips ?? this.clips,
@@ -113,6 +127,7 @@ class VideoLayer {
       transform: transform ?? this.transform,
       chromaKey: chromaKey ?? this.chromaKey,
       keyframes: keyframes ?? this.keyframes,
+      keyframeClock: keyframeClock ?? this.keyframeClock,
     );
   }
 
@@ -123,6 +138,7 @@ class VideoLayer {
       'transform': transform?.toMap(),
       'chromaKey': chromaKey?.toMap(),
       'keyframes': keyframes.map((k) => k.toMap()).toList(),
+      'keyframeClock': keyframeClock.map((p) => p.toMap()).toList(),
     };
   }
 
@@ -149,6 +165,7 @@ class VideoLayer {
               )
               .toList() ??
           const [],
+      keyframeClock: keyframeClockFromMap(map['keyframeClock']),
     );
   }
 
@@ -160,7 +177,8 @@ class VideoLayer {
   @override
   String toString() =>
       'VideoLayer(clips: $clips, opacity: $opacity, transform: $transform, '
-      'chromaKey: $chromaKey, keyframes: $keyframes)';
+      'chromaKey: $chromaKey, keyframes: $keyframes, '
+      'keyframeClock: $keyframeClock)';
 
   @override
   bool operator ==(covariant VideoLayer other) {
@@ -170,7 +188,8 @@ class VideoLayer {
         other.opacity == opacity &&
         other.transform == transform &&
         other.chromaKey == chromaKey &&
-        listEquals(other.keyframes, keyframes);
+        listEquals(other.keyframes, keyframes) &&
+        listEquals(other.keyframeClock, keyframeClock);
   }
 
   @override
@@ -179,5 +198,6 @@ class VideoLayer {
       opacity.hashCode ^
       transform.hashCode ^
       chromaKey.hashCode ^
-      Object.hashAll(keyframes);
+      Object.hashAll(keyframes) ^
+      Object.hashAll(keyframeClock);
 }

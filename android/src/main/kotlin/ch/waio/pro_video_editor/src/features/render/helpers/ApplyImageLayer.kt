@@ -183,7 +183,8 @@ fun applyTimedImageLayers(
                     animations = layer.animations,
                     rasterScaleX = first.rasterScaleX,
                     rasterScaleY = first.rasterScaleY,
-                    keyframes = layer.keyframes
+                    keyframes = layer.keyframes,
+                    keyframeClock = layer.keyframeClock
                 )
                 Log.d(
                     RENDER_TAG,
@@ -248,7 +249,8 @@ fun applyTimedImageLayers(
                         rasterScaleY = prepared.rasterScaleY,
                         animationStartUs = layer.animationStartUs,
                         animationEndUs = layer.animationEndUs,
-                        keyframes = layer.keyframes
+                        keyframes = layer.keyframes,
+                        keyframeClock = layer.keyframeClock
                     )
                 } else {
                     BitmapOverlay.createStaticBitmapOverlay(

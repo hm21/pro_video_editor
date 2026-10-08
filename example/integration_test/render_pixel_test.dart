@@ -824,6 +824,43 @@ void main() {
       expect(magentaAt(end, 600, 350), isFalse, reason: 'holds the last');
     }, skip: kIsWeb);
 
+    testWidgets('keyframes follow their keyframe clock', (tester) async {
+      // 200x100 from (100, 100) at 0 s to (900, 500) at 2 s on a clock that
+      // runs twice as fast as the video from 0.5 s to 1 s.
+      final out = await render([
+        ImageLayer(
+          image: EditorLayerImage.memory(
+            await _solidPng(_magenta, width: 200, height: 100),
+          ),
+          offset: const Offset(100, 100),
+          size: const Size(200, 100),
+          keyframes: const [
+            TimelineKeyframe(time: Duration.zero, offset: Offset(100, 100)),
+            TimelineKeyframe(
+              time: Duration(seconds: 2),
+              offset: Offset(900, 500),
+            ),
+          ],
+          keyframeClock: const [
+            KeyframeClockPoint(
+              output: Duration(milliseconds: 500),
+              keyframe: Duration(milliseconds: 500),
+            ),
+            KeyframeClockPoint(
+              output: Duration(seconds: 1),
+              keyframe: Duration(milliseconds: 1500),
+            ),
+          ],
+        ),
+      ]);
+
+      // At 1 s the clock is at 1.5 s: three quarters along, centred on
+      // (800, 450) instead of half way on (600, 350).
+      final f = await frameOf(out, at: const Duration(seconds: 1));
+      expect(magentaAt(f, 800, 450), isTrue, reason: 'on its clock');
+      expect(magentaAt(f, 600, 350), isFalse, reason: 'not on the video');
+    }, skip: kIsWeb);
+
     testWidgets('keyframes turn and scale a layer around its centre', (
       tester,
     ) async {

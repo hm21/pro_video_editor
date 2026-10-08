@@ -37,6 +37,8 @@ struct ImageLayer {
   /// The layer's placement over time, sorted by time; they replace `x`, `y`
   /// and `rotation`. See `keyframePlacement(_:atUs:)`.
   var keyframes: [KeyframeConfig] = []
+  /// The clock `keyframes` are timed on; see `KeyframeClock`.
+  var keyframeClock: KeyframeClock = .output
 
   /// The frame to display at composition time [currentTimeUs].
   ///
@@ -395,7 +397,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
           censor: layer.censor,
           animationStartUs: layer.animationStartUs,
           animationEndUs: layer.animationEndUs,
-          keyframes: layer.keyframes
+          keyframes: layer.keyframes,
+          keyframeClock: layer.keyframeClock
         ))
     }
   }
@@ -416,7 +419,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
     // A keyframed layer is placed and turned by its keyframes instead of its
     // own x, y and rotation; computeAnimation applies the turn and the scale.
-    let keyframe = keyframePlacement(layer.keyframes, atUs: currentTimeUs)
+    let keyframe = keyframePlacement(
+      layer.keyframes, atUs: layer.keyframeClock.keyframeTimeUs(currentTimeUs))
 
     let overlay: CIImage
     if let keyframe {

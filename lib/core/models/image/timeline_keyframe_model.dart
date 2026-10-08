@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 
+import 'keyframe_clock_point_model.dart';
 import 'layer_animation_model.dart';
 
 /// Where a layer is, how big it is, how far it is turned and how opaque it is
@@ -53,7 +54,8 @@ class TimelineKeyframe {
   }
 
   /// When the placement applies, on the same timeline as the layer's start
-  /// and end time.
+  /// and end time, or on the layer's keyframe clock when it has one (see
+  /// [KeyframeClockPoint]).
   final Duration time;
 
   /// The top-left corner of the layer's unscaled box, in pixels from the

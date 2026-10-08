@@ -18,6 +18,7 @@ import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
+import ch.waio.pro_video_editor.src.features.render.models.KeyframeClock
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerCensorConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
@@ -112,7 +113,9 @@ class VideoSequenceBuilder(
          * The layer's placement over time, sorted by time; they replace [x],
          * [y] and [rotation]. See [keyframePlacementAt].
          */
-        val keyframes: List<KeyframeConfig> = emptyList()
+        val keyframes: List<KeyframeConfig> = emptyList(),
+        /** The clock [keyframes] are timed on; see [KeyframeClock]. */
+        val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT
     )
 
     /**

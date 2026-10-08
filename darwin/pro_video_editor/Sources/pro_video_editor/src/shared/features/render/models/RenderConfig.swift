@@ -224,6 +224,8 @@ public struct ImageLayerConfig: Sendable {
   /// and `rotation`, scale the size around its center and set the opacity;
   /// empty keeps the layer where `x` and `y` put it.
   var keyframes: [KeyframeConfig] = []
+  /// The clock `keyframes` are timed on; see `KeyframeClock`.
+  var keyframeClock: KeyframeClock = .output
 
   static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
     guard let args = args,
@@ -260,7 +262,8 @@ public struct ImageLayerConfig: Sendable {
       censor: LayerCensorConfig.fromArguments(args["censor"] as? [String: Any]),
       animationStartUs: (args["animationStartUs"] as? NSNumber)?.int64Value ?? -1,
       animationEndUs: (args["animationEndUs"] as? NSNumber)?.int64Value ?? -1,
-      keyframes: KeyframeConfig.list(from: args["keyframes"])
+      keyframes: KeyframeConfig.list(from: args["keyframes"]),
+      keyframeClock: KeyframeClock.from(args["keyframeClock"])
     )
   }
 }
@@ -493,6 +496,54 @@ struct SegmentTransformConfig: Sendable {
   }
 }
 
+/// The clock a layer's keyframes are timed on, mirroring the Dart
+/// `KeyframeClockPoint`s: a time on the output timeline maps to the time the
+/// keyframes are measured in, piecewise linear through `points`, sorted by
+/// output time. Before the first point and after the last one it runs as fast
+/// as the output; without points it is the output timeline itself.
+///
+/// Lets keyframes keep the timing they were made on, such as an editor that
+/// shows a clip transition at a different pace than the video plays it: every
+/// frame is placed by its time on that clock, so an eased motion follows its
+/// own curve exactly. Mirrors `KeyframeClock` on Android.
+struct KeyframeClock: Sendable, Equatable {
+  struct Point: Sendable, Equatable {
+    let outputUs: Int64
+    let keyframeUs: Int64
+  }
+
+  let points: [Point]
+
+  static let output = KeyframeClock(points: [])
+
+  /// The keyframe time at [outputUs] on the output timeline.
+  func keyframeTimeUs(_ outputUs: Int64) -> Int64 {
+    guard let first = points.first, let last = points.last else { return outputUs }
+    if outputUs <= first.outputUs { return first.keyframeUs + (outputUs - first.outputUs) }
+    for i in 1..<points.count {
+      let to = points[i]
+      if outputUs > to.outputUs { continue }
+      let from = points[i - 1]
+      if to.outputUs == from.outputUs { return to.keyframeUs }
+      let share = Double(outputUs - from.outputUs) / Double(to.outputUs - from.outputUs)
+      return from.keyframeUs + Int64((share * Double(to.keyframeUs - from.keyframeUs)).rounded())
+    }
+    return last.keyframeUs + (outputUs - last.outputUs)
+  }
+
+  /// The clock in [raw], a list of `{outputUs, keyframeUs}` maps.
+  static func from(_ raw: Any?) -> KeyframeClock {
+    guard let maps = raw as? [[String: Any]] else { return .output }
+    let points = maps.compactMap { map -> Point? in
+      guard let output = (map["outputUs"] as? NSNumber)?.int64Value,
+        let keyframe = (map["keyframeUs"] as? NSNumber)?.int64Value
+      else { return nil }
+      return Point(outputUs: output, keyframeUs: keyframe)
+    }
+    return KeyframeClock(points: points.sorted { $0.outputUs < $1.outputUs })
+  }
+}
+
 /// A single layer (track) of a multi-layer composition.
 struct LayerConfig: Sendable {
   /// Time-ordered clips on this layer.
@@ -507,6 +558,8 @@ struct LayerConfig: Sendable {
   /// The layer's placement over time, sorted by time and on the composition
   /// timeline; empty keeps every clip where its transform puts it.
   var keyframes: [KeyframeConfig] = []
+  /// The clock `keyframes` are timed on; see `KeyframeClock`.
+  var keyframeClock: KeyframeClock = .output
 
   static func fromArguments(_ args: [String: Any]?) -> LayerConfig? {
     guard let args = args,
@@ -519,7 +572,8 @@ struct LayerConfig: Sendable {
       opacity: (args["opacity"] as? NSNumber)?.floatValue ?? 1.0,
       transform: SegmentTransformConfig.fromArguments(args["transform"] as? [String: Any]),
       chromaKey: ChromaKeyConfig.fromArguments(args["chromaKey"] as? [String: Any]),
-      keyframes: KeyframeConfig.list(from: args["keyframes"])
+      keyframes: KeyframeConfig.list(from: args["keyframes"]),
+      keyframeClock: KeyframeClock.from(args["keyframeClock"])
     )
   }
 }

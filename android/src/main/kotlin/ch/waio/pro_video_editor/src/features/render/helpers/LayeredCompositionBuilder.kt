@@ -218,6 +218,7 @@ class LayeredCompositionBuilder(
                 val keyframeAnimator = if (layer.keyframes.isEmpty()) null else {
                     SegmentKeyframeAnimator(
                         keyframes = layer.keyframes,
+                        keyframeClock = layer.keyframeClock,
                         transform = transform,
                         displayW = displayW,
                         displayH = displayH,

@@ -1,5 +1,6 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
+import ch.waio.pro_video_editor.src.features.render.models.KeyframeClock
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.SegmentTransformConfig
 import kotlin.math.max
@@ -105,6 +106,8 @@ internal fun keyframedSegmentTransform(
  */
 internal class SegmentKeyframeAnimator(
     private val keyframes: List<KeyframeConfig>,
+    /** The clock [keyframes] are timed on; see [KeyframeClock]. */
+    private val keyframeClock: KeyframeClock,
     private val transform: SegmentTransformConfig?,
     private val displayW: Int,
     private val displayH: Int,
@@ -124,7 +127,10 @@ internal class SegmentKeyframeAnimator(
      * transform at full opacity when there are no keyframes.
      */
     fun at(compositionTimeUs: Long): Pair<SegmentPlacement, Float> {
-        val keyframe = keyframePlacementAt(keyframes, compositionTimeUs)
+        val keyframe = keyframePlacementAt(
+            keyframes,
+            keyframeClock.keyframeTimeUs(compositionTimeUs)
+        )
             ?: return Pair(
                 segmentPlacement(transform, displayW, displayH, canvasW, canvasH),
                 1f

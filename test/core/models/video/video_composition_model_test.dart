@@ -163,6 +163,26 @@ void main() {
         expect(sent.map((k) => k['timeUs']), [0, 1000000]);
         expect(sent.last['opacity'], 0.25);
       });
+
+      test('keep their clock through toJson and toAsyncMap', () async {
+        const clock = [
+          KeyframeClockPoint(
+            output: Duration(seconds: 1),
+            keyframe: Duration(seconds: 2),
+          ),
+        ];
+        final keyed = VideoLayer(
+          clips: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+          keyframes: keyframes,
+          keyframeClock: clock,
+        );
+
+        expect(VideoLayer.fromJson(keyed.toJson()).keyframeClock, clock);
+        expect(keyed, isNot(keyed.copyWith(keyframeClock: const [])));
+        expect((await keyed.toAsyncMap())['keyframeClock'], [
+          {'outputUs': 1000000, 'keyframeUs': 2000000},
+        ]);
+      });
     });
 
     group('chromaKey', () {

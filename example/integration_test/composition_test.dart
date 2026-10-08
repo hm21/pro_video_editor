@@ -1100,6 +1100,57 @@ void main() {
       expect(await backgroundAt(result, 200, 112, at), isTrue);
     });
 
+    testWidgets('move a layer on its keyframe clock', (tester) async {
+      // A 160x90 box from (0, 0) at 0 s to (480, 270) at 3 s, on a clock
+      // that runs twice as fast as the video from 1 s to 1.5 s.
+      final result = await pve.renderVideo(
+        VideoRenderData(
+          composition: VideoComposition(
+            canvasSize: canvas,
+            backgroundColor: magenta,
+            layers: [
+              VideoLayer(
+                clips: [
+                  VideoSegment(
+                    video: EditorVideo.asset(testAPath),
+                    endTime: const Duration(seconds: 3),
+                  ),
+                ],
+                transform: const SegmentTransform(
+                  offset: Offset.zero,
+                  size: Size(160, 90),
+                ),
+                keyframes: const [
+                  TimelineKeyframe(time: Duration.zero, offset: Offset.zero),
+                  TimelineKeyframe(
+                    time: Duration(seconds: 3),
+                    offset: Offset(480, 270),
+                  ),
+                ],
+                keyframeClock: const [
+                  KeyframeClockPoint(
+                    output: Duration(seconds: 1),
+                    keyframe: Duration(seconds: 1),
+                  ),
+                  KeyframeClockPoint(
+                    output: Duration(milliseconds: 1500),
+                    keyframe: Duration(seconds: 2),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      // At 2 s the clock is at 2.5 s: the box is five sixths along, on
+      // (400, 225)–(560, 315). Timed on the video it would be two thirds
+      // along, on (320, 180)–(480, 270).
+      const at = Duration(seconds: 2);
+      expect(await backgroundAt(result, 520, 290, at), isFalse);
+      expect(await backgroundAt(result, 360, 200, at), isTrue);
+    });
+
     testWidgets('turn and fade a composition layer', (tester) async {
       // A 320x90 box centred on the canvas, turned a quarter clockwise by
       // 1 s and faded out from 1 s to 2 s.

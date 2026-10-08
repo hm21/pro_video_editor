@@ -160,7 +160,9 @@ data class LayerConfig(
      * null falls back to the global key.
      */
     val chromaKey: ChromaKeyConfig? = null,
-    val keyframes: List<KeyframeConfig> = emptyList()
+    val keyframes: List<KeyframeConfig> = emptyList(),
+    /** The clock [keyframes] are timed on; see [KeyframeClock]. */
+    val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT
 ) {
     companion object {
         fun fromMap(map: Map<String, Any?>): LayerConfig? {
@@ -177,7 +179,8 @@ data class LayerConfig(
                 opacity = (map["opacity"] as? Number)?.toFloat() ?: 1.0f,
                 transform = transformRaw?.let { SegmentTransformConfig.fromMap(it) },
                 chromaKey = ChromaKeyConfig.fromMap(chromaKeyRaw),
-                keyframes = KeyframeConfig.listFrom(map["keyframes"])
+                keyframes = KeyframeConfig.listFrom(map["keyframes"]),
+                keyframeClock = KeyframeClock.from(map["keyframeClock"])
             )
         }
     }
@@ -440,6 +443,55 @@ data class LayerAnimationConfig(
 }
 
 /**
+ * The clock a layer's keyframes are timed on, mirroring the Dart
+ * `KeyframeClockPoint`s: a time on the output timeline maps to the time the
+ * keyframes are measured in, piecewise linear through [points] (output µs to
+ * keyframe µs, sorted by output time). Before the first point and after the
+ * last one it runs as fast as the output; without points it is the output
+ * timeline itself.
+ *
+ * Lets keyframes keep the timing they were made on, such as an editor that
+ * shows a clip transition at a different pace than the video plays it: every
+ * frame is placed by its time on that clock, so an eased motion follows its
+ * own curve exactly, however the two timelines differ.
+ */
+data class KeyframeClock(val points: List<Pair<Long, Long>> = emptyList()) {
+    /** The keyframe time at [outputUs] on the output timeline. */
+    fun keyframeTimeUs(outputUs: Long): Long {
+        if (points.isEmpty()) return outputUs
+        val first = points.first()
+        if (outputUs <= first.first) return first.second + (outputUs - first.first)
+        for (i in 1 until points.size) {
+            val (outputTo, keyframeTo) = points[i]
+            if (outputUs > outputTo) continue
+            val (outputFrom, keyframeFrom) = points[i - 1]
+            if (outputTo == outputFrom) return keyframeTo
+            val share = (outputUs - outputFrom).toDouble() / (outputTo - outputFrom)
+            return keyframeFrom + Math.round(share * (keyframeTo - keyframeFrom))
+        }
+        val last = points.last()
+        return last.second + (outputUs - last.first)
+    }
+
+    companion object {
+        val OUTPUT = KeyframeClock()
+
+        /** The clock in [raw], a list of `{outputUs, keyframeUs}` maps. */
+        fun from(raw: Any?): KeyframeClock = KeyframeClock(
+            (raw as? List<*>)
+                ?.mapNotNull { point ->
+                    val map = point as? Map<*, *> ?: return@mapNotNull null
+                    val output = (map["outputUs"] as? Number)?.toLong()
+                    val keyframe = (map["keyframeUs"] as? Number)?.toLong()
+                    if (output == null || keyframe == null) null else Pair(output, keyframe)
+                }
+                ?.sortedBy { it.first }
+                ?: emptyList()
+        )
+    }
+}
+
+/**
  * A layer's placement at one point of the timeline, mirroring the Dart
  * `TimelineKeyframe`.
  *
@@ -520,7 +572,9 @@ data class ImageLayer(
     val animationStartUs: Long = -1L,
     val animationEndUs: Long = -1L,
     val censor: LayerCensorConfig? = null,
-    val keyframes: List<KeyframeConfig> = emptyList()
+    val keyframes: List<KeyframeConfig> = emptyList(),
+    /** The clock [keyframes] are timed on; see [KeyframeClock]. */
+    val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT
 )
 
 data class RenderConfig(
@@ -651,7 +705,8 @@ data class RenderConfig(
                         image, startUs, endUs, x, y, width, height,
                         rotation, loop, animationOffsetUs, animations,
                         animationStartUs, animationEndUs, censor,
-                        KeyframeConfig.listFrom(layerMap["keyframes"])
+                        KeyframeConfig.listFrom(layerMap["keyframes"]),
+                        KeyframeClock.from(layerMap["keyframeClock"])
                     )
                 }
             } ?: emptyList()
