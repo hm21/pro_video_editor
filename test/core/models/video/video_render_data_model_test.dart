@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/core/models/audio/audio_track_model.dart';
 import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart';
 import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
+import 'package:pro_video_editor/core/models/image/keyframe_clock_point_model.dart';
 import 'package:pro_video_editor/core/models/image/timeline_keyframe_model.dart';
 import 'package:pro_video_editor/core/models/video/chroma_key_model.dart';
 import 'package:pro_video_editor/core/models/video/custom_video_effect_model.dart';
@@ -439,6 +440,30 @@ void main() {
       expect(keyframes.last['x'], 10);
       expect(keyframes.last['scale'], 2);
       expect(maps[1]['keyframes'], isEmpty);
+    });
+
+    test('sends the keyframe clock', () async {
+      final maps = await layerMaps([
+        ImageLayer(
+          image: EditorLayerImage.memory(Uint8List.fromList([1])),
+          offset: Offset.zero,
+          keyframes: const [
+            TimelineKeyframe(time: Duration.zero, offset: Offset.zero),
+          ],
+          keyframeClock: const [
+            KeyframeClockPoint(
+              output: Duration(seconds: 1),
+              keyframe: Duration(seconds: 2),
+            ),
+          ],
+        ),
+        ImageLayer(image: EditorLayerImage.memory(Uint8List.fromList([1]))),
+      ]);
+
+      expect(maps[0]['keyframeClock'], [
+        {'outputUs': 1000000, 'keyframeUs': 2000000},
+      ]);
+      expect(maps[1]['keyframeClock'], isEmpty);
     });
 
     test('throws naming the path when a layer image is gone', () async {

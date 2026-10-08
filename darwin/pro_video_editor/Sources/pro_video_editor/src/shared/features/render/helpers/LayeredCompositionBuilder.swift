@@ -48,6 +48,8 @@ internal class LayeredCompositionBuilder {
     let chromaKey: ChromaKeyConfig?
     /// The layer's placement over time, on the composition timeline.
     let keyframes: [KeyframeConfig]
+    /// The clock `keyframes` are timed on; see `KeyframeClock`.
+    let keyframeClock: KeyframeClock
   }
 
   private struct AudioWindow {
@@ -164,7 +166,8 @@ internal class LayeredCompositionBuilder {
             preferredTransform: pt,
             displaySize: displaySize,
             chromaKey: clip.chromaKey ?? layer.chromaKey ?? globalChromaKey,
-            keyframes: layer.keyframes))
+            keyframes: layer.keyframes,
+            keyframeClock: layer.keyframeClock))
       }
     }
 
@@ -242,7 +245,8 @@ internal class LayeredCompositionBuilder {
           preferredTransform: clip.preferredTransform,
           displaySize: clip.displaySize,
           chromaKey: clip.chromaKey,
-          keyframes: clip.keyframes)
+          keyframes: clip.keyframes,
+          keyframeClock: clip.keyframeClock)
       }
 
       let timeRange = CMTimeRange(

@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.StaticOverlaySettings
+import ch.waio.pro_video_editor.src.features.render.models.KeyframeClock
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import kotlin.math.abs
@@ -484,6 +485,7 @@ internal data class OverlayFrame(
  */
 internal fun overlayFrame(
     keyframes: List<KeyframeConfig>,
+    keyframeClock: KeyframeClock,
     animations: List<LayerAnimationConfig>,
     timeUs: Long,
     animationStartUs: Long,
@@ -497,7 +499,7 @@ internal fun overlayFrame(
     layerX: Float,
     layerY: Float,
 ): OverlayFrame {
-    val keyframe = keyframePlacementAt(keyframes, timeUs)
+    val keyframe = keyframePlacementAt(keyframes, keyframeClock.keyframeTimeUs(timeUs))
     val keyframeScale = keyframe?.scale?.toFloat() ?: 1f
     val placedNormX: Float
     val placedNormY: Float
@@ -645,7 +647,9 @@ internal class AnimatedBitmapOverlay(
      * of their own: [imageWidth] x [imageHeight] is its unrotated box, which
      * the keyframes place, turn and scale.
      */
-    private val keyframes: List<KeyframeConfig> = emptyList()
+    private val keyframes: List<KeyframeConfig> = emptyList(),
+    /** The clock [keyframes] are timed on; see [KeyframeClock]. */
+    private val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT
 ) : BitmapOverlay() {
 
     /** Convenience constructor for a single static frame. */
@@ -666,7 +670,8 @@ internal class AnimatedBitmapOverlay(
         rasterScaleY: Float = 1f,
         animationStartUs: Long = -1L,
         animationEndUs: Long = -1L,
-        keyframes: List<KeyframeConfig> = emptyList()
+        keyframes: List<KeyframeConfig> = emptyList(),
+        keyframeClock: KeyframeClock = KeyframeClock.OUTPUT
     ) : this(
         frames = listOf(bitmap),
         frameDurationsUs = listOf(0L),
@@ -686,7 +691,8 @@ internal class AnimatedBitmapOverlay(
         animations = animations,
         rasterScaleX = rasterScaleX,
         rasterScaleY = rasterScaleY,
-        keyframes = keyframes
+        keyframes = keyframes,
+        keyframeClock = keyframeClock
     )
 
     // Cumulative end time of each frame within one playthrough.
@@ -707,6 +713,7 @@ internal class AnimatedBitmapOverlay(
     override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings {
         val frame = overlayFrame(
             keyframes = keyframes,
+            keyframeClock = keyframeClock,
             animations = animations,
             timeUs = presentationTimeUs,
             animationStartUs = if (animationStartUs == -1L) layerStartUs else animationStartUs,

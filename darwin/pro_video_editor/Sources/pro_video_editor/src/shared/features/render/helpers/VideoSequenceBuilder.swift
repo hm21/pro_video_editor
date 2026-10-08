@@ -499,6 +499,8 @@ internal struct LayerPlacement: Sendable {
   /// The layer's placement over time, on the composition timeline; see
   /// `resolved(atUs:renderSize:)`.
   var keyframes: [KeyframeConfig] = []
+  /// The clock `keyframes` are timed on; see `KeyframeClock`.
+  var keyframeClock: KeyframeClock = .output
 }
 
 extension LayerPlacement {
@@ -514,7 +516,10 @@ extension LayerPlacement {
   func resolved(atUs timeUs: Int64, renderSize: CGSize)
     -> (rect: CGRect?, rotation: Double, opacity: Float)
   {
-    guard let keyframe = keyframePlacement(keyframes, atUs: timeUs) else {
+    guard
+      let keyframe = keyframePlacement(
+        keyframes, atUs: keyframeClock.keyframeTimeUs(timeUs))
+    else {
       return (targetRect, rotation, opacity)
     }
     let box = targetRect ?? CGRect(origin: .zero, size: renderSize)

@@ -525,6 +525,9 @@ class VideoRenderData {
                     : sortTimelineKeyframes(
                         layer.keyframes,
                       ).map((k) => k.toMap()).toList(),
+                'keyframeClock': layer.keyframeClock
+                    .map((p) => p.toMap())
+                    .toList(),
               },
             ),
           );

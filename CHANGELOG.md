@@ -1,3 +1,6 @@
+## 2.31.0
+- **FEAT**(android, iOS, macOS): `ImageLayer.keyframeClock` and `VideoLayer.keyframeClock` time a layer's keyframes on a clock of their own, mapped piece by piece from the video's timeline through `KeyframeClockPoint`s. Keyframes made in an editor that shows a clip transition at a different pace than the video plays it keep every eased motion on the curve the editor shows.
+
 ## 2.30.0
 - **FEAT**(android, iOS, macOS): `LayerAnimation.loopPhase` starts a loop part way into its cycle, so a loop split into parts that repeat at different paces stays in step from one part to the next.
 

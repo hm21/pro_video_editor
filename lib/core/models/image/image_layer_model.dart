@@ -9,6 +9,7 @@ import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 import 'package:pro_video_editor/shared/utils/parser/offset_parser.dart';
 
 import 'editor_layer_image_model.dart';
+import 'keyframe_clock_point_model.dart';
 import 'layer_animation_model.dart';
 import 'layer_censor_model.dart';
 import 'timeline_keyframe_model.dart';
@@ -31,6 +32,7 @@ class ImageLayer with TimeRangeMixin {
     this.animationEndTime,
     this.censor,
     this.keyframes = const [],
+    this.keyframeClock = const [],
   }) : assert(
          startTime == null || endTime == null || startTime < endTime,
          'startTime must be before endTime',
@@ -182,6 +184,16 @@ class ImageLayer with TimeRangeMixin {
   /// **Default**: empty, which keeps the layer where [offset] puts it.
   final List<TimelineKeyframe> keyframes;
 
+  /// The clock [keyframes] are timed on; see [KeyframeClockPoint].
+  ///
+  /// When not empty, every frame is placed by the keyframes at its time on
+  /// this clock instead of at its time on the video, so the keyframes can
+  /// keep the timing they were made on. The [animations] stay on the video's
+  /// timeline.
+  ///
+  /// **Default**: empty, which times [keyframes] on the video's timeline.
+  final List<KeyframeClockPoint> keyframeClock;
+
   ImageLayer copyWith({
     EditorLayerImage? image,
     Duration? startTime,
@@ -196,6 +208,7 @@ class ImageLayer with TimeRangeMixin {
     Duration? animationEndTime,
     LayerCensor? censor,
     List<TimelineKeyframe>? keyframes,
+    List<KeyframeClockPoint>? keyframeClock,
   }) {
     return ImageLayer(
       image: image ?? this.image,
@@ -211,6 +224,7 @@ class ImageLayer with TimeRangeMixin {
       animationEndTime: animationEndTime ?? this.animationEndTime,
       censor: censor ?? this.censor,
       keyframes: keyframes ?? this.keyframes,
+      keyframeClock: keyframeClock ?? this.keyframeClock,
     );
   }
 
@@ -231,6 +245,7 @@ class ImageLayer with TimeRangeMixin {
       'animationEndTime': animationEndTime?.inMicroseconds,
       'censor': censor?.toMap(),
       'keyframes': keyframes.map((k) => k.toMap()).toList(),
+      'keyframeClock': keyframeClock.map((p) => p.toMap()).toList(),
     };
   }
 
@@ -282,6 +297,7 @@ class ImageLayer with TimeRangeMixin {
               )
               .toList() ??
           const [],
+      keyframeClock: keyframeClockFromMap(map['keyframeClock']),
     );
   }
 
@@ -305,7 +321,8 @@ class ImageLayer with TimeRangeMixin {
         'animationStartTime: $animationStartTime, '
         'animationEndTime: $animationEndTime, '
         'censor: $censor, '
-        'keyframes: $keyframes'
+        'keyframes: $keyframes, '
+        'keyframeClock: $keyframeClock'
         ')';
   }
 
@@ -325,7 +342,8 @@ class ImageLayer with TimeRangeMixin {
         other.animationStartTime == animationStartTime &&
         other.animationEndTime == animationEndTime &&
         other.censor == censor &&
-        listEquals(other.keyframes, keyframes);
+        listEquals(other.keyframes, keyframes) &&
+        listEquals(other.keyframeClock, keyframeClock);
   }
 
   @override
@@ -342,6 +360,7 @@ class ImageLayer with TimeRangeMixin {
         animationStartTime.hashCode ^
         animationEndTime.hashCode ^
         censor.hashCode ^
-        Object.hashAll(keyframes);
+        Object.hashAll(keyframes) ^
+        Object.hashAll(keyframeClock);
   }
 }

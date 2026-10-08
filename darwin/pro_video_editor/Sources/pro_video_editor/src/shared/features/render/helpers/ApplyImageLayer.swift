@@ -65,6 +65,7 @@ func resolveOpenEndedOutAnimations(
       censor: layer.censor,
       animationStartUs: layer.animationStartUs,
       animationEndUs: layer.animationEndUs,
-      keyframes: layer.keyframes)
+      keyframes: layer.keyframes,
+      keyframeClock: layer.keyframeClock)
   }
 }

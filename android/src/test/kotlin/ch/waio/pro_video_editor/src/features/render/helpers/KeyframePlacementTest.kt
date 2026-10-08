@@ -1,5 +1,6 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
+import ch.waio.pro_video_editor.src.features.render.models.KeyframeClock
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import ch.waio.pro_video_editor.src.features.render.models.SegmentTransformConfig
@@ -98,8 +99,10 @@ internal class KeyframePlacementTest {
         keyframes: List<KeyframeConfig>,
         timeUs: Long,
         animations: List<LayerAnimationConfig> = emptyList(),
+        keyframeClock: KeyframeClock = KeyframeClock.OUTPUT,
     ) = overlayFrame(
         keyframes = keyframes,
+        keyframeClock = keyframeClock,
         animations = animations,
         timeUs = timeUs,
         animationStartUs = 0L,
@@ -247,6 +250,7 @@ internal class KeyframePlacementTest {
                 keyframe(2_000_000L, x = 0.0, opacity = 0.2),
                 keyframe(4_000_000L, x = 100.0, opacity = 1.0),
             ),
+            keyframeClock = KeyframeClock.OUTPUT,
             transform = box,
             displayW = 400, displayH = 300, canvasW = 1080, canvasH = 1920,
             clipStartUs = 2_000_000L,
@@ -265,12 +269,97 @@ internal class KeyframePlacementTest {
     @Test
     fun `the animator keeps the plain transform without keyframes`() {
         val animator = SegmentKeyframeAnimator(
-            keyframes = emptyList(), transform = box,
+            keyframes = emptyList(), keyframeClock = KeyframeClock.OUTPUT, transform = box,
             displayW = 400, displayH = 300, canvasW = 1080, canvasH = 1920,
             clipStartUs = 0L,
         )
         val (placement, alpha) = animator.at(1_000_000L)
         assertEquals(segmentPlacement(box, 400, 300, 1080, 1920), placement)
         assertEquals(1f, alpha, 1e-6f)
+    }
+
+    // ---- Keyframe clock ------------------------------------------------------
+
+    /** Runs at the output's pace, then twice as fast from 1 s to 1.5 s. */
+    private val clock = KeyframeClock(
+        listOf(Pair(1_000_000L, 1_000_000L), Pair(1_500_000L, 2_000_000L))
+    )
+
+    @Test
+    fun `a keyframe clock maps the output piece by piece`() {
+        assertEquals(400_000L, clock.keyframeTimeUs(400_000L))
+        assertEquals(1_500_000L, clock.keyframeTimeUs(1_250_000L))
+        assertEquals(2_000_000L, clock.keyframeTimeUs(1_500_000L))
+        // Beyond its points it runs as fast as the output.
+        assertEquals(2_500_000L, clock.keyframeTimeUs(2_000_000L))
+        assertEquals(-300_000L, clock.keyframeTimeUs(-300_000L))
+        assertEquals(1_234L, KeyframeClock.OUTPUT.keyframeTimeUs(1_234L))
+    }
+
+    @Test
+    fun `a keyframe clock jumps where two points share an output time`() {
+        val jump = KeyframeClock(
+            listOf(
+                Pair(0L, 0L),
+                Pair(1_000_000L, 1_000_000L),
+                Pair(1_000_000L, 3_000_000L),
+                Pair(2_000_000L, 4_000_000L),
+            )
+        )
+        assertEquals(1_000_000L, jump.keyframeTimeUs(1_000_000L))
+        assertEquals(3_500_000L, jump.keyframeTimeUs(1_500_000L))
+        assertEquals(5_000_000L, jump.keyframeTimeUs(3_000_000L))
+    }
+
+    @Test
+    fun `a keyframe clock rounds ties to even`() {
+        // Half way down from 1 µs to -2 µs is -0.5 µs, 1.5 µs below the start.
+        val falling = KeyframeClock(listOf(Pair(0L, 1L), Pair(2L, -2L)))
+        assertEquals(-1L, falling.keyframeTimeUs(1L))
+    }
+
+    @Test
+    fun `a keyframe clock reads its points sorted and skips broken ones`() {
+        val parsed = KeyframeClock.from(
+            listOf(
+                mapOf("outputUs" to 1_500_000L, "keyframeUs" to 2_000_000L),
+                "not a point",
+                mapOf("outputUs" to 1_000_000),
+                mapOf("outputUs" to 1_000_000, "keyframeUs" to 1_000_000),
+            )
+        )
+        assertEquals(clock, parsed)
+        assertEquals(KeyframeClock.OUTPUT, KeyframeClock.from(null))
+    }
+
+    @Test
+    fun `an overlay is placed at its time on its keyframe clock`() {
+        val keyframes = listOf(
+            keyframe(0L, x = 0.0, curve = "easeInOutCubic"),
+            keyframe(3_000_000L, x = 300.0),
+        )
+        // 1.25 s of output is 1.5 s on the clock, along the eased curve.
+        val onClock = frame(keyframes, 1_250_000L, keyframeClock = clock)
+        val direct = frame(keyframes, 1_500_000L)
+        assertEquals(direct.backgroundAnchorX, onClock.backgroundAnchorX, 1e-6f)
+        assertEquals(direct.alpha, onClock.alpha, 1e-6f)
+    }
+
+    @Test
+    fun `the animator places a clip at its time on its keyframe clock`() {
+        val keyframes = listOf(
+            keyframe(0L, x = 0.0, curve = "bounceOut"),
+            keyframe(3_000_000L, x = 100.0),
+        )
+        fun animator(keyframeClock: KeyframeClock) = SegmentKeyframeAnimator(
+            keyframes = keyframes,
+            keyframeClock = keyframeClock,
+            transform = box,
+            displayW = 400, displayH = 300, canvasW = 1080, canvasH = 1920,
+            clipStartUs = 0L,
+        )
+        val (onClock, _) = animator(clock).at(1_250_000L)
+        val (direct, _) = animator(KeyframeClock.OUTPUT).at(1_500_000L)
+        assertEquals(direct.clip!!.x, onClock.clip!!.x, tol)
     }
 }
