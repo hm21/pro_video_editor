@@ -50,6 +50,18 @@ internal enum ClipTransitionRenderer {
     let durationUs: Int64
   }
 
+  /// One clip's own audio settings, applied to its side of the crossfade the
+  /// way its own audio is, so the blend sounds like the clips around it.
+  struct SideAudio {
+    var volume: Float?
+    var equalizer: AudioEqualizer?
+
+    init(volume: Float? = nil, equalizer: AudioEqualizer? = nil) {
+      self.volume = volume
+      self.equalizer = equalizer
+    }
+  }
+
   static func render(
     outgoingPath: String,
     outTailStartUs: Int64,
@@ -64,7 +76,9 @@ internal enum ClipTransitionRenderer {
     includeAudio: Bool,
     outputFormat: String,
     outgoingFrameRate: Float? = nil,
-    incomingFrameRate: Float? = nil
+    incomingFrameRate: Float? = nil,
+    outgoingAudio: SideAudio = SideAudio(),
+    incomingAudio: SideAudio = SideAudio()
   ) async throws -> RenderResult? {
     // Only a *successful* blend reaches the caller, so only a successful blend
     // can be cleaned up by it. An export that fails, stalls or is cancelled
@@ -153,7 +167,8 @@ internal enum ClipTransitionRenderer {
           composition: composition,
           outAsset: outAsset, outStart: outStart, outDuration: outTailDur,
           inAsset: inAsset, inStart: inStart, inDuration: inHeadDur,
-          duration: d, curve: curve)
+          duration: d, curve: curve,
+          outgoingAudio: outgoingAudio, incomingAudio: incomingAudio)
       }
 
       // Build the layer instructions with eased ramps.
@@ -335,7 +350,8 @@ internal enum ClipTransitionRenderer {
     composition: AVMutableComposition,
     outAsset: AVURLAsset, outStart: CMTime, outDuration: CMTime,
     inAsset: AVURLAsset, inStart: CMTime, inDuration: CMTime,
-    duration d: CMTime, curve: String
+    duration d: CMTime, curve: String,
+    outgoingAudio: SideAudio, incomingAudio: SideAudio
   ) async throws -> AVMutableAudioMix? {
     guard
       let outAudio = try? await MediaInfoExtractor.loadAudioTrack(from: outAsset),
@@ -364,8 +380,18 @@ internal enum ClipTransitionRenderer {
     let paramsB = AVMutableAudioMixInputParameters(track: trackB)
     let fullRange = CMTimeRange(start: .zero, duration: d)
     // Linear cross-fade is a good approximation; the visual curve drives feel.
-    paramsA.setVolumeRamp(fromStartVolume: 1.0, toEndVolume: 0.0, timeRange: fullRange)
-    paramsB.setVolumeRamp(fromStartVolume: 0.0, toEndVolume: 1.0, timeRange: fullRange)
+    // Each side starts or ends at its own clip's volume, through its own
+    // equalizer, limited like the clip where either would clip.
+    let outVolume = outgoingAudio.volume ?? 1
+    let inVolume = incomingAudio.volume ?? 1
+    paramsA.setVolumeRamp(fromStartVolume: outVolume, toEndVolume: 0.0, timeRange: fullRange)
+    paramsB.setVolumeRamp(fromStartVolume: 0.0, toEndVolume: inVolume, timeRange: fullRange)
+    paramsA.audioTapProcessor = AudioMixTap.make(
+      volumes: VolumeSchedule(constant: outVolume),
+      equalizers: EqualizerSchedule(constant: outgoingAudio.equalizer))
+    paramsB.audioTapProcessor = AudioMixTap.make(
+      volumes: VolumeSchedule(constant: inVolume),
+      equalizers: EqualizerSchedule(constant: incomingAudio.equalizer))
 
     let mix = AVMutableAudioMix()
     mix.inputParameters = [paramsA, paramsB]

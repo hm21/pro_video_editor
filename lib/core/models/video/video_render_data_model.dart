@@ -490,6 +490,7 @@ class VideoRenderData {
             'endUs': t.endTime?.inMicroseconds,
             'fadeInUs': t.fadeInDuration.inMicroseconds,
             'fadeOutUs': t.fadeOutDuration.inMicroseconds,
+            'equalizer': t.equalizer?.toMap(),
           },
         )
         .toList();

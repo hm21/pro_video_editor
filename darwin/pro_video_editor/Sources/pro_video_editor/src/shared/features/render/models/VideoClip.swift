@@ -6,6 +6,8 @@ internal struct VideoClip: Sendable {
   let startUs: Int64?
   let endUs: Int64?
   let volume: Float?
+  /// Equalizer of this clip's audio. `nil` = unchanged.
+  let equalizer: AudioEqualizer?
   let playbackSpeed: Float?
   let reverseVideo: Bool
   /// Transition into the next clip (nil = hard cut). On the **last** clip it
@@ -43,6 +45,7 @@ internal struct VideoClip: Sendable {
     startUs: Int64? = nil,
     endUs: Int64? = nil,
     volume: Float? = nil,
+    equalizer: AudioEqualizer? = nil,
     playbackSpeed: Float? = nil,
     reverseVideo: Bool = false,
     transition: ClipTransitionConfig? = nil,
@@ -56,6 +59,7 @@ internal struct VideoClip: Sendable {
     self.startUs = startUs
     self.endUs = endUs
     self.volume = volume
+    self.equalizer = equalizer
     self.playbackSpeed = playbackSpeed
     self.reverseVideo = reverseVideo
     self.transition = transition
@@ -77,6 +81,7 @@ internal struct VideoClip: Sendable {
       startUs: startUs,
       endUs: endUs,
       volume: volume,
+      equalizer: equalizer,
       playbackSpeed: playbackSpeed,
       reverseVideo: reverseVideo,
       transition: transition,
@@ -97,6 +102,7 @@ internal struct VideoClip: Sendable {
       startUs: (clipMap["startUs"] as? NSNumber)?.int64Value,
       endUs: (clipMap["endUs"] as? NSNumber)?.int64Value,
       volume: (clipMap["volume"] as? NSNumber)?.floatValue,
+      equalizer: AudioEqualizer.from(clipMap["equalizer"]),
       playbackSpeed: (clipMap["playbackSpeed"] as? NSNumber)?.floatValue,
       reverseVideo: clipMap["reverseVideo"] as? Bool ?? false,
       transition: ClipTransitionConfig.fromArguments(

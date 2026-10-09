@@ -433,6 +433,8 @@ public struct ChromaKeyConfig: Sendable, Equatable {
 struct AudioTrackConfig {
   let path: String
   let volume: Float
+  /// Equalizer of the track. `nil` = unchanged.
+  let equalizer: AudioEqualizer?
   let loop: Bool
   /// Start offset within the audio file in microseconds.
   let audioStartUs: Int64?
@@ -454,6 +456,7 @@ struct AudioTrackConfig {
     return AudioTrackConfig(
       path: path,
       volume: (args["volume"] as? NSNumber)?.floatValue ?? 1.0,
+      equalizer: AudioEqualizer.from(args["equalizer"]),
       loop: args["loop"] as? Bool ?? true,
       audioStartUs: (args["audioStartUs"] as? NSNumber)?.int64Value,
       audioEndUs: (args["audioEndUs"] as? NSNumber)?.int64Value,

@@ -9,6 +9,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
+import ch.waio.pro_video_editor.src.features.render.models.EqualizerConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.mediaSourceExists
 import java.io.File
@@ -54,6 +55,7 @@ class AudioSequenceBuilder(
     private var fadeInUs: Long = 0L
     private var fadeOutUs: Long = 0L
     private var volume: Float = 1.0f
+    private var equalizer: EqualizerConfig? = null
 
     /**
      * Sets whether the audio should loop to fill the play range.
@@ -111,6 +113,17 @@ class AudioSequenceBuilder(
     }
 
     /**
+     * Sets the equalizer of the track; null leaves the audio unchanged.
+     *
+     * Like the volume it is applied to this track's own audio, ahead of the
+     * volume.
+     */
+    fun setEqualizer(equalizer: EqualizerConfig?): AudioSequenceBuilder {
+        this.equalizer = equalizer?.takeUnless { it.isFlat }
+        return this
+    }
+
+    /**
      * Sets how long the track fades in after it starts and fades out before
      * its audio ends. See [AudioPreRenderer.render].
      */
@@ -161,7 +174,7 @@ class AudioSequenceBuilder(
             .build()
 
         val audioProcessors: List<AudioProcessor> =
-            if (volume != 1.0f) listOf(VolumeAudioProcessor(volume)) else emptyList()
+            ClipAudioChain.processors(volume, equalizer)
         val editedItem = EditedMediaItem.Builder(mediaItem)
             .setRemoveVideo(true)
             .setEffects(Effects(audioProcessors, emptyList()))

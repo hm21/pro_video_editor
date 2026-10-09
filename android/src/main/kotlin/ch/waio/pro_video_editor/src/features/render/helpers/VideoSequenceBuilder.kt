@@ -714,18 +714,20 @@ class VideoSequenceBuilder(
             )
         }
 
-        // Per-clip volume, applied to this clip's own audio before it reaches the
-        // mixer, so it holds whether or not custom audio tracks are mixed in.
+        // Per-clip equalizer and volume, applied to this clip's own audio
+        // before it reaches the mixer, so they hold whether or not custom audio
+        // tracks are mixed in. The equalizer comes first: a boost it limits
+        // still follows the volume from there.
         val clipVolume = clip.volume
+        if (clip.equalizer != null || (clipVolume != null && clipVolume != 1.0f)) {
+            Log.d(
+                RENDER_TAG,
+                "Clip $index audio: volume ${clipVolume ?: 1.0f}x, equalizer ${clip.equalizer}"
+            )
+        }
         val perClipAudioProcessors = mutableListOf<AudioProcessor>().apply {
             addAll(normalizedAudioEffects)
-            if (clipVolume != null && clipVolume != 1.0f) {
-                Log.d(
-                    RENDER_TAG,
-                    "Clip $index volume: ${clipVolume}x (applied via VolumeAudioProcessor)"
-                )
-                add(VolumeAudioProcessor(clipVolume))
-            }
+            addAll(ClipAudioChain.processors(clipVolume, clip.equalizer))
         }
 
         // Per-clip playback speed on this clip's own audio; the video's

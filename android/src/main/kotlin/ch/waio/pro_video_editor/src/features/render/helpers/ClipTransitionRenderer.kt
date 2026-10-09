@@ -10,6 +10,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import androidx.media3.common.util.UnstableApi
+import ch.waio.pro_video_editor.src.features.render.models.EqualizerConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.openMediaExtractor
 import java.io.DataInputStream
@@ -60,6 +61,11 @@ object ClipTransitionRenderer {
      *  across this duration, so a tail/head longer than [outputDurationUs]
      *  is sped up by its clip's playback speed (and vice-versa). `<= 0`
      *  preserves the legacy 1× behavior (output = outgoing tail duration).
+     * @param outgoingVolume Volume of the outgoing clip, applied to its side of
+     *  the audio crossfade the way its own audio is (null = unchanged).
+     * @param outgoingEqualizer Equalizer of the outgoing clip, likewise.
+     * @param incomingVolume Volume of the incoming clip, likewise.
+     * @param incomingEqualizer Equalizer of the incoming clip, likewise.
      * @return The rendered transition clip, or `null` if it could not be
      *  produced (caller should fall back to a hard cut).
      */
@@ -76,6 +82,10 @@ object ClipTransitionRenderer {
         curve: String,
         includeAudio: Boolean,
         outputDurationUs: Long = 0L,
+        outgoingVolume: Float? = null,
+        outgoingEqualizer: EqualizerConfig? = null,
+        incomingVolume: Float? = null,
+        incomingEqualizer: EqualizerConfig? = null,
         onProgress: (Float) -> Unit = {},
     ): TransitionResult? {
         val outputFile = File(context.cacheDir, "transition_${System.currentTimeMillis()}.mp4")
@@ -137,8 +147,14 @@ object ClipTransitionRenderer {
                 try {
                     audioPre = preEncodeCrossfadeAudio(
                         context,
-                        outgoingPath, outTailStartUs, outTailEndUs,
-                        incomingPath, inHeadStartUs, inHeadEndUs,
+                        CrossfadeSide(
+                            outgoingPath, outTailStartUs, outTailEndUs,
+                            outgoingVolume, outgoingEqualizer,
+                        ),
+                        CrossfadeSide(
+                            incomingPath, inHeadStartUs, inHeadEndUs,
+                            incomingVolume, incomingEqualizer,
+                        ),
                         curve, effectiveDurationUs, workDir
                     )
                 } catch (e: Exception) {
@@ -707,21 +723,33 @@ object ClipTransitionRenderer {
 
     private data class AudioPreEncoded(val format: MediaFormat, val packetsFile: File)
 
+    /** One clip's side of an audio crossfade: its source range and own audio settings. */
+    private class CrossfadeSide(
+        val path: String,
+        val startUs: Long,
+        val endUs: Long,
+        val volume: Float?,
+        val equalizer: EqualizerConfig?,
+    )
+
     /**
-     * Decodes both segments' audio to PCM, time-scales each side to
-     * [outputDurationUs] (so it inherits its clip's playback speed), cross-fades
-     * them sample-by-sample (outgoing gain 1→0, incoming gain 0→1, eased), and
-     * re-encodes AAC into a packet file (so it can be muxed after the video
-     * track is known).
+     * Decodes both segments' audio to PCM, runs each through its clip's own
+     * equalizer and volume (see [ClipAudioChain]) so the blend sounds like the
+     * clips around it, time-scales each side to [outputDurationUs] (so it
+     * inherits its clip's playback speed), cross-fades them sample-by-sample
+     * (outgoing gain 1→0, incoming gain 0→1, eased), and re-encodes AAC into a
+     * packet file (so it can be muxed after the video track is known).
      */
     private fun preEncodeCrossfadeAudio(
         context: Context,
-        outgoingPath: String, outStartUs: Long, outEndUs: Long,
-        incomingPath: String, inStartUs: Long, inEndUs: Long,
+        outgoing: CrossfadeSide,
+        incoming: CrossfadeSide,
         curve: String, outputDurationUs: Long, workDir: File,
     ): AudioPreEncoded? {
-        val outPcm = decodePcm(context, outgoingPath, outStartUs, outEndUs) ?: return null
-        val inPcm = decodePcm(context, incomingPath, inStartUs, inEndUs) ?: return null
+        val outPcm = decodePcm(context, outgoing.path, outgoing.startUs, outgoing.endUs)
+            ?: return null
+        val inPcm = decodePcm(context, incoming.path, incoming.startUs, incoming.endUs)
+            ?: return null
         if (outPcm.sampleRate != inPcm.sampleRate || outPcm.channelCount != inPcm.channelCount) {
             Log.w(RENDER_TAG, "Transition audio format mismatch; skipping crossfade")
             return null
@@ -730,6 +758,12 @@ object ClipTransitionRenderer {
         val sampleRate = outPcm.sampleRate
         val channelCount = outPcm.channelCount
         val frameSize = channelCount * 2
+        val outProcessed = ClipAudioChain.apply(
+            outPcm.pcm, sampleRate, channelCount, outgoing.volume, outgoing.equalizer,
+        )
+        val inProcessed = ClipAudioChain.apply(
+            inPcm.pcm, sampleRate, channelCount, incoming.volume, incoming.equalizer,
+        )
 
         // Resample each side to the output (post-speed) duration so the
         // crossfade is aligned and the audio matches the blended video length.
@@ -740,8 +774,8 @@ object ClipTransitionRenderer {
         }
         if (targetFrames <= 0) return null
 
-        val outScaled = resamplePcm(outPcm.pcm, frameSize, targetFrames)
-        val inScaled = resamplePcm(inPcm.pcm, frameSize, targetFrames)
+        val outScaled = resamplePcm(outProcessed, frameSize, targetFrames)
+        val inScaled = resamplePcm(inProcessed, frameSize, targetFrames)
 
         // Mix into a single PCM buffer with an eased gain ramp.
         val mixed = ByteArray(targetFrames * frameSize)

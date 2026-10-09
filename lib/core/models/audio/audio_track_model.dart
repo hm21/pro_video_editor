@@ -1,6 +1,7 @@
 // ignore_for_file: public_member_api_docs, sort_constructors_first
 import 'dart:convert';
 
+import 'package:pro_video_editor/core/models/audio/audio_equalizer_model.dart';
 import 'package:pro_video_editor/shared/models/time_range_mixin.dart';
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
@@ -23,6 +24,7 @@ class VideoAudioTrack with TimeRangeMixin {
   const VideoAudioTrack({
     required this.path,
     this.volume = 1.0,
+    this.equalizer,
     this.loop = false,
     this.audioStartTime,
     this.audioEndTime,
@@ -46,6 +48,14 @@ class VideoAudioTrack with TimeRangeMixin {
   /// - `> 1.0`: Amplified; peaks that would pass -1 dBFS are limited
   ///   rather than clipped
   final double volume;
+
+  /// Raises or lowers parts of this track's frequency range.
+  ///
+  /// Applied before [volume] and the fades, so a boosted equalizer that is
+  /// limited at -1 dBFS still follows them from there.
+  ///
+  /// If null, the audio is left as it is.
+  final AudioEqualizer? equalizer;
 
   /// Whether to loop the audio if it is shorter than the time range.
   ///
@@ -93,6 +103,7 @@ class VideoAudioTrack with TimeRangeMixin {
   VideoAudioTrack copyWith({
     String? path,
     double? volume,
+    AudioEqualizer? equalizer,
     bool? loop,
     Duration? audioStartTime,
     Duration? audioEndTime,
@@ -104,6 +115,7 @@ class VideoAudioTrack with TimeRangeMixin {
     return VideoAudioTrack(
       path: path ?? this.path,
       volume: volume ?? this.volume,
+      equalizer: equalizer ?? this.equalizer,
       loop: loop ?? this.loop,
       audioStartTime: audioStartTime ?? this.audioStartTime,
       audioEndTime: audioEndTime ?? this.audioEndTime,
@@ -118,6 +130,7 @@ class VideoAudioTrack with TimeRangeMixin {
     return <String, dynamic>{
       'path': path,
       'volume': volume,
+      'equalizer': equalizer?.toMap(),
       'loop': loop,
       'audioStartTime': audioStartTime?.inMicroseconds,
       'audioEndTime': audioEndTime?.inMicroseconds,
@@ -132,6 +145,9 @@ class VideoAudioTrack with TimeRangeMixin {
     return VideoAudioTrack(
       path: map['path'] as String,
       volume: safeParseDouble(map['volume'], fallback: 1.0),
+      equalizer: map['equalizer'] != null
+          ? AudioEqualizer.fromMap(map['equalizer'] as Map<String, dynamic>)
+          : null,
       loop: map['loop'] as bool,
       audioStartTime: map['audioStartTime'] != null
           ? Duration(microseconds: safeParseInt(map['audioStartTime']))
@@ -161,7 +177,8 @@ class VideoAudioTrack with TimeRangeMixin {
 
   @override
   String toString() {
-    return 'VideoAudioTrack(path: $path, volume: $volume, loop: $loop, '
+    return 'VideoAudioTrack(path: $path, volume: $volume, '
+        'equalizer: $equalizer, loop: $loop, '
         'audioStartTime: $audioStartTime, audioEndTime: $audioEndTime, '
         'startTime: $startTime, endTime: $endTime, '
         'fadeInDuration: $fadeInDuration, fadeOutDuration: $fadeOutDuration)';
@@ -173,6 +190,7 @@ class VideoAudioTrack with TimeRangeMixin {
 
     return other.path == path &&
         other.volume == volume &&
+        other.equalizer == equalizer &&
         other.loop == loop &&
         other.audioStartTime == audioStartTime &&
         other.audioEndTime == audioEndTime &&
@@ -186,6 +204,7 @@ class VideoAudioTrack with TimeRangeMixin {
   int get hashCode {
     return path.hashCode ^
         volume.hashCode ^
+        equalizer.hashCode ^
         loop.hashCode ^
         audioStartTime.hashCode ^
         audioEndTime.hashCode ^

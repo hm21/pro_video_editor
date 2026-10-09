@@ -539,6 +539,10 @@ class RenderVideo(private val context: Context) {
                 curve = transition.curve,
                 includeAudio = enableAudio &&
                         (current.volume ?: 1.0f) > 0f && (next.volume ?: 1.0f) > 0f,
+                outgoingVolume = current.volume,
+                outgoingEqualizer = current.equalizer,
+                incomingVolume = next.volume,
+                incomingEqualizer = next.equalizer,
                 onProgress = { f ->
                     onProgress(((doneCount + f) / total).coerceIn(0f, 1f))
                 },
@@ -625,6 +629,10 @@ class RenderVideo(private val context: Context) {
                     curve = wrapTransition.curve,
                     includeAudio = enableAudio &&
                             (last.volume ?: 1.0f) > 0f && (first.volume ?: 1.0f) > 0f,
+                    outgoingVolume = last.volume,
+                    outgoingEqualizer = last.equalizer,
+                    incomingVolume = first.volume,
+                    incomingEqualizer = first.equalizer,
                     onProgress = { f ->
                         onProgress(((doneCount + f) / total).coerceIn(0f, 1f))
                     },

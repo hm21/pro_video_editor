@@ -1,3 +1,7 @@
+## 2.32.0
+- **FEAT**(android, iOS, macOS): `VideoSegment.equalizer` and `VideoAudioTrack.equalizer` raise or lower parts of a clip's or a track's audio with an `AudioEqualizer`: any number of `AudioEqualizerBand`s, applied in order, each a low shelf, a peak or a high shelf with its own frequency, gain and, for a peak, Q. Both platforms compute the same filters, and while any band boosts, a signal that would cross full scale is limited at -1 dBFS like an amplifying volume.
+- **FIX**(android, iOS, macOS): The audio crossfade of an overlap transition plays each clip at its own volume, where it used to play both at their original level.
+
 ## 2.31.0
 - **FEAT**(android, iOS, macOS): `ImageLayer.keyframeClock` and `VideoLayer.keyframeClock` time a layer's keyframes on a clock of their own, mapped piece by piece from the video's timeline through `KeyframeClockPoint`s. Keyframes made in an editor that shows a clip transition at a different pace than the video plays it keep every eased motion on the curve the editor shows.
 
