@@ -81,6 +81,57 @@ void main() {
       );
     });
 
+    test('fromMap rejects a gain or a frequency that is not finite', () {
+      for (final map in [
+        {'type': 'peak', 'frequencyHz': 1000, 'gainDb': double.nan},
+        {'type': 'peak', 'frequencyHz': 1000, 'gainDb': double.infinity},
+        {'type': 'peak', 'frequencyHz': double.infinity, 'gainDb': 3},
+      ]) {
+        expect(
+          () => AudioEqualizerBand.fromMap(map),
+          throwsFormatException,
+          reason: '$map',
+        );
+      }
+    });
+
+    test('fromMap gives an infinite Q the default', () {
+      final band = AudioEqualizerBand.fromMap(const {
+        'type': 'peak',
+        'frequencyHz': 1000,
+        'gainDb': 3,
+        'q': double.infinity,
+      });
+
+      expect(band.q, AudioEqualizerBand.defaultQ);
+    });
+
+    test('asserts a finite gain, frequency and Q', () {
+      expect(
+        () => AudioEqualizerBand(
+          type: AudioEqualizerBandType.peak,
+          frequency: 1000,
+          gain: double.nan,
+        ),
+        throwsAssertionError,
+      );
+      expect(
+        () => AudioEqualizerBand(
+          type: AudioEqualizerBandType.peak,
+          frequency: double.infinity,
+        ),
+        throwsAssertionError,
+      );
+      expect(
+        () => AudioEqualizerBand(
+          type: AudioEqualizerBandType.peak,
+          frequency: 1000,
+          q: double.infinity,
+        ),
+        throwsAssertionError,
+      );
+    });
+
     test('copyWith replaces only the given fields', () {
       expect(
         presence.copyWith(gain: 4),

@@ -3162,6 +3162,8 @@ final class EqualizerTests: XCTestCase {
       ["type": "peak", "frequencyHz": 0, "gainDb": 3.0] as [String: Any],
       ["type": "peak", "frequencyHz": -40.0, "gainDb": 3.0] as [String: Any],
       ["type": "peak", "gainDb": 3.0] as [String: Any],
+      ["type": "peak", "frequencyHz": 1000.0, "gainDb": Double.nan] as [String: Any],
+      ["type": "lowShelf", "frequencyHz": 200.0, "gainDb": Double.infinity] as [String: Any],
       "not a band",
       ["type": "peak", "frequencyHz": 1000.0, "gainDb": 3.0, "q": 0] as [String: Any],
       ["type": "highShelf", "frequencyHz": 3000.0, "gainDb": -6.0] as [String: Any],
@@ -3221,6 +3223,25 @@ final class EqualizerTests: XCTestCase {
       AudioMixTap.make(
         volumes: VolumeSchedule(constant: 1),
         equalizers: EqualizerSchedule(constant: AudioEqualizer())))
+  }
+
+  /// A bitrate cap used to remux a lone, untouched clip as it was, which left
+  /// its equalizer out of the export.
+  func testAnEqualizedClipIsNotRemuxedPastItsEqualizer() throws {
+    func config(_ clip: [String: Any]) throws -> RenderConfig {
+      try XCTUnwrap(
+        RenderConfig.fromArguments([
+          "videoClips": [clip.merging(["inputPath": "/tmp/clip.mp4"]) { $1 }],
+          "outputPath": "/tmp/out.mp4",
+          "outputFormat": "mp4",
+          "enableAudio": true,
+        ]))
+    }
+    XCTAssertTrue(BitrateCapPolicy.isPassthroughEligible(try config([:])))
+    let bass: [String: Any] = [
+      "bands": [["type": "lowShelf", "frequencyHz": 200.0, "gainDb": 6.0]]
+    ]
+    XCTAssertFalse(BitrateCapPolicy.isPassthroughEligible(try config(["equalizer": bass])))
   }
 
   /// Three 0.5 s clips of a 60 Hz tone in one track, equalized flat, with a
@@ -3301,6 +3322,81 @@ final class EqualizerTests: XCTestCase {
     XCTAssertEqual(peak(0.1, 0.49), 0.1, accuracy: 0.002)
     XCTAssertEqual(peak(0.65, 0.99), 0.392, accuracy: 0.01)
     XCTAssertEqual(peak(1.15, 1.49), 0.0255, accuracy: 0.002)
+  }
+
+  /// A time-scaled track stamps its buffers a sample or two off where the one
+  /// before ended. The tap took each of those for a seek and started its
+  /// filters over, a click at every buffer of a clip at a speed like 1.1.
+  func testATimeScaledTrackPlaysThroughItsEqualizerWithoutClicks() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("equalizer-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("tone.caf")
+    let frames = 88_200
+    let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
+    let tone = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames))!
+    tone.frameLength = AVAudioFrameCount(frames)
+    for channel in 0..<2 {
+      for frame in 0..<frames {
+        tone.floatChannelData![channel][frame] = 0.1 * sin(Float(frame) * 2 * .pi * 60 / 44_100)
+      }
+    }
+    try AVAudioFile(forWriting: source, settings: format.settings).write(from: tone)
+    let asset = AVURLAsset(url: source)
+    let sourceTrack = try XCTUnwrap(asset.tracks(withMediaType: .audio).first)
+    let length = CMTime(value: CMTimeValue(frames), timescale: 44_100)
+
+    for speed in [0.8, 1.1, 1.3] {
+      let composition = AVMutableComposition()
+      let track = try XCTUnwrap(
+        composition.addMutableTrack(
+          withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid))
+      try track.insertTimeRange(
+        CMTimeRange(start: .zero, duration: length), of: sourceTrack, at: .zero)
+      track.scaleTimeRange(
+        CMTimeRange(start: .zero, duration: length),
+        toDuration: CMTimeMultiplyByFloat64(length, multiplier: 1 / speed))
+      let parameters = AVMutableAudioMixInputParameters(track: track)
+      parameters.setVolumeSteps(
+        [(CMTimeRange(start: .zero, duration: track.timeRange.duration), 1)],
+        equalizers: EqualizerSchedule(constant: single(.lowShelf, 200, 12)))
+      let mix = AVMutableAudioMix()
+      mix.inputParameters = [parameters]
+
+      let reader = try AVAssetReader(asset: composition)
+      let output = AVAssetReaderAudioMixOutput(
+        audioTracks: [track],
+        audioSettings: [
+          AVFormatIDKey: kAudioFormatLinearPCM,
+          AVSampleRateKey: 44_100,
+          AVNumberOfChannelsKey: 2,
+          AVLinearPCMBitDepthKey: 32,
+          AVLinearPCMIsFloatKey: true,
+          AVLinearPCMIsBigEndianKey: false,
+          AVLinearPCMIsNonInterleaved: false,
+        ])
+      output.audioMix = mix
+      reader.add(output)
+      XCTAssertTrue(reader.startReading())
+      var left: [Float] = []
+      while let buffer = output.copyNextSampleBuffer(),
+        let block = CMSampleBufferGetDataBuffer(buffer)
+      {
+        var interleaved = [Float](repeating: 0, count: CMBlockBufferGetDataLength(block) / 4)
+        CMBlockBufferCopyDataBytes(
+          block, atOffset: 0, dataLength: interleaved.count * 4, destination: &interleaved)
+        left += stride(from: 0, to: interleaved.count, by: 2).map { interleaved[$0] }
+      }
+      XCTAssertEqual(reader.status, .completed, String(describing: reader.error))
+      XCTAssertGreaterThan(left.count, 22_050, "speed \(speed)")
+
+      // The equalized 60 Hz tone at 0.39 moves at most 0.0034 per sample; a
+      // filter started over mid-tone jumps by up to 0.3. Past the first 50 ms,
+      // where the filters settle.
+      let steps = (2_205..<(left.count - 1)).map { abs(left[$0 + 1] - left[$0]) }
+      XCTAssertLessThan(steps.max() ?? 0, 0.005, "speed \(speed)")
+    }
   }
 
   private func single(

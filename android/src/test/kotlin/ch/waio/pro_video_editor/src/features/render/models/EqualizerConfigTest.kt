@@ -35,12 +35,18 @@ internal class EqualizerConfigTest {
     }
 
     @Test
-    fun `a band without a positive q gets 1 over the square root of 2`() {
+    fun `a band without a positive finite q gets 1 over the square root of 2`() {
         val config = EqualizerConfig.fromMap(
             mapOf(
                 "bands" to listOf(
                     mapOf("type" to "peak", "frequencyHz" to 1000.0, "gainDb" to 3.0),
                     mapOf("type" to "peak", "frequencyHz" to 1000.0, "gainDb" to 3.0, "q" to 0),
+                    mapOf(
+                        "type" to "peak",
+                        "frequencyHz" to 1000.0,
+                        "gainDb" to 3.0,
+                        "q" to Double.POSITIVE_INFINITY,
+                    ),
                 ),
             ),
         )!!
@@ -58,6 +64,12 @@ internal class EqualizerConfigTest {
                     mapOf("type" to "peak", "frequencyHz" to 0, "gainDb" to 3.0),
                     mapOf("type" to "peak", "frequencyHz" to -40.0, "gainDb" to 3.0),
                     mapOf("type" to "peak", "gainDb" to 3.0),
+                    mapOf("type" to "peak", "frequencyHz" to 1000.0, "gainDb" to Double.NaN),
+                    mapOf(
+                        "type" to "lowShelf",
+                        "frequencyHz" to 200.0,
+                        "gainDb" to Double.POSITIVE_INFINITY,
+                    ),
                     "not a band",
                     mapOf("type" to "highShelf", "frequencyHz" to 3000.0, "gainDb" to -6.0),
                 ),

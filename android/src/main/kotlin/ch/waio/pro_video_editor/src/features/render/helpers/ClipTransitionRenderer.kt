@@ -730,15 +730,23 @@ object ClipTransitionRenderer {
         val endUs: Long,
         val volume: Float?,
         val equalizer: EqualizerConfig?,
-    )
+    ) {
+        /** Whether the clip plays silent, so its side is silence, decoded or not. */
+        val isMuted: Boolean get() = volume != null && volume <= 0f
+    }
 
     /**
-     * Decodes both segments' audio to PCM, runs each through its clip's own
-     * equalizer and volume (see [ClipAudioChain]) so the blend sounds like the
-     * clips around it, time-scales each side to [outputDurationUs] (so it
-     * inherits its clip's playback speed), cross-fades them sample-by-sample
+     * Decodes both segments' audio to PCM, time-scales each side to
+     * [outputDurationUs] (so it inherits its clip's playback speed), runs each
+     * through its clip's own equalizer and volume (see [ClipAudioChain]) so the
+     * blend sounds like the clips around it, cross-fades them sample-by-sample
      * (outgoing gain 1→0, incoming gain 0→1, eased), and re-encodes AAC into a
      * packet file (so it can be muxed after the video track is known).
+     *
+     * The equalizer runs after the time-scaling: the resampling shifts the
+     * pitch by the clip's speed, so filtering before it would move every band
+     * by that factor too. A muted side is not decoded at all; the other side
+     * fades in or out against silence.
      */
     private fun preEncodeCrossfadeAudio(
         context: Context,
@@ -746,36 +754,45 @@ object ClipTransitionRenderer {
         incoming: CrossfadeSide,
         curve: String, outputDurationUs: Long, workDir: File,
     ): AudioPreEncoded? {
-        val outPcm = decodePcm(context, outgoing.path, outgoing.startUs, outgoing.endUs)
-            ?: return null
-        val inPcm = decodePcm(context, incoming.path, incoming.startUs, incoming.endUs)
-            ?: return null
-        if (outPcm.sampleRate != inPcm.sampleRate || outPcm.channelCount != inPcm.channelCount) {
+        val outPcm = if (outgoing.isMuted) null else {
+            decodePcm(context, outgoing.path, outgoing.startUs, outgoing.endUs) ?: return null
+        }
+        val inPcm = if (incoming.isMuted) null else {
+            decodePcm(context, incoming.path, incoming.startUs, incoming.endUs) ?: return null
+        }
+        val format = outPcm ?: inPcm ?: return null
+        if (outPcm != null && inPcm != null &&
+            (outPcm.sampleRate != inPcm.sampleRate || outPcm.channelCount != inPcm.channelCount)
+        ) {
             Log.w(RENDER_TAG, "Transition audio format mismatch; skipping crossfade")
             return null
         }
 
-        val sampleRate = outPcm.sampleRate
-        val channelCount = outPcm.channelCount
+        val sampleRate = format.sampleRate
+        val channelCount = format.channelCount
         val frameSize = channelCount * 2
-        val outProcessed = ClipAudioChain.apply(
-            outPcm.pcm, sampleRate, channelCount, outgoing.volume, outgoing.equalizer,
-        )
-        val inProcessed = ClipAudioChain.apply(
-            inPcm.pcm, sampleRate, channelCount, incoming.volume, incoming.equalizer,
-        )
 
         // Resample each side to the output (post-speed) duration so the
         // crossfade is aligned and the audio matches the blended video length.
         val targetFrames = if (outputDurationUs > 0L) {
             ((outputDurationUs * sampleRate) / 1_000_000L).toInt().coerceAtLeast(1)
         } else {
-            max(outPcm.pcm.size, inPcm.pcm.size) / frameSize
+            max(outPcm?.pcm?.size ?: 0, inPcm?.pcm?.size ?: 0) / frameSize
         }
         if (targetFrames <= 0) return null
 
-        val outScaled = resamplePcm(outProcessed, frameSize, targetFrames)
-        val inScaled = resamplePcm(inProcessed, frameSize, targetFrames)
+        val outScaled = outPcm?.let {
+            ClipAudioChain.apply(
+                resamplePcm(it.pcm, frameSize, targetFrames),
+                sampleRate, channelCount, outgoing.volume, outgoing.equalizer,
+            )
+        } ?: ByteArray(targetFrames * frameSize)
+        val inScaled = inPcm?.let {
+            ClipAudioChain.apply(
+                resamplePcm(it.pcm, frameSize, targetFrames),
+                sampleRate, channelCount, incoming.volume, incoming.equalizer,
+            )
+        } ?: ByteArray(targetFrames * frameSize)
 
         // Mix into a single PCM buffer with an eased gain ramp.
         val mixed = ByteArray(targetFrames * frameSize)

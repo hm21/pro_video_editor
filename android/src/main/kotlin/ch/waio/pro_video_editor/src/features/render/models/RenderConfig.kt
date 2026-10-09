@@ -377,19 +377,23 @@ data class EqualizerBand(
         const val DEFAULT_Q = 0.7071067811865476
 
         /**
-         * Parses a band from a platform-channel map; null for an unknown type
-         * or a frequency that is not above 0, so the caller skips it.
+         * Parses a band from a platform-channel map; null for an unknown type,
+         * a frequency that is not above 0 or a gain that is not finite, so the
+         * caller skips it.
          */
         fun fromMap(map: Map<*, *>?): EqualizerBand? {
             map ?: return null
             val type = EqualizerBandType.fromName(map["type"]) ?: return null
             val frequencyHz = (map["frequencyHz"] as? Number)?.toDouble()
                 ?.takeIf { it > 0.0 && it.isFinite() } ?: return null
+            val gainDb = (map["gainDb"] as? Number)?.toDouble() ?: 0.0
+            if (!gainDb.isFinite()) return null
             return EqualizerBand(
                 type = type,
                 frequencyHz = frequencyHz,
-                gainDb = (map["gainDb"] as? Number)?.toDouble() ?: 0.0,
-                q = (map["q"] as? Number)?.toDouble()?.takeIf { it > 0.0 } ?: DEFAULT_Q,
+                gainDb = gainDb,
+                q = (map["q"] as? Number)?.toDouble()
+                    ?.takeIf { it > 0.0 && it.isFinite() } ?: DEFAULT_Q,
             )
         }
     }

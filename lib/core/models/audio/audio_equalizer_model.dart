@@ -24,13 +24,23 @@ class AudioEqualizerBand {
     required this.frequency,
     this.gain = 0,
     this.q = defaultQ,
-  }) : assert(frequency > 0, '[frequency] must be greater than 0'),
-       assert(q > 0, '[q] must be greater than 0');
+  }) : assert(
+         frequency > 0 && frequency < double.infinity,
+         '[frequency] must be finite and greater than 0',
+       ),
+       assert(
+         gain > double.negativeInfinity && gain < double.infinity,
+         '[gain] must be finite',
+       ),
+       assert(
+         q > 0 && q < double.infinity,
+         '[q] must be finite and greater than 0',
+       );
 
   /// Parses a band from [toMap]'s output.
   ///
-  /// Throws a [FormatException] when [map] names no known type or no
-  /// frequency above 0.
+  /// Throws a [FormatException] when [map] names no known type, no finite
+  /// frequency above 0 or a gain that is not finite.
   factory AudioEqualizerBand.fromMap(Map<String, dynamic> map) =>
       _tryParse(map) ??
       (throw FormatException('Not an audio equalizer band: $map'));
@@ -82,21 +92,28 @@ class AudioEqualizerBand {
     );
   }
 
-  /// The band [map] describes, or null when it names no known type or no
-  /// frequency above 0. A missing or non-positive q falls back to [defaultQ].
+  /// The band [map] describes, or null when it names no known type, no finite
+  /// frequency above 0 or a gain that is not finite. A missing, non-positive
+  /// or infinite q falls back to [defaultQ].
   static AudioEqualizerBand? _tryParse(Map<dynamic, dynamic> map) {
     final typeName = map['type'];
     final type = AudioEqualizerBandType.values
         .where((type) => type.name == typeName)
         .firstOrNull;
     final frequency = safeParseDouble(map['frequencyHz']);
-    if (type == null || !(frequency > 0) || frequency.isInfinite) return null;
+    final gain = safeParseDouble(map['gainDb']);
+    if (type == null ||
+        !(frequency > 0) ||
+        frequency.isInfinite ||
+        !gain.isFinite) {
+      return null;
+    }
     final q = safeParseDouble(map['q'], fallback: defaultQ);
     return AudioEqualizerBand(
       type: type,
       frequency: frequency,
-      gain: safeParseDouble(map['gainDb']),
-      q: q > 0 ? q : defaultQ,
+      gain: gain,
+      q: q > 0 && q.isFinite ? q : defaultQ,
     );
   }
 

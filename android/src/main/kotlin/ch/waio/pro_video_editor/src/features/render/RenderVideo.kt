@@ -537,8 +537,9 @@ class RenderVideo(private val context: Context) {
                 type = transition.type,
                 direction = transition.direction,
                 curve = transition.curve,
+                // A muted side still lets the other fade in or out.
                 includeAudio = enableAudio &&
-                        (current.volume ?: 1.0f) > 0f && (next.volume ?: 1.0f) > 0f,
+                        ((current.volume ?: 1.0f) > 0f || (next.volume ?: 1.0f) > 0f),
                 outgoingVolume = current.volume,
                 outgoingEqualizer = current.equalizer,
                 incomingVolume = next.volume,
@@ -628,7 +629,7 @@ class RenderVideo(private val context: Context) {
                     direction = wrapTransition.direction,
                     curve = wrapTransition.curve,
                     includeAudio = enableAudio &&
-                            (last.volume ?: 1.0f) > 0f && (first.volume ?: 1.0f) > 0f,
+                            ((last.volume ?: 1.0f) > 0f || (first.volume ?: 1.0f) > 0f),
                     outgoingVolume = last.volume,
                     outgoingEqualizer = last.equalizer,
                     incomingVolume = first.volume,

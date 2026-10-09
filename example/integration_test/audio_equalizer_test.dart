@@ -218,4 +218,36 @@ void main() {
     expect(cut / flat, lessThan(0.9));
     expect(again / cut, inInclusiveRange(0.98, 1.02));
   }, skip: !isSupported);
+
+  testWidgets('a dissolve out of a muted segment fades the next one in', (
+    _,
+  ) async {
+    // 2 s of the muted segment, the 1 s dissolve, 2 s of the next segment.
+    final pcm = await render(
+      VideoRenderData(
+        videoSegments: [
+          VideoSegment(
+            video: EditorVideo.asset(kVideoEditorExampleH264Path),
+            startTime: const Duration(seconds: 3),
+            endTime: const Duration(seconds: 6),
+            volume: 0,
+            transition: const ClipTransition(
+              type: ClipTransitionType.dissolve,
+              duration: Duration(seconds: 1),
+            ),
+          ),
+          VideoSegment(
+            video: EditorVideo.asset(kVideoEditorExampleH264Path),
+            startTime: const Duration(seconds: 1),
+            endTime: const Duration(seconds: 4),
+          ),
+        ],
+      ),
+    );
+
+    expect(pcm.rms(0.2, 1.8), lessThan(0.0001), reason: 'muted segment');
+    // The dissolve used to drop its audio when either side was muted, so
+    // the next segment only came in after it.
+    expect(pcm.rms(2.5, 2.95), greaterThan(0.0005), reason: 'dissolve');
+  }, skip: !isSupported);
 }

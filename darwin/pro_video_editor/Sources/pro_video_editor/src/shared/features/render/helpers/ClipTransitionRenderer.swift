@@ -353,48 +353,59 @@ internal enum ClipTransitionRenderer {
     duration d: CMTime, curve: String,
     outgoingAudio: SideAudio, incomingAudio: SideAudio
   ) async throws -> AVMutableAudioMix? {
-    guard
-      let outAudio = try? await MediaInfoExtractor.loadAudioTrack(from: outAsset),
-      let inAudio = try? await MediaInfoExtractor.loadAudioTrack(from: inAsset),
-      let trackA = composition.addMutableTrack(
-        withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid),
-      let trackB = composition.addMutableTrack(
-        withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
-    else { return nil }
-
-    try trackA.insertTimeRange(
-      CMTimeRange(start: outStart, duration: outDuration), of: outAudio, at: .zero)
-    try trackB.insertTimeRange(
-      CMTimeRange(start: inStart, duration: inDuration), of: inAudio, at: .zero)
-
-    // Speed-scale each side's audio to the shared output duration so it stays
-    // aligned with the speed-adjusted video and the blend length matches.
-    if outDuration != d {
-      trackA.scaleTimeRange(CMTimeRange(start: .zero, duration: outDuration), toDuration: d)
-    }
-    if inDuration != d {
-      trackB.scaleTimeRange(CMTimeRange(start: .zero, duration: inDuration), toDuration: d)
-    }
-
-    let paramsA = AVMutableAudioMixInputParameters(track: trackA)
-    let paramsB = AVMutableAudioMixInputParameters(track: trackB)
     let fullRange = CMTimeRange(start: .zero, duration: d)
     // Linear cross-fade is a good approximation; the visual curve drives feel.
     // Each side starts or ends at its own clip's volume, through its own
-    // equalizer, limited like the clip where either would clip.
-    let outVolume = outgoingAudio.volume ?? 1
-    let inVolume = incomingAudio.volume ?? 1
-    paramsA.setVolumeRamp(fromStartVolume: outVolume, toEndVolume: 0.0, timeRange: fullRange)
-    paramsB.setVolumeRamp(fromStartVolume: 0.0, toEndVolume: inVolume, timeRange: fullRange)
-    paramsA.audioTapProcessor = AudioMixTap.make(
-      volumes: VolumeSchedule(constant: outVolume),
-      equalizers: EqualizerSchedule(constant: outgoingAudio.equalizer))
-    paramsB.audioTapProcessor = AudioMixTap.make(
-      volumes: VolumeSchedule(constant: inVolume),
-      equalizers: EqualizerSchedule(constant: incomingAudio.equalizer))
+    // equalizer, limited like the clip where either would clip. A muted side
+    // is left out, and the other fades in or out against silence.
+    let sides = [
+      (
+        asset: outAsset, start: outStart, duration: outDuration, audio: outgoingAudio,
+        fadesIn: false
+      ),
+      (
+        asset: inAsset, start: inStart, duration: inDuration, audio: incomingAudio,
+        fadesIn: true
+      ),
+    ].filter { ($0.audio.volume ?? 1) > 0 }
+    guard !sides.isEmpty else { return nil }
+    // Every side's source first: a track added for one side would otherwise
+    // play unfaded in the blend when the other has no audio to load.
+    var sources: [AVAssetTrack] = []
+    for side in sides {
+      guard let source = try? await MediaInfoExtractor.loadAudioTrack(from: side.asset)
+      else { return nil }
+      sources.append(source)
+    }
+
+    var parameters: [AVMutableAudioMixInputParameters] = []
+    for (side, sourceAudio) in zip(sides, sources) {
+      guard
+        let track = composition.addMutableTrack(
+          withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+      else { return nil }
+      try track.insertTimeRange(
+        CMTimeRange(start: side.start, duration: side.duration), of: sourceAudio, at: .zero)
+      // Speed-scale each side's audio to the shared output duration so it
+      // stays aligned with the speed-adjusted video and the blend length
+      // matches.
+      if side.duration != d {
+        track.scaleTimeRange(CMTimeRange(start: .zero, duration: side.duration), toDuration: d)
+      }
+
+      let volume = side.audio.volume ?? 1
+      let params = AVMutableAudioMixInputParameters(track: track)
+      params.setVolumeRamp(
+        fromStartVolume: side.fadesIn ? 0 : volume, toEndVolume: side.fadesIn ? volume : 0,
+        timeRange: fullRange)
+      params.audioTapProcessor = AudioMixTap.make(
+        volumes: VolumeSchedule(constant: volume),
+        equalizers: EqualizerSchedule(constant: side.audio.equalizer))
+      parameters.append(params)
+    }
 
     let mix = AVMutableAudioMix()
-    mix.inputParameters = [paramsA, paramsB]
+    mix.inputParameters = parameters
     return mix
   }
 

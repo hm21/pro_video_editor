@@ -723,8 +723,9 @@ class RenderVideo {
       let tailSrc = plan.outgoingTailSourceUs
       let headSrc = plan.incomingHeadSourceUs
 
+      // A muted side still lets the other fade in or out.
       let includeAudio =
-        enableAudio && (current.volume ?? 1.0) > 0 && (next!.volume ?? 1.0) > 0
+        enableAudio && ((current.volume ?? 1.0) > 0 || (next!.volume ?? 1.0) > 0)
       let rendered: ClipTransitionRenderer.RenderResult?
       do {
         rendered = try await ClipTransitionRenderer.render(
@@ -821,7 +822,7 @@ class RenderVideo {
         let tailSrc = plan.outgoingTailSourceUs
         let headSrc = plan.incomingHeadSourceUs
         let includeAudio =
-          enableAudio && (last.volume ?? 1.0) > 0 && (first.volume ?? 1.0) > 0
+          enableAudio && ((last.volume ?? 1.0) > 0 || (first.volume ?? 1.0) > 0)
         let rendered: ClipTransitionRenderer.RenderResult?
         do {
           rendered = try await ClipTransitionRenderer.render(

@@ -51,8 +51,9 @@ class VideoAudioTrack with TimeRangeMixin {
 
   /// Raises or lowers parts of this track's frequency range.
   ///
-  /// Applied before [volume] and the fades, so a boosted equalizer that is
-  /// limited at -1 dBFS still follows them from there.
+  /// Applied to the faded audio (see [fadeInDuration] and [fadeOutDuration])
+  /// before [volume]; while any band boosts, peaks that would pass -1 dBFS
+  /// are limited rather than clipped.
   ///
   /// If null, the audio is left as it is.
   final AudioEqualizer? equalizer;

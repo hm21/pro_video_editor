@@ -43,8 +43,8 @@ internal enum BitrateCapPolicy {
 
   /// True when the render has no edits at all, so a compliant source can be
   /// remuxed with `AVAssetExportPresetPassthrough` instead of re-encoded:
-  /// exactly one clip, untrimmed, at original speed/volume, with no effects,
-  /// no extra audio, and no output-geometry or frame-rate changes.
+  /// exactly one clip, untrimmed, at original speed/volume, unequalized, with
+  /// no effects, no extra audio, and no output-geometry or frame-rate changes.
   static func isPassthroughEligible(_ config: RenderConfig) -> Bool {
     guard config.composition == nil,
       config.videoClips.count == 1,
@@ -72,6 +72,7 @@ internal enum BitrateCapPolicy {
     return (clip.startUs == nil || clip.startUs == 0)
       && clip.endUs == nil
       && (clip.volume == nil || clip.volume == 1.0)
+      && clip.equalizer == nil
       && (clip.playbackSpeed == nil || clip.playbackSpeed == 1.0)
       && !clip.reverseVideo
       && clip.chromaKey == nil

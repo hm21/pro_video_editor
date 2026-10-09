@@ -33,20 +33,23 @@ struct AudioEqualizer: Equatable {
       self.q = q
     }
 
-    /// Parses a band from a platform-channel map; nil for an unknown type or
-    /// a frequency that is not above 0, so the caller skips it.
+    /// Parses a band from a platform-channel map; nil for an unknown type, a
+    /// frequency that is not above 0 or a gain that is not finite, so the
+    /// caller skips it.
     static func from(_ map: Any?) -> Band? {
       guard let map = map as? [String: Any],
         let kind = (map["type"] as? String).flatMap(Kind.init(rawValue:)),
         let frequencyHz = (map["frequencyHz"] as? NSNumber)?.doubleValue,
         frequencyHz > 0, frequencyHz.isFinite
       else { return nil }
+      let gainDb = (map["gainDb"] as? NSNumber)?.doubleValue ?? 0
+      guard gainDb.isFinite else { return nil }
       let q = (map["q"] as? NSNumber)?.doubleValue ?? defaultQ
       return Band(
         kind: kind,
         frequencyHz: frequencyHz,
-        gainDb: (map["gainDb"] as? NSNumber)?.doubleValue ?? 0,
-        q: q > 0 ? q : defaultQ)
+        gainDb: gainDb,
+        q: q > 0 && q.isFinite ? q : defaultQ)
     }
   }
 

@@ -153,6 +153,13 @@ enum AudioMixTap {
   /// the limiter.
   static let riseLeadSeconds = 0.005
 
+  /// How far a buffer may start from where the one before it ended and still
+  /// count as the track playing on. A time-scaled track (a clip's speed, the
+  /// global speed, a transition side) stamps its buffers up to two samples off
+  /// that point (measured); taking each of those for a seek started the
+  /// equalizer over mid-tone, an audible click at every buffer.
+  static let seekToleranceSeconds = 0.002
+
   /// A tap for a track the mix plays at [volumes] with [equalizers], or nil
   /// when the volume never amplifies and nothing is equalized, or the tap
   /// cannot be created.
@@ -251,7 +258,9 @@ enum AudioMixTap {
       guard isFloat, frameCount > 0 else { return }
       let buffers = UnsafeMutableAudioBufferListPointer(list)
       let startSeconds = start.isNumeric ? start.seconds : nil
-      if let startSeconds, let nextStart, abs(startSeconds - nextStart) > 1 / sampleRate {
+      if let startSeconds, let nextStart,
+        abs(startSeconds - nextStart) > AudioMixTap.seekToleranceSeconds
+      {
         // A seek: the mix starts over at the volume set there, and the
         // filters' history belongs to audio that no longer follows.
         mixVolume = nil
@@ -286,8 +295,11 @@ enum AudioMixTap {
       frame: Int,
       at seconds: Double?
     ) {
-      // Without a time the entry stays the one already playing.
-      let entry = seconds.flatMap { equalizers.entryIndex(at: $0) } ?? filterEntry
+      // Without a time the entry stays the one already playing, or, before
+      // any has played, the one a constant schedule sets for the whole track.
+      let entry =
+        seconds.flatMap { equalizers.entryIndex(at: $0) } ?? filterEntry
+        ?? equalizers.entryIndex(at: -.infinity)
       if entry != filterEntry {
         let equalizer = entry.flatMap { equalizers.entries[$0].equalizer }
           .flatMap { $0.isFlat ? nil : $0 }
