@@ -16,6 +16,7 @@ class VideoSegment {
     this.startTime,
     this.endTime,
     this.volume,
+    this.equalizer,
     this.playbackSpeed,
     this.reverseVideo = false,
     this.transition,
@@ -60,6 +61,14 @@ class VideoSegment {
   ///
   /// If null, the original volume is used.
   final double? volume;
+
+  /// Raises or lowers parts of the frequency range of this segment's audio.
+  ///
+  /// Applied before [volume], so a boosted equalizer that is limited at
+  /// -1 dBFS still follows the volume from there.
+  ///
+  /// If null, the audio is left as it is.
+  final AudioEqualizer? equalizer;
 
   /// Playback speed of this segment.
   ///
@@ -147,6 +156,7 @@ class VideoSegment {
       'startUs': startTime?.inMicroseconds,
       'endUs': endTime?.inMicroseconds,
       'volume': volume,
+      'equalizer': equalizer?.toMap(),
       'playbackSpeed': playbackSpeed,
       'reverseVideo': reverseVideo,
       'transition': transition?.toMap(),
@@ -162,6 +172,7 @@ class VideoSegment {
     Duration? startTime,
     Duration? endTime,
     double? volume,
+    AudioEqualizer? equalizer,
     double? playbackSpeed,
     bool? reverseVideo,
     ClipTransition? transition,
@@ -174,6 +185,7 @@ class VideoSegment {
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       volume: volume ?? this.volume,
+      equalizer: equalizer ?? this.equalizer,
       playbackSpeed: playbackSpeed ?? this.playbackSpeed,
       reverseVideo: reverseVideo ?? this.reverseVideo,
       transition: transition ?? this.transition,
@@ -191,6 +203,7 @@ class VideoSegment {
         other.startTime == startTime &&
         other.endTime == endTime &&
         other.volume == volume &&
+        other.equalizer == equalizer &&
         other.playbackSpeed == playbackSpeed &&
         other.reverseVideo == reverseVideo &&
         other.transition == transition &&
@@ -205,6 +218,7 @@ class VideoSegment {
         startTime.hashCode ^
         endTime.hashCode ^
         volume.hashCode ^
+        equalizer.hashCode ^
         playbackSpeed.hashCode ^
         reverseVideo.hashCode ^
         transition.hashCode ^
@@ -219,6 +233,7 @@ class VideoSegment {
         'startTime: $startTime, '
         'endTime: $endTime, '
         'volume: $volume, '
+        'equalizer: $equalizer, '
         'playbackSpeed: $playbackSpeed, '
         'reverseVideo: $reverseVideo, '
         'transition: $transition, '
@@ -233,6 +248,7 @@ class VideoSegment {
       'startTime': startTime?.inMicroseconds,
       'endTime': endTime?.inMicroseconds,
       'volume': volume,
+      'equalizer': equalizer?.toMap(),
       'playbackSpeed': playbackSpeed,
       'reverseVideo': reverseVideo,
       'transition': transition?.toMap(),
@@ -252,6 +268,9 @@ class VideoSegment {
           ? Duration(microseconds: safeParseInt(map['endTime']))
           : null,
       volume: tryParseDouble(map['volume']),
+      equalizer: map['equalizer'] != null
+          ? AudioEqualizer.fromMap(map['equalizer'] as Map<String, dynamic>)
+          : null,
       playbackSpeed: tryParseDouble(map['playbackSpeed']),
       reverseVideo: map['reverseVideo'] as bool? ?? false,
       transition: map['transition'] != null

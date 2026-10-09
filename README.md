@@ -111,6 +111,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - ⏩ **Playback Speed**: Adjust the playback speed of the video.
 - ⏪ **Reverse Video**: Play a video segment backwards.
 - 🔇 **Mute Audio**: Remove or mute the audio track from the video.
+- 🎚️ **Equalizer**: Raise or lower parts of the audio of a clip or a custom audio track with an `AudioEqualizer` of any number of bands, each a low shelf, a peak or a high shelf.
 - 📊 **Waveform**: Generate audio waveform data for visualization, with support for streaming mode.
 
 #### 🔧 **Transformations**
@@ -173,6 +174,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 | `Video Effects`            | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Custom Video Effects`     | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Custom Audio Tracks`      | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
+| `Audio Equalizer`          | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Merge Videos`             | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Stop-Motion (Images→Video)`| ✅     | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Extract Audio`            | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
@@ -755,6 +757,15 @@ var task = VideoRenderData(
       VideoAudioTrack(
         path: customAudioPath,
         volume: 0.3, // Background music at 30%
+        equalizer: const AudioEqualizer(
+          bands: [
+            AudioEqualizerBand(
+              type: AudioEqualizerBandType.lowShelf,
+              frequency: 200,
+              gain: 4, // a little more bass
+            ),
+          ],
+        ),
         fadeInDuration: const Duration(milliseconds: 500), // ease it in
         fadeOutDuration: const Duration(seconds: 1), // and out at the end
       ),
@@ -903,6 +914,7 @@ VideoSegment({
   Duration? startTime,           // Optional: Start time for trimming
   Duration? endTime,             // Optional: End time for trimming
   double? volume,                // Optional: Per-clip volume multiplier
+  AudioEqualizer? equalizer,     // Optional: Per-clip equalizer bands
   double? playbackSpeed,         // Optional: Per-clip playback speed
   bool reverseVideo = false,     // Optional: Play this clip backwards
   ClipTransition? transition,    // Optional: Transition into the NEXT clip
@@ -914,6 +926,7 @@ VideoSegment({
 - `startTime` (optional): The starting point for this clip. If omitted, starts from the beginning (0:00).
 - `endTime` (optional): The ending point for this clip. If omitted, uses the full video duration.
 - `volume` (optional): Per-clip audio volume multiplier (`0.0` = mute, `1.0` = original).
+- `equalizer` (optional): An `AudioEqualizer` whose `bands` raise or lower parts of the clip's audio, one after the other. Each `AudioEqualizerBand` is a `lowShelf` (everything below its `frequency`), a `peak` (a bell around its `frequency`, as narrow as its `q`) or a `highShelf` (everything above its `frequency`), with a `gain` in decibels, and there can be any number of them. Applied before `volume`; while any band boosts, the result is limited at -1 dBFS rather than clipped.
 - `playbackSpeed` (optional): Per-clip playback speed (e.g. `0.5` = half, `2.0` = double).
 - `reverseVideo` (optional): Renders this clip backwards when `true`.
 - `transition` (optional): A `ClipTransition` describing how this clip transitions into the **next** clip (dissolve, fade-to-black, slide, etc.). Ignored on the last segment.
@@ -928,6 +941,26 @@ VideoSegment(
   video: EditorVideo.file(File('video.mp4')),
   startTime: Duration(seconds: 5),
   endTime: Duration(seconds: 10),
+)
+
+// A clearer voice: less rumble, more presence
+VideoSegment(
+  video: EditorVideo.asset('video.mp4'),
+  equalizer: const AudioEqualizer(
+    bands: [
+      AudioEqualizerBand(
+        type: AudioEqualizerBandType.lowShelf,
+        frequency: 150,
+        gain: -6,
+      ),
+      AudioEqualizerBand(
+        type: AudioEqualizerBandType.peak,
+        frequency: 3000,
+        gain: 4,
+        q: 1.2,
+      ),
+    ],
+  ),
 )
 ```
 

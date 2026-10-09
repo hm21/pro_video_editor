@@ -46,6 +46,7 @@ data class TransitionConfig(
  * @property startUs Start time in microseconds (null = from beginning)
  * @property endUs End time in microseconds (null = until end)
  * @property volume Volume multiplier for this clip (null = unchanged, 0.0=mute, 1.0=original)
+ * @property equalizer Equalizer of this clip's audio (null = unchanged)
  * @property playbackSpeed Speed multiplier for this clip (null = unchanged, 0.5=half, 2.0=double)
  * @property reverseVideo Whether to render this clip backwards
  * @property transition Transition into the next clip (null = hard cut). On the
@@ -57,6 +58,7 @@ data class VideoClip(
     val startUs: Long?,
     val endUs: Long?,
     val volume: Float? = null,
+    val equalizer: EqualizerConfig? = null,
     val playbackSpeed: Float? = null,
     val reverseVideo: Boolean = false,
     val transition: TransitionConfig? = null,
@@ -93,6 +95,7 @@ data class VideoClip(
                 startUs = (clipMap["startUs"] as? Number)?.toLong(),
                 endUs = (clipMap["endUs"] as? Number)?.toLong(),
                 volume = (clipMap["volume"] as? Number)?.toFloat(),
+                equalizer = EqualizerConfig.fromMap(clipMap["equalizer"] as? Map<*, *>),
                 playbackSpeed = (clipMap["playbackSpeed"] as? Number)?.toFloat(),
                 reverseVideo = clipMap["reverseVideo"] as? Boolean ?: false,
                 transition = transitionRaw?.let { TransitionConfig.fromMap(it) },
@@ -333,11 +336,107 @@ data class ChromaKeyConfig(
     }
 }
 
+/** The shape of an [EqualizerBand]'s filter. */
+enum class EqualizerBandType {
+    /** Raises or lowers everything below the band's frequency. */
+    LOW_SHELF,
+
+    /** Raises or lowers a bell around the band's frequency, as wide as its Q. */
+    PEAK,
+
+    /** Raises or lowers everything above the band's frequency. */
+    HIGH_SHELF;
+
+    companion object {
+        /** The type the Dart side names [name], or null for one it does not know. */
+        fun fromName(name: Any?): EqualizerBandType? = when (name) {
+            "lowShelf" -> LOW_SHELF
+            "peak" -> PEAK
+            "highShelf" -> HIGH_SHELF
+            else -> null
+        }
+    }
+}
+
+/**
+ * One filter of an [EqualizerConfig]: a shelf or a peak at [frequencyHz].
+ *
+ * @property type The shape of the filter
+ * @property frequencyHz Corner of a shelf or center of a peak, above 0
+ * @property gainDb How far the band is raised (positive) or lowered (negative), in decibels
+ * @property q How narrow a peak is; shelves ignore it and have a slope of 1
+ */
+data class EqualizerBand(
+    val type: EqualizerBandType,
+    val frequencyHz: Double,
+    val gainDb: Double = 0.0,
+    val q: Double = DEFAULT_Q,
+) {
+    companion object {
+        /** 1/√2, the Q of a band that names none. */
+        const val DEFAULT_Q = 0.7071067811865476
+
+        /**
+         * Parses a band from a platform-channel map; null for an unknown type,
+         * a frequency that is not above 0 or a gain that is not finite, so the
+         * caller skips it.
+         */
+        fun fromMap(map: Map<*, *>?): EqualizerBand? {
+            map ?: return null
+            val type = EqualizerBandType.fromName(map["type"]) ?: return null
+            val frequencyHz = (map["frequencyHz"] as? Number)?.toDouble()
+                ?.takeIf { it > 0.0 && it.isFinite() } ?: return null
+            val gainDb = (map["gainDb"] as? Number)?.toDouble() ?: 0.0
+            if (!gainDb.isFinite()) return null
+            return EqualizerBand(
+                type = type,
+                frequencyHz = frequencyHz,
+                gainDb = gainDb,
+                q = (map["q"] as? Number)?.toDouble()
+                    ?.takeIf { it > 0.0 && it.isFinite() } ?: DEFAULT_Q,
+            )
+        }
+    }
+}
+
+/**
+ * Raises or lowers parts of a clip's or a track's audio with a cascade of
+ * [bands], applied in order.
+ *
+ * See [ch.waio.pro_video_editor.src.features.render.helpers.BandEqualizer]
+ * for the filters themselves.
+ *
+ * @property bands The filters, in the order they are applied
+ */
+data class EqualizerConfig(val bands: List<EqualizerBand> = emptyList()) {
+    /** Whether the equalizer leaves the audio unchanged. */
+    val isFlat: Boolean
+        get() = bands.all { it.gainDb == 0.0 }
+
+    /** Whether any band raises the audio, which can cross full scale. */
+    val boosts: Boolean
+        get() = bands.any { it.gainDb > 0.0 }
+
+    companion object {
+        /**
+         * Parses an equalizer from a platform-channel map, skipping the bands
+         * it cannot parse; null when the map is absent or leaves the audio
+         * unchanged, so a flat one costs nothing.
+         */
+        fun fromMap(map: Map<*, *>?): EqualizerConfig? {
+            val bands = map?.get("bands") as? List<*> ?: return null
+            return EqualizerConfig(bands.mapNotNull { EqualizerBand.fromMap(it as? Map<*, *>) })
+                .takeUnless { it.isFlat }
+        }
+    }
+}
+
 /**
  * Represents a custom audio track with timing and volume configuration.
  *
  * @property path Absolute path to the audio file
  * @property volume Volume multiplier (0.0=silent, 1.0=unchanged, >1.0=amplified)
+ * @property equalizer Equalizer of the track (null = unchanged)
  * @property loop Whether to loop the audio if shorter than the video
  * @property audioStartUs Start offset within the audio file in microseconds
  * @property audioEndUs End offset within the audio file in microseconds (null = until end)
@@ -349,6 +448,7 @@ data class ChromaKeyConfig(
 data class AudioTrackConfig(
     val path: String,
     val volume: Float = 1.0f,
+    val equalizer: EqualizerConfig? = null,
     val loop: Boolean = false,
     val audioStartUs: Long? = null,
     val audioEndUs: Long? = null,
@@ -362,6 +462,7 @@ data class AudioTrackConfig(
             return AudioTrackConfig(
                 path = map["path"] as String,
                 volume = (map["volume"] as? Number)?.toFloat() ?: 1.0f,
+                equalizer = EqualizerConfig.fromMap(map["equalizer"] as? Map<*, *>),
                 loop = map["loop"] as? Boolean ?: false,
                 audioStartUs = (map["audioStartUs"] as? Number)?.toLong(),
                 audioEndUs = (map["audioEndUs"] as? Number)?.toLong(),

@@ -143,6 +143,40 @@ void main() {
       });
     });
 
+    group('equalizer', () {
+      const equalizer = AudioEqualizer(
+        bands: [
+          AudioEqualizerBand(
+            type: AudioEqualizerBandType.lowShelf,
+            frequency: 200,
+            gain: 4,
+          ),
+          AudioEqualizerBand(
+            type: AudioEqualizerBandType.highShelf,
+            frequency: 3000,
+            gain: -2,
+          ),
+        ],
+      );
+
+      test('defaults to none', () {
+        expect(const VideoAudioTrack(path: '/audio.mp3').equalizer, isNull);
+      });
+
+      test('round-trips through toMap and fromMap', () {
+        final withEqualizer = track.copyWith(equalizer: equalizer);
+
+        expect(
+          VideoAudioTrack.fromMap(withEqualizer.toMap()).equalizer,
+          equalizer,
+        );
+      });
+
+      test('a different equalizer makes the tracks differ', () {
+        expect(track.copyWith(equalizer: equalizer), isNot(track));
+      });
+    });
+
     group('fade', () {
       test('defaults to none', () {
         const minimal = VideoAudioTrack(path: '/audio.mp3');

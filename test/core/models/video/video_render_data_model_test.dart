@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pro_video_editor/core/models/audio/audio_equalizer_model.dart';
 import 'package:pro_video_editor/core/models/audio/audio_track_model.dart';
 import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart';
 import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
@@ -197,6 +198,34 @@ void main() {
         expect(tracks[0]['fadeOutUs'], 2000000);
         expect(tracks[1]['fadeInUs'], 0);
         expect(tracks[1]['fadeOutUs'], 0);
+      },
+    );
+
+    test(
+      'toAsyncMap sends each track\'s equalizer over the platform channel',
+      () async {
+        const equalizer = AudioEqualizer(
+          bands: [
+            AudioEqualizerBand(
+              type: AudioEqualizerBandType.lowShelf,
+              frequency: 200,
+              gain: 6,
+            ),
+          ],
+        );
+        final data = VideoRenderData(
+          id: 'test',
+          videoSegments: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+          audioTracks: const [
+            VideoAudioTrack(path: '/audio/eq.m4a', equalizer: equalizer),
+            VideoAudioTrack(path: '/audio/plain.m4a'),
+          ],
+        );
+
+        final tracks = (await data.toAsyncMap())['audioTracks'] as List;
+
+        expect(tracks[0]['equalizer'], equalizer.toMap());
+        expect(tracks[1]['equalizer'], isNull);
       },
     );
   });

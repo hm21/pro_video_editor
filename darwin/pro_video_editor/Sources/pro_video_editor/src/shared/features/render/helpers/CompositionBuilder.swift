@@ -297,7 +297,7 @@ internal class CompositionBuilder {
     return windows
   }
 
-  /// Creates audio mix with per-clip volume parameters.
+  /// Creates audio mix with per-clip volume and equalizer parameters.
   private func createAudioMix(
     originalTracks: [AVMutableCompositionTrack],
     clipInstructions: [ClipInstruction]
@@ -308,13 +308,17 @@ internal class CompositionBuilder {
     for track in originalTracks {
       let inputParameters = AVMutableAudioMixInputParameters(track: track)
 
-      // Each clip's volume over its own time range; a clip played above its
-      // own level is limited rather than clipped.
+      // Each clip's volume and equalizer over its own time range; a clip
+      // played above its own level is limited rather than clipped.
       inputParameters.setVolumeSteps(
         clipInstructions.enumerated().map { index, clipInstruction in
           let clipVolume = index < videoClips.count ? (videoClips[index].volume ?? 1.0) : 1.0
           return (clipInstruction.timeRange, clipVolume)
-        })
+        },
+        equalizers: EqualizerSchedule(
+          clipInstructions.enumerated().map { index, clipInstruction in
+            (clipInstruction.timeRange, index < videoClips.count ? videoClips[index].equalizer : nil)
+          }))
 
       audioMixInputParameters.append(inputParameters)
       PluginLog.print("🔊 Applied per-clip volume to original audio track")

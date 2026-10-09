@@ -149,6 +149,7 @@ class CompositionBuilder(
                     .setCompositionStartTime(track.startUs)
                     .setCompositionEndTime(track.endUs)
                     .setFade(track.fadeInUs, track.fadeOutUs)
+                    .setEqualizer(track.equalizer)
                     .setVolume(track.volume)
                     .build()
 

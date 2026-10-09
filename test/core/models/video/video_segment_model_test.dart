@@ -14,6 +14,53 @@ void main() {
       volume: 0.8,
     );
 
+    group('equalizer', () {
+      const equalizer = AudioEqualizer(
+        bands: [
+          AudioEqualizerBand(
+            type: AudioEqualizerBandType.lowShelf,
+            frequency: 200,
+            gain: -6,
+          ),
+          AudioEqualizerBand(
+            type: AudioEqualizerBandType.peak,
+            frequency: 3000,
+            gain: 3,
+            q: 1.2,
+          ),
+        ],
+      );
+
+      test('defaults to none', () {
+        expect(segment.equalizer, isNull);
+      });
+
+      test('round-trips through toMap and fromMap', () {
+        final withEqualizer = segment.copyWith(equalizer: equalizer);
+
+        expect(
+          VideoSegment.fromMap(withEqualizer.toMap()).equalizer,
+          equalizer,
+        );
+      });
+
+      test('is sent over the platform channel', () async {
+        final map = await VideoSegment(
+          video: EditorVideo.file('test.mp4'),
+          equalizer: equalizer,
+        ).toAsyncMap();
+
+        expect(map['equalizer'], equalizer.toMap());
+      });
+
+      test('a different equalizer makes the segments differ', () {
+        final withEqualizer = segment.copyWith(equalizer: equalizer);
+
+        expect(withEqualizer, isNot(segment));
+        expect(withEqualizer.toString(), contains('equalizer: AudioEqualizer'));
+      });
+    });
+
     group('toMap', () {
       test('serializes all fields correctly', () {
         final map = segment.toMap();

@@ -55,6 +55,7 @@ internal class LayeredCompositionBuilder {
   private struct AudioWindow {
     let track: AVMutableCompositionTrack
     let volume: Float
+    let equalizer: AudioEqualizer?
     let range: CMTimeRange
   }
 
@@ -138,7 +139,7 @@ internal class LayeredCompositionBuilder {
             try? audioTrack.insertTimeRange(srcRange, of: assetAudioTrack, at: at)
             audioWindows.append(
               AudioWindow(
-                track: audioTrack, volume: volume,
+                track: audioTrack, volume: volume, equalizer: clip.equalizer,
                 range: CMTimeRange(start: at, duration: srcRange.duration)))
           }
         }
@@ -283,7 +284,9 @@ internal class LayeredCompositionBuilder {
       guard let track = windows.first?.track else { continue }
       let p = AVMutableAudioMixInputParameters(track: track)
       // A clip played above its own level is limited rather than clipped.
-      p.setVolumeSteps(windows.map { (range: $0.range, volume: $0.volume) })
+      p.setVolumeSteps(
+        windows.map { (range: $0.range, volume: $0.volume) },
+        equalizers: EqualizerSchedule(windows.map { (range: $0.range, equalizer: $0.equalizer) }))
       params.append(p)
     }
 

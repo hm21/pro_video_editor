@@ -1,3 +1,8 @@
+## 2.32.0
+- **FEAT**(android, iOS, macOS): `VideoSegment.equalizer` and `VideoAudioTrack.equalizer` shape a clip's or a track's sound with an `AudioEqualizer` of low-shelf, peak and high-shelf bands. Both platforms compute the same filters, and a boost that would clip is limited at -1 dBFS.
+- **FIX**(android, iOS, macOS): The audio crossfade of an overlap transition plays each clip at its own volume, where it used to play both at their original level, and fades the other clip in or out when one is muted instead of going silent.
+- **FIX**(android): A muted clip, or one without audio, ahead of a clip with 5.1 audio no longer fails the export.
+
 ## 2.31.0
 - **FEAT**(android, iOS, macOS): `ImageLayer.keyframeClock` and `VideoLayer.keyframeClock` time a layer's keyframes on a clock of their own, mapped piece by piece from the video's timeline through `KeyframeClockPoint`s. Keyframes made in an editor that shows a clip transition at a different pace than the video plays it keep every eased motion on the curve the editor shows.
 

@@ -20,6 +20,7 @@ import androidx.media3.transformer.Effects
 import ch.waio.pro_video_editor.src.features.render.models.AudioTrackConfig
 import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
 import ch.waio.pro_video_editor.src.features.render.models.CompositionConfig
+import ch.waio.pro_video_editor.src.features.render.models.EqualizerConfig
 import ch.waio.pro_video_editor.src.features.render.models.SegmentTransformConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
@@ -104,7 +105,8 @@ class LayeredCompositionBuilder(
         val srcEndUs: Long?,
         val outputStartUs: Long,
         val outputEndUs: Long,
-        val volume: Float
+        val volume: Float,
+        val equalizer: EqualizerConfig?
     )
 
     fun build(): Composition {
@@ -242,7 +244,8 @@ class LayeredCompositionBuilder(
                         srcEndUs = srcEndUs,
                         outputStartUs = outputStartUs,
                         outputEndUs = outputStartUs + outputDurationUs,
-                        volume = volume
+                        volume = volume,
+                        equalizer = clip.equalizer
                     )
                 }
                 outputCursorUs += outputDurationUs
@@ -301,6 +304,7 @@ class LayeredCompositionBuilder(
                 .setAudioEndTime(audio.srcEndUs)
                 .setCompositionStartTime(audio.outputStartUs)
                 .setCompositionEndTime(audio.outputEndUs)
+                .setEqualizer(audio.equalizer)
                 .setVolume(audio.volume)
                 .build()
                 ?.also { temporaryFiles.add(it.temporaryFile) }
@@ -317,6 +321,7 @@ class LayeredCompositionBuilder(
                 .setCompositionStartTime(track.startUs)
                 .setCompositionEndTime(track.endUs)
                 .setFade(track.fadeInUs, track.fadeOutUs)
+                .setEqualizer(track.equalizer)
                 .setVolume(track.volume)
                 .build()
                 ?.also { temporaryFiles.add(it.temporaryFile) }

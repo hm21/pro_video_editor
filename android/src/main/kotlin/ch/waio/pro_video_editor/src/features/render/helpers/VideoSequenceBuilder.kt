@@ -42,6 +42,11 @@ class VideoSequenceBuilder(
 ) {
     private val mediaInfoExtractor = MediaInfoExtractor(context)
 
+    private companion object {
+        /** Channels of the silence Media3 plays for a clip without audio. */
+        const val SILENCE_CHANNEL_COUNT = 2
+    }
+
     /**
      * Paths to temp files produced while building the sequence (currently:
      * reversed-segment MP4s pre-rendered by [VideoReverser]). The caller MUST
@@ -254,6 +259,11 @@ class VideoSequenceBuilder(
     /**
      * Detects if audio normalization is needed across video clips.
      *
+     * A muted clip, whose audio is removed, and a clip without audio count as
+     * stereo: Media3 fills them with stereo silence, and a 5.1 clip after one
+     * of them failed the export ("No mixing matrix for input channel count")
+     * unless every clip is folded to stereo.
+     *
      * @return true if clips have different audio channel counts
      */
     fun detectAudioNormalizationNeeded(): Boolean {
@@ -261,8 +271,12 @@ class VideoSequenceBuilder(
             return false
         }
 
-        val audioChannelCounts = videoClips.mapNotNull { clip ->
-            mediaInfoExtractor.getAudioChannelCount(clip.inputPath)
+        val audioChannelCounts = videoClips.map { clip ->
+            if (clip.volume == 0.0f) {
+                SILENCE_CHANNEL_COUNT
+            } else {
+                mediaInfoExtractor.getAudioChannelCount(clip.inputPath) ?: SILENCE_CHANNEL_COUNT
+            }
         }
 
         val needsNormalization = audioChannelCounts.isNotEmpty() &&
@@ -714,18 +728,20 @@ class VideoSequenceBuilder(
             )
         }
 
-        // Per-clip volume, applied to this clip's own audio before it reaches the
-        // mixer, so it holds whether or not custom audio tracks are mixed in.
+        // Per-clip equalizer and volume, applied to this clip's own audio
+        // before it reaches the mixer, so they hold whether or not custom audio
+        // tracks are mixed in. The equalizer comes first: a boost it limits
+        // still follows the volume from there.
         val clipVolume = clip.volume
+        if (clip.equalizer != null || (clipVolume != null && clipVolume != 1.0f)) {
+            Log.d(
+                RENDER_TAG,
+                "Clip $index audio: volume ${clipVolume ?: 1.0f}x, equalizer ${clip.equalizer}"
+            )
+        }
         val perClipAudioProcessors = mutableListOf<AudioProcessor>().apply {
             addAll(normalizedAudioEffects)
-            if (clipVolume != null && clipVolume != 1.0f) {
-                Log.d(
-                    RENDER_TAG,
-                    "Clip $index volume: ${clipVolume}x (applied via VolumeAudioProcessor)"
-                )
-                add(VolumeAudioProcessor(clipVolume))
-            }
+            addAll(ClipAudioChain.processors(clipVolume, clip.equalizer))
         }
 
         // Per-clip playback speed on this clip's own audio; the video's

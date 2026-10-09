@@ -723,8 +723,9 @@ class RenderVideo {
       let tailSrc = plan.outgoingTailSourceUs
       let headSrc = plan.incomingHeadSourceUs
 
+      // A muted side still lets the other fade in or out.
       let includeAudio =
-        enableAudio && (current.volume ?? 1.0) > 0 && (next!.volume ?? 1.0) > 0
+        enableAudio && ((current.volume ?? 1.0) > 0 || (next!.volume ?? 1.0) > 0)
       let rendered: ClipTransitionRenderer.RenderResult?
       do {
         rendered = try await ClipTransitionRenderer.render(
@@ -736,7 +737,9 @@ class RenderVideo {
           type: t!.type, direction: t!.direction, curve: t!.curve,
           includeAudio: includeAudio, outputFormat: outputFormat,
           outgoingFrameRate: current.frameRateOverride,
-          incomingFrameRate: next!.frameRateOverride)
+          incomingFrameRate: next!.frameRateOverride,
+          outgoingAudio: .init(volume: current.volume, equalizer: current.equalizer),
+          incomingAudio: .init(volume: next!.volume, equalizer: next!.equalizer))
       } catch {
         return TransitionPreRender(clips: result, urls: urls, stall: error)
       }
@@ -748,7 +751,8 @@ class RenderVideo {
         appendClip(
           VideoClip(
             inputPath: current.inputPath, startUs: curStart, endUs: curEnd - tailSrc,
-            volume: current.volume, playbackSpeed: current.playbackSpeed,
+            volume: current.volume, equalizer: current.equalizer,
+            playbackSpeed: current.playbackSpeed,
             reverseVideo: false, transition: nil, chromaKey: current.chromaKey,
             frameRateOverride: current.frameRateOverride))
         let blend = blendChromaKey(
@@ -760,7 +764,8 @@ class RenderVideo {
         // Trim the incoming head in place; it keeps its own speed/transition.
         work[i + 1] = VideoClip(
           inputPath: next!.inputPath, startUs: nextStart + headSrc, endUs: nextEnd,
-          volume: next!.volume, playbackSpeed: next!.playbackSpeed,
+          volume: next!.volume, equalizer: next!.equalizer,
+          playbackSpeed: next!.playbackSpeed,
           reverseVideo: next!.reverseVideo, transition: next!.transition,
           chromaKey: next!.chromaKey, frameRateOverride: next!.frameRateOverride)
       } else {
@@ -817,7 +822,7 @@ class RenderVideo {
         let tailSrc = plan.outgoingTailSourceUs
         let headSrc = plan.incomingHeadSourceUs
         let includeAudio =
-          enableAudio && (last.volume ?? 1.0) > 0 && (first.volume ?? 1.0) > 0
+          enableAudio && ((last.volume ?? 1.0) > 0 || (first.volume ?? 1.0) > 0)
         let rendered: ClipTransitionRenderer.RenderResult?
         do {
           rendered = try await ClipTransitionRenderer.render(
@@ -829,7 +834,9 @@ class RenderVideo {
             type: wrap.type, direction: wrap.direction, curve: wrap.curve,
             includeAudio: includeAudio, outputFormat: outputFormat,
             outgoingFrameRate: last.frameRateOverride,
-            incomingFrameRate: first.frameRateOverride)
+            incomingFrameRate: first.frameRateOverride,
+            outgoingAudio: .init(volume: last.volume, equalizer: last.equalizer),
+            incomingAudio: .init(volume: first.volume, equalizer: first.equalizer))
         } catch {
           return TransitionPreRender(clips: result, urls: urls, stall: error)
         }
@@ -841,19 +848,20 @@ class RenderVideo {
             // the appended blend.
             result[0] = VideoClip(
               inputPath: first.inputPath, startUs: firstStart + headSrc,
-              endUs: lastEnd - tailSrc, volume: first.volume,
+              endUs: lastEnd - tailSrc, volume: first.volume, equalizer: first.equalizer,
               playbackSpeed: first.playbackSpeed, reverseVideo: false, transition: nil,
               chromaKey: first.chromaKey, frameRateOverride: first.frameRateOverride)
           } else {
             result[0] = VideoClip(
               inputPath: first.inputPath, startUs: firstStart + headSrc,
-              endUs: first.endUs, volume: first.volume,
+              endUs: first.endUs, volume: first.volume, equalizer: first.equalizer,
               playbackSpeed: first.playbackSpeed, reverseVideo: false,
               transition: first.transition, chromaKey: first.chromaKey,
               frameRateOverride: first.frameRateOverride)
             result[lastIdx] = VideoClip(
               inputPath: last.inputPath, startUs: last.startUs, endUs: lastEnd - tailSrc,
-              volume: last.volume, playbackSpeed: last.playbackSpeed,
+              volume: last.volume, equalizer: last.equalizer,
+              playbackSpeed: last.playbackSpeed,
               reverseVideo: false, transition: nil, chromaKey: last.chromaKey,
               frameRateOverride: last.frameRateOverride)
           }
@@ -889,7 +897,7 @@ class RenderVideo {
     guard clip.transition?.isOverlap == true else { return clip }
     return VideoClip(
       inputPath: clip.inputPath, startUs: clip.startUs, endUs: clip.endUs,
-      volume: clip.volume, playbackSpeed: clip.playbackSpeed,
+      volume: clip.volume, equalizer: clip.equalizer, playbackSpeed: clip.playbackSpeed,
       reverseVideo: clip.reverseVideo, transition: nil, chromaKey: clip.chromaKey,
       frameRateOverride: clip.frameRateOverride)
   }
