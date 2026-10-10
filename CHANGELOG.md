@@ -1,3 +1,6 @@
+## 2.32.1
+- **FIX**(android): A layer turned by its keyframes or by a wiggle stays where it was placed when it sits more than half its size past the frame edge with its corners still reaching in, as on iOS and macOS. It used to be pulled in to at most half its upright size past the edge, so more of it showed than in the preview.
+
 ## 2.32.0
 - **FEAT**(android, iOS, macOS): `VideoSegment.equalizer` and `VideoAudioTrack.equalizer` shape a clip's or a track's sound with an `AudioEqualizer` of low-shelf, peak and high-shelf bands. Both platforms compute the same filters, and a boost that would clip is limited at -1 dBFS.
 - **FIX**(android, iOS, macOS): The audio crossfade of an overlap transition plays each clip at its own volume, where it used to play both at their original level, and fades the other clip in or out when one is muted instead of going silent.

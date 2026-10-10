@@ -1,9 +1,10 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
 import android.graphics.Bitmap
+import android.util.Pair
+import androidx.media3.common.OverlaySettings
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
-import androidx.media3.effect.StaticOverlaySettings
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeClock
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
@@ -398,13 +399,17 @@ internal data class OverlayAnchors(
  * Splits a desired layer-center position (in [-1, 1] NDC, possibly beyond the
  * canvas to place the layer off-screen) into the two anchors Media3 accepts.
  *
- * Media3 accepts only [-1, 1] for both
- * [StaticOverlaySettings.Builder.setBackgroundFrameAnchor] and
- * [StaticOverlaySettings.Builder.setOverlayFrameAnchor], so a
+ * [androidx.media3.effect.StaticOverlaySettings.Builder] accepts only [-1, 1]
+ * for both background-frame and overlay-frame anchors, so a
  * single background anchor cannot move a layer fully off-screen. The background
  * anchor covers the on-canvas part; the overlay anchor supplies the remaining
  * off-canvas shift — its ±1 range maps to ±[halfNorm] of background travel,
  * which is exactly one layer half-size, enough for an edge-flush slide-out.
+ *
+ * Exact only for an overlay Media3 does not turn: the overlay anchor moves it
+ * along the overlay's own axes. A static layer is turned in its bitmap, so its
+ * [halfNorm] is the box around the turn; an animated one is anchored on its
+ * center instead (see [CenteredOverlaySettings]).
  *
  * @param targetCenter Desired layer center on this axis (may exceed [-1, 1]).
  * @param halfNorm Layer half-size on this axis in [-1, 1] units.
@@ -458,19 +463,47 @@ internal fun animatedFrameIndex(
 }
 
 /**
- * Where Media3 draws an overlay at one moment: [alpha], the anchors it splits
- * the position into (see [resolveAnchor]), the [scale] before any raster
- * compensation and the counter-clockwise [rotationDegrees].
+ * Where Media3 draws an overlay at one moment: [alpha], its center
+ * [centerNormX] / [centerNormY] in [-1, 1] units (+y up, possibly beyond the
+ * frame), the [scale] before any raster compensation and the
+ * counter-clockwise [rotationDegrees].
  */
 internal data class OverlayFrame(
     val alpha: Float,
-    val backgroundAnchorX: Float,
-    val backgroundAnchorY: Float,
-    val overlayAnchorX: Float,
-    val overlayAnchorY: Float,
+    val centerNormX: Float,
+    val centerNormY: Float,
     val scale: Float,
     val rotationDegrees: Float,
 )
+
+/**
+ * Overlay settings that anchor an overlay's own center on [centerNormX] /
+ * [centerNormY], in [-1, 1] units, even beyond the frame.
+ *
+ * [androidx.media3.effect.StaticOverlaySettings.Builder] rejects an anchor
+ * outside [-1, 1], but Media3's overlay matrix places an overlay at any
+ * anchor. Media3 scales and turns an overlay around its overlay-frame anchor,
+ * so with that anchor on the overlay's center the placement stays exact
+ * whatever the turn and scale. Splitting a position past the edge into a
+ * clamped background anchor and an overlay anchor cannot: the overlay anchor
+ * reaches at most one upright half-size, while a turned layer still shows
+ * corners further out.
+ */
+internal class CenteredOverlaySettings(
+    private val alpha: Float,
+    private val centerNormX: Float,
+    private val centerNormY: Float,
+    private val scaleX: Float,
+    private val scaleY: Float,
+    private val rotation: Float,
+) : OverlaySettings {
+    override fun getAlphaScale(): Float = alpha
+    override fun getBackgroundFrameAnchor(): Pair<Float, Float> =
+        Pair(centerNormX, centerNormY)
+    override fun getOverlayFrameAnchor(): Pair<Float, Float> = Pair(0f, 0f)
+    override fun getScale(): Pair<Float, Float> = Pair(scaleX, scaleY)
+    override fun getRotationDegrees(): Float = rotation
+}
 
 /**
  * Composes an overlay's [keyframes] and [animations] at [timeUs].
@@ -533,20 +566,17 @@ internal fun overlayFrame(
         videoHeight = videoHeight,
     )
 
-    // Media3 clamps each anchor to [-1, 1], so a fully off-screen slide is
-    // split across the background and overlay anchors (see resolveAnchor).
+    // Anchored on its own center, even past the edge (see
+    // [CenteredOverlaySettings]).
     val centerNormX = placedNormX + state.offsetX
     val centerNormY = placedNormY + state.offsetY
-    val anchorX = resolveAnchor(centerNormX, halfNormW)
-    val anchorY = resolveAnchor(centerNormY, halfNormH)
     // Flutter turns clockwise, Media3 counter-clockwise.
     val rotationDegrees = state.rotationDegrees -
         Math.toDegrees(keyframe?.rotation ?: 0.0).toFloat()
     val scale = state.scale * keyframeScale
 
-    // The anchors carry a layer at most one half-size past an edge, which
-    // hides it only while it is upright: turned, its corners would poke into
-    // the frame. A layer wholly off the frame is hidden instead.
+    // A layer wholly off the frame draws nothing; skipping it spares the
+    // compositor a draw that cannot show.
     val offFrame = liesOffFrame(
         centerNormX, centerNormY,
         halfWidthPx = imageWidth * scale / 2f,
@@ -558,10 +588,8 @@ internal fun overlayFrame(
 
     return OverlayFrame(
         alpha = if (offFrame) 0f else state.alpha * (keyframe?.opacity?.toFloat() ?: 1f),
-        backgroundAnchorX = anchorX.backgroundAnchor,
-        backgroundAnchorY = anchorY.backgroundAnchor,
-        overlayAnchorX = anchorX.overlayAnchor,
-        overlayAnchorY = anchorY.overlayAnchor,
+        centerNormX = centerNormX,
+        centerNormY = centerNormY,
         scale = scale,
         rotationDegrees = rotationDegrees,
     )
@@ -710,7 +738,7 @@ internal class AnimatedBitmapOverlay(
         )
     ]
 
-    override fun getOverlaySettings(presentationTimeUs: Long): StaticOverlaySettings {
+    override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
         val frame = overlayFrame(
             keyframes = keyframes,
             keyframeClock = keyframeClock,
@@ -729,12 +757,13 @@ internal class AnimatedBitmapOverlay(
         )
         // Media3 turns the overlay around its own center, in pixels rather
         // than in the stretched [-1, 1] square, so the tilt keeps its shape.
-        return StaticOverlaySettings.Builder()
-            .setAlphaScale(frame.alpha)
-            .setBackgroundFrameAnchor(frame.backgroundAnchorX, frame.backgroundAnchorY)
-            .setOverlayFrameAnchor(frame.overlayAnchorX, frame.overlayAnchorY)
-            .setScale(rasterScaleX * frame.scale, rasterScaleY * frame.scale)
-            .setRotationDegrees(frame.rotationDegrees)
-            .build()
+        return CenteredOverlaySettings(
+            alpha = frame.alpha,
+            centerNormX = frame.centerNormX,
+            centerNormY = frame.centerNormY,
+            scaleX = rasterScaleX * frame.scale,
+            scaleY = rasterScaleY * frame.scale,
+            rotation = frame.rotationDegrees,
+        )
     }
 }
