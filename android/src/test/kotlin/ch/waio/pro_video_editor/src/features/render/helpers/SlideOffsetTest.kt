@@ -132,22 +132,13 @@ internal class SlideOffsetTest {
 
     @Test
     fun startPointFarOutsideTheFrameStillLandsTheLayerOffCanvas() {
-        // Media3 rejects anchors outside [-1, 1], so a start point way
-        // off-canvas cannot be reached exactly. What must survive the clamp is
-        // that the layer is still *completely* outside the frame — the clamp is
-        // then invisible, because the viewer sees nothing either way.
         // The 200x100 layer of halfNormW/halfNormH resting at (400, 200) in a
-        // 1000x500 frame is centred on the canvas origin.
-        val baseNormX = 0f
-        val baseNormY = 0f
+        // 1000x500 frame is centred on the canvas origin. An animated overlay
+        // is anchored on its center wherever that lies (see
+        // CenteredOverlaySettings), so the layer starts wholly off the frame.
         val off = slideFromOffset(1f, -5000f, 9000f, layerX, layerY, videoW, videoH)
-        val ax = resolveAnchor(baseNormX + off.x, halfNormW)
-        val ay = resolveAnchor(baseNormY + off.y, halfNormH)
-
-        // Media3 places the layer's center at
-        // background − overlayAnchor * halfNorm (see resolveAnchor).
-        val centerX = ax.backgroundAnchor - ax.overlayAnchor * halfNormW
-        val centerY = ay.backgroundAnchor - ay.overlayAnchor * halfNormH
+        val centerX = 0f + off.x
+        val centerY = 0f + off.y
 
         // Off to the left and below: the layer's leading edge must sit at or
         // beyond the canvas edge it left through.
@@ -198,17 +189,5 @@ internal class SlideOffsetTest {
         val a = resolveAnchor(1.5f, 0f)
         assertEquals(1f, a.backgroundAnchor, tol)
         assertEquals(0f, a.overlayAnchor, tol)
-    }
-
-    @Test
-    fun slideOutThenResolveStaysInRangeForCenteredLayer() {
-        // End-to-end: the centered-layer slide-out that used to crash Media3.
-        for (dir in listOf("left", "right", "top", "bottom")) {
-            val off = slideOffset(dir, 1f, 0f, 0f, halfNormW, halfNormH)
-            val ax = resolveAnchor(0f + off.x, halfNormW)
-            val ay = resolveAnchor(0f + off.y, halfNormH)
-            assertTrue(ax.backgroundAnchor in -1f..1f && ax.overlayAnchor in -1f..1f, dir)
-            assertTrue(ay.backgroundAnchor in -1f..1f && ay.overlayAnchor in -1f..1f, dir)
-        }
     }
 }

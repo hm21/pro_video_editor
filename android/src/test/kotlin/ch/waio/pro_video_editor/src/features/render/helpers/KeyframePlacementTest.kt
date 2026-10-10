@@ -120,8 +120,8 @@ internal class KeyframePlacementTest {
     @Test
     fun `an overlay without keyframes stays on its resting place`() {
         val frame = frame(emptyList(), 0L)
-        assertEquals(0f, frame.backgroundAnchorX, 1e-6f)
-        assertEquals(0f, frame.backgroundAnchorY, 1e-6f)
+        assertEquals(0f, frame.centerNormX, 1e-6f)
+        assertEquals(0f, frame.centerNormY, 1e-6f)
         assertEquals(1f, frame.scale, 1e-6f)
         assertEquals(0f, frame.rotationDegrees, 1e-6f)
         assertEquals(1f, frame.alpha, 1e-6f)
@@ -135,8 +135,8 @@ internal class KeyframePlacementTest {
             listOf(keyframe(0L, scale = 2.0, rotation = PI / 2, opacity = 0.25)),
             0L,
         )
-        assertEquals(-0.8f, frame.backgroundAnchorX, 1e-6f)
-        assertEquals(0.9f, frame.backgroundAnchorY, 1e-6f)
+        assertEquals(-0.8f, frame.centerNormX, 1e-6f)
+        assertEquals(0.9f, frame.centerNormY, 1e-6f)
         assertEquals(2f, frame.scale, 1e-6f)
         // Clockwise in Flutter, counter-clockwise in Media3.
         assertEquals(-90f, frame.rotationDegrees, 1e-4f)
@@ -157,10 +157,8 @@ internal class KeyframePlacementTest {
                 )
             ),
         )
-        // Center x, as Media3 places it: background anchor minus the overlay
-        // anchor's share of the doubled half width (0.4).
-        val centerX = frame.backgroundAnchorX - frame.overlayAnchorX * 0.4f
-        assertEquals(-1f - 0.4f, centerX, 1e-5f)
+        // The doubled half width is 0.4.
+        assertEquals(-1f - 0.4f, frame.centerNormX, 1e-5f)
     }
 
     @Test
@@ -174,14 +172,14 @@ internal class KeyframePlacementTest {
             listOf(keyframe(0L, x = 400.0, y = 450.0, scale = 2.0)), 0L, listOf(bounce)
         )
         // Lifted by its whole height, 0.2 in y-up units, and twice that doubled.
-        assertEquals(0.2f, plain.backgroundAnchorY, 1e-5f)
-        assertEquals(0.4f, doubled.backgroundAnchorY, 1e-5f)
+        assertEquals(0.2f, plain.centerNormY, 1e-5f)
+        assertEquals(0.4f, doubled.centerNormY, 1e-5f)
     }
 
     @Test
     fun `a turned layer wholly off the frame is hidden`() {
-        // Centered 500 px left of the frame: the anchors can only bring it to
-        // 100 px left of it, where its 45° corners would reach 6 px in.
+        // Centered 500 px left of the frame, the box around its 45° turn ends
+        // 394 px short of it.
         val off = frame(listOf(keyframe(0L, x = -600.0, y = 450.0, rotation = PI / 4)), 0L)
         assertEquals(0f, off.alpha, 1e-6f)
     }
@@ -194,6 +192,33 @@ internal class KeyframePlacementTest {
             0L,
         )
         assertEquals(0.5f, partly.alpha, 1e-6f)
+    }
+
+    @Test
+    fun `a turned layer past the edge keeps its center`() {
+        // A 100 x 100 layer turned 45° and centered at x = 365 on a 300 px
+        // wide frame: its left corner reaches 5.7 px into the frame. Clamped
+        // to one upright half-size past the edge, it would sit at x = 350 and
+        // reach 20.7 px in.
+        val frame = overlayFrame(
+            keyframes = listOf(keyframe(0L, x = 315.0, y = 100.0, rotation = PI / 4)),
+            keyframeClock = KeyframeClock.OUTPUT,
+            animations = emptyList(),
+            timeUs = 0L,
+            animationStartUs = 0L,
+            animationEndUs = 10_000_000L,
+            baseNormX = 0f,
+            baseNormY = 0f,
+            imageWidth = 100,
+            imageHeight = 100,
+            videoWidth = 300,
+            videoHeight = 300,
+            layerX = 0f,
+            layerY = 0f,
+        )
+        assertEquals(365f / 300f * 2f - 1f, frame.centerNormX, 1e-6f)
+        assertEquals(0f, frame.centerNormY, 1e-6f)
+        assertEquals(1f, frame.alpha, 1e-6f)
     }
 
     @Test
@@ -341,7 +366,7 @@ internal class KeyframePlacementTest {
         // 1.25 s of output is 1.5 s on the clock, along the eased curve.
         val onClock = frame(keyframes, 1_250_000L, keyframeClock = clock)
         val direct = frame(keyframes, 1_500_000L)
-        assertEquals(direct.backgroundAnchorX, onClock.backgroundAnchorX, 1e-6f)
+        assertEquals(direct.centerNormX, onClock.centerNormX, 1e-6f)
         assertEquals(direct.alpha, onClock.alpha, 1e-6f)
     }
 

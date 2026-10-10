@@ -956,6 +956,41 @@ void main() {
       expect(magentaAt(f, 1260, 560), isFalse, reason: 'rotated, off');
     }, skip: kIsWeb);
 
+    testWidgets('turned layers centred far past an edge keep their place', (
+      tester,
+    ) async {
+      final square = EditorLayerImage.memory(
+        await _solidPng(_magenta, width: 400, height: 400),
+      );
+      // A 400x400 square turned 45° and centred 260 px past an edge: its
+      // corner reaches 22.8 px into the frame. Held to one upright half-size
+      // (200 px) past the edge, it would reach 82.8 px in.
+      ImageLayer turned(Offset offset, {required bool keyframed}) => ImageLayer(
+        image: square,
+        offset: offset,
+        size: const Size(400, 400),
+        rotation: keyframed ? 0 : 0.7853981633974483,
+        keyframes: [
+          if (keyframed)
+            TimelineKeyframe(
+              time: Duration.zero,
+              offset: offset,
+              rotation: 0.7853981633974483,
+            ),
+        ],
+      );
+      final out = await render([
+        turned(const Offset(1340, 160), keyframed: true),
+        turned(const Offset(-460, 160), keyframed: false),
+      ]);
+
+      final f = await frameOf(out, at: const Duration(milliseconds: 500));
+      expect(magentaAt(f, 1272, 360), isTrue, reason: 'keyframed, corner');
+      expect(magentaAt(f, 1227, 360), isFalse, reason: 'keyframed, past it');
+      expect(magentaAt(f, 8, 360), isTrue, reason: 'rotated, corner');
+      expect(magentaAt(f, 53, 360), isFalse, reason: 'rotated, past it');
+    }, skip: kIsWeb);
+
     testWidgets('a loop plays only within its window, from its start', (
       tester,
     ) async {
