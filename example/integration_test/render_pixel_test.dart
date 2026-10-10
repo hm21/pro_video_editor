@@ -982,6 +982,36 @@ void main() {
       final out = await render([
         turned(const Offset(1340, 160), keyframed: true),
         turned(const Offset(-460, 160), keyframed: false),
+        // A smaller layout grown by its keyframe has the same 400x400
+        // extent, even when its raster is prepared at a different size.
+        ImageLayer(
+          image: square,
+          offset: const Offset(540, -360),
+          size: const Size(200, 200),
+          keyframes: const [
+            TimelineKeyframe(
+              time: Duration.zero,
+              offset: Offset(540, -360),
+              scale: 2,
+              rotation: 0.7853981633974483,
+            ),
+          ],
+        ),
+        // At 0.5 s the wiggle reaches 45 degrees, bringing only its corner
+        // onto the frame from a center 260 px below the bottom edge.
+        ImageLayer(
+          image: square,
+          offset: const Offset(440, 780),
+          size: const Size(400, 400),
+          animations: const [
+            LayerAnimation(
+              type: LayerAnimationType.wiggle,
+              phase: AnimationPhase.loop,
+              duration: Duration(seconds: 2),
+              wiggleAngle: 0.7853981633974483,
+            ),
+          ],
+        ),
       ]);
 
       final f = await frameOf(out, at: const Duration(milliseconds: 500));
@@ -989,6 +1019,10 @@ void main() {
       expect(magentaAt(f, 1227, 360), isFalse, reason: 'keyframed, past it');
       expect(magentaAt(f, 8, 360), isTrue, reason: 'rotated, corner');
       expect(magentaAt(f, 53, 360), isFalse, reason: 'rotated, past it');
+      expect(magentaAt(f, 640, 8), isTrue, reason: 'scaled, corner');
+      expect(magentaAt(f, 640, 53), isFalse, reason: 'scaled, past it');
+      expect(magentaAt(f, 640, 712), isTrue, reason: 'wiggle, corner');
+      expect(magentaAt(f, 640, 667), isFalse, reason: 'wiggle, past it');
     }, skip: kIsWeb);
 
     testWidgets('a loop plays only within its window, from its start', (

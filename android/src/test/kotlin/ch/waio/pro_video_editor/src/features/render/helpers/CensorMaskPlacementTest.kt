@@ -103,7 +103,7 @@ internal class CensorMaskPlacementTest {
 
     @Test
     fun anOffCanvasAnchorShiftsTheBox() {
-        // AnimatedBitmapOverlay splits a center beyond the canvas into a
+        // prepareOverlay splits a static layer's center beyond the canvas into a
         // clamped background anchor and an overlay anchor.
         val placement = CensorMaskPlacement.of(
             backgroundAnchor = floatArrayOf(1f, 0f),

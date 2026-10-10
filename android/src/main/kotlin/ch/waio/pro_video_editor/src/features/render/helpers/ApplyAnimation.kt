@@ -399,9 +399,8 @@ internal data class OverlayAnchors(
  * Splits a desired layer-center position (in [-1, 1] NDC, possibly beyond the
  * canvas to place the layer off-screen) into the two anchors Media3 accepts.
  *
- * Media3 accepts only [-1, 1] for both
- * [StaticOverlaySettings.Builder.setBackgroundFrameAnchor] and
- * [StaticOverlaySettings.Builder.setOverlayFrameAnchor], so a
+ * [androidx.media3.effect.StaticOverlaySettings.Builder] accepts only [-1, 1]
+ * for both background-frame and overlay-frame anchors, so a
  * single background anchor cannot move a layer fully off-screen. The background
  * anchor covers the on-canvas part; the overlay anchor supplies the remaining
  * off-canvas shift — its ±1 range maps to ±[halfNorm] of background travel,
