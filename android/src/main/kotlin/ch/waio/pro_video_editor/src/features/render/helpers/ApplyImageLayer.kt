@@ -10,14 +10,18 @@ import androidx.media3.effect.GlEffect
 import androidx.media3.effect.OverlayEffect
 import java.io.File
 import java.nio.ByteBuffer
+import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.math.sqrt
 import androidx.core.graphics.scale
 import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.TimestampWrapper
 import ch.waio.pro_video_editor.src.features.render.models.ImageLayer
+import ch.waio.pro_video_editor.src.features.render.models.LayerAudioVisualizerConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.ImageOrientation
 
@@ -129,7 +133,6 @@ fun applyTimedImageLayers(
     )
     for (layer in imageLayers) {
         try {
-            val image = layer.image ?: continue
             val startTimeUs = layer.startUs
             val endTimeUs = layer.endUs
             // Keyframes move the layer as animations do, frame by frame.
@@ -140,6 +143,32 @@ fun applyTimedImageLayers(
                 "Layer timing: ${if (startTimeUs == -1L) "from start" else "start=${startTimeUs}us"}," +
                         " ${if (endTimeUs == -1L) "until end" else "end=${endTimeUs}us"}"
             )
+
+            // An audio visualizer draws itself into the layer's box on every
+            // frame and never reads the layer's image.
+            val visualizer = layer.audioVisualizer
+            if (visualizer != null) {
+                val overlay = prepareAudioVisualizerOverlay(
+                    layer, visualizer, videoWidth, videoHeight, rasterScale, rasterBudget
+                )
+                if (overlay == null) {
+                    Log.e(
+                        RENDER_TAG,
+                        "Layer: audio visualizer without a size to fill; skipping layer"
+                    )
+                    continue
+                }
+                Log.d(
+                    RENDER_TAG,
+                    "Layer: audio visualizer (${visualizer.style}, " +
+                            "${visualizer.bandCount} bands, ${visualizer.frameCount} rows)"
+                )
+                addTimedOverlayEffect(
+                    videoEffects, OverlayEffect(listOf(overlay)), startTimeUs, endTimeUs
+                )
+                continue
+            }
+            val image = layer.image ?: continue
 
             // Animated GIFs decode to several frames; everything else (PNG/JPEG
             // and static GIFs) decodes to a single bitmap.
@@ -269,22 +298,15 @@ fun applyTimedImageLayers(
                 OverlayEffect(listOf(bitmapOverlay))
             }
 
-            if (startTimeUs == -1L && endTimeUs == -1L) {
-                // No time range set — show for the entire video
-                videoEffects += layerEffect
-            } else {
-                val effectiveStart = if (startTimeUs == -1L) 0L else startTimeUs
-                val effectiveEnd = if (endTimeUs == -1L) Long.MAX_VALUE else endTimeUs
-                if (censor != null && effectiveEnd <= effectiveStart) {
-                    // An empty window hides nothing; TimestampWrapper would
-                    // reject it, which a censor layer turns into a failure.
-                    Log.d(RENDER_TAG, "Layer: censor with an empty time range; skipping layer")
-                    continue
-                }
-                videoEffects += TimestampWrapper(
-                    layerEffect, effectiveStart, effectiveEnd
-                )
+            if (censor != null && endTimeUs != -1L &&
+                endTimeUs <= (if (startTimeUs == -1L) 0L else startTimeUs)
+            ) {
+                // An empty window hides nothing; TimestampWrapper would
+                // reject it, which a censor layer turns into a failure.
+                Log.d(RENDER_TAG, "Layer: censor with an empty time range; skipping layer")
+                continue
             }
+            addTimedOverlayEffect(videoEffects, layerEffect, startTimeUs, endTimeUs)
 
         } catch (e: OutOfMemoryError) {
             // An Error, so no catch above sees it: it would unwind the
@@ -305,6 +327,27 @@ fun applyTimedImageLayers(
             Log.e(RENDER_TAG, "Failed to decode image layer: ${e.message}")
         }
     }
+}
+
+/**
+ * Adds [effect] to [videoEffects], shown from [startTimeUs] to [endTimeUs]
+ * (`-1` = from the start, until the end).
+ */
+@UnstableApi
+private fun addTimedOverlayEffect(
+    videoEffects: MutableList<Effect>,
+    effect: GlEffect,
+    startTimeUs: Long,
+    endTimeUs: Long,
+) {
+    if (startTimeUs == -1L && endTimeUs == -1L) {
+        // No time range set — show for the entire video
+        videoEffects += effect
+        return
+    }
+    val effectiveStart = if (startTimeUs == -1L) 0L else startTimeUs
+    val effectiveEnd = if (endTimeUs == -1L) Long.MAX_VALUE else endTimeUs
+    videoEffects += TimestampWrapper(effect, effectiveStart, effectiveEnd)
 }
 
 /**
@@ -581,6 +624,175 @@ private fun prepareOverlay(
     rasterScale: Float = 1f,
     rasterBudget: Long = Long.MAX_VALUE,
 ): PreparedOverlay {
+    val raster = planOverlayRaster(
+        rawBitmap.width, rawBitmap.height, layer, videoWidth, videoHeight,
+        rasterScale, rasterBudget
+    )
+    val isStretched = raster.isStretched
+    val hasExplicitSize = layer.width != null && layer.height != null
+    val rasterWidth = raster.rasterWidth
+    val rasterHeight = raster.rasterHeight
+
+    // Scale straight to the raster size. A stretched layer goes to the frame
+    // (capped) in one step rather than through its declared size first.
+    val sizedBitmap = if (
+        isStretched || hasExplicitSize ||
+        rasterWidth != rawBitmap.width || rasterHeight != rawBitmap.height
+    ) {
+        val scaled = rawBitmap.scale(rasterWidth, rasterHeight)
+        // scale() may return the same object when dimensions already match
+        if (scaled !== rawBitmap) rawBitmap.recycle()
+        scaled
+    } else {
+        rawBitmap
+    }
+
+    val unpremultiplied = unpremultiplyAlpha(sizedBitmap)
+    if (unpremultiplied !== sizedBitmap) sizedBitmap.recycle()
+    val finalOverlay: Bitmap = unpremultiplied
+
+    // Rotate the overlay around its center. baseNormX/baseNormY describe the
+    // (unrotated) layout center; rotating about the bitmap center keeps that
+    // point fixed, so the anchor stays correct while the bounding box grows
+    // symmetrically. A keyframed layer is turned by its keyframes instead,
+    // frame by frame (see [AnimatedBitmapOverlay]), so its box stays upright.
+    val rotatedOverlay = if (layer.keyframes.isNotEmpty()) {
+        finalOverlay
+    } else {
+        rotateBitmap(finalOverlay, Math.toDegrees(layer.rotation).toFloat())
+    }
+
+    return placeOverlay(rotatedOverlay, raster, layer, videoWidth, videoHeight)
+}
+
+/**
+ * The overlay of an audio visualizer layer, or `null` when the layer has no
+ * box to fill: a positioned layer without a size.
+ *
+ * The visualizer is rastered as an image of the layer's box would be — at the
+ * layer's largest keyframe scale, held to the raster budget, turned by the
+ * layer's rotation — and placed and animated through the same overlay, so it
+ * sits exactly where an image layer of that box would.
+ */
+@UnstableApi
+private fun prepareAudioVisualizerOverlay(
+    layer: VideoSequenceBuilder.ImageLayerConfig,
+    visualizer: LayerAudioVisualizerConfig,
+    videoWidth: Int,
+    videoHeight: Int,
+    rasterScale: Float,
+    rasterBudget: Long,
+): BitmapOverlay? {
+    val isStretched = layer.x == null && layer.y == null
+    val width = layer.width
+    val height = layer.height
+    val (boxWidth, boxHeight) = when {
+        isStretched -> Pair(videoWidth, videoHeight)
+        width != null && height != null -> Pair(width.toInt(), height.toInt())
+        else -> return null
+    }
+    if (boxWidth <= 0 || boxHeight <= 0) return null
+
+    // As large as the box at its largest keyframe scale, the raster a sized
+    // image of that resolution would get.
+    val growth = if (isStretched) 1.0 else keyframeRasterGrowth(layer)
+    val raster = planOverlayRaster(
+        (boxWidth * growth).roundToInt(), (boxHeight * growth).roundToInt(),
+        layer, videoWidth, videoHeight, rasterScale, rasterBudget
+    )
+    // A keyframed layer is turned by its keyframes, frame by frame.
+    val degrees = if (layer.keyframes.isNotEmpty()) 0f
+        else Math.toDegrees(layer.rotation).toFloat()
+    val (targetWidth, targetHeight) = rotatedBoxSize(
+        raster.rasterWidth, raster.rasterHeight, degrees
+    )
+    val target = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+    val prepared = placeOverlay(target, raster, layer, videoWidth, videoHeight)
+
+    val placement = if (layer.animations.isNotEmpty() || layer.keyframes.isNotEmpty()) {
+        AnimatedBitmapOverlay(
+            bitmap = target,
+            baseNormX = prepared.baseNormX,
+            baseNormY = prepared.baseNormY,
+            imageWidth = prepared.displayWidth,
+            imageHeight = prepared.displayHeight,
+            videoWidth = videoWidth,
+            videoHeight = videoHeight,
+            layerX = (layer.x ?: 0).toFloat(),
+            layerY = (layer.y ?: 0).toFloat(),
+            layerStartUs = layer.startUs,
+            layerEndUs = layer.endUs,
+            animations = layer.animations,
+            rasterScaleX = prepared.rasterScaleX,
+            rasterScaleY = prepared.rasterScaleY,
+            animationStartUs = layer.animationStartUs,
+            animationEndUs = layer.animationEndUs,
+            keyframes = layer.keyframes,
+            keyframeClock = layer.keyframeClock
+        )
+    } else {
+        BitmapOverlay.createStaticBitmapOverlay(target, prepared.overlaySettings)
+    }
+    return AudioVisualizerOverlay(
+        placement = placement,
+        target = target,
+        visualizer = visualizer,
+        boxWidth = raster.displayWidth.toFloat(),
+        boxHeight = raster.displayHeight.toFloat(),
+        rotationDegrees = degrees,
+        rasterScaleX = raster.scaleX,
+        rasterScaleY = raster.scaleY,
+    )
+}
+
+/**
+ * The bounding box of a [width] x [height] raster turned by [degrees] about its
+ * center, in whole pixels and at least one per axis.
+ */
+internal fun rotatedBoxSize(width: Int, height: Int, degrees: Float): Pair<Int, Int> {
+    if (degrees % 360f == 0f) return Pair(width, height)
+    val radians = Math.toRadians(degrees.toDouble())
+    val cos = abs(cos(radians))
+    val sin = abs(sin(radians))
+    return Pair(
+        (width * cos + height * sin).roundToInt().coerceAtLeast(1),
+        (width * sin + height * cos).roundToInt().coerceAtLeast(1),
+    )
+}
+
+/**
+ * The size an overlay is laid out at and the size it is rastered at; see
+ * [planOverlayRaster].
+ *
+ * @property displayWidth The unrotated width the layer occupies in the
+ *   composition, in composition pixels.
+ * @property rasterWidth The width it is rastered at, before any rotation.
+ * @property scaleX What Media3 multiplies the raster by to land back on
+ *   [displayWidth]; `1f` when uncapped.
+ */
+private data class OverlayRaster(
+    val isStretched: Boolean,
+    val displayWidth: Int,
+    val displayHeight: Int,
+    val rasterWidth: Int,
+    val rasterHeight: Int,
+    val scaleX: Float,
+    val scaleY: Float,
+)
+
+/**
+ * Plans how [layer] is rastered from an image of [rawWidth] x [rawHeight]:
+ * the size it is laid out at and the size its raster is held to.
+ */
+private fun planOverlayRaster(
+    rawWidth: Int,
+    rawHeight: Int,
+    layer: VideoSequenceBuilder.ImageLayerConfig,
+    videoWidth: Int,
+    videoHeight: Int,
+    rasterScale: Float,
+    rasterBudget: Long,
+): OverlayRaster {
     // Determine if this layer should stretch or be positioned
     val isStretched = layer.x == null && layer.y == null
     val hasExplicitSize = layer.width != null && layer.height != null
@@ -613,9 +825,9 @@ private fun prepareOverlay(
             // composition frame (see [scaledToClipFrame]). Converted, it is
             // resampled anyway, so it is held to the raster budget like a sized
             // layer: a clip larger than the frame on one axis scales it up.
-            displayWidth = (rawBitmap.width * layer.naturalSizeScale)
+            displayWidth = (rawWidth * layer.naturalSizeScale)
                 .roundToInt().coerceAtLeast(1)
-            displayHeight = (rawBitmap.height * layer.naturalSizeScale)
+            displayHeight = (rawHeight * layer.naturalSizeScale)
                 .roundToInt().coerceAtLeast(1)
             cappable = layer.naturalSizeScale != 1.0
         }
@@ -631,8 +843,8 @@ private fun prepareOverlay(
             max(
                 1.0,
                 min(
-                    rawBitmap.width.toDouble() / displayWidth,
-                    rawBitmap.height.toDouble() / displayHeight
+                    rawWidth.toDouble() / displayWidth,
+                    rawHeight.toDouble() / displayHeight
                 )
             )
         )
@@ -647,23 +859,34 @@ private fun prepareOverlay(
     val overlayScaleX = rasterCompensation(displayWidth, rasterWidth)
     val overlayScaleY = rasterCompensation(displayHeight, rasterHeight)
 
-    // Scale straight to the raster size. A stretched layer goes to the frame
-    // (capped) in one step rather than through its declared size first.
-    val sizedBitmap = if (
-        isStretched || hasExplicitSize ||
-        rasterWidth != rawBitmap.width || rasterHeight != rawBitmap.height
-    ) {
-        val scaled = rawBitmap.scale(rasterWidth, rasterHeight)
-        // scale() may return the same object when dimensions already match
-        if (scaled !== rawBitmap) rawBitmap.recycle()
-        scaled
-    } else {
-        rawBitmap
-    }
+    return OverlayRaster(
+        isStretched = isStretched,
+        displayWidth = displayWidth,
+        displayHeight = displayHeight,
+        rasterWidth = rasterWidth,
+        rasterHeight = rasterHeight,
+        scaleX = overlayScaleX,
+        scaleY = overlayScaleY,
+    )
+}
 
-    val unpremultiplied = unpremultiplyAlpha(sizedBitmap)
-    if (unpremultiplied !== sizedBitmap) sizedBitmap.recycle()
-    val finalOverlay: Bitmap = unpremultiplied
+/**
+ * Anchors [rotatedOverlay], the raster [raster] planned turned by the layer's
+ * rotation, where [layer] places it.
+ */
+@UnstableApi
+private fun placeOverlay(
+    rotatedOverlay: Bitmap,
+    raster: OverlayRaster,
+    layer: VideoSequenceBuilder.ImageLayerConfig,
+    videoWidth: Int,
+    videoHeight: Int,
+): PreparedOverlay {
+    val isStretched = raster.isStretched
+    val displayWidth = raster.displayWidth
+    val displayHeight = raster.displayHeight
+    val overlayScaleX = raster.scaleX
+    val overlayScaleY = raster.scaleY
 
     var baseNormX = 0f
     var baseNormY = 0f
@@ -682,17 +905,6 @@ private fun prepareOverlay(
         val centerY = y.toFloat() + displayHeight / 2f
         baseNormX = (centerX / videoWidth) * 2f - 1f
         baseNormY = 1f - (centerY / videoHeight) * 2f
-    }
-
-    // Rotate the overlay around its center. baseNormX/baseNormY describe the
-    // (unrotated) layout center; rotating about the bitmap center keeps that
-    // point fixed, so the anchor stays correct while the bounding box grows
-    // symmetrically. A keyframed layer is turned by its keyframes instead,
-    // frame by frame (see [AnimatedBitmapOverlay]), so its box stays upright.
-    val rotatedOverlay = if (layer.keyframes.isNotEmpty()) {
-        finalOverlay
-    } else {
-        rotateBitmap(finalOverlay, Math.toDegrees(layer.rotation).toFloat())
     }
 
     // Rotation grows the bounding box. The display size grows with it, per

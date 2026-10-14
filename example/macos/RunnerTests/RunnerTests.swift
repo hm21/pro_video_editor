@@ -3808,3 +3808,258 @@ final class KeyframeTests: XCTestCase {
     XCTAssertEqual(resolved.opacity, 0.8, accuracy: 1e-6)
   }
 }
+
+/// The audio visualizer layer. The shape numbers are those of the Dart
+/// `audio_visualizer_shapes_test.dart` and the Kotlin
+/// `AudioVisualizerShapesTest`, so the export draws what the editor
+/// previews. Change them together.
+final class AudioVisualizerTests: XCTestCase {
+
+  /// Two bands, ten rows a second: [0, 1] at 0 s, [1, 0] at 0.1 s.
+  private let visualizer = LayerAudioVisualizerConfig(
+    style: .bars, color: 0xFFFF_FFFF, bandCount: 2, levels: [0, 1, 1, 0],
+    framesPerSecond: 10)
+
+  private func levels(atUs timeUs: Int64) -> [Float] {
+    var levels = [Float](repeating: 0, count: 2)
+    visualizer.levels(atUs: timeUs, into: &levels)
+    return levels
+  }
+
+  private func assertBars(
+    _ expected: [AudioVisualizerBar], _ actual: [AudioVisualizerBar],
+    file: StaticString = #filePath, line: UInt = #line
+  ) {
+    XCTAssertEqual(expected.count, actual.count, file: file, line: line)
+    for (e, a) in zip(expected, actual) {
+      XCTAssertEqual(e.left, a.left, accuracy: 1e-9, file: file, line: line)
+      XCTAssertEqual(e.top, a.top, accuracy: 1e-9, file: file, line: line)
+      XCTAssertEqual(e.right, a.right, accuracy: 1e-9, file: file, line: line)
+      XCTAssertEqual(e.bottom, a.bottom, accuracy: 1e-9, file: file, line: line)
+      XCTAssertEqual(e.radius, a.radius, accuracy: 1e-9, file: file, line: line)
+      XCTAssertEqual(e.pivotX, a.pivotX, accuracy: 1e-9, file: file, line: line)
+      XCTAssertEqual(e.pivotY, a.pivotY, accuracy: 1e-9, file: file, line: line)
+      XCTAssertEqual(e.rotation, a.rotation, accuracy: 1e-9, file: file, line: line)
+    }
+  }
+
+  func testALayerWithoutVisualizerDrawsItsImage() {
+    XCTAssertNil(LayerAudioVisualizerConfig.fromArguments(nil))
+  }
+
+  func testParsesTheChannelMap() throws {
+    let levels: [Float] = [0.25, 0.5]
+    let data = levels.withUnsafeBufferPointer { Data(buffer: $0) }
+    let parsed = try XCTUnwrap(
+      LayerAudioVisualizerConfig.fromArguments([
+        "style": "mirroredBars",
+        // An opaque color does not fit a 32-bit int in Dart.
+        "color": NSNumber(value: Int64(0xFF27_C58B)),
+        "bandCount": 2,
+        "levels": FlutterStandardTypedData(float32: data),
+        "framesPerSecond": 30.0,
+        "barFill": 0.4,
+      ]))
+
+    XCTAssertEqual(parsed.style, .mirroredBars)
+    XCTAssertEqual(parsed.color, 0xFF27_C58B)
+    XCTAssertEqual(parsed.bandCount, 2)
+    XCTAssertEqual(parsed.levels, [0.25, 0.5])
+    XCTAssertEqual(parsed.framesPerSecond, 30)
+    XCTAssertEqual(parsed.barFill, 0.4)
+  }
+
+  func testFallsBackToTheDartDefaultsAndKeepsWholeRows() throws {
+    let parsed = try XCTUnwrap(
+      LayerAudioVisualizerConfig.fromArguments([
+        "style": "spiral",
+        "bandCount": 2,
+        "levels": [0.5, 0.5, 1.0],
+        "framesPerSecond": 0,
+        "barFill": 1.5,
+      ]))
+
+    XCTAssertEqual(parsed.style, .bars)
+    XCTAssertNil(parsed.barFill)
+    XCTAssertEqual(parsed.color, 0xFFFF_FFFF)
+    XCTAssertEqual(parsed.levels, [0.5, 0.5])
+    XCTAssertEqual(parsed.framesPerSecond, 60)
+  }
+
+  func testAnImageLayerCarriesItsVisualizer() throws {
+    let layer = try XCTUnwrap(
+      ImageLayerConfig.fromArguments([
+        "imageData": FlutterStandardTypedData(bytes: Data([1, 2, 3])),
+        "audioVisualizer": ["style": "wave", "bandCount": 1, "levels": [0.5]],
+      ]))
+
+    XCTAssertEqual(layer.audioVisualizer?.style, .wave)
+  }
+
+  func testReadsARowAtItsOwnTimeAndMixesBetweenRows() {
+    XCTAssertEqual(levels(atUs: 0), [0, 1])
+    XCTAssertEqual(levels(atUs: 100_000), [1, 0])
+    let mixed = levels(atUs: 25_000)
+    XCTAssertEqual(mixed[0], 0.25, accuracy: 1e-6)
+    XCTAssertEqual(mixed[1], 0.75, accuracy: 1e-6)
+  }
+
+  func testFadesToSilenceAfterTheLastRowAndBeforeTheFirst() {
+    XCTAssertEqual(levels(atUs: 150_000), [0.5, 0])
+    XCTAssertEqual(levels(atUs: 200_000), [0, 0])
+    XCTAssertEqual(levels(atUs: -50_000), [0, 0.5])
+  }
+
+  func testBarsStandOnTheBottomASilentOneAsADot() {
+    let shapes = audioVisualizerShapes(
+      style: .bars, width: 100, height: 50, levels: [0, 0.5, 1, 0.2])
+
+    XCTAssertNil(shapes.wave)
+    assertBars(
+      [
+        AudioVisualizerBar(left: 3.75, top: 32.5, right: 21.25, bottom: 50, radius: 8.75),
+        AudioVisualizerBar(left: 28.75, top: 25, right: 46.25, bottom: 50, radius: 8.75),
+        AudioVisualizerBar(left: 53.75, top: 0, right: 71.25, bottom: 50, radius: 8.75),
+        AudioVisualizerBar(left: 78.75, top: 32.5, right: 96.25, bottom: 50, radius: 8.75),
+      ], shapes.bars)
+  }
+
+  func testMirroredBarsGrowFromTheMiddle() {
+    let shapes = audioVisualizerShapes(
+      style: .mirroredBars, width: 100, height: 50, levels: [0, 0.5, 1, 0.2])
+
+    assertBars(
+      [
+        AudioVisualizerBar(left: 3.75, top: 16.25, right: 21.25, bottom: 33.75, radius: 8.75),
+        AudioVisualizerBar(left: 28.75, top: 12.5, right: 46.25, bottom: 37.5, radius: 8.75),
+        AudioVisualizerBar(left: 53.75, top: 0, right: 71.25, bottom: 50, radius: 8.75),
+        AudioVisualizerBar(left: 78.75, top: 16.25, right: 96.25, bottom: 33.75, radius: 8.75),
+      ], shapes.bars)
+  }
+
+  func testACircleMirrorsTheBandsDownBothSidesOfItsRing() {
+    let shapes = audioVisualizerShapes(style: .circle, width: 200, height: 100, levels: [1, 0])
+
+    func bar(_ top: Double, _ rotation: Double) -> AudioVisualizerBar {
+      AudioVisualizerBar(
+        left: -6.25, top: top, right: 6.25, bottom: -25, radius: 6.25, pivotX: 100,
+        pivotY: 50, rotation: rotation)
+    }
+    assertBars(
+      [
+        bar(-50, Double.pi / 4), bar(-37.5, 3 * Double.pi / 4),
+        bar(-37.5, 5 * Double.pi / 4), bar(-50, 7 * Double.pi / 4),
+      ], shapes.bars)
+  }
+
+  func testABarFillsTheShareOfItsSlotItIsGiven() {
+    let shapes = audioVisualizerShapes(
+      style: .bars, width: 100, height: 50, levels: [1, 0], barFill: 0.5)
+
+    assertBars(
+      [
+        AudioVisualizerBar(left: 12.5, top: 0, right: 37.5, bottom: 50, radius: 12.5),
+        AudioVisualizerBar(left: 62.5, top: 25, right: 87.5, bottom: 50, radius: 12.5),
+      ], shapes.bars)
+  }
+
+  func testARingOfBarsFillsTheShareOfTheRingItIsGiven() {
+    let shapes = audioVisualizerShapes(
+      style: .circle, width: 200, height: 100, levels: [1, 0], barFill: 0.2)
+    // 2 pi 25 / 4 * 0.2 wide, leaving 25 - that for the loudest bar.
+    let w = 7.853981633974483
+
+    func bar(_ top: Double, _ rotation: Double) -> AudioVisualizerBar {
+      AudioVisualizerBar(
+        left: -w / 2, top: top, right: w / 2, bottom: -25, radius: w / 2, pivotX: 100,
+        pivotY: 50, rotation: rotation)
+    }
+    assertBars(
+      [
+        bar(-50, Double.pi / 4), bar(-(25 + w), 3 * Double.pi / 4),
+        bar(-(25 + w), 5 * Double.pi / 4), bar(-50, 7 * Double.pi / 4),
+      ], shapes.bars)
+  }
+
+  func testAWaveTapersAtTheEdgesAndStaysInsideTheBox() throws {
+    let shapes = audioVisualizerShapes(style: .wave, width: 40, height: 20, levels: [0.5, 1])
+    let expected: [Double] = [
+      0, 10,
+      1.6666666667, 9.1666666667, 5, 6.6666666667, 10, 5,
+      15, 3.3333333333, 25, 0, 30, 0,
+      35, 0.8333333333, 38.3333333333, 8.3333333333, 40, 10,
+      38.3333333333, 11.6666666667, 35, 19.1666666667, 30, 20,
+      25, 20, 15, 16.6666666667, 10, 15,
+      5, 13.3333333333, 1.6666666667, 10.8333333333, 0, 10,
+    ]
+
+    XCTAssertTrue(shapes.bars.isEmpty)
+    let wave = try XCTUnwrap(shapes.wave)
+    XCTAssertEqual(wave.count, expected.count)
+    for (index, value) in expected.enumerated() {
+      XCTAssertEqual(wave[index], value, accuracy: 1e-9, "value \(index)")
+    }
+  }
+
+  func testDrawsNothingWithoutBandsOrWithoutABox() {
+    for style: LayerAudioVisualizerConfig.Style in [.bars, .mirroredBars, .wave, .circle] {
+      let empty = audioVisualizerShapes(style: style, width: 0, height: 10, levels: [1])
+      XCTAssertTrue(empty.bars.isEmpty)
+      XCTAssertNil(empty.wave)
+      XCTAssertTrue(audioVisualizerShapes(style: style, width: 10, height: 10, levels: []).bars.isEmpty)
+    }
+  }
+
+  /// The RGBA bytes of [image], drawn top row first.
+  private func pixels(of image: CIImage) -> (width: Int, height: Int, bytes: [UInt8]) {
+    let width = Int(image.extent.width)
+    let height = Int(image.extent.height)
+    var bytes = [UInt8](repeating: 0, count: width * height * 4)
+    CIContext().render(
+      image, toBitmap: &bytes, rowBytes: width * 4, bounds: image.extent, format: .RGBA8,
+      colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+    return (width, height, bytes)
+  }
+
+  func testTheRendererDrawsTheBarsInTheBoxColorTopRowFirst() {
+    // One loud band and one silent one, 100 x 50 at twice the resolution.
+    let renderer = AudioVisualizerRenderer(
+      config: LayerAudioVisualizerConfig(
+        style: .bars, color: 0xFFFF_0000, bandCount: 2, levels: [1, 0], framesPerSecond: 1),
+      rasterScale: 2)
+    let image = renderer.image(atUs: 0, box: CGSize(width: 100, height: 50))
+    let (width, height, bytes) = pixels(of: image)
+    func pixel(_ x: Int, _ y: Int) -> [UInt8] {
+      let at = (y * width + x) * 4
+      return Array(bytes[at..<at + 4])
+    }
+
+    XCTAssertEqual(width, 200)
+    XCTAssertEqual(height, 100)
+    // The loud bar fills its slot from top to bottom.
+    XCTAssertEqual(pixel(50, 10), [255, 0, 0, 255])
+    XCTAssertEqual(pixel(50, 90), [255, 0, 0, 255])
+    // The silent one is a dot at the bottom, not at the top.
+    XCTAssertEqual(pixel(150, 10)[3], 0)
+    XCTAssertEqual(pixel(150, 90), [255, 0, 0, 255])
+    // The gap between the bars stays clear.
+    XCTAssertEqual(pixel(100, 50)[3], 0)
+  }
+
+  func testTheRendererKeepsTheImageOfTheFrameItLastDrew() {
+    let renderer = AudioVisualizerRenderer(config: visualizer, rasterScale: 1)
+    let box = CGSize(width: 40, height: 20)
+
+    let first = renderer.image(atUs: 0, box: box)
+    XCTAssertTrue(first === renderer.image(atUs: 0, box: box))
+    XCTAssertFalse(first === renderer.image(atUs: 50_000, box: box))
+  }
+
+  func testTheRendererHoldsAHugeLayerToTheLargestRaster() {
+    let renderer = AudioVisualizerRenderer(config: visualizer, rasterScale: 2)
+    let image = renderer.image(atUs: 0, box: CGSize(width: 8192, height: 1024))
+
+    XCTAssertEqual(image.extent.width, AudioVisualizerRenderer.maxRasterSide)
+    XCTAssertEqual(image.extent.height, 512)
+  }
+}

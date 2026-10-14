@@ -152,6 +152,100 @@ public struct LayerCensorConfig: Sendable, Equatable {
   }
 }
 
+/// Draws bars or a wave that move with the sound in an image layer's box
+/// instead of its image; see `LayerAudioVisualizer` on the Dart side.
+public struct LayerAudioVisualizerConfig: Sendable, Equatable {
+  enum Style: Sendable {
+    case bars
+    case mirroredBars
+    case wave
+    case circle
+  }
+
+  /// The defaults of the Dart `LayerAudioVisualizer`.
+  static let defaultFramesPerSecond = 60.0
+  static let defaultColor: UInt32 = 0xFFFF_FFFF
+
+  /// How the levels are drawn.
+  let style: Style
+  /// The ARGB color every shape is filled with.
+  let color: UInt32
+  /// How many bands every row of `levels` holds.
+  let bandCount: Int
+  /// The level of every band, row after row, from 0 to 1. Row `row` is the
+  /// moment `row / framesPerSecond` seconds into the rendered video.
+  let levels: [Float]
+  /// How many rows of `levels` there are a second.
+  let framesPerSecond: Double
+  /// How much of its share a bar fills, from above 0 to 1; `nil` takes the
+  /// style's own.
+  var barFill: Double? = nil
+
+  /// How many rows `levels` holds.
+  var frameCount: Int { levels.count / bandCount }
+
+  /// Writes the level of every band at `timeUs` on the rendered video into
+  /// `into`, mixed linearly between the two rows around it; the same mix as
+  /// `LayerAudioVisualizer.levelsAt`. Before the first row and after the last
+  /// one every band is silent.
+  func levels(atUs timeUs: Int64, into: inout [Float]) {
+    let position = Double(timeUs) * framesPerSecond / 1_000_000
+    let rowFloor = position.rounded(.down)
+    let row = Int(rowFloor)
+    let mix = position - rowFloor
+    for band in 0..<min(bandCount, into.count) {
+      let from = level(row: row, band: band)
+      let to = level(row: row + 1, band: band)
+      into[band] = Float(from + (to - from) * mix)
+    }
+  }
+
+  private func level(row: Int, band: Int) -> Double {
+    guard row >= 0, row < frameCount else { return 0 }
+    return min(1, max(0, Double(levels[row * bandCount + band])))
+  }
+
+  /// Parses the `audioVisualizer` entry of an image layer, or `nil` when the
+  /// layer has none and draws its image.
+  ///
+  /// The levels arrive as a `Float32List`; a plain list of numbers is read
+  /// too. A table cut short keeps its whole rows, and an unknown style draws
+  /// bars.
+  static func fromArguments(_ args: [String: Any]?) -> LayerAudioVisualizerConfig? {
+    guard let args = args else { return nil }
+    let bandCount = max(1, (args["bandCount"] as? NSNumber)?.intValue ?? 1)
+    var levels: [Float]
+    if let typed = args["levels"] as? FlutterStandardTypedData {
+      levels = typed.data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+    } else if let list = args["levels"] as? [NSNumber] {
+      levels = list.map { $0.floatValue }
+    } else {
+      levels = []
+    }
+    levels.removeLast(levels.count % bandCount)
+    let style: Style
+    switch args["style"] as? String {
+    case "mirroredBars": style = .mirroredBars
+    case "wave": style = .wave
+    case "circle": style = .circle
+    default: style = .bars
+    }
+    var framesPerSecond =
+      (args["framesPerSecond"] as? NSNumber)?.doubleValue ?? defaultFramesPerSecond
+    if !(framesPerSecond > 0) || !framesPerSecond.isFinite {
+      framesPerSecond = defaultFramesPerSecond
+    }
+    let color =
+      (args["color"] as? NSNumber).map { UInt32(truncatingIfNeeded: $0.int64Value) }
+      ?? defaultColor
+    var barFill = (args["barFill"] as? NSNumber)?.doubleValue
+    if let fill = barFill, !(fill > 0 && fill <= 1) { barFill = nil }
+    return LayerAudioVisualizerConfig(
+      style: style, color: color, bandCount: bandCount, levels: levels,
+      framesPerSecond: framesPerSecond, barFill: barFill)
+  }
+}
+
 /// A layer's placement at one point of the timeline, mirroring the Dart
 /// `TimelineKeyframe`.
 struct KeyframeConfig: Sendable, Equatable {
@@ -226,6 +320,9 @@ public struct ImageLayerConfig: Sendable {
   var keyframes: [KeyframeConfig] = []
   /// The clock `keyframes` are timed on; see `KeyframeClock`.
   var keyframeClock: KeyframeClock = .output
+  /// Draws bars or a wave that move with the sound in the layer's box instead
+  /// of `image`, which is then not read. `nil` draws the image.
+  var audioVisualizer: LayerAudioVisualizerConfig? = nil
 
   static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
     guard let args = args,
@@ -263,7 +360,9 @@ public struct ImageLayerConfig: Sendable {
       animationStartUs: (args["animationStartUs"] as? NSNumber)?.int64Value ?? -1,
       animationEndUs: (args["animationEndUs"] as? NSNumber)?.int64Value ?? -1,
       keyframes: KeyframeConfig.list(from: args["keyframes"]),
-      keyframeClock: KeyframeClock.from(args["keyframeClock"])
+      keyframeClock: KeyframeClock.from(args["keyframeClock"]),
+      audioVisualizer: LayerAudioVisualizerConfig.fromArguments(
+        args["audioVisualizer"] as? [String: Any])
     )
   }
 }

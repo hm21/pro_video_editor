@@ -11,6 +11,7 @@ import 'package:pro_video_editor/shared/utils/parser/offset_parser.dart';
 import 'editor_layer_image_model.dart';
 import 'keyframe_clock_point_model.dart';
 import 'layer_animation_model.dart';
+import 'layer_audio_visualizer_model.dart';
 import 'layer_censor_model.dart';
 import 'timeline_keyframe_model.dart';
 
@@ -33,6 +34,7 @@ class ImageLayer with TimeRangeMixin {
     this.censor,
     this.keyframes = const [],
     this.keyframeClock = const [],
+    this.audioVisualizer,
   }) : assert(
          startTime == null || endTime == null || startTime < endTime,
          'startTime must be before endTime',
@@ -50,6 +52,46 @@ class ImageLayer with TimeRangeMixin {
        assert(
          keyframes.length == 0 || offset != null,
          'keyframes place a positioned layer; set [offset]',
+       ),
+       assert(
+         audioVisualizer == null || censor == null,
+         'A layer is either a censor or an audio visualizer',
+       ),
+       assert(
+         audioVisualizer == null || offset == null || size != null,
+         'An audio visualizer fills a box; set [size] with [offset]',
+       );
+
+  /// Creates a layer that draws [visualizer] instead of an image; see
+  /// [LayerAudioVisualizer].
+  ///
+  /// It fills the box [offset] and [size] describe, or the whole frame when
+  /// both are `null`.
+  ImageLayer.audioVisualizer({
+    required LayerAudioVisualizer visualizer,
+    Duration? startTime,
+    Duration? endTime,
+    Offset? offset,
+    Size? size,
+    double rotation = 0.0,
+    List<LayerAnimation> animations = const [],
+    Duration? animationStartTime,
+    Duration? animationEndTime,
+    List<TimelineKeyframe> keyframes = const [],
+    List<KeyframeClockPoint> keyframeClock = const [],
+  }) : this(
+         image: EditorLayerImage.memory(_transparentPixelPng),
+         startTime: startTime,
+         endTime: endTime,
+         offset: offset,
+         size: size,
+         rotation: rotation,
+         animations: animations,
+         animationStartTime: animationStartTime,
+         animationEndTime: animationEndTime,
+         keyframes: keyframes,
+         keyframeClock: keyframeClock,
+         audioVisualizer: visualizer,
        );
 
   /// The image to overlay on the video.
@@ -194,6 +236,15 @@ class ImageLayer with TimeRangeMixin {
   /// **Default**: empty, which times [keyframes] on the video's timeline.
   final List<KeyframeClockPoint> keyframeClock;
 
+  /// Draws bars or a wave that move with the sound instead of [image], which
+  /// is then not read. See [LayerAudioVisualizer].
+  ///
+  /// The visualizer fills the layer's box: [size] at [offset], or the whole
+  /// frame for a stretched layer.
+  ///
+  /// **Default**: `null`, which draws [image].
+  final LayerAudioVisualizer? audioVisualizer;
+
   ImageLayer copyWith({
     EditorLayerImage? image,
     Duration? startTime,
@@ -209,6 +260,7 @@ class ImageLayer with TimeRangeMixin {
     LayerCensor? censor,
     List<TimelineKeyframe>? keyframes,
     List<KeyframeClockPoint>? keyframeClock,
+    LayerAudioVisualizer? audioVisualizer,
   }) {
     return ImageLayer(
       image: image ?? this.image,
@@ -225,6 +277,7 @@ class ImageLayer with TimeRangeMixin {
       censor: censor ?? this.censor,
       keyframes: keyframes ?? this.keyframes,
       keyframeClock: keyframeClock ?? this.keyframeClock,
+      audioVisualizer: audioVisualizer ?? this.audioVisualizer,
     );
   }
 
@@ -246,6 +299,7 @@ class ImageLayer with TimeRangeMixin {
       'censor': censor?.toMap(),
       'keyframes': keyframes.map((k) => k.toMap()).toList(),
       'keyframeClock': keyframeClock.map((p) => p.toMap()).toList(),
+      'audioVisualizer': audioVisualizer?.toMap(),
     };
   }
 
@@ -298,6 +352,11 @@ class ImageLayer with TimeRangeMixin {
               .toList() ??
           const [],
       keyframeClock: keyframeClockFromMap(map['keyframeClock']),
+      audioVisualizer: map['audioVisualizer'] != null
+          ? LayerAudioVisualizer.fromMap(
+              Map<String, dynamic>.from(map['audioVisualizer'] as Map),
+            )
+          : null,
     );
   }
 
@@ -322,7 +381,8 @@ class ImageLayer with TimeRangeMixin {
         'animationEndTime: $animationEndTime, '
         'censor: $censor, '
         'keyframes: $keyframes, '
-        'keyframeClock: $keyframeClock'
+        'keyframeClock: $keyframeClock, '
+        'audioVisualizer: $audioVisualizer'
         ')';
   }
 
@@ -343,7 +403,8 @@ class ImageLayer with TimeRangeMixin {
         other.animationEndTime == animationEndTime &&
         other.censor == censor &&
         listEquals(other.keyframes, keyframes) &&
-        listEquals(other.keyframeClock, keyframeClock);
+        listEquals(other.keyframeClock, keyframeClock) &&
+        other.audioVisualizer == audioVisualizer;
   }
 
   @override
@@ -361,6 +422,16 @@ class ImageLayer with TimeRangeMixin {
         animationEndTime.hashCode ^
         censor.hashCode ^
         Object.hashAll(keyframes) ^
-        Object.hashAll(keyframeClock);
+        Object.hashAll(keyframeClock) ^
+        audioVisualizer.hashCode;
   }
 }
+
+/// A fully transparent 1 x 1 PNG, the image of an
+/// [ImageLayer.audioVisualizer] layer, which no renderer reads.
+final Uint8List _transparentPixelPng = Uint8List.fromList(const [
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, //
+  0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 11, 73, 68, 65, 84,
+  120, 218, 99, 96, 0, 2, 0, 0, 5, 0, 1, 233, 250, 220, 216, 0, 0, 0, 0, 73,
+  69, 78, 68, 174, 66, 96, 130,
+]);

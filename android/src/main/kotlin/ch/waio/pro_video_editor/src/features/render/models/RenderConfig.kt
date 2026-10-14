@@ -662,6 +662,9 @@ data class KeyframeConfig(
  * @property keyframes The layer's placement over time, sorted by time; they
  *   replace [x], [y] and [rotation], scale the size around its center and set
  *   the opacity (empty = the layer stays where [x] and [y] put it)
+ * @property audioVisualizer Draws bars or a wave that move with the sound in
+ *   the layer's box instead of [image], which is then not read (null = draw
+ *   the image)
  */
 data class ImageLayer(
     val image: EncodedImage,
@@ -680,7 +683,8 @@ data class ImageLayer(
     val censor: LayerCensorConfig? = null,
     val keyframes: List<KeyframeConfig> = emptyList(),
     /** The clock [keyframes] are timed on; see [KeyframeClock]. */
-    val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT
+    val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT,
+    val audioVisualizer: LayerAudioVisualizerConfig? = null
 )
 
 data class RenderConfig(
@@ -812,7 +816,10 @@ data class RenderConfig(
                         rotation, loop, animationOffsetUs, animations,
                         animationStartUs, animationEndUs, censor,
                         KeyframeConfig.listFrom(layerMap["keyframes"]),
-                        KeyframeClock.from(layerMap["keyframeClock"])
+                        KeyframeClock.from(layerMap["keyframeClock"]),
+                        LayerAudioVisualizerConfig.fromMap(
+                            layerMap["audioVisualizer"] as? Map<*, *>
+                        )
                     )
                 }
             } ?: emptyList()

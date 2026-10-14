@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart';
 import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
 import 'package:pro_video_editor/core/models/image/keyframe_clock_point_model.dart';
+import 'package:pro_video_editor/core/models/image/layer_audio_visualizer_model.dart';
 import 'package:pro_video_editor/core/models/image/layer_censor_model.dart';
 import 'package:pro_video_editor/core/models/image/timeline_keyframe_model.dart';
 
@@ -254,6 +255,60 @@ void main() {
 
         expect(layer.copyWith(loop: false).censor, layer.censor);
         expect(layer == ImageLayer(image: image), isFalse);
+      });
+    });
+
+    group('audioVisualizer', () {
+      final visualizer = LayerAudioVisualizer(
+        style: AudioVisualizerStyle.wave,
+        bandCount: 2,
+        levels: Float32List.fromList([0.5, 1]),
+      );
+
+      test('draws the image by default', () {
+        final layer = ImageLayer(image: image);
+
+        expect(layer.audioVisualizer, isNull);
+        expect(layer.toMap()['audioVisualizer'], isNull);
+        expect(ImageLayer.fromMap(layer.toMap()).audioVisualizer, isNull);
+      });
+
+      test('roundtrips through toMap / fromMap', () {
+        final layer = ImageLayer.audioVisualizer(
+          visualizer: visualizer,
+          offset: const Offset(10, 20),
+          size: const Size(300, 100),
+        );
+
+        final read = ImageLayer.fromMap(layer.toMap());
+        expect(read.audioVisualizer, visualizer);
+        expect(read.offset, layer.offset);
+        expect(read.size, layer.size);
+      });
+
+      test('the named constructor carries the layer\'s placement', () {
+        final layer = ImageLayer.audioVisualizer(
+          visualizer: visualizer,
+          offset: const Offset(10, 20),
+          size: const Size(300, 100),
+          rotation: 0.5,
+          startTime: const Duration(seconds: 1),
+          endTime: const Duration(seconds: 2),
+        );
+
+        expect(layer.audioVisualizer, visualizer);
+        expect(layer.offset, const Offset(10, 20));
+        expect(layer.size, const Size(300, 100));
+        expect(layer.rotation, 0.5);
+        expect(layer.startTime, const Duration(seconds: 1));
+        expect(layer.endTime, const Duration(seconds: 2));
+      });
+
+      test('is kept by copyWith and tells layers apart', () {
+        final layer = ImageLayer.audioVisualizer(visualizer: visualizer);
+
+        expect(layer.copyWith(loop: false).audioVisualizer, visualizer);
+        expect(layer == ImageLayer(image: layer.image), isFalse);
       });
     });
 

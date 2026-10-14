@@ -100,7 +100,8 @@ class CompositionBuilder(
                     animationEndUs = imageLayer.animationEndUs,
                     censor = imageLayer.censor,
                     keyframes = imageLayer.keyframes,
-                    keyframeClock = imageLayer.keyframeClock
+                    keyframeClock = imageLayer.keyframeClock,
+                    audioVisualizer = imageLayer.audioVisualizer
                 )
             })
             .setEnableAudio(config.enableAudio)

@@ -20,6 +20,7 @@ import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeClock
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
+import ch.waio.pro_video_editor.src.features.render.models.LayerAudioVisualizerConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerCensorConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
@@ -120,7 +121,12 @@ class VideoSequenceBuilder(
          */
         val keyframes: List<KeyframeConfig> = emptyList(),
         /** The clock [keyframes] are timed on; see [KeyframeClock]. */
-        val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT
+        val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT,
+        /**
+         * Draws bars or a wave that move with the sound in the layer's box
+         * instead of [image]; see [AudioVisualizerOverlay].
+         */
+        val audioVisualizer: LayerAudioVisualizerConfig? = null
     )
 
     /**

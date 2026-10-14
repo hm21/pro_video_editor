@@ -39,6 +39,9 @@ struct ImageLayer {
   var keyframes: [KeyframeConfig] = []
   /// The clock `keyframes` are timed on; see `KeyframeClock`.
   var keyframeClock: KeyframeClock = .output
+  /// Draws an audio visualizer into the layer's box for each frame instead of
+  /// `frames`, which is then empty.
+  var visualizer: AudioVisualizerRenderer? = nil
 
   /// The frame to display at composition time [currentTimeUs].
   ///
@@ -362,6 +365,33 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     overlayImageLayers = []
     hasUnreadableCensorMask = false
     for layer in layers {
+      if let visualizer = layer.audioVisualizer {
+        // Drawn for each frame; the layer's image is never read. A layer that
+        // keyframes grow is drawn at its largest size, so it stays sharp.
+        let growth = max(1, layer.keyframes.map(\.scale).max() ?? 1)
+        overlayImageLayers.append(
+          ImageLayer(
+            frames: [],
+            frameEndsUs: [0],
+            loop: false,
+            animationOffsetUs: 0,
+            startUs: layer.startUs,
+            endUs: layer.endUs,
+            x: layer.x,
+            y: layer.y,
+            width: layer.width,
+            height: layer.height,
+            rotation: layer.rotation,
+            animations: layer.animations,
+            animationStartUs: layer.animationStartUs,
+            animationEndUs: layer.animationEndUs,
+            keyframes: layer.keyframes,
+            keyframeClock: layer.keyframeClock,
+            visualizer: AudioVisualizerRenderer(
+              config: visualizer, rasterScale: CGFloat(growth))
+          ))
+        continue
+      }
       let frames: [CIImage]
       let frameEndsUs: [Int64]
 
@@ -409,7 +439,19 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   private func drawImageLayer(
     _ layer: ImageLayer, over outputImage: CIImage, imageRect: CGRect, currentTimeUs: Int64
   ) -> CIImage {
-    var img = layer.currentFrame(atUs: currentTimeUs)
+    var img: CIImage
+    if let visualizer = layer.visualizer {
+      // The visualizer fills the layer's box, or the frame for a stretched
+      // layer, and is scaled into it below like a decoded image.
+      img = visualizer.image(
+        atUs: currentTimeUs,
+        box: CGSize(
+          width: layer.width ?? imageRect.width, height: layer.height ?? imageRect.height))
+      // A box of no size draws nothing.
+      if img.extent.isEmpty || img.extent.isInfinite { return outputImage }
+    } else {
+      img = layer.currentFrame(atUs: currentTimeUs)
+    }
 
     if let w = layer.width, let h = layer.height {
       let sx = CGFloat(w) / img.extent.width

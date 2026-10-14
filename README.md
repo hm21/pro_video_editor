@@ -130,6 +130,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🎬 **Layer Animations**: Animate image layers with fade, slide, scale, wiggle and bounce effects, configurable easing curves, and in/out/inOut phases, or `loop` to keep a layer moving while it is visible. A slide travels to a canvas edge or to a start point you pick yourself. `animationStartTime`/`animationEndTime` let several layers that each show part of one overlay share one run of animations.
 - 🗝️ **Layer Keyframes**: Move image layers and composition layers between keyframes — position, size, rotation and opacity over time, eased with the same curves as the animations. A loop animation can play over the stretch between two keyframes only, `loopPhase` starts it part way into its cycle, and a `keyframeClock` keeps keyframes on the timing they were made on.
 - 🫥 **Censor Layers**: Blur or pixelate the part of the picture an image layer covers instead of drawing the layer, e.g. to hide a face or a license plate, via `ImageLayer.censor`. The layer's image is the shape of the area, and image layers after it stay sharp on top.
+- 📊 **Audio Visualizer Layers**: Draw bars, mirrored bars, a wave or a ring of bars that move with the sound in an image layer's box, via `ImageLayer.audioVisualizer`. The app hands over the levels of the sound's bands over time and can set how wide the bars are (`barFill`); `AudioVisualizerPainter` draws the same shapes in an editor preview.
 - 🎞️ **Clip Transitions**: Add transitions between adjacent clips — `dissolve`, `fadeToBlack`, `fadeToWhite`, `slide`, `push`, and `wipe` — with configurable duration, easing curve, and direction.
 - 🧮 **Color Matrix**: Apply one or multiple 4x5 color matrices (e.g., for filters).
 - 💧 **Blur**: Add a blur effect to the video.
@@ -167,6 +168,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 | `Clip Transitions`          | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Layer Size`                | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Censor Layers`             | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
+| `Audio Visualizer Layers`   | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Multiple ColorMatrix 4x5` | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Cancel export task`       | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Blur background`          | 🧪      | 🧪  | 🧪     | ❌      | ❌     | 🚫   |
@@ -744,6 +746,18 @@ var task = VideoRenderData(
         offset: const Offset(320, 180),
         size: const Size(240, 300),
         censor: const LayerCensor.pixelate(blockSize: 32),
+      ),
+      // Bars that move with the sound: 24 levels per row, 60 rows a second
+      // on the rendered video, which the app computes from the audio.
+      ImageLayer.audioVisualizer(
+        visualizer: LayerAudioVisualizer(
+          style: AudioVisualizerStyle.bars,
+          color: const Color(0xFF27C58B),
+          bandCount: 24,
+          levels: bandLevels,
+        ),
+        offset: const Offset(90, 1400),
+        size: const Size(900, 300),
       ),
     ],
     outputFormat: VideoOutputFormat.mp4,

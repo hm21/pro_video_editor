@@ -66,6 +66,7 @@ func resolveOpenEndedOutAnimations(
       animationStartUs: layer.animationStartUs,
       animationEndUs: layer.animationEndUs,
       keyframes: layer.keyframes,
-      keyframeClock: layer.keyframeClock)
+      keyframeClock: layer.keyframeClock,
+      audioVisualizer: layer.audioVisualizer)
   }
 }
