@@ -31,6 +31,9 @@ class RenderVideo {
   // MARK: - Public Methods
 
   /// Starts an asynchronous video render job using RenderConfig.
+  ///
+  /// On iOS the job survives the app leaving the foreground: see
+  /// ``BackgroundSafeJob``.
   @discardableResult
   static func render(
     config: RenderConfig,
@@ -39,6 +42,25 @@ class RenderVideo {
     onError: @escaping (Error) -> Void
   ) -> RenderJobHandle {
     let handle = RenderJobHandle()
+    BackgroundSafeJob.run(
+      label: "Render", handle: handle,
+      attempt: { attemptHandle, onComplete, onError in
+        renderAttempt(
+          config: config, handle: attemptHandle, onProgress: onProgress,
+          onComplete: onComplete, onError: onError)
+      },
+      onComplete: onComplete, onError: onError)
+    return handle
+  }
+
+  /// Runs the whole pipeline once, from the pre-transcode to the encode.
+  private static func renderAttempt(
+    config: RenderConfig,
+    handle: RenderJobHandle,
+    onProgress: @escaping (Double) -> Void,
+    onComplete: @escaping (Data?) -> Void,
+    onError: @escaping (Error) -> Void
+  ) {
     queue.async {
       let renderTask = Task {
         guard !config.videoClips.isEmpty || config.composition != nil else {
@@ -146,12 +168,14 @@ class RenderVideo {
           }
         }
 
+        // Cleans up before reporting, so an attempt started over after an
+        // interruption never runs alongside the cleanup of the one before.
         let handleCompletion: (Result<Data?, Error>) -> Void = { result in
+          finalize()
           switch result {
           case .success(let data): onComplete(data)
           case .failure(let error): onError(error)
           }
-          finalize()
         }
 
         do {
@@ -484,8 +508,6 @@ class RenderVideo {
       }
       handle.attach(task: renderTask)
     }
-
-    return handle
   }
 
   // MARK: - Helper Methods
@@ -994,6 +1016,10 @@ class RenderVideo {
         userInfo: [NSLocalizedDescriptionKey: "Export session creation failed"])
     }
 
+    // The session refuses to overwrite a file, such as the partial one an
+    // interrupted attempt left behind.
+    try? FileManager.default.removeItem(at: outputURL)
+
     let fileType = mapFormatToMimeType(format: outputFormat)
     PluginLog.print("📹 Export session setup:")
     PluginLog.print("   - Requested format: \(outputFormat)")
@@ -1046,6 +1072,7 @@ final class RenderJobHandle: @unchecked Sendable {
   private let lock = NSLock()
   private var exportSession: AVAssetExportSession?
   private var renderTask: Task<Void, Never>?
+  private var child: RenderJobHandle?
   private var canceled = false
   private var exportClaimed = false
 
@@ -1077,6 +1104,23 @@ final class RenderJobHandle: @unchecked Sendable {
     }
   }
 
+  /// Registers the handle of the job's current attempt, so a ``cancel()`` of
+  /// the job reaches the attempt too. Each attempt replaces the one before.
+  func attach(child: RenderJobHandle) {
+    lock.lock()
+    let cancelNow = canceled
+    if !cancelNow { self.child = child }
+    lock.unlock()
+    if cancelNow { child.cancel() }
+  }
+
+  /// Whether ``cancel()`` was called.
+  var isCanceled: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return canceled
+  }
+
   /// Claims the start of the attached export, returning `false` when the job
   /// was cancelled while the export was still queued — the caller must then not
   /// start it at all. Only a claimed session is ever force-cancelled.
@@ -1095,9 +1139,11 @@ final class RenderJobHandle: @unchecked Sendable {
     canceled = true
     let session = exportClaimed ? exportSession : nil
     let task = renderTask
+    let child = self.child
     lock.unlock()
 
     task?.cancel()
+    child?.cancel()
     // A claimed session may still be a few instructions short of the assignment
     // `export(to:as:)` makes before it starts, and cancelling it in that sliver
     // would trip the same uncatchable exception — `forceCancel` skips it. Such

@@ -2110,3 +2110,37 @@ final class KeyframeTests: XCTestCase {
     XCTAssertEqual(resolved.opacity, 0.8, accuracy: 1e-6)
   }
 }
+
+// MARK: - Leaving the app during a job
+
+/// The UIKit side of ``BackgroundSafeJob``; the restart rules themselves are
+/// covered by the shared `BackgroundSafeJobTests`. The test host stays active,
+/// so the app leaving is simulated by posting the notification UIKit sends.
+final class UIKitAppActivityTests: XCTestCase {
+  func testActivityNoticesTheAppResigningActive() async {
+    let activity = UIKitAppActivity(label: "Test", onExpired: {})
+    defer { activity.end() }
+
+    let leftBefore = await activity.leftForeground()
+    XCTAssertFalse(leftBefore, "the test host is active")
+
+    await MainActor.run {
+      NotificationCenter.default.post(
+        name: UIApplication.willResignActiveNotification, object: UIApplication.shared)
+    }
+
+    let leftAfter = await activity.leftForeground()
+    XCTAssertTrue(leftAfter)
+
+    // Hand the other observers in the host (the Flutter engine) their
+    // matching return.
+    await MainActor.run {
+      NotificationCenter.default.post(
+        name: UIApplication.didBecomeActiveNotification, object: UIApplication.shared)
+    }
+  }
+
+  func testWaitReturnsAtOnceWhileTheAppIsActive() async throws {
+    try await UIKitActiveWaiter().wait()
+  }
+}

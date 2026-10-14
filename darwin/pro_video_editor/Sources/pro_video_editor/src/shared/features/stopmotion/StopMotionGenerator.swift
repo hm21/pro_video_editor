@@ -22,6 +22,9 @@ internal enum StopMotionGenerator {
   ///     directly to `config.outputPath`.
   ///   - onError: Called when the job fails or is cancelled.
   /// - Returns: A cancellable job handle.
+  ///
+  /// On iOS the job survives the app leaving the foreground: see
+  /// ``BackgroundSafeJob``.
   @discardableResult
   static func generate(
     config: StopMotionConfig,
@@ -30,17 +33,22 @@ internal enum StopMotionGenerator {
     onError: @escaping (Error) -> Void
   ) -> RenderJobHandle {
     let handle = RenderJobHandle()
-    queue.async {
-      let task = Task {
-        do {
-          let data = try await encode(config: config, onProgress: onProgress)
-          onComplete(data)
-        } catch {
-          onError(error)
+    BackgroundSafeJob.run(
+      label: "Stop-motion render", handle: handle,
+      attempt: { attemptHandle, onComplete, onError in
+        queue.async {
+          let task = Task {
+            do {
+              let data = try await encode(config: config, onProgress: onProgress)
+              onComplete(data)
+            } catch {
+              onError(error)
+            }
+          }
+          attemptHandle.attach(task: task)
         }
-      }
-      handle.attach(task: task)
-    }
+      },
+      onComplete: onComplete, onError: onError)
     return handle
   }
 
@@ -74,6 +82,9 @@ internal enum StopMotionGenerator {
     let outputURL = resolveOutputURL(
       outputPath: config.outputPath, format: config.outputFormat)
 
+    // The writer refuses to overwrite a file, such as the partial one an
+    // interrupted attempt left behind.
+    try? FileManager.default.removeItem(at: outputURL)
     let writer = try AVAssetWriter(
       outputURL: outputURL, fileType: mapFormatToMimeType(format: config.outputFormat))
 
