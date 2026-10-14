@@ -62,7 +62,7 @@ internal fun audioVisualizerShapes(
 ): AudioVisualizerShapes {
     val count = levels.size
     if (count == 0 || width <= 0 || height <= 0) return AudioVisualizerShapes()
-    fun level(band: Int): Double = levels[band].toDouble().coerceIn(0.0, 1.0)
+    fun level(band: Int): Double = LayerAudioVisualizerConfig.unitLevel(levels[band])
 
     return when (style) {
         LayerAudioVisualizerConfig.Style.BARS,
@@ -136,7 +136,7 @@ private fun waveOutline(width: Double, height: Double, levels: FloatArray): Doub
         xs[band + 1] = (band + 0.5) * width / count
         amplitudes[band + 1] = max(
             AUDIO_VISUALIZER_WAVE_MIN_LEVEL,
-            levels[band].toDouble().coerceIn(0.0, 1.0),
+            LayerAudioVisualizerConfig.unitLevel(levels[band]),
         ) * middle
     }
 

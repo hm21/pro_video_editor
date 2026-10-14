@@ -20,7 +20,8 @@ export 'core/models/image/image_layer_model.dart';
 export 'core/models/image/keyframe_clock_point_model.dart'
     hide keyframeClockFromMap;
 export 'core/models/image/layer_animation_model.dart';
-export 'core/models/image/layer_audio_visualizer_model.dart';
+export 'core/models/image/layer_audio_visualizer_model.dart'
+    hide audioVisualizerUnitLevel;
 export 'core/models/image/layer_censor_model.dart';
 export 'core/models/image/timeline_keyframe_model.dart'
     hide sortTimelineKeyframes;

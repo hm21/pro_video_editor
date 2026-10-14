@@ -366,6 +366,10 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     hasUnreadableCensorMask = false
     for layer in layers {
       if let visualizer = layer.audioVisualizer {
+        // A positioned visualizer has no box to fill without a size; Android
+        // skips it as well.
+        let isStretched = layer.x == nil && layer.y == nil
+        if !isStretched && (layer.width == nil || layer.height == nil) { continue }
         // Drawn for each frame; the layer's image is never read. A layer that
         // keyframes grow is drawn at its largest size, so it stays sharp.
         let growth = max(1, layer.keyframes.map(\.scale).max() ?? 1)
@@ -442,11 +446,12 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     var img: CIImage
     if let visualizer = layer.visualizer {
       // The visualizer fills the layer's box, or the frame for a stretched
-      // layer, and is scaled into it below like a decoded image.
-      img = visualizer.image(
-        atUs: currentTimeUs,
-        box: CGSize(
-          width: layer.width ?? imageRect.width, height: layer.height ?? imageRect.height))
+      // layer whatever its size, as on Android: drawn in its size and
+      // stretched over the frame, a ring would come out as an ellipse.
+      let box =
+        layer.x == nil && layer.y == nil
+        ? imageRect.size : CGSize(width: layer.width ?? 0, height: layer.height ?? 0)
+      img = visualizer.image(atUs: currentTimeUs, box: box)
       // A box of no size draws nothing.
       if img.extent.isEmpty || img.extent.isInfinite { return outputImage }
     } else {

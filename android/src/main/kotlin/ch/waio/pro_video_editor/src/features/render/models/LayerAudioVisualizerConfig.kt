@@ -50,7 +50,7 @@ class LayerAudioVisualizerConfig(
 
     private fun level(row: Long, band: Int): Double {
         if (row < 0 || row >= frameCount) return 0.0
-        return levels[(row * bandCount).toInt() + band].toDouble().coerceIn(0.0, 1.0)
+        return unitLevel(levels[(row * bandCount).toInt() + band])
     }
 
     override fun equals(other: Any?): Boolean =
@@ -77,6 +77,14 @@ class LayerAudioVisualizerConfig(
             "frames=$frameCount, framesPerSecond=$framesPerSecond)"
 
     companion object {
+        /**
+         * [level] held to 0–1, with NaN counted as silent, as the Dart
+         * `audioVisualizerUnitLevel` reads it. `coerceIn` alone keeps a NaN,
+         * which would drop a bar or the whole wave.
+         */
+        internal fun unitLevel(level: Float): Double =
+            if (level.isNaN()) 0.0 else level.toDouble().coerceIn(0.0, 1.0)
+
         /**
          * Parses the `audioVisualizer` entry of an image layer, or `null` when
          * the layer has none and draws its image.

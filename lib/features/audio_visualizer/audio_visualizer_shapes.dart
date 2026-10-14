@@ -107,7 +107,8 @@ class AudioVisualizerShapes {
 /// a box of [width] by [height] whose top-left corner is the origin.
 ///
 /// [barFill] is how much of its share a bar fills; see
-/// [LayerAudioVisualizer.barFill]. `null` takes the style's own.
+/// [LayerAudioVisualizer.barFill]. `null` takes the style's own, as does a
+/// value outside above 0 to 1, which the native renderers never receive.
 ///
 /// The Android, iOS and macOS renderers compute the same shapes from the
 /// same numbers; a change here has to be made there too.
@@ -122,13 +123,14 @@ AudioVisualizerShapes audioVisualizerShapes({
   if (count == 0 || width <= 0 || height <= 0) {
     return const AudioVisualizerShapes();
   }
-  double level(int band) => levels[band].clamp(0.0, 1.0);
+  double level(int band) => audioVisualizerUnitLevel(levels[band]);
+  final fill = barFill != null && barFill > 0 && barFill <= 1 ? barFill : null;
 
   switch (style) {
     case AudioVisualizerStyle.bars:
     case AudioVisualizerStyle.mirroredBars:
       final slot = width / count;
-      final barWidth = slot * (barFill ?? audioVisualizerBarFill);
+      final barWidth = slot * (fill ?? audioVisualizerBarFill);
       // A silent bar is a dot as wide as the bar.
       final minHeight = math.min(barWidth, height);
       return AudioVisualizerShapes(
@@ -151,7 +153,7 @@ AudioVisualizerShapes audioVisualizerShapes({
       final bars = count * 2;
       final ring = radius * audioVisualizerCircleInnerRadius;
       final barWidth = math.min(
-        2 * math.pi * ring / bars * (barFill ?? audioVisualizerCircleBarFill),
+        2 * math.pi * ring / bars * (fill ?? audioVisualizerCircleBarFill),
         (radius - ring) / 2,
       );
       final maxLength = math.max(0.0, radius - ring - barWidth);
@@ -211,7 +213,10 @@ List<double> _waveOutline(double width, double height, List<double> levels) {
   for (var band = 0; band < count; band++) {
     xs[band + 1] = (band + 0.5) * width / count;
     amplitudes[band + 1] =
-        math.max(audioVisualizerWaveMinLevel, levels[band].clamp(0.0, 1.0)) *
+        math.max(
+          audioVisualizerWaveMinLevel,
+          audioVisualizerUnitLevel(levels[band]),
+        ) *
         middle;
   }
 

@@ -7,6 +7,11 @@ import 'package:flutter/foundation.dart';
 import '/shared/utils/parser/double_parser.dart';
 import '/shared/utils/parser/int_parser.dart';
 
+/// [level] held to 0–1, with NaN counted as silent, as every renderer reads
+/// a level.
+double audioVisualizerUnitLevel(double level) =>
+    level.isNaN ? 0 : level.clamp(0.0, 1.0);
+
 /// How a [LayerAudioVisualizer] draws the levels of its bands.
 ///
 /// Every style fills the layer's box and scales with it, so the
@@ -79,13 +84,22 @@ class LayerAudioVisualizer {
          levels.length % bandCount == 0,
          'levels must hold bandCount values for every row',
        ),
-       assert(framesPerSecond > 0, 'framesPerSecond must be greater than 0');
+       assert(
+         framesPerSecond > 0 && framesPerSecond < double.infinity,
+         'framesPerSecond must be a finite number greater than 0',
+       );
 
   /// Creates a visualizer from [toMap]'s output.
   ///
-  /// An unknown [style] name throws an [ArgumentError].
+  /// An unknown [style] name throws an [ArgumentError]. A [framesPerSecond]
+  /// that is not a finite number above 0 falls back to 60, as the native
+  /// renderers read it.
   factory LayerAudioVisualizer.fromMap(Map<String, dynamic> map) {
     final bandCount = math.max(1, safeParseInt(map['bandCount'], fallback: 1));
+    final framesPerSecond = safeParseDouble(
+      map['framesPerSecond'],
+      fallback: 60,
+    );
     final raw = map['levels'];
     final levels = switch (raw) {
       final Float32List list => list,
@@ -106,7 +120,9 @@ class LayerAudioVisualizer {
               levels.length - levels.length % bandCount,
             ),
       color: Color(safeParseInt(map['color'], fallback: 0xFFFFFFFF)),
-      framesPerSecond: safeParseDouble(map['framesPerSecond'], fallback: 60),
+      framesPerSecond: framesPerSecond > 0 && framesPerSecond < double.infinity
+          ? framesPerSecond
+          : 60,
       barFill: switch (tryParseDouble(map['barFill'])) {
         final fill? when fill > 0 && fill <= 1 => fill,
         _ => null,
@@ -133,7 +149,8 @@ class LayerAudioVisualizer {
   /// `row / framesPerSecond` seconds into the rendered video, on the same
   /// timeline as [ImageLayer.startTime].
   ///
-  /// Levels run from 0 (silent) to 1 (loudest); values outside are clamped.
+  /// Levels run from 0 (silent) to 1 (loudest); values outside are clamped,
+  /// and NaN counts as silent.
   final Float32List levels;
 
   /// How many rows of [levels] there are a second.
@@ -174,7 +191,7 @@ class LayerAudioVisualizer {
 
   double _level(int row, int band) {
     if (row < 0 || row >= frameCount) return 0;
-    return levels[row * bandCount + band].clamp(0.0, 1.0);
+    return audioVisualizerUnitLevel(levels[row * bandCount + band]);
   }
 
   /// The entry the native renderers read, with [levels] as typed data so the

@@ -128,6 +128,33 @@ void main() {
       ]);
     });
 
+    test('a bar fill out of range takes the style\'s own', () {
+      for (final style in [
+        AudioVisualizerStyle.bars,
+        AudioVisualizerStyle.circle,
+      ]) {
+        final own = audioVisualizerShapes(
+          style: style,
+          width: 100,
+          height: 50,
+          levels: const [1, 0],
+        ).bars;
+        for (final barFill in [0.0, -0.5, 1.5, double.nan]) {
+          expect(
+            audioVisualizerShapes(
+              style: style,
+              width: 100,
+              height: 50,
+              levels: const [1, 0],
+              barFill: barFill,
+            ).bars,
+            own,
+            reason: '${style.name}, $barFill',
+          );
+        }
+      }
+    });
+
     test('a ring of bars fills the share of the ring it is given', () {
       final shapes = audioVisualizerShapes(
         style: AudioVisualizerStyle.circle,
@@ -218,6 +245,25 @@ void main() {
       expect(wave[6], 5);
       expect(wave[7], closeTo(48, 1e-9));
       expect(wave[19], closeTo(52, 1e-9));
+    });
+
+    test('a NaN level counts as silent', () {
+      for (final style in AudioVisualizerStyle.values) {
+        final silent = audioVisualizerShapes(
+          style: style,
+          width: 100,
+          height: 50,
+          levels: const [0, 1],
+        );
+        final broken = audioVisualizerShapes(
+          style: style,
+          width: 100,
+          height: 50,
+          levels: const [double.nan, 1],
+        );
+        expect(broken.bars, silent.bars, reason: style.name);
+        expect(broken.wave, silent.wave, reason: style.name);
+      }
     });
 
     test('draws nothing without bands or without a box', () {

@@ -66,7 +66,7 @@ class ImageLayer with TimeRangeMixin {
   /// [LayerAudioVisualizer].
   ///
   /// It fills the box [offset] and [size] describe, or the whole frame when
-  /// both are `null`.
+  /// [offset] is `null`, whatever [size] is.
   ImageLayer.audioVisualizer({
     required LayerAudioVisualizer visualizer,
     Duration? startTime,
@@ -240,7 +240,7 @@ class ImageLayer with TimeRangeMixin {
   /// is then not read. See [LayerAudioVisualizer].
   ///
   /// The visualizer fills the layer's box: [size] at [offset], or the whole
-  /// frame for a stretched layer.
+  /// frame for a stretched layer, one without an [offset].
   ///
   /// **Default**: `null`, which draws [image].
   final LayerAudioVisualizer? audioVisualizer;

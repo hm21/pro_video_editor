@@ -202,7 +202,7 @@ public struct LayerAudioVisualizerConfig: Sendable, Equatable {
 
   private func level(row: Int, band: Int) -> Double {
     guard row >= 0, row < frameCount else { return 0 }
-    return min(1, max(0, Double(levels[row * bandCount + band])))
+    return audioVisualizerUnitLevel(levels[row * bandCount + band])
   }
 
   /// Parses the `audioVisualizer` entry of an image layer, or `nil` when the

@@ -4001,6 +4001,23 @@ final class AudioVisualizerTests: XCTestCase {
     }
   }
 
+  func testCountsANaNLevelAsSilent() {
+    let broken = LayerAudioVisualizerConfig(
+      style: .bars, color: 0xFFFF_FFFF, bandCount: 1, levels: [.nan, 1], framesPerSecond: 1)
+    var levels: [Float] = [0]
+    broken.levels(atUs: 0, into: &levels)
+    XCTAssertEqual(levels, [0])
+    broken.levels(atUs: 500_000, into: &levels)
+    XCTAssertEqual(levels[0], 0.5, accuracy: 1e-6)
+
+    for style: LayerAudioVisualizerConfig.Style in [.bars, .mirroredBars, .wave, .circle] {
+      let silent = audioVisualizerShapes(style: style, width: 100, height: 50, levels: [0, 1])
+      let shapes = audioVisualizerShapes(style: style, width: 100, height: 50, levels: [.nan, 1])
+      assertBars(silent.bars, shapes.bars)
+      XCTAssertEqual(silent.wave, shapes.wave, "\(style)")
+    }
+  }
+
   func testDrawsNothingWithoutBandsOrWithoutABox() {
     for style: LayerAudioVisualizerConfig.Style in [.bars, .mirroredBars, .wave, .circle] {
       let empty = audioVisualizerShapes(style: style, width: 0, height: 10, levels: [1])

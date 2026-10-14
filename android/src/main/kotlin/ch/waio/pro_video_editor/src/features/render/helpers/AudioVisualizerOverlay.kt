@@ -48,9 +48,6 @@ internal class AudioVisualizerOverlay(
     private val rect = RectF()
     private val path = Path()
 
-    /** The raster's pixels, for dividing the alpha back out after a redraw. */
-    private val pixels: ByteBuffer = ByteBuffer.allocateDirect(target.byteCount)
-
     /**
      * The frame [target] was last drawn for. Media3 reads the bitmap more than
      * once per frame, for its size and for its texture.
@@ -91,7 +88,7 @@ internal class AudioVisualizerOverlay(
 
         // Media3's overlay shader multiplies by alpha itself; see
         // unpremultiplyAlpha.
-        pixels.rewind()
+        val pixels = scratch(target.byteCount)
         target.copyPixelsToBuffer(pixels)
         unpremultiplyInPlace(pixels, target.byteCount)
         pixels.rewind()
@@ -126,5 +123,25 @@ internal class AudioVisualizerOverlay(
         }
         path.close()
         canvas.drawPath(path, paint)
+    }
+
+    private companion object {
+        /**
+         * The pixels of a raster, for dividing the alpha back out after a
+         * redraw: one buffer per GL thread, shared by every visualizer drawn
+         * on it. Image layers are built for every clip up front, so a buffer
+         * per overlay would hold a raster's worth of memory per clip for the
+         * whole export, while only one is ever drawn at a time.
+         */
+        private val pixelBuffer = ThreadLocal<ByteBuffer>()
+
+        /** A buffer of at least [bytes], cleared for writing from the start. */
+        fun scratch(bytes: Int): ByteBuffer {
+            val held = pixelBuffer.get()
+            val buffer = if (held != null && held.capacity() >= bytes) held
+                else ByteBuffer.allocateDirect(bytes).also { pixelBuffer.set(it) }
+            buffer.clear()
+            return buffer
+        }
     }
 }

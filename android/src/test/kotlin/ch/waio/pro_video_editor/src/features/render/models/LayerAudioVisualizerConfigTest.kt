@@ -121,4 +121,21 @@ internal class LayerAudioVisualizerConfigTest {
         loud.levelsAt(1_000_000, levels)
         assertEquals(0f, levels[0])
     }
+
+    @Test
+    fun countsANaNLevelAsSilent() {
+        val broken = LayerAudioVisualizerConfig(
+            style = LayerAudioVisualizerConfig.Style.BARS,
+            color = -1,
+            bandCount = 1,
+            levels = floatArrayOf(Float.NaN, 1f),
+            framesPerSecond = 1.0,
+        )
+        val levels = FloatArray(1)
+
+        broken.levelsAt(0, levels)
+        assertEquals(0f, levels[0])
+        broken.levelsAt(500_000, levels)
+        assertEquals(0.5f, levels[0])
+    }
 }

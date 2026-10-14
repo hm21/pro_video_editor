@@ -18,6 +18,12 @@ let audioVisualizerCircleInnerRadius = 0.5
 /// `audioVisualizerCircleBarFill`.
 let audioVisualizerCircleBarFill = 0.6
 
+/// `level` held to 0–1, with NaN counted as silent, as the Dart
+/// `audioVisualizerUnitLevel` reads it.
+func audioVisualizerUnitLevel(_ level: Float) -> Double {
+  level.isNaN ? 0 : min(1, max(0, Double(level)))
+}
+
 /// A rounded bar: a box with fully rounded corners of `radius`, turned
 /// `rotation` radians clockwise about (`pivotX`, `pivotY`) of the layer's box,
 /// its own coordinates measured from that point.
@@ -48,7 +54,7 @@ func audioVisualizerShapes(
 ) -> AudioVisualizerShapes {
   let count = levels.count
   guard count > 0, width > 0, height > 0 else { return AudioVisualizerShapes() }
-  func level(_ band: Int) -> Double { min(1, max(0, Double(levels[band]))) }
+  func level(_ band: Int) -> Double { audioVisualizerUnitLevel(levels[band]) }
 
   switch style {
   case .bars, .mirroredBars:
@@ -107,7 +113,7 @@ private func audioVisualizerWaveOutline(
   for band in 0..<count {
     xs[band + 1] = (Double(band) + 0.5) * width / Double(count)
     amplitudes[band + 1] =
-      max(audioVisualizerWaveMinLevel, min(1, max(0, Double(levels[band])))) * middle
+      max(audioVisualizerWaveMinLevel, audioVisualizerUnitLevel(levels[band])) * middle
   }
 
   let last = count + 1

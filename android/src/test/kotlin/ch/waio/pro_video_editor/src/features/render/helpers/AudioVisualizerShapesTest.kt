@@ -3,6 +3,7 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 import ch.waio.pro_video_editor.src.features.render.models.LayerAudioVisualizerConfig.Style
 import kotlin.math.PI
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -137,6 +138,16 @@ internal class AudioVisualizerShapesTest {
         assertEquals(5.0, wave[6], 1e-9)
         assertEquals(48.0, wave[7], 1e-9)
         assertEquals(52.0, wave[19], 1e-9)
+    }
+
+    @Test
+    fun aNaNLevelCountsAsSilent() {
+        for (style in Style.values()) {
+            val silent = audioVisualizerShapes(style, 100.0, 50.0, floatArrayOf(0f, 1f))
+            val broken = audioVisualizerShapes(style, 100.0, 50.0, floatArrayOf(Float.NaN, 1f))
+            assertBars(silent.bars, broken.bars)
+            assertContentEquals(silent.wave, broken.wave, "$style")
+        }
     }
 
     @Test

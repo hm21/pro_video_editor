@@ -202,6 +202,59 @@ void main() {
     expect(isBlack(out, 410, 180), isTrue, reason: 'right of the turned bar');
   });
 
+  testWidgets('fills the frame when stretched, whatever its size', (
+    tester,
+  ) async {
+    // One loud band of a ring is two bars, pointing right and left from the
+    // middle of the frame. The ring fits the frame's height, radius 180:
+    // each bar runs from 90 to 180 px out, 45 px wide, so the right one is
+    // x 410..500. Drawn in a 100 x 100 box and stretched over the frame, it
+    // would run x 480..640 instead.
+    for (final size in [null, const Size(100, 100)]) {
+      final out = await frameOf(
+        await render(
+          ImageLayer.audioVisualizer(
+            visualizer: visualizer(AudioVisualizerStyle.circle, 1, (_) => [1]),
+            size: size,
+          ),
+        ),
+      );
+
+      expect(isGreen(out, 430, 180), isTrue, reason: 'right bar, size $size');
+      expect(isGreen(out, 210, 180), isTrue, reason: 'left bar, size $size');
+      expect(isBlack(out, 320, 180), isTrue, reason: 'ring, size $size');
+      expect(isBlack(out, 600, 180), isTrue, reason: 'past the bar, $size');
+    }
+  });
+
+  testWidgets('moves and grows with its keyframes', (tester) async {
+    // A 160 x 90 box that one keyframe puts at the middle of the frame,
+    // grown twice: x 160..480 and y 90..270, its loud bar x 208..432. At its
+    // own size the bar would be x 264..376 and y 135..225.
+    final out = await frameOf(
+      await render(
+        ImageLayer.audioVisualizer(
+          visualizer: visualizer(AudioVisualizerStyle.bars, 1, (_) => [1]),
+          offset: Offset.zero,
+          size: const Size(160, 90),
+          keyframes: const [
+            TimelineKeyframe(
+              time: Duration.zero,
+              offset: Offset(240, 135),
+              scale: 2,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    expect(isGreen(out, 320, 100), isTrue, reason: 'top of the grown bar');
+    expect(isGreen(out, 320, 260), isTrue, reason: 'bottom of the grown bar');
+    expect(isGreen(out, 220, 180), isTrue, reason: 'left of the grown bar');
+    expect(isBlack(out, 320, 80), isTrue, reason: 'above the grown box');
+    expect(isBlack(out, 40, 40), isTrue, reason: 'where the offset was');
+  });
+
   group('matches the editor preview', () {
     /// The editor preview of [layer]'s visualizer at 0.5 s: its alpha, one
     /// value per pixel of the box.

@@ -51,6 +51,18 @@ void main() {
         expect(loud.levelsAt(const Duration(seconds: 1)), [0]);
       });
 
+      test('counts a NaN level as silent', () {
+        final broken = LayerAudioVisualizer(
+          style: AudioVisualizerStyle.bars,
+          bandCount: 1,
+          levels: Float32List.fromList([double.nan, 1]),
+          framesPerSecond: 1,
+        );
+
+        expect(broken.levelsAt(Duration.zero), [0]);
+        expect(broken.levelsAt(const Duration(milliseconds: 500)), [0.5]);
+      });
+
       test('writes into a list of the right length', () {
         final into = Float32List(2);
 
@@ -60,6 +72,21 @@ void main() {
         );
         expect(into, [0, 1]);
       });
+    });
+
+    test('asserts a finite rate above 0', () {
+      for (final rate in [0.0, double.infinity]) {
+        expect(
+          () => LayerAudioVisualizer(
+            style: AudioVisualizerStyle.bars,
+            bandCount: 1,
+            levels: Float32List(1),
+            framesPerSecond: rate,
+          ),
+          throwsAssertionError,
+          reason: '$rate',
+        );
+      }
     });
 
     test('counts its rows', () {
@@ -119,6 +146,18 @@ void main() {
 
         expect(read.levels, [0.5, 0.5]);
         expect(read.framesPerSecond, 60);
+      });
+
+      test('falls back to 60 rows a second for a rate it cannot use', () {
+        for (final rate in [0, -5, double.infinity, double.nan]) {
+          final read = LayerAudioVisualizer.fromMap({
+            'style': 'bars',
+            'bandCount': 1,
+            'levels': [0.5],
+            'framesPerSecond': rate,
+          });
+          expect(read.framesPerSecond, 60, reason: '$rate');
+        }
       });
 
       test('throws on an unknown style', () {
