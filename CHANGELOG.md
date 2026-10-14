@@ -1,5 +1,5 @@
 ## 2.32.2
-- **FIX**(android): Exports that re-encode no longer fail with `Video frame processing error` on Android 9 to 11 in apps minified with R8. The plugin now ships consumer ProGuard rules that keep R8 from optimizing Media3's effect classes, whose optimized form fails on those versions with `A 4x4 transformation matrix must have 16 elements`.
+- **FIX**(android): In apps minified with R8, exports on Android 11 and older no longer fail with `Video frame processing error` or, under R8 full mode, crash the app with `NoClassDefFoundError`. The plugin now ships consumer ProGuard rules for Media3.
 
 ## 2.32.1
 - **FIX**(android): A layer turned by its keyframes or by a wiggle stays where it was placed when it sits more than half its size past the frame edge with its corners still reaching in, as on iOS and macOS. It used to be pulled in to at most half its upright size past the edge, so more of it showed than in the preview.
