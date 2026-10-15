@@ -309,6 +309,9 @@ class RenderVideo(private val context: Context) {
                             workingConfig.videoClips,
                             enableAudio = workingConfig.enableAudio,
                             globalChromaKey = workingConfig.chromaKey,
+                            endUs = ClipTransitionGeometry.clipTimelineEndUs(
+                                workingConfig.endUs, workingConfig.playbackSpeed
+                            ),
                             shouldStop = shouldStopPolling,
                             collectPath = { paths.add(it) },
                             onProgress = { f -> transitionProgress(f.toDouble()) },
@@ -446,11 +449,17 @@ class RenderVideo(private val context: Context) {
      * so footage inside the transition plays at the same speed as the rest of
      * the clip. If a transition cannot be rendered (e.g. dimension mismatch or
      * not enough content) it degrades to a hard cut.
+     *
+     * A blend that would start at or after [endUs] (the render's end on the
+     * clips' timeline) never reaches the output, so it is not rendered: the
+     * outgoing tail stands in for it at the same length, which keeps every later
+     * clip where the blend would have put it.
      */
     private fun preRenderTransitions(
         clips: List<VideoClip>,
         enableAudio: Boolean,
         globalChromaKey: ChromaKeyConfig?,
+        endUs: Long?,
         shouldStop: AtomicBoolean,
         collectPath: (String) -> Unit,
         onProgress: (Float) -> Unit,
@@ -463,8 +472,45 @@ class RenderVideo(private val context: Context) {
         val betweenCount = if (clips.size >= 2) {
             (0 until clips.size - 1).count { clips[it].transition?.isOverlap == true }
         } else 0
-        val total = betweenCount + (if (wrapTransition != null) 1 else 0)
-        if (total == 0) return clips
+        if (betweenCount == 0 && wrapTransition == null) return clips
+
+        // The planning below and the pass after it both need every source's
+        // length; probe each one once.
+        val sourceDurations = HashMap<String, Long>()
+        fun sourceEndUs(clip: VideoClip): Long = clip.endUs
+            ?: sourceDurations.getOrPut(clip.inputPath) {
+                mediaInfoExtractor.getVideoDuration(clip.inputPath)
+            }
+        fun outputUs(clip: VideoClip): Long = ClipTransitionGeometry.outputDurationUs(
+            sourceEndUs(clip) - (clip.startUs ?: 0L), clip.playbackSpeed
+        )
+
+        // Each blend is a full encode, so on a long timeline cut short by the
+        // render's end most of the pass would go into blends nobody sees.
+        val pastEnd = if (endUs == null) BooleanArray(clips.size) else {
+            ClipTransitionGeometry.blendsPastEnd(
+                clips = clips.mapIndexed { index, clip ->
+                    val next = clips.getOrNull(index + 1)
+                    ClipTransitionGeometry.TimelineClip(
+                        sourceDurationUs = sourceEndUs(clip) - (clip.startUs ?: 0L),
+                        speed = clip.playbackSpeed,
+                        blendDurationUs = clip.transition?.takeIf {
+                            it.isOverlap && next != null &&
+                                    !clip.reverseVideo && !next.reverseVideo
+                        }?.durationUs,
+                    )
+                },
+                endUs = endUs,
+                startOffsetUs = -(wrapTransition?.durationUs ?: 0L),
+            )
+        }
+        val skippedCount = pastEnd.count { it }
+        if (skippedCount > 0) {
+            Log.d(RENDER_TAG, "Transition: $skippedCount blend(s) start after the render end")
+        }
+        // A skipped blend takes no time, so progress leaves it out.
+        val total = (betweenCount - skippedCount + (if (wrapTransition != null) 1 else 0))
+            .coerceAtLeast(1)
 
         val work = clips.toMutableList()
         val result = mutableListOf<VideoClip>()
@@ -496,9 +542,9 @@ class RenderVideo(private val context: Context) {
             }
 
             val curStart = current.startUs ?: 0L
-            val curEnd = current.endUs ?: mediaInfoExtractor.getVideoDuration(current.inputPath)
+            val curEnd = sourceEndUs(current)
             val nextStart = next.startUs ?: 0L
-            val nextEnd = next.endUs ?: mediaInfoExtractor.getVideoDuration(next.inputPath)
+            val nextEnd = sourceEndUs(next)
             val curDur = curEnd - curStart
             val nextDur = nextEnd - nextStart
 
@@ -524,6 +570,17 @@ class RenderVideo(private val context: Context) {
 
             val tailSrc = plan.outgoingTailSourceUs
             val headSrc = plan.incomingHeadSourceUs
+
+            if (pastEnd[i]) {
+                // The outgoing tail stands in for the blend nobody sees. It is
+                // split off so the first and last clips, which a loop wrap
+                // reads, end up as they would beside a blend.
+                addClip(current.copy(endUs = curEnd - tailSrc, transition = null))
+                addClip(current.copy(startUs = curEnd - tailSrc, endUs = curEnd, transition = null))
+                work[i + 1] = next.copy(startUs = nextStart + headSrc)
+                i++
+                continue
+            }
 
             val rendered = ClipTransitionRenderer.renderSync(
                 context = context,
@@ -588,9 +645,9 @@ class RenderVideo(private val context: Context) {
             val singleClip = lastIdx == 0
 
             val firstStart = first.startUs ?: 0L
-            val firstEnd = first.endUs ?: mediaInfoExtractor.getVideoDuration(first.inputPath)
+            val firstEnd = sourceEndUs(first)
             val lastStart = last.startUs ?: 0L
-            val lastEnd = last.endUs ?: mediaInfoExtractor.getVideoDuration(last.inputPath)
+            val lastEnd = sourceEndUs(last)
 
             // Single-clip loops carve the head and tail from the same source, so
             // they need the stricter head+tail<L guard; multi-clip loops keep two
@@ -611,8 +668,26 @@ class RenderVideo(private val context: Context) {
                 )
             }
 
+            // Where the wrap blend would start: after every clip, less the head
+            // it moves from the first clip and the tail it takes from the last.
+            fun wrapStartUs(plan: ClipTransitionGeometry.OverlapPlan): Long =
+                result.sumOf { outputUs(it) } -
+                        ClipTransitionGeometry.outputDurationUs(
+                            plan.incomingHeadSourceUs, first.playbackSpeed
+                        ) -
+                        ClipTransitionGeometry.outputDurationUs(
+                            plan.outgoingTailSourceUs, last.playbackSpeed
+                        )
+
             if (plan == null) {
                 Log.w(RENDER_TAG, "Loop wrap: not enough content, seamless loop skipped")
+            } else if (endUs != null && wrapStartUs(plan) >= endUs) {
+                // The render ends before the wrap blend would start. The first
+                // clip still gives up its head, so everything inside the render
+                // stays where the wrap puts it; the last keeps its tail in place
+                // of the blend.
+                Log.d(RENDER_TAG, "Loop wrap: starts after the render end, not rendered")
+                result[0] = first.copy(startUs = firstStart + plan.incomingHeadSourceUs)
             } else {
                 val tailSrc = plan.outgoingTailSourceUs
                 val headSrc = plan.incomingHeadSourceUs

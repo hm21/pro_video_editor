@@ -1,3 +1,6 @@
+## 2.33.4
+- **FIX**(android, iOS, macOS): A render with an `endTime` skips the overlap transitions that would start after it. Each one used to be encoded first, so a 6 s export of a long timeline with a transition between every clip took minutes; it now takes about as long as the same clips without transitions.
+
 ## 2.33.2
 - **FIX**(android, iOS, macOS): A render's memory no longer grows with every still image layer. A video with 200 stickers or drawing strokes now needs about as much as one with a single sticker, and exports faster.
 

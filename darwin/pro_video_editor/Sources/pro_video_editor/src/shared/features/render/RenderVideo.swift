@@ -192,7 +192,9 @@ class RenderVideo {
               clips: workingConfig.videoClips,
               enableAudio: workingConfig.enableAudio,
               outputFormat: workingConfig.outputFormat,
-              globalChromaKey: workingConfig.chromaKey)
+              globalChromaKey: workingConfig.chromaKey,
+              endUs: ClipTransitionGeometry.clipTimelineEndUs(
+                globalEndUs: workingConfig.endUs, globalSpeed: workingConfig.playbackSpeed))
             workingConfig = workingConfig.copyWith(videoClips: preRender.clips)
             transitionURLs = preRender.urls
             // `preRenderTransitions` stops early when the job is cancelled or a
@@ -655,6 +657,11 @@ class RenderVideo {
   /// (e.g. a neighbour is reversed or has too little content) — those cases are
   /// handled live by the main pipeline.
   ///
+  /// A blend that would start at or after `endUs` (the render's end on the
+  /// clips' timeline) never reaches the output, so it is not rendered: the
+  /// outgoing tail stands in for it at the same length, which keeps every later
+  /// clip where the blend would have put it.
+  ///
   /// A cancelled job stops the pass where it stands and returns the clip list
   /// as far as it got, together with every blend written so far — the caller
   /// checks for cancellation immediately afterwards and lets `finalize` remove
@@ -663,7 +670,7 @@ class RenderVideo {
   /// `stall`, for the caller to throw once the blends are registered.
   private static func preRenderTransitions(
     clips: [VideoClip], enableAudio: Bool, outputFormat: String,
-    globalChromaKey: ChromaKeyConfig?
+    globalChromaKey: ChromaKeyConfig?, endUs: Int64?
   ) async -> TransitionPreRender {
     // An overlap transition on the last/only clip loops back into the first clip
     // (seamless loop). Captured before the between-clip pass clears it.
@@ -673,6 +680,46 @@ class RenderVideo {
       else { return nil }
       return t
     }()
+
+    // The planning below and the pass after it both need every source's
+    // length; load each one once.
+    var sourceDurations: [String: Int64] = [:]
+    func sourceEndUs(_ clip: VideoClip) async -> Int64 {
+      if let end = clip.endUs { return end }
+      if let known = sourceDurations[clip.inputPath] { return known }
+      let duration = await clipDurationUs(clip.inputPath)
+      sourceDurations[clip.inputPath] = duration
+      return duration
+    }
+    func outputUs(_ clip: VideoClip) async -> Int64 {
+      ClipTransitionGeometry.outputDurationUs(
+        sourceDurationUs: await sourceEndUs(clip) - (clip.startUs ?? 0),
+        speed: clip.playbackSpeed)
+    }
+
+    // Each blend is a full export, so on a long timeline cut short by the
+    // render's end most of the pass would go into blends nobody sees.
+    var pastEnd = Array(repeating: false, count: clips.count)
+    if let endUs {
+      var timeline: [ClipTransitionGeometry.TimelineClip] = []
+      for (index, clip) in clips.enumerated() {
+        let next: VideoClip? = index + 1 < clips.count ? clips[index + 1] : nil
+        let blends =
+          clip.transition?.isOverlap == true && next != nil
+          && !clip.reverseVideo && !(next?.reverseVideo ?? false)
+        timeline.append(
+          ClipTransitionGeometry.TimelineClip(
+            sourceDurationUs: await sourceEndUs(clip) - (clip.startUs ?? 0),
+            speed: clip.playbackSpeed,
+            blendDurationUs: blends ? clip.transition?.durationUs : nil))
+      }
+      pastEnd = ClipTransitionGeometry.blendsPastEnd(
+        clips: timeline, endUs: endUs, startOffsetUs: -(wrapTransition?.durationUs ?? 0))
+      let skippedCount = pastEnd.filter { $0 }.count
+      if skippedCount > 0 {
+        PluginLog.print("✂️ Transition: \(skippedCount) blend(s) start after the render end")
+      }
+    }
 
     var work = clips
     var result: [VideoClip] = []
@@ -709,19 +756,9 @@ class RenderVideo {
       }
 
       let curStart = current.startUs ?? 0
-      let curEnd: Int64
-      if let e = current.endUs {
-        curEnd = e
-      } else {
-        curEnd = await clipDurationUs(current.inputPath)
-      }
+      let curEnd = await sourceEndUs(current)
       let nextStart = next!.startUs ?? 0
-      let nextEnd: Int64
-      if let e = next!.endUs {
-        nextEnd = e
-      } else {
-        nextEnd = await clipDurationUs(next!.inputPath)
-      }
+      let nextEnd = await sourceEndUs(next!)
       let curDur = curEnd - curStart
       let nextDur = nextEnd - nextStart
 
@@ -744,6 +781,26 @@ class RenderVideo {
 
       let tailSrc = plan.outgoingTailSourceUs
       let headSrc = plan.incomingHeadSourceUs
+
+      if pastEnd[i] {
+        // The outgoing tail stands in for the blend nobody sees. It is split
+        // off so the first and last clips, which a loop wrap reads, end up as
+        // they would beside a blend.
+        let outgoing = clearedOverlap(current)
+        appendClip(
+          outgoing.reading(
+            current.inputPath, startUs: curStart, endUs: curEnd - tailSrc,
+            frameRateOverride: current.frameRateOverride))
+        appendClip(
+          outgoing.reading(
+            current.inputPath, startUs: curEnd - tailSrc, endUs: curEnd,
+            frameRateOverride: current.frameRateOverride))
+        work[i + 1] = next!.reading(
+          next!.inputPath, startUs: nextStart + headSrc, endUs: nextEnd,
+          frameRateOverride: next!.frameRateOverride)
+        i += 1
+        continue
+      }
 
       // A muted side still lets the other fade in or out.
       let includeAudio =
@@ -809,12 +866,7 @@ class RenderVideo {
 
       let firstStart = first.startUs ?? 0
       let lastStart = last.startUs ?? 0
-      let lastEnd: Int64
-      if let e = last.endUs {
-        lastEnd = e
-      } else {
-        lastEnd = await clipDurationUs(last.inputPath)
-      }
+      let lastEnd = await sourceEndUs(last)
 
       // Single-clip loops carve head and tail from the same source, so they need
       // the stricter head+tail<L guard; multi-clip loops keep two independent
@@ -826,12 +878,7 @@ class RenderVideo {
           transitionDurationUs: wrap.durationUs,
           speed: last.playbackSpeed)
       } else {
-        let firstEnd: Int64
-        if let e = first.endUs {
-          firstEnd = e
-        } else {
-          firstEnd = await clipDurationUs(first.inputPath)
-        }
+        let firstEnd = await sourceEndUs(first)
         plan = ClipTransitionGeometry.planOverlap(
           outgoingSourceDurationUs: lastEnd - lastStart,
           incomingSourceDurationUs: firstEnd - firstStart,
@@ -840,7 +887,30 @@ class RenderVideo {
           incomingSpeed: first.playbackSpeed)
       }
 
-      if let plan = plan {
+      // Where the wrap blend would start: after every clip, less the head it
+      // moves from the first clip and the tail it takes from the last.
+      var wrapPastEnd = false
+      if let plan, let endUs {
+        var timelineUs: Int64 = 0
+        for clip in result { timelineUs += await outputUs(clip) }
+        let wrapStartUs =
+          timelineUs
+          - ClipTransitionGeometry.outputDurationUs(
+            sourceDurationUs: plan.incomingHeadSourceUs, speed: first.playbackSpeed)
+          - ClipTransitionGeometry.outputDurationUs(
+            sourceDurationUs: plan.outgoingTailSourceUs, speed: last.playbackSpeed)
+        wrapPastEnd = wrapStartUs >= endUs
+      }
+
+      if let plan, wrapPastEnd {
+        // The render ends before the wrap blend would start. The first clip
+        // still gives up its head, so everything inside the render stays where
+        // the wrap puts it; the last keeps its tail in place of the blend.
+        PluginLog.print("✂️ Loop wrap: starts after the render end, not rendered")
+        result[0] = first.reading(
+          first.inputPath, startUs: firstStart + plan.incomingHeadSourceUs,
+          endUs: first.endUs, frameRateOverride: first.frameRateOverride)
+      } else if let plan = plan {
         let tailSrc = plan.outgoingTailSourceUs
         let headSrc = plan.incomingHeadSourceUs
         let includeAudio =

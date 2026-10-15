@@ -132,6 +132,89 @@ internal object ClipTransitionGeometry {
     }
 
     /**
+     * One clip as the overlap pre-render lays it out.
+     *
+     * @property sourceDurationUs Trimmed source duration of the clip.
+     * @property speed Clip playback speed (null/<=0 → 1×).
+     * @property blendDurationUs Requested duration of the overlap blend into the
+     *  next clip, or null when this clip does not blend into it.
+     */
+    data class TimelineClip(
+        val sourceDurationUs: Long,
+        val speed: Float?,
+        val blendDurationUs: Long?,
+    )
+
+    /**
+     * Which overlap blends start at or after [endUs], where the render ends on
+     * the clips' timeline (see [clipTimelineEndUs]). Such a blend never reaches
+     * the output, so it need not be rendered.
+     *
+     * Lays the clips out the way the pre-render rewrites them: every blend takes
+     * its tail from the outgoing clip and its head from the incoming one, so
+     * each transition shortens the timeline by one blend. A clip whose blend
+     * cannot be planned is a hard cut, as in [planOverlap].
+     *
+     * The layout assumes every earlier blend renders. One that fails becomes a
+     * hard cut, which only pushes later clips back, so a blend found past the
+     * end stays past it.
+     *
+     * @param startOffsetUs Where the first clip starts. A loop wrap moves the
+     *  first clip's head to the end, which pulls every blend earlier by up to
+     *  the wrap's requested duration, so the caller passes that negated.
+     * @return per clip, whether its blend into the next clip starts at or after
+     *  [endUs]; false for a clip without a blend, and for all when [endUs] is
+     *  null.
+     */
+    fun blendsPastEnd(
+        clips: List<TimelineClip>,
+        endUs: Long?,
+        startOffsetUs: Long = 0L,
+    ): BooleanArray {
+        val result = BooleanArray(clips.size)
+        if (endUs == null) return result
+        var positionUs = startOffsetUs
+        // Source the previous blend took from the head of the current clip.
+        var headTakenUs = 0L
+        for ((i, clip) in clips.withIndex()) {
+            val durationUs = clip.sourceDurationUs - headTakenUs
+            headTakenUs = 0L
+            val next = clips.getOrNull(i + 1)
+            val plan = if (clip.blendDurationUs != null && next != null) {
+                planOverlap(
+                    outgoingSourceDurationUs = durationUs,
+                    incomingSourceDurationUs = next.sourceDurationUs,
+                    transitionDurationUs = clip.blendDurationUs,
+                    outgoingSpeed = clip.speed,
+                    incomingSpeed = next.speed,
+                )
+            } else null
+            if (plan == null) {
+                positionUs += outputDurationUs(durationUs, clip.speed)
+                continue
+            }
+            val blendStartUs = positionUs +
+                    outputDurationUs(durationUs - plan.outgoingTailSourceUs, clip.speed)
+            result[i] = blendStartUs >= endUs
+            positionUs = blendStartUs + plan.outputDurationUs
+            headTakenUs = plan.incomingHeadSourceUs
+        }
+        return result
+    }
+
+    /**
+     * Maps the render's end, given on the output timeline after the
+     * composition-wide [globalSpeed], onto the clips' own timeline, where each
+     * clip runs at its own speed only. Null stays null (no end).
+     */
+    fun clipTimelineEndUs(globalEndUs: Long?, globalSpeed: Float?): Long? =
+        globalEndUs?.let { (it * validSpeedOrOne(globalSpeed)).roundToLong() }
+
+    /** Output duration of [sourceDurationUs] of a clip played at [speed]. */
+    fun outputDurationUs(sourceDurationUs: Long, speed: Float?): Long =
+        (sourceDurationUs / validSpeedOrOne(speed)).roundToLong()
+
+    /**
      * Number of OUTPUT frames the blended clip should emit so the decoded
      * outgoing tail ([decodedTailFrames] frames covering [tailSourceDurationUs]
      * of source) is replayed across [outputDurationUs] of output. When the

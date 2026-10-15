@@ -288,4 +288,109 @@ internal class ClipTransitionGeometryTest {
             )
         )
     }
+
+    private fun clip(
+        sourceMs: Long,
+        blendMs: Long? = null,
+        speed: Float? = null,
+    ) = ClipTransitionGeometry.TimelineClip(
+        sourceDurationUs = sourceMs * 1_000L,
+        speed = speed,
+        blendDurationUs = blendMs?.let { it * 1_000L },
+    )
+
+    @Test
+    fun blendsPastEnd_onlyTheBlendsInsideTheRenderAreKept() {
+        // 50 clips of 4s with 500ms blends: blend 0 runs 3.5..4.0s, blend 1
+        // starts at 7.0s, after a 6.3s render end, and so does every later one.
+        val clips = List(50) { index -> clip(4_000L, blendMs = if (index < 49) 500L else null) }
+
+        val pastEnd = ClipTransitionGeometry.blendsPastEnd(clips, endUs = 6_300_000L)
+
+        assertEquals(false, pastEnd[0])
+        assertEquals((1 until 49).toList(), pastEnd.indices.filter { pastEnd[it] })
+    }
+
+    @Test
+    fun blendsPastEnd_keepsABlendTheEndCutsThrough() {
+        // Blend 0 starts at 3.5s; an end inside it still shows its first frames.
+        val clips = listOf(clip(4_000L, blendMs = 500L), clip(4_000L))
+
+        assertEquals(
+            listOf(false, false),
+            ClipTransitionGeometry.blendsPastEnd(clips, endUs = 3_700_000L).toList(),
+        )
+        assertEquals(
+            listOf(true, false),
+            ClipTransitionGeometry.blendsPastEnd(clips, endUs = 3_500_000L).toList(),
+        )
+    }
+
+    @Test
+    fun blendsPastEnd_placesBlendsAfterTheHeadThePreviousOneTook() {
+        // Blend 0 takes 500ms of clip 1's head, so blend 1 starts at 7.0s, not
+        // 7.5s: a 7.2s end still shows it.
+        val clips = listOf(
+            clip(4_000L, blendMs = 500L),
+            clip(4_000L, blendMs = 500L),
+            clip(4_000L),
+        )
+
+        assertEquals(
+            listOf(false, false, false),
+            ClipTransitionGeometry.blendsPastEnd(clips, endUs = 7_200_000L).toList(),
+        )
+    }
+
+    @Test
+    fun blendsPastEnd_laysClipsOutInOutputTime() {
+        // At 2x a 4s source plays for 2s, so blend 0 starts at 1.5s and blend 1
+        // at 3.0s.
+        val clips = listOf(
+            clip(4_000L, blendMs = 500L, speed = 2f),
+            clip(4_000L, blendMs = 500L, speed = 2f),
+            clip(4_000L, speed = 2f),
+        )
+
+        assertEquals(
+            listOf(false, true, false),
+            ClipTransitionGeometry.blendsPastEnd(clips, endUs = 2_000_000L).toList(),
+        )
+    }
+
+    @Test
+    fun blendsPastEnd_startOffsetPullsEveryBlendEarlier() {
+        // A loop wrap of up to 500ms moves the first clip's head to the end, so
+        // blend 1 may start as early as 6.5s.
+        val clips = listOf(
+            clip(4_000L, blendMs = 500L),
+            clip(4_000L, blendMs = 500L),
+            clip(4_000L),
+        )
+
+        assertEquals(
+            listOf(false, false, false),
+            ClipTransitionGeometry.blendsPastEnd(
+                clips, endUs = 6_800_000L, startOffsetUs = -500_000L
+            ).toList(),
+        )
+    }
+
+    @Test
+    fun blendsPastEnd_isEmptyWithoutAnEnd() {
+        val clips = listOf(clip(4_000L, blendMs = 500L), clip(4_000L))
+
+        assertEquals(
+            listOf(false, false),
+            ClipTransitionGeometry.blendsPastEnd(clips, endUs = null).toList(),
+        )
+    }
+
+    @Test
+    fun clipTimelineEndUs_undoesTheGlobalSpeed() {
+        // 6.3s of output at 2x is 12.6s of the clips' own timeline.
+        assertEquals(12_600_000L, ClipTransitionGeometry.clipTimelineEndUs(6_300_000L, 2f))
+        assertEquals(6_300_000L, ClipTransitionGeometry.clipTimelineEndUs(6_300_000L, null))
+        assertNull(ClipTransitionGeometry.clipTimelineEndUs(null, 2f))
+    }
 }

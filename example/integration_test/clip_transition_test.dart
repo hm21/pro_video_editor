@@ -425,6 +425,55 @@ void main() {
   });
 
   // ───────────────────────────────────────────────────────────
+  // Render end — blends that would start after endTime are left out
+  // ───────────────────────────────────────────────────────────
+  group('Clip transitions — render end', () {
+    const windowDuration = Duration(seconds: 2);
+    const endTime = Duration(seconds: 3);
+    const dissolve = ClipTransition(
+      type: ClipTransitionType.dissolve,
+      duration: overlapDuration,
+    );
+
+    /// [count] 2 s windows of the demo clip, each dissolving into the next;
+    /// the last one into the first when [loop] is set.
+    List<VideoSegment> windows(int count, {bool loop = false}) => [
+      for (var i = 0; i < count; i++)
+        VideoSegment(
+          video: inputVideo,
+          startTime: windowDuration * (i % 5),
+          endTime: windowDuration * (i % 5 + 1),
+          transition: i < count - 1 || loop ? dissolve : null,
+        ),
+    ];
+
+    testWidgets('a long timeline stops at the end time', (_) async {
+      // Only the first two of the 19 blends start before 3 s.
+      final meta = await render(
+        'long-timeline-render-end',
+        VideoRenderData(
+          outputFormat: VideoOutputFormat.mp4,
+          videoSegments: windows(20),
+          endTime: endTime,
+        ),
+      );
+      expectDuration(meta, endTime, 'the output must stop at the end time');
+    });
+
+    testWidgets('a loop wrap after the end time still stops there', (_) async {
+      final meta = await render(
+        'loop-wrap-render-end',
+        VideoRenderData(
+          outputFormat: VideoOutputFormat.mp4,
+          videoSegments: windows(20, loop: true),
+          endTime: endTime,
+        ),
+      );
+      expectDuration(meta, endTime, 'the output must stop at the end time');
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────
   // Trimmed HDR source — iOS/macOS pre-transcode only each segment's window
   // and blend on the shorter files that come out of it
   // ───────────────────────────────────────────────────────────

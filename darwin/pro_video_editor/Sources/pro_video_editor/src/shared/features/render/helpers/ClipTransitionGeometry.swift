@@ -104,6 +104,84 @@ internal enum ClipTransitionGeometry {
     )
   }
 
+  /// One clip as the overlap pre-render lays it out.
+  struct TimelineClip: Equatable {
+    /// Trimmed source duration of the clip.
+    let sourceDurationUs: Int64
+    /// Clip playback speed (nil/<=0 → 1×).
+    let speed: Float?
+    /// Requested duration of the overlap blend into the next clip, or `nil`
+    /// when this clip does not blend into it.
+    let blendDurationUs: Int64?
+  }
+
+  /// Which overlap blends start at or after `endUs`, where the render ends on
+  /// the clips' timeline (see `clipTimelineEndUs`). Such a blend never reaches
+  /// the output, so it need not be rendered.
+  ///
+  /// Lays the clips out the way the pre-render rewrites them: every blend takes
+  /// its tail from the outgoing clip and its head from the incoming one, so each
+  /// transition shortens the timeline by one blend. A clip whose blend cannot be
+  /// planned is a hard cut, as in `planOverlap`.
+  ///
+  /// The layout assumes every earlier blend renders. One that fails becomes a
+  /// hard cut, which only pushes later clips back, so a blend found past the end
+  /// stays past it.
+  ///
+  /// - Parameter startOffsetUs: Where the first clip starts. A loop wrap moves
+  ///   the first clip's head to the end, which pulls every blend earlier by up
+  ///   to the wrap's requested duration, so the caller passes that negated.
+  /// - Returns: per clip, whether its blend into the next clip starts at or
+  ///   after `endUs`; false for a clip without a blend, and for all when `endUs`
+  ///   is nil.
+  static func blendsPastEnd(
+    clips: [TimelineClip],
+    endUs: Int64?,
+    startOffsetUs: Int64 = 0
+  ) -> [Bool] {
+    var result = Array(repeating: false, count: clips.count)
+    guard let endUs else { return result }
+    var positionUs = startOffsetUs
+    // Source the previous blend took from the head of the current clip.
+    var headTakenUs: Int64 = 0
+    for (i, clip) in clips.enumerated() {
+      let durationUs = clip.sourceDurationUs - headTakenUs
+      headTakenUs = 0
+      let next: TimelineClip? = i + 1 < clips.count ? clips[i + 1] : nil
+      guard let blendDurationUs = clip.blendDurationUs, let next,
+        let plan = planOverlap(
+          outgoingSourceDurationUs: durationUs,
+          incomingSourceDurationUs: next.sourceDurationUs,
+          transitionDurationUs: blendDurationUs,
+          outgoingSpeed: clip.speed,
+          incomingSpeed: next.speed)
+      else {
+        positionUs += outputDurationUs(sourceDurationUs: durationUs, speed: clip.speed)
+        continue
+      }
+      let blendStartUs =
+        positionUs
+        + outputDurationUs(
+          sourceDurationUs: durationUs - plan.outgoingTailSourceUs, speed: clip.speed)
+      result[i] = blendStartUs >= endUs
+      positionUs = blendStartUs + plan.outputDurationUs
+      headTakenUs = plan.incomingHeadSourceUs
+    }
+    return result
+  }
+
+  /// Maps the render's end, given on the output timeline after the
+  /// composition-wide `globalSpeed`, onto the clips' own timeline, where each
+  /// clip runs at its own speed only. `nil` stays `nil` (no end).
+  static func clipTimelineEndUs(globalEndUs: Int64?, globalSpeed: Float?) -> Int64? {
+    globalEndUs.map { Int64((Double($0) * validSpeedOrOne(globalSpeed)).rounded()) }
+  }
+
+  /// Output duration of `sourceDurationUs` of a clip played at `speed`.
+  static func outputDurationUs(sourceDurationUs: Int64, speed: Float?) -> Int64 {
+    Int64((Double(sourceDurationUs) / validSpeedOrOne(speed)).rounded())
+  }
+
   private static func validSpeedOrOne(_ speed: Float?) -> Double {
     if let speed = speed, speed > 0 { return Double(speed) }
     return 1.0
