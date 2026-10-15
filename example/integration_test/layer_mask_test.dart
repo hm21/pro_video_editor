@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 
@@ -160,6 +161,30 @@ void main() {
       }
     });
 
+    testWidgets('stretches a larger matte of another aspect ratio over the '
+        'clip', (_) async {
+      // Three times the clip's width and four times its height, so it is
+      // brought down on each axis on its own before the stretch. It still
+      // splits the clip in half.
+      final mask = await paintPng(
+        const Size(1920, 1440),
+        (c) => c.drawRect(
+          const Rect.fromLTWH(0, 0, 960, 1440),
+          Paint()..color = clipBlue,
+        ),
+      );
+      final out = await renderMasked(mask);
+
+      for (final p in const [Offset(0.15, 0.3), Offset(0.3, 0.7)]) {
+        final c = await samplePixel(out, p.dx, p.dy);
+        expect(isBlue(c), isTrue, reason: 'The clip is hidden at $p, got $c');
+      }
+      for (final p in const [Offset(0.7, 0.3), Offset(0.85, 0.7)]) {
+        final c = await samplePixel(out, p.dx, p.dy);
+        expect(isRed(c), isTrue, reason: 'Expected the base at $p, got $c');
+      }
+    });
+
     testWidgets('blends with the layer below where the matte is partly '
         'transparent', (_) async {
       // Half alpha on the right: a clip whose alpha were scaled twice — once
@@ -210,6 +235,33 @@ void main() {
         Offset(0.88, 0.25), // beside it, in the clip
         Offset(0.88, 0.75),
         Offset(0.2, 0.25), // outside the clip
+      ]) {
+        final c = await samplePixel(out, p.dx, p.dy);
+        expect(isRed(c), isTrue, reason: 'Expected the base at $p, got $c');
+      }
+    });
+
+    testWidgets('turns with the clip', (_) async {
+      // The same top-left quarter, on a clip turned half way round its box:
+      // the quarter comes out at the bottom right of x 320–640. A mask
+      // applied after the turn would stay at the top left.
+      final out = await renderMasked(
+        await pngWith(const Rect.fromLTWH(0, 0, 320, 180), clipBlue),
+        transform: const SegmentTransform(
+          offset: Offset(320, 0),
+          size: Size(320, 360),
+          fit: SegmentFit.fill,
+          rotation: math.pi,
+        ),
+      );
+
+      final shown = await samplePixel(out, 0.88, 0.75);
+      expect(isBlue(shown), isTrue, reason: 'Turned quarter: $shown');
+
+      for (final p in const [
+        Offset(0.62, 0.25), // where the quarter sits unturned
+        Offset(0.62, 0.75),
+        Offset(0.88, 0.25),
       ]) {
         final c = await samplePixel(out, p.dx, p.dy);
         expect(isRed(c), isTrue, reason: 'Expected the base at $p, got $c');

@@ -446,7 +446,9 @@ var data = VideoRenderData(
                 ),
                 // Optional: show the clip only inside a shape. Only the
                 // image's alpha counts; it is stretched over each clip's own
-                // frame, so it moves and turns with the clip.
+                // frame before the fit, so it moves and turns with the clip.
+                // Draw it at the clip's aspect ratio, and note that `cover`
+                // cuts off whatever of the shape overflows the box.
                 mask: EditorLayerImage.asset('assets/circle_mask.png'),
                 clips: [
                     VideoSegment(

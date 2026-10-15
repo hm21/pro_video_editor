@@ -124,6 +124,8 @@ class VideoLayer {
   /// Resolves each clip's input path, any chroma-key background image and the
   /// [mask], so this is asynchronous. See [EditorLayerImage.toChannelSource]
   /// for what that means for a file-backed matte.
+  ///
+  /// Throws an [ArgumentError] when [mask] resolves to no bytes at all.
   Future<Map<String, dynamic>> toAsyncMap() async {
     assert(
       clips.every((c) => c.transition == null),
@@ -138,13 +140,20 @@ class VideoLayer {
       'videoSegments.',
     );
     final mask = this.mask;
+    final maskSource = mask == null
+        ? null
+        : await mask.toChannelSource(pathKey: 'maskPath', dataKey: 'maskData');
+    // The renderers read empty bytes as "no image", which would export the
+    // clips unmasked instead of failing.
+    if ((maskSource?['maskData'] as Uint8List?)?.isEmpty ?? false) {
+      throw ArgumentError.value(mask, 'mask', 'The mask image is empty');
+    }
     return {
       'clips': await Future.wait(clips.map((clip) => clip.toAsyncMap())),
       'opacity': opacity,
       'transform': transform?.toMap(),
       'chromaKey': await chromaKey?.toAsyncMap(),
-      if (mask != null)
-        ...await mask.toChannelSource(pathKey: 'maskPath', dataKey: 'maskData'),
+      ...?maskSource,
       'keyframes': sortTimelineKeyframes(
         keyframes,
       ).map((k) => k.toMap()).toList(),

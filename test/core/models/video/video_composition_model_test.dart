@@ -268,6 +268,14 @@ void main() {
         expect(missing.toAsyncMap(), throwsA(isA<FileSystemException>()));
       });
 
+      test('toAsyncMap fails on an empty matte rather than drop it', () {
+        final empty = local.copyWith(
+          mask: EditorLayerImage.memory(Uint8List(0)),
+        );
+
+        expect(empty.toAsyncMap(), throwsArgumentError);
+      });
+
       test('toAsyncMap omits the matte when unset', () async {
         final map = await local.toAsyncMap();
 

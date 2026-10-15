@@ -154,9 +154,10 @@ class LayeredCompositionBuilder(
         for ((layerIndex, layer) in config.layers.withIndex()) {
             val seqBuilder = EditedMediaItemSequence.Builder(trackTypes)
                 .setIsLooping(false)
-            // Probed here, once per layer, so a matte that does not decode
-            // fails the render before it starts instead of on its first frame,
-            // and the same as on iOS and macOS.
+            // Probed here, once per layer, so a matte that is not an image
+            // fails the render before it starts, as on iOS and macOS. Only the
+            // header is read: a file that breaks off after it still fails,
+            // but on the clip's first frame.
             val maskEffect = layer.mask?.let { mask ->
                 val probe = ImageOrientation.probe(mask)
                     ?: throw IllegalArgumentException(

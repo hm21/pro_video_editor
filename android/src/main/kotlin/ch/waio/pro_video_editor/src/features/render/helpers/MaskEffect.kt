@@ -121,8 +121,11 @@ internal class MaskEffect(
                         "The layer mask (${image.describe()}) could not be decoded",
                         presentationTimeUs
                     )
-                    matteTexId = GlUtil.createTexture(bitmap)
-                    bitmap.recycle()
+                    matteTexId = try {
+                        GlUtil.createTexture(bitmap)
+                    } finally {
+                        bitmap.recycle()
+                    }
                 }
 
                 glProgram.setSamplerTexIdUniform("uTexSampler", inputTexId, 0)
@@ -173,23 +176,38 @@ internal class MaskEffect(
 
         /**
          * Decodes the matte, upright and no larger than the frame it is
-         * stretched over or the GPU's texture limit.
+         * stretched over on either axis, as on iOS and macOS.
          *
          * Pixels beyond the frame's own size would only be thrown away again
-         * by the stretch, so they are not decoded in the first place — which
-         * also keeps a camera-sized matte inside `GL_MAX_TEXTURE_SIZE`, above
-         * which `GlUtil.createTexture` throws.
+         * by the stretch, so they are not kept — which also keeps a
+         * camera-sized matte inside `GL_MAX_TEXTURE_SIZE`, above which
+         * `GlUtil.createTexture` throws. The decoder only samples down as far
+         * as keeps the matte at least the frame's size, and an exact scale
+         * does the rest: halving past it, a 2048 px matte would come out at
+         * 1024 px for a 1920 px frame and the stretch would blur its edge.
          *
          * Must be called on the GL thread.
          */
         private fun decodeMatte(): Bitmap? {
-            val frameSize = maxOf(frameWidth, frameHeight)
-            val maxSize = if (frameSize > 0) {
-                minOf(frameSize, maxTextureSize())
-            } else {
-                maxTextureSize()
-            }
-            return ImageOrientation.decodeWithin(image, maxSize = maxSize, knownProbe = probe)
+            val limit = maxTextureSize()
+            val maxWidth = if (frameWidth > 0) minOf(frameWidth, limit) else limit
+            val maxHeight = if (frameHeight > 0) minOf(frameHeight, limit) else limit
+            val sampled = ImageOrientation.decode(
+                image,
+                reqWidth = maxWidth,
+                reqHeight = maxHeight,
+                knownOrientation = probe.orientation
+            ) ?: return null
+            if (sampled.width <= maxWidth && sampled.height <= maxHeight) return sampled
+
+            val scaled = Bitmap.createScaledBitmap(
+                sampled,
+                minOf(sampled.width, maxWidth),
+                minOf(sampled.height, maxHeight),
+                /* filter= */ true
+            )
+            if (scaled !== sampled) sampled.recycle()
+            return scaled
         }
 
         /** The GPU's maximum texture dimension, or a conservative fallback. */
