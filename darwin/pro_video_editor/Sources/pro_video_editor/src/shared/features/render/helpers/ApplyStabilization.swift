@@ -6,16 +6,18 @@ import Foundation
 ///
 /// `startUs..<endUs` is the clip's span in composition microseconds;
 /// `fileStartUs` is the time in the file the clip reads that plays at
-/// `startUs`. Single-track path only, where a clip plays at its own speed.
+/// `startUs`, and `frameUs` the file's frame duration. Single-track path
+/// only, where a clip plays at its own speed.
 struct StabilizationWindow: Sendable {
   let startUs: Int64
   let endUs: Int64
   let fileStartUs: Int64
+  let frameUs: Int64
   let config: StabilizationConfig
 
   /// The transform for the frame shown at composition time `tUs`.
   func transform(atCompositionUs tUs: Int64) -> StabilizationConfig.Transform {
-    config.transform(atFileUs: fileStartUs + (tUs - startUs))
+    config.transform(atFileUs: fileStartUs + (tUs - startUs), frameUs: frameUs)
   }
 }
 
@@ -42,6 +44,7 @@ func computeStabilizationWindows(
         startUs: microseconds(instruction.timeRange.start),
         endUs: microseconds(CMTimeRangeGetEnd(instruction.timeRange)),
         fileStartUs: microseconds(instruction.sourceStart),
+        frameUs: microseconds(instruction.sourceFrameDuration),
         config: config))
   }
   return windows

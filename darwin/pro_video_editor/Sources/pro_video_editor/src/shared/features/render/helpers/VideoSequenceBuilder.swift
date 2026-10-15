@@ -231,10 +231,14 @@ internal class VideoSequenceBuilder {
       }
 
       // Store instruction for this clip segment
+      let sourceFrameDuration =
+        nominalFrameRate > 0
+        ? CMTime(seconds: 1 / Double(nominalFrameRate), preferredTimescale: 1_000_000) : .zero
       clipInstructions.append(
         ClipInstruction(
           timeRange: CMTimeRange(start: insertStart, duration: effectiveDuration),
           sourceStart: clipTimeRange.start,
+          sourceFrameDuration: sourceFrameDuration,
           transform: preferredTransform,
           naturalSize: naturalSize,
           renderSize: correctedSize
@@ -466,6 +470,8 @@ internal struct ClipInstruction {
   let timeRange: CMTimeRange
   /// The time in the clip's file that plays at `timeRange.start`.
   let sourceStart: CMTime
+  /// The frame duration of the clip's file; zero when it is unknown.
+  let sourceFrameDuration: CMTime
   let transform: CGAffineTransform
   let naturalSize: CGSize
   let renderSize: CGSize

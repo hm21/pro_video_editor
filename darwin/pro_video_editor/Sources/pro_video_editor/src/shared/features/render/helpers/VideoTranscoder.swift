@@ -312,9 +312,12 @@ internal class VideoTranscoder {
         guard let output = outputs[key] else { continue }
         let clip = clips[index]
         if let trimmed = output.trimmed {
+          // The short file shows this clip's first frame at its window start
+          // instead of the source's, so its keyframes move by the difference.
           rewritten[index] = clip.reading(
             output.path, startUs: trimmed.window.startUs, endUs: trimmed.window.endUs,
-            frameRateOverride: trimmed.frameRate)
+            frameRateOverride: trimmed.frameRate,
+            sourceShiftUs: (clip.startUs ?? 0) - trimmed.window.startUs)
         } else {
           rewritten[index] = clip.reading(
             output.path, startUs: clip.startUs, endUs: clip.endUs)

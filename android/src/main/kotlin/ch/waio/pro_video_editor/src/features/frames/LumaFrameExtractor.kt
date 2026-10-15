@@ -24,7 +24,8 @@ import java.util.concurrent.atomic.AtomicReference
  * [ThumbnailGenerator]'s extraction chain (parallel forward passes, then the
  * slower fallbacks) with raw luma output instead of an encoded image. The
  * parallel passes finish out of order, so frames are held back until every
- * earlier one has been delivered.
+ * earlier one has been delivered, and all of them come in the first one's
+ * size.
  */
 class LumaFrameExtractor(
     context: Context,
@@ -59,9 +60,17 @@ class LumaFrameExtractor(
             try {
                 val timestamps = selectTimestamps(config)
                 if (cancelled.get()) throw CancellationException("Frame stream was canceled")
+                // The extraction strategies scale with slightly different
+                // rounding, so a frame a fallback extracted can be a pixel off.
+                // Every frame takes the first one's size: motion analysis
+                // compares them pixel by pixel.
+                var size: Pair<Int, Int>? = null
                 val ordered = Reorderer(timestamps.size) { index, payload ->
+                    val (width, height) = size
+                        ?: (payload.width to payload.height).also { size = it }
+                    val frame = payload.resized(width, height)
                     val progress = (index + 1).toDouble() / timestamps.size
-                    onFrame(timestamps[index], payload.width, payload.height, payload.luma, progress)
+                    onFrame(timestamps[index], width, height, frame.luma, progress)
                 }
                 val handle = thumbnailGenerator.streamThumbnails(
                     config = ThumbnailConfig(
@@ -115,6 +124,8 @@ class LumaFrameExtractor(
         for (pts in scan.samplePts) {
             if (pts < start || pts >= end) continue
             val last = selected.lastOrNull()
+            // A repeated timestamp is no new frame.
+            if (last != null && pts <= last) continue
             if (minSpacing != null && last != null && pts - last < minSpacing) continue
             selected.add(pts)
         }

@@ -78,8 +78,13 @@ internal struct VideoClip: Sendable {
   /// This clip playing `startUs..<endUs` of `inputPath` instead of its own
   /// source window; every other setting is kept. `frameRateOverride` is the
   /// new file's: a cadence measured on the old one does not carry over.
+  ///
+  /// `sourceShiftUs` is how much later in the clip's current file a time in
+  /// `inputPath` lies: non-zero only for a pre-transcode of part of it, whose
+  /// timeline starts later. A re-trim of the same file leaves it at zero.
   func reading(
-    _ inputPath: String, startUs: Int64?, endUs: Int64?, frameRateOverride: Float? = nil
+    _ inputPath: String, startUs: Int64?, endUs: Int64?, frameRateOverride: Float? = nil,
+    sourceShiftUs: Int64 = 0
   ) -> VideoClip {
     VideoClip(
       inputPath: inputPath,
@@ -95,9 +100,7 @@ internal struct VideoClip: Sendable {
       chromaKey: chromaKey,
       suppressChromaKey: suppressChromaKey,
       frameRateOverride: frameRateOverride,
-      // The new file shows this clip's first frame at `startUs` instead of
-      // the source's, so its keyframes move by the difference.
-      stabilization: stabilization?.shifted(by: (self.startUs ?? 0) - (startUs ?? 0))
+      stabilization: stabilization?.shifted(by: sourceShiftUs)
     )
   }
 

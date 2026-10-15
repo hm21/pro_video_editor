@@ -95,6 +95,35 @@ void main() {
       expect(after, lessThan(before * 0.25));
     });
 
+    testWidgets('interpolates the frames a frame rate cap skipped', (_) async {
+      // Every second frame is analyzed, so every gap between two keyframes
+      // is the same; the frame in each one still needs its own correction.
+      // 15 fps cannot follow the clip's fastest shake, so the render only
+      // gets a little steadier. Holding the previous keyframe over the
+      // skipped frame instead made it shakier than the source (1.69 % ->
+      // 1.93 %).
+      final capped = await VideoStabilizationAnalyzer.analyzeVideo(
+        shaky,
+        maxFrameRate: 15,
+      );
+      expect(capped.keyframes, hasLength(45));
+      final bytes = await pve.renderVideo(
+        VideoRenderData(
+          videoSegments: [VideoSegment(video: shaky, stabilization: capped)],
+        ),
+      );
+
+      final before = await jitter(shaky);
+      final after = await jitter(EditorVideo.memory(bytes));
+      // ignore: avoid_print
+      print(
+        'capped stabilization render: jitter '
+        '${(before * 100).toStringAsFixed(3)} % -> '
+        '${(after * 100).toStringAsFixed(3)} %',
+      );
+      expect(after, lessThan(before * 0.97));
+    });
+
     testWidgets('stops the analysis when cancelled', (_) async {
       const id = 'stabilization-cancel';
       final analysis = VideoStabilizationAnalyzer.analyzeVideo(

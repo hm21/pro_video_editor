@@ -123,8 +123,11 @@ enum LumaFrameExtractor {
       guard ptsUs >= startUs, ptsUs < endUs,
         let pixelBuffer = CMSampleBufferGetImageBuffer(sample)
       else { continue }
-      if let spacing = minSpacingUs, let last = lastPts, ptsUs - last < spacing {
-        continue
+      if let last = lastPts {
+        // A repeated timestamp is no new frame, and the analysis needs them
+        // strictly in order.
+        if ptsUs <= last { continue }
+        if let spacing = minSpacingUs, ptsUs - last < spacing { continue }
       }
       // Decoded samples carry no duration; the spacing to the previous frame
       // stands in for it, so the last frame reports a progress of 1.

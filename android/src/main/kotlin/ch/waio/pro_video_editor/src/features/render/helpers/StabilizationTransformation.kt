@@ -15,7 +15,8 @@ import kotlin.math.sin
  * timeline. The first frame it delivers is the clip's first frame after the
  * trim, whose source timestamp is [firstSourcePtsUs]; every later frame keeps
  * its distance from it, so source time is a fixed offset of presentation
- * time.
+ * time. [sourceFrameUs] is the source's frame duration, which places frames
+ * the analysis skipped between their keyframes.
  *
  * The keyframe is defined in pixels with y pointing down; Media3 applies the
  * matrix in normalized device coordinates (-1..1, y up), so it is converted
@@ -25,6 +26,7 @@ import kotlin.math.sin
 internal class StabilizationTransformation(
     private val stabilization: StabilizationConfig,
     private val firstSourcePtsUs: Long,
+    private val sourceFrameUs: Long,
 ) : MatrixTransformation {
     private var width = 1
     private var height = 1
@@ -40,7 +42,7 @@ internal class StabilizationTransformation(
 
     override fun getMatrix(presentationTimeUs: Long): Matrix {
         val offset = offsetUs ?: (firstSourcePtsUs - presentationTimeUs).also { offsetUs = it }
-        val t = stabilization.transformAt(presentationTimeUs + offset)
+        val t = stabilization.transformAt(presentationTimeUs + offset, sourceFrameUs)
         val c = cos(t.rotation) * t.scale
         val s = sin(t.rotation) * t.scale
         val aspect = width.toDouble() / height

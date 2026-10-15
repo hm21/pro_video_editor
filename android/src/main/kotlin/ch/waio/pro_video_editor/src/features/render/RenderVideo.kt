@@ -422,11 +422,20 @@ class RenderVideo(private val context: Context) {
                     },
                 )
                 collectPath(reversed.outputPath)
+                if (clip.stabilization != null) {
+                    Log.w(
+                        RENDER_TAG,
+                        "Clip $clipIdx: stabilization is not supported with reverse yet " +
+                                "and is skipped"
+                    )
+                }
                 result[clipIdx] = clip.copy(
                     inputPath = reversed.outputPath,
                     startUs = 0L,
                     endUs = reversed.durationUs.takeIf { it > 0 },
                     reverseVideo = false,
+                    // Its keyframes belong to the forward source's timestamps.
+                    stabilization = null,
                 )
             } catch (e: Exception) {
                 Log.e(

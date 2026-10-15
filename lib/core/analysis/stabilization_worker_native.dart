@@ -23,16 +23,47 @@ Future<VideoStabilization> analyzeVideoInBackground({
   void Function(double progress)? onProgress,
 }) async {
   final fromWorker = ReceivePort();
-  final isolate = await Isolate.spawn(_worker, (
-    fromWorker.sendPort,
-    maxZoom,
-    smoothing.inMicroseconds,
-  ), errorsAreFatal: true);
-  final replies = StreamIterator<Object?>(fromWorker);
-  try {
-    if (!await replies.moveNext()) throw StateError('Analysis did not start');
-    final toWorker = replies.current! as SendPort;
+  final worker = Completer<SendPort>();
+  final result = Completer<VideoStabilization>();
+  // Both are awaited below; a failure that arrives before that must not count
+  // as unhandled in the meantime.
+  worker.future.ignore();
+  result.future.ignore();
+  void fail(Object error) {
+    if (!worker.isCompleted) worker.completeError(error);
+    if (!result.isCompleted) result.completeError(error);
+  }
 
+  fromWorker.listen((message) {
+    if (message is SendPort) {
+      worker.complete(message);
+    } else if (message is Map<String, dynamic>) {
+      if (!result.isCompleted) {
+        result.complete(VideoStabilization.fromMap(message));
+      }
+    } else if (message is (String, String)) {
+      fail(
+        StateError(
+          'Stabilization analysis failed: ${message.$1}\n${message.$2}',
+        ),
+      );
+    } else if (message is List) {
+      // An error the worker did not catch, sent by `onError`.
+      fail(StateError('Stabilization analysis failed: ${message.first}'));
+    } else {
+      // `onExit`: the worker ended without an answer, e.g. out of memory.
+      fail(StateError('Stabilization analysis ended early'));
+    }
+  });
+  final isolate = await Isolate.spawn(
+    _worker,
+    (fromWorker.sendPort, maxZoom, smoothing.inMicroseconds),
+    errorsAreFatal: true,
+    onError: fromWorker.sendPort,
+    onExit: fromWorker.sendPort,
+  );
+  try {
+    final toWorker = await worker.future;
     await for (final frame in ProVideoEditor.instance.getLumaFrameStream(
       LumaFrameConfigs(
         video: video,
@@ -44,6 +75,8 @@ Future<VideoStabilization> analyzeVideoInBackground({
         id: id,
       ),
     )) {
+      // The worker failed: stop decoding, which cancels the native task.
+      if (result.isCompleted) break;
       toWorker.send((
         TransferableTypedData.fromList([frame.bytes]),
         frame.width,
@@ -53,14 +86,8 @@ Future<VideoStabilization> analyzeVideoInBackground({
       onProgress?.call(frame.progress);
     }
     toWorker.send(null);
-
-    if (!await replies.moveNext()) throw StateError('Analysis ended early');
-    final reply = replies.current;
-    if (reply is Map<String, dynamic>) return VideoStabilization.fromMap(reply);
-    final (error, stack) = reply! as (String, String);
-    throw StateError('Stabilization analysis failed: $error\n$stack');
+    return await result.future;
   } finally {
-    await replies.cancel();
     fromWorker.close();
     isolate.kill(priority: Isolate.immediate);
   }

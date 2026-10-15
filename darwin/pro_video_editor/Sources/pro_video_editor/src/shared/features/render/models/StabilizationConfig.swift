@@ -23,18 +23,6 @@ struct StabilizationConfig: Sendable {
   /// part of its source, whose timeline starts later.
   let sourceOffsetUs: Int64
 
-  /// Keyframes further apart than this were not analyzed frame by frame
-  /// (a `maxFrameRate` cap); the frames between them are interpolated.
-  private let frameGapLimitUs: Int64
-
-  init(timesUs: [Int64], values: [Double], sourceOffsetUs: Int64) {
-    self.timesUs = timesUs
-    self.values = values
-    self.sourceOffsetUs = sourceOffsetUs
-    let gaps = zip(timesUs.dropFirst(), timesUs).map { $0 - $1 }.sorted()
-    frameGapLimitUs = gaps.isEmpty ? 0 : gaps[gaps.count / 2] * 3 / 2
-  }
-
   /// Parses the map written by the Dart `VideoStabilization.toMap`.
   static func fromArguments(_ map: [String: Any]?) -> StabilizationConfig? {
     guard let map,
@@ -53,29 +41,33 @@ struct StabilizationConfig: Sendable {
   }
 
   /// The transform for the picture on screen at `fileUs` in the file the clip
-  /// reads.
+  /// reads, whose frames are `frameUs` apart.
   ///
-  /// That picture is the last frame that started at or before `fileUs`, so
-  /// its own keyframe applies — a render whose frame times fall between two
-  /// source frames must not blend their corrections. Only across a gap the
-  /// analysis skipped is the transform interpolated. Before the first and
-  /// after the last keyframe the nearest one holds.
-  func transform(atFileUs fileUs: Int64) -> Transform {
+  /// That picture is the last frame that started at or before `fileUs`.
+  /// Where two keyframes are no more than a frame apart, it is the earlier
+  /// keyframe's own frame, so that keyframe applies unchanged — a render whose
+  /// frame times fall between two source frames must not blend their
+  /// corrections. Where they are further apart, the analysis skipped the
+  /// frames between them (a `maxFrameRate` cap): the frame on screen is placed
+  /// on the source's frame grid and its transform interpolated. Before the
+  /// first and after the last keyframe the nearest one holds.
+  func transform(atFileUs fileUs: Int64, frameUs: Int64) -> Transform {
     // A millisecond of slack absorbs rounding in the composition clock.
-    let sourceUs = fileUs + sourceOffsetUs + 1_000
+    let probe = fileUs + sourceOffsetUs + 1_000
     var lo = 0
     var hi = timesUs.count
     while lo < hi {
       let mid = (lo + hi) / 2
-      if timesUs[mid] <= sourceUs { lo = mid + 1 } else { hi = mid }
+      if timesUs[mid] <= probe { lo = mid + 1 } else { hi = mid }
     }
     let index = lo - 1
     if index < 0 { return keyframe(0) }
     if index >= timesUs.count - 1 { return keyframe(timesUs.count - 1) }
     let t0 = timesUs[index]
     let t1 = timesUs[index + 1]
-    if t1 - t0 <= frameGapLimitUs { return keyframe(index) }
-    let k = min(1, max(0, Double(sourceUs - 1_000 - t0) / Double(t1 - t0)))
+    if frameUs <= 0 || 2 * (t1 - t0) <= 3 * frameUs { return keyframe(index) }
+    let frameStartUs = t0 + (probe - t0) / frameUs * frameUs
+    let k = min(1, max(0, Double(frameStartUs - t0) / Double(t1 - t0)))
     let a = keyframe(index)
     let b = keyframe(index + 1)
     return Transform(

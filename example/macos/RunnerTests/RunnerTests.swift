@@ -4338,3 +4338,66 @@ final class LayerMaskTests: XCTestCase {
       .bytes(Data([1, 2, 3])))
   }
 }
+
+/// How a stabilized clip is rendered: which keyframe a frame takes, and the
+/// render paths that must keep it.
+final class StabilizationTests: XCTestCase {
+
+  /// Keyframes 0.1 apart in dx, one per frame of a 30 fps source.
+  private func stabilization(_ timesUs: [Int64]) -> StabilizationConfig {
+    StabilizationConfig(
+      timesUs: timesUs,
+      values: timesUs.indices.flatMap { [0.1 * Double($0), 0, 0, 1.1] },
+      sourceOffsetUs: 0)
+  }
+
+  /// A render whose frame times fall between two source frames shows the
+  /// earlier one, so its keyframe applies unblended.
+  func testStabilizationHoldsTheKeyframeOfTheFrameOnScreen() {
+    let config = stabilization([0, 33_333, 66_667, 100_000])
+    XCTAssertEqual(config.transform(atFileUs: 33_000, frameUs: 33_333).dx, 0.1, accuracy: 1e-9)
+    XCTAssertEqual(config.transform(atFileUs: 50_000, frameUs: 33_333).dx, 0.1, accuracy: 1e-9)
+    XCTAssertEqual(config.transform(atFileUs: 400_000, frameUs: 33_333).dx, 0.3, accuracy: 1e-9)
+  }
+
+  /// A 60 fps source analyzed at 30 fps: every keyframe gap is the same, yet
+  /// the frame between two keyframes was never measured and is interpolated.
+  func testStabilizationInterpolatesFramesAFrameRateCapSkipped() {
+    let config = stabilization([0, 33_333, 66_667, 100_000])
+    XCTAssertEqual(config.transform(atFileUs: 33_333, frameUs: 16_667).dx, 0.1, accuracy: 1e-9)
+    XCTAssertEqual(config.transform(atFileUs: 50_000, frameUs: 16_667).dx, 0.15, accuracy: 1e-3)
+    XCTAssertEqual(config.transform(atFileUs: 60_000, frameUs: 16_667).dx, 0.15, accuracy: 1e-3)
+  }
+
+  /// Re-trimming a clip around a transition reads the same file, whose frames
+  /// keep their times; only a pre-transcode of part of it moves them.
+  func testReadingTheSameFileKeepsTheKeyframesOnTheirFrames() {
+    let clip = VideoClip(
+      inputPath: "/tmp/clip.mp4", startUs: 1_000_000, endUs: 3_000_000,
+      stabilization: stabilization([0, 33_333]))
+    XCTAssertEqual(
+      clip.reading("/tmp/clip.mp4", startUs: 2_000_000, endUs: 3_000_000)
+        .stabilization?.sourceOffsetUs, 0)
+    XCTAssertEqual(
+      clip.reading("/tmp/window.mp4", startUs: 0, endUs: 2_000_000, sourceShiftUs: 1_000_000)
+        .stabilization?.sourceOffsetUs, 1_000_000)
+  }
+
+  /// A bitrate cap used to remux a lone stabilized clip as it was, which left
+  /// its stabilization out of the export.
+  func testAStabilizedClipIsNotRemuxedPastItsStabilization() throws {
+    let config = try XCTUnwrap(
+      RenderConfig.fromArguments([
+        "videoClips": [
+          [
+            "inputPath": "/tmp/clip.mp4",
+            "stabilization": ["timesUs": [0, 33_333], "values": [0, 0, 0, 1.1, 0, 0, 0, 1.1]],
+          ]
+        ],
+        "outputPath": "/tmp/out.mp4",
+        "outputFormat": "mp4",
+        "enableAudio": true,
+      ]))
+    XCTAssertFalse(BitrateCapPolicy.isPassthroughEligible(config))
+  }
+}

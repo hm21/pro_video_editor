@@ -21,21 +21,18 @@ class StabilizationConfig(
     )
 
     /**
-     * Keyframes further apart than this were not analyzed frame by frame (a
-     * `maxFrameRate` cap); the frames between them are interpolated.
-     */
-    private val frameGapLimitUs: Long = timesUs.toList().zipWithNext { a, b -> b - a }
-        .sorted().let { gaps -> if (gaps.isEmpty()) 0L else gaps[gaps.size / 2] * 3 / 2 }
-
-    /**
-     * The transform for the picture on screen at [sourceUs].
+     * The transform for the picture on screen at [sourceUs], in a source whose
+     * frames are [frameUs] apart.
      *
-     * That picture is the last frame that started at or before [sourceUs], so
-     * its own keyframe applies; only across a gap the analysis skipped is the
-     * transform interpolated. Before the first and after the last keyframe the
-     * nearest one holds.
+     * That picture is the last frame that started at or before [sourceUs].
+     * Where two keyframes are no more than a frame apart, it is the earlier
+     * keyframe's own frame, so that keyframe applies unchanged. Where they are
+     * further apart, the analysis skipped the frames between them (a
+     * `maxFrameRate` cap): the frame on screen is placed on the source's frame
+     * grid and its transform interpolated. Before the first and after the last
+     * keyframe the nearest one holds.
      */
-    fun transformAt(sourceUs: Long): Transform {
+    fun transformAt(sourceUs: Long, frameUs: Long): Transform {
         // A millisecond of slack absorbs rounding in the frame clock.
         val probe = sourceUs + 1_000
         val found = timesUs.binarySearch(probe)
@@ -44,8 +41,9 @@ class StabilizationConfig(
         if (index >= timesUs.size - 1) return keyframe(timesUs.size - 1)
         val t0 = timesUs[index]
         val t1 = timesUs[index + 1]
-        if (t1 - t0 <= frameGapLimitUs) return keyframe(index)
-        val k = ((sourceUs - t0).toDouble() / (t1 - t0)).coerceIn(0.0, 1.0)
+        if (frameUs <= 0 || 2 * (t1 - t0) <= 3 * frameUs) return keyframe(index)
+        val frameStartUs = t0 + (probe - t0) / frameUs * frameUs
+        val k = ((frameStartUs - t0).toDouble() / (t1 - t0)).coerceIn(0.0, 1.0)
         val a = keyframe(index)
         val b = keyframe(index + 1)
         return Transform(
