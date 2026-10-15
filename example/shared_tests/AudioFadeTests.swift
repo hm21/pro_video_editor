@@ -132,11 +132,7 @@ final class TransitionCrossfadeTests: XCTestCase {
   /// its volume (a straight fade would be at 3/4), and halfway the incoming
   /// clip has only reached a quarter of its own (a straight fade: half).
   func testEachSideFollowsTheTransitionCurve() async throws {
-    let directory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("crossfade-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let tone = try writeTone(to: directory.appendingPathComponent("tone.caf"))
+    let tone = try writeTone()
 
     // One side at a time, the other muted, so the level read is that side's.
     let fadingOut = try await crossfadeLevel(
@@ -152,7 +148,7 @@ final class TransitionCrossfadeTests: XCTestCase {
 
   /// elasticOut springs to about 1.3 a sixth of the way in, where Android
   /// plays the incoming clip that much louder; here it holds at its volume.
-  func testAnElasticOvershootHoldsEachSideAtItsEndVolume() {
+  func testAnElasticOvershootHoldsEachSideAtItsEndVolume() async throws {
     XCTAssertGreaterThan(applyEasing(5.0 / 30, curve: "elasticOut"), 1.2)
     let rising = ClipTransitionRenderer.crossfadeRamps(
       volume: 0.8, fadesIn: true, curve: "elasticOut", duration: blend, steps: 30)
@@ -164,12 +160,29 @@ final class TransitionCrossfadeTests: XCTestCase {
     for ramp in rising + falling {
       XCTAssertTrue((0...0.8).contains(ramp.from) && (0...0.8).contains(ramp.to))
     }
+
+    // The hold is a run of flat ramps. A mix plays a flat ramp at its volume
+    // only when the ramp before ends there (see `setVolumeSteps`), so the mix
+    // is read back too.
+    let tone = try writeTone()
+    let fadingIn = try await crossfadeLevel(
+      tone, outgoing: .init(volume: 0), incoming: .init(volume: 0.8), curve: "elasticOut")
+    XCTAssertEqual(fadingIn(0.15), toneLevel * 0.8, accuracy: 0.01)
+    let fadingOut = try await crossfadeLevel(
+      tone, outgoing: .init(volume: 0.8), incoming: .init(volume: 0), curve: "elasticOut")
+    XCTAssertEqual(fadingOut(0.15), 0, accuracy: 0.01)
   }
 
   // MARK: - Helpers
 
-  /// One second of a 440 Hz stereo tone at `toneLevel`.
-  private func writeTone(to url: URL) throws -> AVURLAsset {
+  /// One second of a 440 Hz stereo tone at `toneLevel`, in a file removed
+  /// after the test.
+  private func writeTone() throws -> AVURLAsset {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("crossfade-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("tone.caf")
     let frames = AVAudioFrameCount(sampleRate)
     let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
     let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
