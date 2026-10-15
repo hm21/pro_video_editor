@@ -514,6 +514,9 @@ internal struct LayerPlacement: Sendable {
   /// Chroma key for this layer, resolved as `clip ?? layer ?? global`.
   /// Applied to the layer's own source frame, before it reaches the canvas.
   let chromaKey: ChromaKeyConfig?
+  /// The layer's alpha matte, stretched over the upright source frame after
+  /// the chroma key and before the frame is placed; `nil` shows it whole.
+  var matte: LayerMatte? = nil
   /// The layer's placement over time, on the composition timeline; see
   /// `resolved(atUs:renderSize:)`.
   var keyframes: [KeyframeConfig] = []

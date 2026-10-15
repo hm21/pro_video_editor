@@ -129,6 +129,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🎞️ **Animated GIF Layers**: Overlay animated GIFs — detected automatically and played frame by frame, with optional `loop`. `animationOffset` starts playback part-way in, so one animation can run on across several layers.
 - 🎬 **Layer Animations**: Animate image layers with fade, slide, scale, wiggle and bounce effects, configurable easing curves, and in/out/inOut phases, or `loop` to keep a layer moving while it is visible. A slide travels to a canvas edge or to a start point you pick yourself. `animationStartTime`/`animationEndTime` let several layers that each show part of one overlay share one run of animations.
 - 🗝️ **Layer Keyframes**: Move image layers and composition layers between keyframes — position, size, rotation and opacity over time, eased with the same curves as the animations. A loop animation can play over the stretch between two keyframes only, `loopPhase` starts it part way into its cycle, and a `keyframeClock` keeps keyframes on the timing they were made on.
+- 🎭 **Layer Masks**: Show a `VideoLayer`'s clips only inside a shape — a circle, a heart, a rounded rectangle — or fade them out through a soft edge over the layers below, via `VideoLayer.mask`. Only the matte image's alpha counts, and the mask moves, scales and turns with each clip.
 - 🫥 **Censor Layers**: Blur or pixelate the part of the picture an image layer covers instead of drawing the layer, e.g. to hide a face or a license plate, via `ImageLayer.censor`. The layer's image is the shape of the area, and image layers after it stay sharp on top.
 - 📊 **Audio Visualizer Layers**: Draw bars, mirrored bars, a wave or a ring of bars that move with the sound in an image layer's box, via `ImageLayer.audioVisualizer`. The app hands over the levels of the sound's bands over time and can set how wide the bars are (`barFill`); `AudioVisualizerPainter` draws the same shapes in an editor preview.
 - 🎞️ **Clip Transitions**: Add transitions between adjacent clips — `dissolve`, `fadeToBlack`, `fadeToWhite`, `slide`, `push`, and `wipe` — with configurable duration, easing curve, and direction.
@@ -167,6 +168,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 | `Layer Keyframes`           | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Clip Transitions`          | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Layer Size`                | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
+| `Layer Masks`               | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Censor Layers`             | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Audio Visualizer Layers`   | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Multiple ColorMatrix 4x5` | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
@@ -442,6 +444,10 @@ var data = VideoRenderData(
                     // overflow is cut at its edge before the turn.
                     rotation: 0.15,
                 ),
+                // Optional: show the clip only inside a shape. Only the
+                // image's alpha counts; it is stretched over each clip's own
+                // frame, so it moves and turns with the clip.
+                mask: EditorLayerImage.asset('assets/circle_mask.png'),
                 clips: [
                     VideoSegment(
                         video: EditorVideo.asset('assets/pip.mp4'),

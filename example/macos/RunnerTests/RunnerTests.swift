@@ -4080,3 +4080,261 @@ final class AudioVisualizerTests: XCTestCase {
     XCTAssertEqual(image.extent.height, 512)
   }
 }
+
+// MARK: - Layer masks
+
+/// Pins `VideoLayer.mask` on the Apple renderer: how the matte is decoded and
+/// how it shapes a clip's frame before the frame is placed.
+///
+/// The compositor itself is covered end to end by the example's
+/// `layer_mask_test` integration test; these pin the two helpers it calls, on
+/// frames small enough to read back pixel by pixel.
+final class LayerMaskTests: XCTestCase {
+
+  private let context = CIContext(options: [
+    .workingColorSpace: NSNull(),
+    .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
+  ])
+
+  /// A PNG of [width]×[height] whose pixel at (x, y), y counted from the top,
+  /// has the straight color and alpha [pixel] returns. [orientation] is written
+  /// as its EXIF tag.
+  private func png(
+    width: Int, height: Int, orientation: UInt32? = nil,
+    _ pixel: (Int, Int) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8)
+  ) throws -> Data {
+    var bytes = [UInt8](repeating: 0, count: width * height * 4)
+    for y in 0..<height {
+      for x in 0..<width {
+        let p = pixel(x, y)
+        let i = (y * width + x) * 4
+        // Premultiplied, as the context below stores it.
+        bytes[i] = UInt8(Int(p.r) * Int(p.a) / 255)
+        bytes[i + 1] = UInt8(Int(p.g) * Int(p.a) / 255)
+        bytes[i + 2] = UInt8(Int(p.b) * Int(p.a) / 255)
+        bytes[i + 3] = p.a
+      }
+    }
+    let provider = try XCTUnwrap(CGDataProvider(data: Data(bytes) as CFData))
+    let image = try XCTUnwrap(
+      CGImage(
+        width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+        bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+        provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+
+    let data = NSMutableData()
+    let destination = try XCTUnwrap(
+      CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
+    let properties: [CFString: Any] =
+      orientation.map { [kCGImagePropertyOrientation: $0] } ?? [:]
+    CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+    XCTAssertTrue(CGImageDestinationFinalize(destination))
+    return data as Data
+  }
+
+  /// A matte of [width]×[height], opaque on its left half and clear on its
+  /// right half.
+  private func leftHalfMatte(width: Int = 8, height: Int = 4) throws -> CIImage {
+    let data = try png(width: width, height: height) { x, _ in
+      (255, 255, 255, x < width / 2 ? 255 : 0)
+    }
+    return try XCTUnwrap(decodeLayerMatte(.bytes(data), fittingWithin: .zero))
+  }
+
+  /// A solid frame of [size] at [origin], which need not be the origin.
+  private func frame(
+    _ color: CIColor, _ size: CGSize, origin: CGPoint = .zero
+  ) -> CIImage {
+    CIImage(color: color).cropped(to: CGRect(origin: origin, size: size))
+  }
+
+  /// [image] rendered as premultiplied RGBA, rows from the top, with a reader
+  /// for the pixel at (x, y) counted from its top-left corner.
+  private func pixels(_ image: CIImage) -> (Int, Int) -> [UInt8] {
+    let extent = image.extent
+    let width = Int(extent.width)
+    let height = Int(extent.height)
+    var bytes = [UInt8](repeating: 0, count: width * height * 4)
+    context.render(
+      image, toBitmap: &bytes, rowBytes: width * 4, bounds: extent, format: .RGBA8,
+      colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
+    return { x, y in
+      let i = (y * width + x) * 4
+      return Array(bytes[i..<i + 4])
+    }
+  }
+
+  /// The alpha of every pixel of [image], rows from the top.
+  private func alphaRows(_ image: CIImage) -> [[UInt8]] {
+    let extent = image.extent
+    let width = Int(extent.width)
+    let height = Int(extent.height)
+    var bytes = [UInt8](repeating: 0, count: width * height)
+    context.render(
+      image, toBitmap: &bytes, rowBytes: width, bounds: extent, format: .A8, colorSpace: nil)
+    return (0..<height).map { Array(bytes[($0 * width)..<(($0 + 1) * width)]) }
+  }
+
+  // MARK: Applying the matte
+
+  func testTheClipShowsWhereTheMatteIsOpaqueAndNotWhereItIsClear() throws {
+    let red = CIColor(red: 1, green: 0, blue: 0)
+    let masked = applyLayerMatte(
+      try leftHalfMatte(), to: frame(red, CGSize(width: 200, height: 100)))
+    let pixel = pixels(masked)
+
+    // Each matte column covers 25 frame columns; the edge ramps between the
+    // centers of the two around it, from x = 87.5 to x = 112.5.
+
+    XCTAssertEqual(masked.extent, CGRect(x: 0, y: 0, width: 200, height: 100))
+    for y in [5, 50, 95] {
+      XCTAssertEqual(pixel(20, y), [255, 0, 0, 255])
+      XCTAssertEqual(pixel(70, y), [255, 0, 0, 255])
+      XCTAssertEqual(pixel(130, y), [0, 0, 0, 0])
+      XCTAssertEqual(pixel(190, y), [0, 0, 0, 0])
+    }
+  }
+
+  /// Only the alpha counts: a blue matte does not tint a red clip.
+  func testTheMattesColorsAreIgnored() throws {
+    let data = try png(width: 4, height: 4) { _, _ in (0, 0, 255, 255) }
+    let matte = try XCTUnwrap(decodeLayerMatte(.bytes(data), fittingWithin: .zero))
+    let masked = applyLayerMatte(
+      matte, to: frame(CIColor(red: 1, green: 0, blue: 0), CGSize(width: 40, height: 40)))
+
+    XCTAssertEqual(pixels(masked)(20, 20), [255, 0, 0, 255])
+  }
+
+  /// Partial alpha multiplies, which on premultiplied pixels scales color and
+  /// alpha together — and folds into a clip that is already see-through, such
+  /// as one a chroma key left half transparent.
+  func testPartialAlphaMultipliesTheClipsOwnAlpha() throws {
+    let data = try png(width: 4, height: 4) { _, _ in (255, 255, 255, 128) }
+    let matte = try XCTUnwrap(decodeLayerMatte(.bytes(data), fittingWithin: .zero))
+
+    let opaque = pixels(
+      applyLayerMatte(
+        matte, to: frame(CIColor(red: 1, green: 0, blue: 0), CGSize(width: 20, height: 20))
+      ))(10, 10)
+    XCTAssertEqual(Int(opaque[3]), 128, accuracy: 1)
+    XCTAssertEqual(Int(opaque[0]), 128, accuracy: 1)
+
+    let halfKeyed = pixels(
+      applyLayerMatte(
+        matte,
+        to: frame(CIColor(red: 1, green: 0, blue: 0, alpha: 0.5), CGSize(width: 20, height: 20))
+      ))(10, 10)
+    XCTAssertEqual(Int(halfKeyed[3]), 64, accuracy: 1)
+    // Still pure red once unpremultiplied.
+    XCTAssertEqual(Int(halfKeyed[0]), Int(halfKeyed[3]), accuracy: 1)
+  }
+
+  /// The matte covers the frame wherever the frame sits, top to top: a frame
+  /// coming off the orientation step need not start at the origin, and Core
+  /// Image counts y upwards.
+  func testTheMatteIsStretchedOverTheFrameTopToTop() throws {
+    let data = try png(width: 4, height: 4) { _, y in (255, 255, 255, y < 2 ? 255 : 0) }
+    let matte = try XCTUnwrap(decodeLayerMatte(.bytes(data), fittingWithin: .zero))
+    let masked = applyLayerMatte(
+      matte,
+      to: frame(
+        CIColor(red: 0, green: 1, blue: 0), CGSize(width: 60, height: 120),
+        origin: CGPoint(x: 35, y: -20)))
+    let pixel = pixels(masked)
+
+    // Each matte row covers 30 frame rows, and the stretch samples linearly
+    // between row centers, so the edge ramps from row 45 to row 75.
+    XCTAssertEqual(masked.extent, CGRect(x: 35, y: -20, width: 60, height: 120))
+    XCTAssertEqual(pixel(30, 10), [0, 255, 0, 255])
+    XCTAssertEqual(pixel(30, 40), [0, 255, 0, 255])
+    XCTAssertEqual(pixel(30, 80), [0, 0, 0, 0])
+    XCTAssertEqual(pixel(30, 110), [0, 0, 0, 0])
+  }
+
+  /// A matte that is opaque to its edges keeps the clip whole to its edges: a
+  /// stretch that sampled the transparency beyond the matte would fade the
+  /// clip's outermost pixels.
+  func testAnOpaqueMatteLeavesNoFringeAtTheFrameEdge() throws {
+    let data = try png(width: 3, height: 3) { _, _ in (255, 255, 255, 255) }
+    let matte = try XCTUnwrap(decodeLayerMatte(.bytes(data), fittingWithin: .zero))
+    let masked = applyLayerMatte(
+      matte, to: frame(CIColor(red: 1, green: 0, blue: 0), CGSize(width: 101, height: 67)))
+    let rows = alphaRows(masked)
+
+    XCTAssertEqual(Set(rows.first!), [255])
+    XCTAssertEqual(Set(rows.last!), [255])
+    XCTAssertEqual(Set(rows.map { $0.first! }), [255])
+    XCTAssertEqual(Set(rows.map { $0.last! }), [255])
+  }
+
+  // MARK: Decoding the matte
+
+  func testTheDecodedMatteKeepsItsAlphaAtTheOrigin() throws {
+    let matte = try leftHalfMatte()
+
+    XCTAssertEqual(matte.extent, CGRect(x: 0, y: 0, width: 8, height: 4))
+    XCTAssertEqual(alphaRows(matte), Array(repeating: [255, 255, 255, 255, 0, 0, 0, 0], count: 4))
+  }
+
+  /// No more pixels than the largest frame it is stretched over, on each axis
+  /// on its own, since the stretch is per axis too.
+  func testTheDecodedMatteIsNoLargerThanTheLargestFrame() throws {
+    let data = try png(width: 64, height: 32) { x, _ in (255, 255, 255, x < 32 ? 255 : 0) }
+
+    let capped = try XCTUnwrap(
+      decodeLayerMatte(.bytes(data), fittingWithin: CGSize(width: 16, height: 100)))
+    XCTAssertEqual(capped.extent, CGRect(x: 0, y: 0, width: 16, height: 32))
+    let row = alphaRows(capped)[16]
+    XCTAssertGreaterThanOrEqual(row[2], 250)
+    XCTAssertLessThanOrEqual(row[13], 5)
+
+    let whole = try XCTUnwrap(decodeLayerMatte(.bytes(data), fittingWithin: .zero))
+    XCTAssertEqual(whole.extent, CGRect(x: 0, y: 0, width: 64, height: 32))
+  }
+
+  /// EXIF 6 displays the stored pixels turned 90° clockwise, so the stored
+  /// left half — the opaque one — becomes the top half.
+  func testTheMattesExifOrientationIsApplied() throws {
+    let data = try png(width: 8, height: 4, orientation: 6) { x, _ in
+      (255, 255, 255, x < 4 ? 255 : 0)
+    }
+    let matte = try XCTUnwrap(decodeLayerMatte(.bytes(data), fittingWithin: .zero))
+    let rows = alphaRows(matte)
+
+    XCTAssertEqual(matte.extent, CGRect(x: 0, y: 0, width: 4, height: 8))
+    XCTAssertEqual(rows[1], [255, 255, 255, 255])
+    XCTAssertEqual(rows[6], [0, 0, 0, 0])
+  }
+
+  func testAMatteFileIsReadOffDisk() throws {
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("layer_mask_\(UUID().uuidString).png")
+    try png(width: 8, height: 4) { x, _ in (255, 255, 255, x < 4 ? 255 : 0) }.write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let matte = try XCTUnwrap(decodeLayerMatte(.file(url.path), fittingWithin: .zero))
+    XCTAssertEqual(alphaRows(matte)[2], [255, 255, 255, 255, 0, 0, 0, 0])
+  }
+
+  func testAMatteThatDoesNotDecodeIsNil() {
+    XCTAssertNil(decodeLayerMatte(.bytes(Data([0x00, 0x01, 0x02, 0x03])), fittingWithin: .zero))
+    XCTAssertNil(decodeLayerMatte(.file("/does/not/exist.png"), fittingWithin: .zero))
+  }
+
+  // MARK: Channel map
+
+  func testALayerReadsItsMatteOffTheChannelMap() {
+    let clips: [[String: Any]] = [["inputPath": "/videos/pip.mp4"]]
+
+    XCTAssertNil(LayerConfig.fromArguments(["clips": clips])?.mask)
+    XCTAssertEqual(
+      LayerConfig.fromArguments(["clips": clips, "maskPath": "/mattes/circle.png"])?.mask,
+      .file("/mattes/circle.png"))
+    XCTAssertEqual(
+      LayerConfig.fromArguments([
+        "clips": clips, "maskData": FlutterStandardTypedData(bytes: Data([1, 2, 3])),
+      ])?.mask,
+      .bytes(Data([1, 2, 3])))
+  }
+}

@@ -153,6 +153,9 @@ data class SegmentTransformConfig(
  * @property keyframes The layer's placement over time, sorted by time and on
  *   the composition timeline; see [KeyframeConfig]. Empty = every clip stays
  *   where its transform puts it
+ * @property mask Alpha matte stretched over each clip's own frame, after its
+ *   chroma key and before it is placed; see `MaskEffect`. Null = every clip
+ *   shows whole
  */
 data class LayerConfig(
     val clips: List<VideoClip>,
@@ -163,6 +166,7 @@ data class LayerConfig(
      * null falls back to the global key.
      */
     val chromaKey: ChromaKeyConfig? = null,
+    val mask: EncodedImage? = null,
     val keyframes: List<KeyframeConfig> = emptyList(),
     /** The clock [keyframes] are timed on; see [KeyframeClock]. */
     val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT
@@ -182,6 +186,7 @@ data class LayerConfig(
                 opacity = (map["opacity"] as? Number)?.toFloat() ?: 1.0f,
                 transform = transformRaw?.let { SegmentTransformConfig.fromMap(it) },
                 chromaKey = ChromaKeyConfig.fromMap(chromaKeyRaw),
+                mask = EncodedImage.fromMap(map, "maskPath", "maskData"),
                 keyframes = KeyframeConfig.listFrom(map["keyframes"]),
                 keyframeClock = KeyframeClock.from(map["keyframeClock"])
             )

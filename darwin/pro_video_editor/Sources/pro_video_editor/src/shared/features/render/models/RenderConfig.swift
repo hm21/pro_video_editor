@@ -663,6 +663,10 @@ struct LayerConfig: Sendable {
   /// Default chroma key for the clips on this layer. A clip's own key wins;
   /// `nil` falls back to the global key.
   let chromaKey: ChromaKeyConfig?
+  /// Alpha matte stretched over each clip's own upright frame, after its
+  /// chroma key and before it is placed; `nil` shows every clip whole. See
+  /// `applyLayerMatte(_:to:)`.
+  var mask: EncodedImage? = nil
   /// The layer's placement over time, sorted by time and on the composition
   /// timeline; empty keeps every clip where its transform puts it.
   var keyframes: [KeyframeConfig] = []
@@ -680,6 +684,7 @@ struct LayerConfig: Sendable {
       opacity: (args["opacity"] as? NSNumber)?.floatValue ?? 1.0,
       transform: SegmentTransformConfig.fromArguments(args["transform"] as? [String: Any]),
       chromaKey: ChromaKeyConfig.fromArguments(args["chromaKey"] as? [String: Any]),
+      mask: EncodedImage.from(args, pathKey: "maskPath", dataKey: "maskData"),
       keyframes: KeyframeConfig.list(from: args["keyframes"]),
       keyframeClock: KeyframeClock.from(args["keyframeClock"])
     )

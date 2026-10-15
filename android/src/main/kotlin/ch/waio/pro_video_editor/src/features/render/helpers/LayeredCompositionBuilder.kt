@@ -24,6 +24,7 @@ import ch.waio.pro_video_editor.src.features.render.models.EqualizerConfig
 import ch.waio.pro_video_editor.src.features.render.models.SegmentTransformConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
+import ch.waio.pro_video_editor.src.shared.media.ImageOrientation
 import ch.waio.pro_video_editor.src.shared.media.contentDataSource
 import ch.waio.pro_video_editor.src.shared.media.contentUri
 import ch.waio.pro_video_editor.src.shared.media.copyContentToFile
@@ -153,6 +154,16 @@ class LayeredCompositionBuilder(
         for ((layerIndex, layer) in config.layers.withIndex()) {
             val seqBuilder = EditedMediaItemSequence.Builder(trackTypes)
                 .setIsLooping(false)
+            // Probed here, once per layer, so a matte that does not decode
+            // fails the render before it starts instead of on its first frame,
+            // and the same as on iOS and macOS.
+            val maskEffect = layer.mask?.let { mask ->
+                val probe = ImageOrientation.probe(mask)
+                    ?: throw IllegalArgumentException(
+                        "The mask of layer $layerIndex does not decode (${mask.describe()})"
+                    )
+                MaskEffect(mask, probe)
+            }
             val pathsInThisLayer = mutableSetOf<String>()
             val layerSourceCopies = mutableMapOf<String, String>()
             var untrimmedCursorUs = 0L
@@ -233,7 +244,7 @@ class LayeredCompositionBuilder(
                     buildClipItem(
                         clip, srcStartUs, srcEndUs, effectivePath, placement,
                         displayW, displayH, layer.opacity, canvasW, canvasH,
-                        layer.chromaKey, keyframeAnimator
+                        layer.chromaKey, maskEffect, keyframeAnimator
                     )
                 )
                 val volume = clip.volume ?: 1.0f
@@ -263,7 +274,7 @@ class LayeredCompositionBuilder(
             Log.d(
                 RENDER_TAG,
                 "  Layer $layerIndex: items=$itemCount duration=${outputCursorUs / 1000}ms " +
-                    "opacity=${layer.opacity}"
+                    "opacity=${layer.opacity} masked=${maskEffect != null}"
             )
         }
 
@@ -369,6 +380,7 @@ class LayeredCompositionBuilder(
         canvasW: Int,
         canvasH: Int,
         layerChromaKey: ChromaKeyConfig?,
+        maskEffect: MaskEffect?,
         keyframeAnimator: SegmentKeyframeAnimator? = null
     ): EditedMediaItem {
         val mediaItemBuilder = MediaItem.Builder().contentUri(inputPath)
@@ -397,6 +409,12 @@ class LayeredCompositionBuilder(
                 clip.chromaKey ?: layerChromaKey ?: globalChromaKey
             }
         )
+
+        // The layer's mask right after the key, still on the clip's own frame:
+        // the transformation below then places the masked frame, so the shape
+        // moves, scales and turns with the clip. A pixel the key removed stays
+        // removed, since the mask only ever scales the alpha down.
+        if (maskEffect != null) effects += maskEffect
 
         val draw = placement.draw
         val clipBox = placement.clip

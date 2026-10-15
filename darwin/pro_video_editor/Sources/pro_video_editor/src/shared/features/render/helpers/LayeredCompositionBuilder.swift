@@ -50,6 +50,8 @@ internal class LayeredCompositionBuilder {
     let keyframes: [KeyframeConfig]
     /// The clock `keyframes` are timed on; see `KeyframeClock`.
     let keyframeClock: KeyframeClock
+    /// The layer's decoded mask, filled in once the whole layer is placed.
+    var matte: LayerMatte? = nil
   }
 
   private struct AudioWindow {
@@ -170,6 +172,10 @@ internal class LayeredCompositionBuilder {
             keyframes: layer.keyframes,
             keyframeClock: layer.keyframeClock))
       }
+
+      if let mask = layer.mask {
+        try attachMatte(mask, toLayer: layerIndex, of: &placed)
+      }
     }
 
     guard !placed.isEmpty else {
@@ -206,6 +212,37 @@ internal class LayeredCompositionBuilder {
       composition, videoCompositionData, canvasSize, audioMix, firstVideoTrackID,
       [], [], []
     )
+  }
+
+  /// Decodes [mask] once for layer [layerIndex] and hands it to every clip of
+  /// that layer in [placed].
+  ///
+  /// Decoded here rather than per frame, and no larger than the layer's
+  /// largest clip frame, since the compositor stretches it over each frame
+  /// anyway. A matte that does not decode fails the render, as on Android,
+  /// rather than export the clips unmasked.
+  private func attachMatte(
+    _ mask: EncodedImage, toLayer layerIndex: Int, of placed: inout [PlacedClip]
+  ) throws {
+    let indices = placed.indices.filter { placed[$0].layerIndex == layerIndex }
+    guard !indices.isEmpty else { return }
+
+    let largestFrame = indices.reduce(CGSize.zero) { size, index in
+      let display = placed[index].displaySize
+      return CGSize(
+        width: max(size.width, display.width), height: max(size.height, display.height))
+    }
+    guard let image = decodeLayerMatte(mask, fittingWithin: largestFrame) else {
+      throw NSError(
+        domain: "LayeredCompositionBuilder", code: 3,
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "The mask of layer \(layerIndex) does not decode (\(mask.describe))"
+        ])
+    }
+
+    let matte = LayerMatte(image: image)
+    for index in indices { placed[index].matte = matte }
   }
 
   /// Segments the timeline at every clip boundary and produces one layered
@@ -246,6 +283,7 @@ internal class LayeredCompositionBuilder {
           preferredTransform: clip.preferredTransform,
           displaySize: clip.displaySize,
           chromaKey: clip.chromaKey,
+          matte: clip.matte,
           keyframes: clip.keyframes,
           keyframeClock: clip.keyframeClock)
       }

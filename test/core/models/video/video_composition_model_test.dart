@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -218,6 +220,89 @@ void main() {
 
       test('a differing key breaks equality', () {
         expect(layer.copyWith(chromaKey: key), isNot(layer));
+      });
+    });
+
+    group('mask', () {
+      final matte = EditorLayerImage.asset('assets/circle.png');
+
+      // As above: toAsyncMap resolves each clip's source to a local path.
+      final local = VideoLayer(
+        clips: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+      );
+
+      test('defaults to null so every clip shows whole', () {
+        expect(layer.mask, isNull);
+        expect(layer.toMap()['mask'], isNull);
+      });
+
+      test('toAsyncMap resolves an in-memory matte to bytes', () async {
+        final bytes = Uint8List.fromList([1, 2, 3, 4]);
+        final map = await local
+            .copyWith(mask: EditorLayerImage.memory(bytes))
+            .toAsyncMap();
+
+        expect(map['maskData'], bytes);
+        expect(map.containsKey('maskPath'), isFalse);
+      });
+
+      test('toAsyncMap sends a file-backed matte as a path', () async {
+        final tempDir = Directory.systemTemp.createTempSync('layer_mask_test');
+        addTearDown(() => tempDir.deleteSync(recursive: true));
+        final file = File('${tempDir.path}/circle.png')
+          ..writeAsBytesSync([1, 2, 3, 4]);
+
+        final map = await local
+            .copyWith(mask: EditorLayerImage.file(file.path))
+            .toAsyncMap();
+
+        expect(map['maskPath'], file.path);
+        expect(map.containsKey('maskData'), isFalse);
+      });
+
+      test('toAsyncMap fails on a matte file that is not there', () {
+        final missing = local.copyWith(
+          mask: EditorLayerImage.file('/does/not/exist/circle.png'),
+        );
+
+        expect(missing.toAsyncMap(), throwsA(isA<FileSystemException>()));
+      });
+
+      test('toAsyncMap omits the matte when unset', () async {
+        final map = await local.toAsyncMap();
+
+        expect(map.containsKey('maskPath'), isFalse);
+        expect(map.containsKey('maskData'), isFalse);
+      });
+
+      test('toJson / fromJson roundtrip preserves the matte', () {
+        final restored = VideoLayer.fromJson(
+          layer.copyWith(mask: matte).toJson(),
+        );
+
+        // EditorLayerImage compares by identity, so check the source instead.
+        expect(restored.mask?.assetPath, 'assets/circle.png');
+        expect(restored.opacity, layer.opacity);
+        expect(VideoLayer.fromJson(layer.toJson()).mask, isNull);
+      });
+
+      test('copyWith sets the matte and keeps it when not passed', () {
+        final masked = layer.copyWith(mask: matte);
+
+        expect(masked.mask, same(matte));
+        expect(masked.copyWith(opacity: 0.25).mask, same(matte));
+      });
+
+      test('a differing matte breaks equality', () {
+        final masked = layer.copyWith(mask: matte);
+
+        expect(masked, isNot(layer));
+        expect(masked, layer.copyWith(mask: matte));
+        expect(masked.hashCode, layer.copyWith(mask: matte).hashCode);
+      });
+
+      test('toString names the matte', () {
+        expect(layer.copyWith(mask: matte).toString(), contains('mask:'));
       });
     });
   });

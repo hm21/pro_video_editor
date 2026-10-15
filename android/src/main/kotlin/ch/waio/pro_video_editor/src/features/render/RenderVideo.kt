@@ -108,7 +108,11 @@ class RenderVideo(private val context: Context) {
         // effect's history and pass-through.
         val hasEffects = config.effects.isNotEmpty() || config.customEffects.isNotEmpty()
 
-        return hasImageLayers || hasBlur || hasColorFilters || hasChromaKey || hasEffects
+        // So is a layer mask's shader; it only exists on the layered path.
+        val hasLayerMask = config.composition?.layers?.any { it.mask != null } == true
+
+        return hasImageLayers || hasBlur || hasColorFilters || hasChromaKey || hasEffects ||
+                hasLayerMask
     }
 
     /**

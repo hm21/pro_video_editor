@@ -1,3 +1,6 @@
+## 2.34.0
+- **FEAT**(android, iOS, macOS): `VideoLayer.mask` shapes a layer's clips with an alpha matte, so a clip can show in a circle or a heart, or fade out through a soft edge over the layers below. The mask moves, scales and turns with each clip.
+
 ## 2.33.4
 - **FIX**(android, iOS, macOS): A render with an `endTime` skips the overlap transitions that would start after it. Each one used to be encoded first, so a 6 s export of a long timeline with a transition between every clip took minutes; it now takes about as long as the same clips without transitions.
 
@@ -341,7 +344,6 @@
 
 ## 1.13.1
 - **FIX**: Fix `VideoQualityConfig` stretching video when target resolution has a different aspect ratio. Now uses uniform scaling (BoxFit.contain) to preserve the original aspect ratio.
-
 
 ## 1.13.0
 - **FEAT**(android, iOS, macOS): Add optional `size` field on `ImageLayer` to scale overlay images to specific dimensions before rendering.

@@ -894,9 +894,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// Composites all layers of a layered instruction onto the composition canvas.
   ///
   /// Layers are drawn bottom-to-top over the instruction's background color.
-  /// Each layer's source frame is oriented, scaled into its destination rect
-  /// per its fit mode, clipped to that rect, turned by the placement's
-  /// rotation, and blended with its opacity.
+  /// Each layer's source frame is keyed, oriented, masked, scaled into its
+  /// destination rect per its fit mode, clipped to that rect, turned by the
+  /// placement's rotation, and blended with its opacity.
   private func composeLayered(
     request: AVAsynchronousVideoCompositionRequest,
     instruction: CustomVideoCompositionInstruction
@@ -931,6 +931,15 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       let preferred = placement.preferredTransform
       if !preferred.isIdentity {
         img = applyingAVFoundationTransform(preferred, to: img)
+      }
+
+      // 1b. Shape the upright frame with the layer's mask, after its chroma
+      //     key and before it is scaled into place, so the shape moves, scales
+      //     and turns with the clip. Upright rather than raw, as on Android,
+      //     where Media3 hands the effects a frame already turned by its
+      //     rotation metadata.
+      if let matte = placement.matte {
+        img = applyLayerMatte(matte.image, to: img)
       }
 
       let srcSize = img.extent.size

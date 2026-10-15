@@ -19,7 +19,9 @@ import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 /// Layers are composited bottom-to-top in the order they appear in
 /// [VideoComposition.layers], so a later layer is drawn on top of an earlier
 /// one (its z-order). The whole layer is rendered with [opacity] and, unless a
-/// clip provides its own [VideoSegment.transform], placed using [transform].
+/// clip provides its own [VideoSegment.transform], placed using [transform]. A
+/// [mask] shows its clips only within a shape, or fades them out through a soft
+/// edge.
 class VideoLayer {
   /// Creates a [VideoLayer] from a list of [clips].
   const VideoLayer({
@@ -27,6 +29,7 @@ class VideoLayer {
     this.opacity = 1.0,
     this.transform,
     this.chromaKey,
+    this.mask,
     this.keyframes = const [],
     this.keyframeClock = const [],
   }) : assert(clips.length > 0, 'A layer must contain at least one clip'),
@@ -61,6 +64,39 @@ class VideoLayer {
   /// through — which is how you put a video behind a green screen.
   final ChromaKey? chromaKey;
 
+  /// An alpha matte that shapes every clip of this layer, such as a circle, a
+  /// heart or a rectangle with rounded or soft edges.
+  ///
+  /// Only the matte's **alpha** counts; its colors are ignored. Each pixel of a
+  /// clip keeps its own alpha times the matte's alpha there: where the matte is
+  /// opaque the clip shows, where it is transparent the layers below show
+  /// through (or [VideoComposition.backgroundColor] on the bottom layer), and
+  /// partial alpha blends the two — which is how a feathered or gradient edge
+  /// fades the clip into the track below.
+  ///
+  /// The matte is stretched over each clip's **own source frame**, the frame
+  /// as it comes out of the decoder with its rotation metadata applied. That
+  /// happens after the clip's chroma key and before the clip is placed on the
+  /// canvas, so the mask moves, scales and turns with the clip — by
+  /// [VideoSegment.transform] or [transform], their rotation, and [keyframes].
+  /// A [SegmentFit.cover] or [SegmentFit.contain] fit then treats the masked
+  /// frame like any other: `contain` shows all of the shape, while `cover` cuts
+  /// off whatever of it overflows the box. Draw the matte at the clips' aspect
+  /// ratio, or the stretch pulls the shape out of proportion.
+  ///
+  /// It combines with the rest of the layer: a pixel the chroma key removed
+  /// stays removed, and [opacity] — or a keyframe's opacity — applies on top.
+  ///
+  /// The matte's EXIF orientation is applied, as for
+  /// [ChromaKey.backgroundImage]. A matte that does not decode fails the
+  /// render rather than export the clips in a shape nobody asked for.
+  ///
+  /// **Default**: `null`, which shows every clip whole.
+  ///
+  /// **Note:** Ignored on Web, Windows and Linux, which have no render
+  /// pipeline.
+  final EditorLayerImage? mask;
+
   /// The layer's placement over time; see [TimelineKeyframe].
   ///
   /// When not empty, the keyframes move every clip of the layer: a
@@ -85,8 +121,9 @@ class VideoLayer {
 
   /// Converts this layer to a map for platform channel communication.
   ///
-  /// Resolves each clip's input path and any chroma-key background image, so
-  /// this is asynchronous.
+  /// Resolves each clip's input path, any chroma-key background image and the
+  /// [mask], so this is asynchronous. See [EditorLayerImage.toChannelSource]
+  /// for what that means for a file-backed matte.
   Future<Map<String, dynamic>> toAsyncMap() async {
     assert(
       clips.every((c) => c.transition == null),
@@ -100,11 +137,14 @@ class VideoLayer {
       'VideoComposition. Pre-render them into the source, or use '
       'videoSegments.',
     );
+    final mask = this.mask;
     return {
       'clips': await Future.wait(clips.map((clip) => clip.toAsyncMap())),
       'opacity': opacity,
       'transform': transform?.toMap(),
       'chromaKey': await chromaKey?.toAsyncMap(),
+      if (mask != null)
+        ...await mask.toChannelSource(pathKey: 'maskPath', dataKey: 'maskData'),
       'keyframes': sortTimelineKeyframes(
         keyframes,
       ).map((k) => k.toMap()).toList(),
@@ -118,6 +158,7 @@ class VideoLayer {
     double? opacity,
     SegmentTransform? transform,
     ChromaKey? chromaKey,
+    EditorLayerImage? mask,
     List<TimelineKeyframe>? keyframes,
     List<KeyframeClockPoint>? keyframeClock,
   }) {
@@ -126,6 +167,7 @@ class VideoLayer {
       opacity: opacity ?? this.opacity,
       transform: transform ?? this.transform,
       chromaKey: chromaKey ?? this.chromaKey,
+      mask: mask ?? this.mask,
       keyframes: keyframes ?? this.keyframes,
       keyframeClock: keyframeClock ?? this.keyframeClock,
     );
@@ -137,6 +179,7 @@ class VideoLayer {
       'opacity': opacity,
       'transform': transform?.toMap(),
       'chromaKey': chromaKey?.toMap(),
+      'mask': mask?.toMap(),
       'keyframes': keyframes.map((k) => k.toMap()).toList(),
       'keyframeClock': keyframeClock.map((p) => p.toMap()).toList(),
     };
@@ -155,6 +198,9 @@ class VideoLayer {
           : null,
       chromaKey: map['chromaKey'] != null
           ? ChromaKey.fromMap(map['chromaKey'] as Map<String, dynamic>)
+          : null,
+      mask: map['mask'] != null
+          ? EditorLayerImage.fromMap(map['mask'] as Map<String, dynamic>)
           : null,
       keyframes:
           (map['keyframes'] as List<dynamic>?)
@@ -177,7 +223,7 @@ class VideoLayer {
   @override
   String toString() =>
       'VideoLayer(clips: $clips, opacity: $opacity, transform: $transform, '
-      'chromaKey: $chromaKey, keyframes: $keyframes, '
+      'chromaKey: $chromaKey, mask: $mask, keyframes: $keyframes, '
       'keyframeClock: $keyframeClock)';
 
   @override
@@ -188,6 +234,7 @@ class VideoLayer {
         other.opacity == opacity &&
         other.transform == transform &&
         other.chromaKey == chromaKey &&
+        other.mask == mask &&
         listEquals(other.keyframes, keyframes) &&
         listEquals(other.keyframeClock, keyframeClock);
   }
@@ -198,6 +245,7 @@ class VideoLayer {
       opacity.hashCode ^
       transform.hashCode ^
       chromaKey.hashCode ^
+      mask.hashCode ^
       Object.hashAll(keyframes) ^
       Object.hashAll(keyframeClock);
 }
