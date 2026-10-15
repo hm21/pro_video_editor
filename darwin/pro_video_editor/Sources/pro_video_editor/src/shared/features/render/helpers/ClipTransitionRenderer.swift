@@ -16,8 +16,8 @@ import Foundation
 /// - **wipe** → crop-rectangle ramp on the incoming layer.
 ///
 /// The ramps are applied piecewise so the requested easing [curve] is honored.
-/// Audio is cross-faded via an `AVMutableAudioMix`. The result is exported with
-/// `AVAssetExportSession`.
+/// Audio is cross-faded along the same curve via an `AVMutableAudioMix`. The
+/// result is exported with `AVAssetExportSession`.
 ///
 /// Mirrors the Android `ClipTransitionRenderer` pre-render strategy and keeps
 /// the main composition pipeline single-track. Returns `nil` on failure so the
@@ -167,7 +167,7 @@ internal enum ClipTransitionRenderer {
           composition: composition,
           outAsset: outAsset, outStart: outStart, outDuration: outTailDur,
           inAsset: inAsset, inStart: inStart, inDuration: inHeadDur,
-          duration: d, curve: curve,
+          duration: d, curve: curve, steps: steps,
           outgoingAudio: outgoingAudio, incomingAudio: incomingAudio)
       }
 
@@ -346,18 +346,19 @@ internal enum ClipTransitionRenderer {
 
   // MARK: - Audio
 
-  private static func buildAudioMix(
+  /// Adds each side's audio to [composition] and cross-fades the two along
+  /// [curve] over [d], in [steps] ramps; see ``crossfadeRamps``.
+  ///
+  /// Each side starts or ends at its own clip's volume, through its own
+  /// equalizer, limited like the clip where either would clip. A muted side
+  /// is left out, and the other fades in or out against silence.
+  static func buildAudioMix(
     composition: AVMutableComposition,
     outAsset: AVURLAsset, outStart: CMTime, outDuration: CMTime,
     inAsset: AVURLAsset, inStart: CMTime, inDuration: CMTime,
-    duration d: CMTime, curve: String,
+    duration d: CMTime, curve: String, steps: Int,
     outgoingAudio: SideAudio, incomingAudio: SideAudio
   ) async throws -> AVMutableAudioMix? {
-    let fullRange = CMTimeRange(start: .zero, duration: d)
-    // Linear cross-fade is a good approximation; the visual curve drives feel.
-    // Each side starts or ends at its own clip's volume, through its own
-    // equalizer, limited like the clip where either would clip. A muted side
-    // is left out, and the other fades in or out against silence.
     let sides = [
       (
         asset: outAsset, start: outStart, duration: outDuration, audio: outgoingAudio,
@@ -395,9 +396,12 @@ internal enum ClipTransitionRenderer {
 
       let volume = side.audio.volume ?? 1
       let params = AVMutableAudioMixInputParameters(track: track)
-      params.setVolumeRamp(
-        fromStartVolume: side.fadesIn ? 0 : volume, toEndVolume: side.fadesIn ? volume : 0,
-        timeRange: fullRange)
+      for ramp in crossfadeRamps(
+        volume: volume, fadesIn: side.fadesIn, curve: curve, duration: d, steps: steps)
+      {
+        params.setVolumeRamp(
+          fromStartVolume: ramp.from, toEndVolume: ramp.to, timeRange: ramp.range)
+      }
       params.audioTapProcessor = AudioMixTap.make(
         volumes: VolumeSchedule(constant: volume),
         equalizers: EqualizerSchedule(constant: side.audio.equalizer))
@@ -407,6 +411,33 @@ internal enum ClipTransitionRenderer {
     let mix = AVMutableAudioMix()
     mix.inputParameters = parameters
     return mix
+  }
+
+  /// The volume ramps that fade one side of a blend of duration [d] along
+  /// [curve]: the incoming side plays at `volume × p` and the outgoing one at
+  /// `volume × (1 − p)`, p being the eased progress, as on Android. A mix
+  /// only ramps linearly, so the curve is followed piecewise, one ramp per
+  /// easing step like the video in ``applyRamps``, each starting exactly where
+  /// the one before it ends.
+  ///
+  /// p is held within 0...1. An elastic curve springs past its ends, and
+  /// Android follows it there, playing one clip louder than its own volume
+  /// and the other phase-inverted. A mix has no negative volume, and the tap
+  /// limits each side for its own volume only, so here each side stops at its
+  /// own volume or at silence through the overshoot instead.
+  static func crossfadeRamps(
+    volume: Float, fadesIn: Bool, curve: String, duration d: CMTime, steps: Int
+  ) -> [(from: Float, to: Float, range: CMTimeRange)] {
+    func time(_ k: Int) -> CMTime {
+      k == steps ? d : CMTimeMultiplyByFloat64(d, multiplier: Double(k) / Double(steps))
+    }
+    func gain(_ k: Int) -> Float {
+      let p = Float(min(1, max(0, applyEasing(Double(k) / Double(steps), curve: curve))))
+      return volume * (fadesIn ? p : 1 - p)
+    }
+    return (0..<steps).map { k in
+      (gain(k), gain(k + 1), CMTimeRange(start: time(k), end: time(k + 1)))
+    }
   }
 
   // MARK: - Export

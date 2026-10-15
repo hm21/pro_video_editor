@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import XCTest
 
@@ -112,6 +113,139 @@ final class AudioFadeTests: XCTestCase {
       let offset = frameStart + channel * 2
       let bits = UInt16(pcm[offset]) | (UInt16(pcm[offset + 1]) << 8)
       return Int16(bitPattern: bits)
+    }
+  }
+}
+
+// MARK: - Overlap transition crossfade
+
+/// The audio cross-fade `ClipTransitionRenderer` gives an overlap transition:
+/// each side follows the transition's curve, as the video and the Android
+/// export do, instead of a straight line.
+final class TransitionCrossfadeTests: XCTestCase {
+  private let sampleRate = 44_100.0
+  /// The source tone's peak.
+  private let toneLevel: Float = 0.5
+  private let blend = CMTime(value: 1_000_000, timescale: 1_000_000)
+
+  /// A quarter into an easeIn blend the outgoing clip still plays at 15/16 of
+  /// its volume (a straight fade would be at 3/4), and halfway the incoming
+  /// clip has only reached a quarter of its own (a straight fade: half).
+  func testEachSideFollowsTheTransitionCurve() async throws {
+    let tone = try writeTone()
+
+    // One side at a time, the other muted, so the level read is that side's.
+    let fadingOut = try await crossfadeLevel(
+      tone, outgoing: .init(volume: 0.8), incoming: .init(volume: 0), curve: "easeIn")
+    XCTAssertEqual(fadingOut(0.25), toneLevel * 0.8 * 15 / 16, accuracy: 0.01)
+    XCTAssertEqual(fadingOut(0.5), toneLevel * 0.8 * 3 / 4, accuracy: 0.01)
+
+    let fadingIn = try await crossfadeLevel(
+      tone, outgoing: .init(volume: 0), incoming: .init(volume: 1), curve: "easeIn")
+    XCTAssertEqual(fadingIn(0.5), toneLevel / 4, accuracy: 0.01)
+    XCTAssertEqual(fadingIn(0.75), toneLevel * 9 / 16, accuracy: 0.01)
+  }
+
+  /// elasticOut springs to about 1.3 a sixth of the way in, where Android
+  /// plays the incoming clip that much louder; here it holds at its volume.
+  func testAnElasticOvershootHoldsEachSideAtItsEndVolume() async throws {
+    XCTAssertGreaterThan(applyEasing(5.0 / 30, curve: "elasticOut"), 1.2)
+    let rising = ClipTransitionRenderer.crossfadeRamps(
+      volume: 0.8, fadesIn: true, curve: "elasticOut", duration: blend, steps: 30)
+    let falling = ClipTransitionRenderer.crossfadeRamps(
+      volume: 0.8, fadesIn: false, curve: "elasticOut", duration: blend, steps: 30)
+
+    XCTAssertEqual(rising[4].to, 0.8)
+    XCTAssertEqual(falling[4].to, 0)
+    for ramp in rising + falling {
+      XCTAssertTrue((0...0.8).contains(ramp.from) && (0...0.8).contains(ramp.to))
+    }
+
+    // The hold is a run of flat ramps. A mix plays a flat ramp at its volume
+    // only when the ramp before ends there (see `setVolumeSteps`), so the mix
+    // is read back too.
+    let tone = try writeTone()
+    let fadingIn = try await crossfadeLevel(
+      tone, outgoing: .init(volume: 0), incoming: .init(volume: 0.8), curve: "elasticOut")
+    XCTAssertEqual(fadingIn(0.15), toneLevel * 0.8, accuracy: 0.01)
+    let fadingOut = try await crossfadeLevel(
+      tone, outgoing: .init(volume: 0.8), incoming: .init(volume: 0), curve: "elasticOut")
+    XCTAssertEqual(fadingOut(0.15), 0, accuracy: 0.01)
+  }
+
+  // MARK: - Helpers
+
+  /// One second of a 440 Hz stereo tone at `toneLevel`, in a file removed
+  /// after the test.
+  private func writeTone() throws -> AVURLAsset {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("crossfade-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("tone.caf")
+    let frames = AVAudioFrameCount(sampleRate)
+    let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
+    let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+    buffer.frameLength = frames
+    for channel in 0..<2 {
+      for frame in 0..<Int(frames) {
+        buffer.floatChannelData![channel][frame] =
+          toneLevel * sin(Float(frame) * 2 * .pi * 440 / Float(sampleRate))
+      }
+    }
+    try AVAudioFile(forWriting: url, settings: format.settings).write(from: buffer)
+    return AVURLAsset(url: url)
+  }
+
+  /// Cross-fades [tone] with itself over `blend` and reads the mix back as
+  /// float through an asset reader. Returns the tone's peak around a point of
+  /// the blend, given as a fraction of it.
+  private func crossfadeLevel(
+    _ tone: AVURLAsset,
+    outgoing: ClipTransitionRenderer.SideAudio,
+    incoming: ClipTransitionRenderer.SideAudio,
+    curve: String
+  ) async throws -> (Double) -> Float {
+    let composition = AVMutableComposition()
+    let mix = try await ClipTransitionRenderer.buildAudioMix(
+      composition: composition,
+      outAsset: tone, outStart: .zero, outDuration: blend,
+      inAsset: tone, inStart: .zero, inDuration: blend,
+      duration: blend, curve: curve, steps: 30,
+      outgoingAudio: outgoing, incomingAudio: incoming)
+
+    let reader = try AVAssetReader(asset: composition)
+    let output = AVAssetReaderAudioMixOutput(
+      audioTracks: composition.tracks(withMediaType: .audio),
+      audioSettings: [
+        AVFormatIDKey: kAudioFormatLinearPCM,
+        AVSampleRateKey: sampleRate,
+        AVNumberOfChannelsKey: 2,
+        AVLinearPCMBitDepthKey: 32,
+        AVLinearPCMIsFloatKey: true,
+        AVLinearPCMIsBigEndianKey: false,
+        AVLinearPCMIsNonInterleaved: false,
+      ])
+    output.audioMix = try XCTUnwrap(mix)
+    reader.add(output)
+    XCTAssertTrue(reader.startReading())
+    var left: [Float] = []
+    while let buffer = output.copyNextSampleBuffer(),
+      let block = CMSampleBufferGetDataBuffer(buffer)
+    {
+      var interleaved = [Float](repeating: 0, count: CMBlockBufferGetDataLength(block) / 4)
+      CMBlockBufferCopyDataBytes(
+        block, atOffset: 0, dataLength: interleaved.count * 4, destination: &interleaved)
+      left += stride(from: 0, to: interleaved.count, by: 2).map { interleaved[$0] }
+    }
+    XCTAssertEqual(reader.status, .completed, String(describing: reader.error))
+
+    let samples = left
+    let rate = sampleRate
+    // One 440 Hz cycle around the point.
+    return { fraction in
+      let center = Int(fraction * rate)
+      return samples[(center - 50)...(center + 50)].map(abs).max() ?? 0
     }
   }
 }

@@ -129,6 +129,10 @@ class ClipTransition {
 
   /// The easing curve applied to the transition's progress.
   ///
+  /// An overlap transition cross-fades its audio along the same curve. Where
+  /// an elastic curve overshoots, iOS and macOS hold each clip at its own
+  /// volume or at silence, while Android follows the overshoot.
+  ///
   /// Defaults to [AnimationCurve.linear].
   final AnimationCurve curve;
 
