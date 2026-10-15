@@ -193,6 +193,7 @@ class RenderVideo {
               enableAudio: workingConfig.enableAudio,
               outputFormat: workingConfig.outputFormat,
               globalChromaKey: workingConfig.chromaKey,
+              trimToCommonTrackEnd: workingConfig.trimToCommonTrackEnd,
               endUs: ClipTransitionGeometry.clipTimelineEndUs(
                 globalEndUs: workingConfig.endUs, globalSpeed: workingConfig.playbackSpeed))
             workingConfig = workingConfig.copyWith(videoClips: preRender.clips)
@@ -670,7 +671,7 @@ class RenderVideo {
   /// `stall`, for the caller to throw once the blends are registered.
   private static func preRenderTransitions(
     clips: [VideoClip], enableAudio: Bool, outputFormat: String,
-    globalChromaKey: ChromaKeyConfig?, endUs: Int64?
+    globalChromaKey: ChromaKeyConfig?, trimToCommonTrackEnd: Bool, endUs: Int64?
   ) async -> TransitionPreRender {
     // An overlap transition on the last/only clip loops back into the first clip
     // (seamless loop). Captured before the between-clip pass clears it.
@@ -691,10 +692,36 @@ class RenderVideo {
       sourceDurations[clip.inputPath] = duration
       return duration
     }
-    func outputUs(_ clip: VideoClip) async -> Int64 {
+
+    // The planning lays a clip out by what the composition plays of it, which
+    // can be less than `sourceEndUs` reads: the composition clamps a clip to
+    // its video track, which the container can outlast, and with
+    // `trimToCommonTrackEnd` to its audio. A clip that plays to its end would
+    // otherwise push every later blend back past an end it starts before. A
+    // clip a blend cuts short only places that blend a little early, which
+    // renders it.
+    var plannedSources: [String: (asset: AVURLAsset, videoTrack: AVAssetTrack)] = [:]
+    func plannedSourceUs(_ clip: VideoClip) async -> Int64 {
+      var source = plannedSources[clip.inputPath]
+      if source == nil {
+        let asset = AVURLAsset(url: URL(fileURLWithPath: clip.inputPath))
+        if let videoTrack = try? await loadVideoTrack(from: asset) {
+          source = (asset, videoTrack)
+          plannedSources[clip.inputPath] = source
+        }
+      }
+      guard let source else { return await sourceEndUs(clip) - (clip.startUs ?? 0) }
+      let played = await VideoSequenceBuilder.playedTimeRange(
+        for: clip, from: source.asset, videoTrack: source.videoTrack,
+        trimToCommonTrackEnd: trimToCommonTrackEnd && enableAudio,
+        label: "Transition planning")
+      return CMTimeConvertScale(
+        played.duration, timescale: 1_000_000, method: .roundTowardZero
+      ).value
+    }
+    func plannedOutputUs(_ clip: VideoClip) async -> Int64 {
       ClipTransitionGeometry.outputDurationUs(
-        sourceDurationUs: await sourceEndUs(clip) - (clip.startUs ?? 0),
-        speed: clip.playbackSpeed)
+        sourceDurationUs: await plannedSourceUs(clip), speed: clip.playbackSpeed)
     }
 
     // Each blend is a full export, so on a long timeline cut short by the
@@ -709,7 +736,7 @@ class RenderVideo {
           && !clip.reverseVideo && !(next?.reverseVideo ?? false)
         timeline.append(
           ClipTransitionGeometry.TimelineClip(
-            sourceDurationUs: await sourceEndUs(clip) - (clip.startUs ?? 0),
+            sourceDurationUs: await plannedSourceUs(clip),
             speed: clip.playbackSpeed,
             blendDurationUs: blends ? clip.transition?.durationUs : nil))
       }
@@ -892,7 +919,7 @@ class RenderVideo {
       var wrapPastEnd = false
       if let plan, let endUs {
         var timelineUs: Int64 = 0
-        for clip in result { timelineUs += await outputUs(clip) }
+        for clip in result { timelineUs += await plannedOutputUs(clip) }
         let wrapStartUs =
           timelineUs
           - ClipTransitionGeometry.outputDurationUs(

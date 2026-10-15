@@ -185,30 +185,9 @@ internal class VideoSequenceBuilder {
       }
 
       // Calculate time range for this clip
-      let rawClipTimeRange = await calculateTimeRange(for: clip, from: asset)
-
-      // Clamp clip range to the video track's actual available range.
-      // Some MP4 files have a container duration slightly longer than the video
-      // track's decoded frames. Without clamping, insertTimeRange silently truncates
-      // the insert but the ClipInstruction keeps the longer duration, creating a gap
-      // where AVFoundation calls the compositor with no source frame available
-      // (sourceTrackIDs empty), causing a RENDER_ERROR crash.
-      let videoTrackTimeRange = await TrackEndTrimmer.timeRange(of: videoTrack)
-      let clampedRange = CMTimeRangeGetIntersection(
-        rawClipTimeRange, otherRange: videoTrackTimeRange)
-      var clipTimeRange = clampedRange.duration > .zero ? clampedRange : rawClipTimeRange
-
-      // The video clamp above leaves a range the audio track cannot fill when
-      // the two tracks end apart, `insertTimeRange` silently inserts what
-      // exists, and the export ends on a stretch of missing audio — the seam a
-      // looping player replays every cycle. Cut the clip back to where both
-      // tracks still have content instead.
-      if trimToCommonTrackEnd, enableAudio,
-        let trimmed = await TrackEndTrimmer.trimmedRange(
-          clipTimeRange, in: asset, label: "Clip \(index)")
-      {
-        clipTimeRange = trimmed
-      }
+      let clipTimeRange = await Self.playedTimeRange(
+        for: clip, from: asset, videoTrack: videoTrack,
+        trimToCommonTrackEnd: trimToCommonTrackEnd && enableAudio, label: "Clip \(index)")
       let clipDuration = clipTimeRange.duration
       let insertStart = totalDuration
       let sourceRanges: [CMTimeRange]
@@ -384,8 +363,47 @@ internal class VideoSequenceBuilder {
     )
   }
 
+  /// The part of a clip's source the composition plays: its own range,
+  /// clamped to the video track and, with `trimToCommonTrackEnd`, cut back to
+  /// where the audio track also has content.
+  ///
+  /// The overlap pre-render lays the clips out with this as well
+  /// (`RenderVideo.preRenderTransitions`), so a clip takes the same time there
+  /// as in the composition.
+  static func playedTimeRange(
+    for clip: VideoClip, from asset: AVAsset, videoTrack: AVAssetTrack,
+    trimToCommonTrackEnd: Bool, label: String
+  ) async -> CMTimeRange {
+    let rawClipTimeRange = await calculateTimeRange(for: clip, from: asset)
+
+    // Clamp clip range to the video track's actual available range.
+    // Some MP4 files have a container duration slightly longer than the video
+    // track's decoded frames. Without clamping, insertTimeRange silently truncates
+    // the insert but the ClipInstruction keeps the longer duration, creating a gap
+    // where AVFoundation calls the compositor with no source frame available
+    // (sourceTrackIDs empty), causing a RENDER_ERROR crash.
+    let videoTrackTimeRange = await TrackEndTrimmer.timeRange(of: videoTrack)
+    let clampedRange = CMTimeRangeGetIntersection(
+      rawClipTimeRange, otherRange: videoTrackTimeRange)
+    let clipTimeRange = clampedRange.duration > .zero ? clampedRange : rawClipTimeRange
+
+    // The video clamp above leaves a range the audio track cannot fill when
+    // the two tracks end apart, `insertTimeRange` silently inserts what
+    // exists, and the export ends on a stretch of missing audio — the seam a
+    // looping player replays every cycle. Cut the clip back to where both
+    // tracks still have content instead.
+    if trimToCommonTrackEnd,
+      let trimmed = await TrackEndTrimmer.trimmedRange(clipTimeRange, in: asset, label: label)
+    {
+      return trimmed
+    }
+    return clipTimeRange
+  }
+
   /// Calculates time range for a clip considering start/end trimming.
-  private func calculateTimeRange(for clip: VideoClip, from asset: AVAsset) async -> CMTimeRange {
+  private static func calculateTimeRange(
+    for clip: VideoClip, from asset: AVAsset
+  ) async -> CMTimeRange {
     let startTime: CMTime
     let endTime: CMTime
 
