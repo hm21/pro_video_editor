@@ -3,8 +3,10 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 import RENDER_TAG
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.ColorSpace
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.os.Build
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
@@ -578,7 +580,7 @@ private fun drawStaticLayer(
         reqWidth = reqWidth,
         reqHeight = reqHeight,
         config = Bitmap.Config.ARGB_8888,
-    )
+    )?.let(::withSrgbValues)
     if (bitmap == null) {
         Log.e(RENDER_TAG, "Layer: image did not decode (${image.describe()}); skipping layer")
         return false
@@ -603,6 +605,38 @@ private fun drawStaticLayer(
         bitmap.recycle()
     }
     return true
+}
+
+/**
+ * [bitmap] with the values it holds read as sRGB, as Media3 reads an overlay of
+ * its own: it uploads the pixels as they are, whatever colour space they were
+ * decoded in. A [Canvas] converts them into its target's instead, so a photo
+ * decoded as Display P3 would come out in other colours drawn with other layers
+ * than drawn on its own. Recycles [bitmap] when it returns a copy.
+ */
+private fun withSrgbValues(bitmap: Bitmap): Bitmap {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return bitmap
+    val srgb = ColorSpace.get(ColorSpace.Named.SRGB)
+    val colorSpace = bitmap.colorSpace
+    if (colorSpace == null || colorSpace == srgb) return bitmap
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        try {
+            bitmap.setColorSpace(srgb)
+            return bitmap
+        } catch (e: IllegalArgumentException) {
+            // A colour space of a wider range than sRGB's; copied below.
+        }
+    }
+    if (bitmap.config != Bitmap.Config.ARGB_8888) return bitmap
+    val copy = Bitmap.createBitmap(
+        bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888, bitmap.hasAlpha(), srgb
+    )
+    val pixels = ByteBuffer.allocateDirect(bitmap.byteCount)
+    bitmap.copyPixelsToBuffer(pixels)
+    pixels.rewind()
+    copy.copyPixelsFromBuffer(pixels)
+    bitmap.recycle()
+    return copy
 }
 
 /**
