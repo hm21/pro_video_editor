@@ -44,10 +44,10 @@ class RenderVideo {
     let handle = RenderJobHandle()
     BackgroundSafeJob.run(
       label: "Render", handle: handle,
-      attempt: { attemptHandle, onComplete, onError in
+      attempt: { attemptHandle, complete, fail in
         renderAttempt(
           config: config, handle: attemptHandle, onProgress: onProgress,
-          onComplete: onComplete, onError: onError)
+          onComplete: complete, onError: fail)
       },
       onComplete: onComplete, onError: onError)
     return handle

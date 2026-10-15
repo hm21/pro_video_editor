@@ -1,6 +1,6 @@
 ## 2.33.1
-- **FIX**(iOS): Leaving the app during a render or a stop-motion render no longer fails it with `Operation Interrupted`. The export keeps running in the background for as long as iOS allows, about 30 seconds. One still running when that time is up stops, and starts over by itself once the app is active again, with its progress back at zero; a render requested in the background after that waits for the app too.
-- **FIX**(iOS, macOS): A render without a bitrate cap, and a stop-motion render, replace a file already at the output path, as the other export paths do, instead of failing.
+- **FIX**(iOS): Leaving the app during a render or a stop-motion render no longer fails it with `Operation Interrupted`. It keeps running in the background while iOS allows (about 30 s), and otherwise starts over once the app is back.
+- **FIX**(iOS, macOS): A render without a bitrate cap and a stop-motion render overwrite a file already at the output path instead of failing.
 
 ## 2.33.0
 - **FEAT**(android, iOS, macOS): `ImageLayer.audioVisualizer` draws bars, mirrored bars, a wave or a ring of bars that move with the sound, from band levels the app passes as a `LayerAudioVisualizer`. `AudioVisualizerPainter` draws the same shapes for an editor preview.

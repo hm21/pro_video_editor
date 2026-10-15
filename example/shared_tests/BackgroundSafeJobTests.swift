@@ -1,4 +1,6 @@
+import AVFoundation
 import Foundation
+import ImageIO
 import XCTest
 
 @testable import pro_video_editor
@@ -324,6 +326,98 @@ class BackgroundSafeJobTests: XCTestCase {
     wait(for: [done], timeout: 10)
     XCTAssertTrue(lock.sync { reported } is CancellationError)
     XCTAssertEqual(lock.sync { attempts }, 0)
+  }
+}
+
+/// An attempt started over writes to the output path of the one before it, so
+/// both jobs ``BackgroundSafeJob`` runs must replace the partial file left
+/// there.
+final class RestartOutputTests: XCTestCase {
+  private func makePartialOutput() throws -> URL {
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pve_partial_\(UUID().uuidString).mp4")
+    try Data("partial".utf8).write(to: url)
+    return url
+  }
+
+  private func videoSeconds(_ url: URL) async throws -> Double {
+    let track = try await MediaInfoExtractor.loadVideoTrack(from: AVURLAsset(url: url))
+    return await TrackEndTrimmer.timeRange(of: track).duration.seconds
+  }
+
+  func testRenderReplacesAFileAtTheOutputPath() async throws {
+    let palette = ThumbnailTimestampFixture.palette
+    let source = try ThumbnailTimestampFixture.makeColorVideo(colors: [palette[0]])
+    defer { try? FileManager.default.removeItem(at: source) }
+    let output = try makePartialOutput()
+    defer { try? FileManager.default.removeItem(at: output) }
+
+    // No bitrate cap: the export-session path, the one that refused the file.
+    let config = try XCTUnwrap(
+      RenderConfig.fromArguments([
+        "videoClips": [["inputPath": source.path]],
+        "outputPath": output.path,
+        "outputFormat": "mp4",
+        "enableAudio": false,
+      ]))
+    let settled = expectation(description: "render settles")
+    var failure: Error?
+    RenderVideo.render(
+      config: config,
+      onProgress: { _ in },
+      onComplete: { _ in settled.fulfill() },
+      onError: { error in
+        failure = error
+        settled.fulfill()
+      })
+    await fulfillment(of: [settled], timeout: 120)
+
+    XCTAssertNil(failure)
+    let seconds = try await videoSeconds(output)
+    XCTAssertEqual(seconds, 1, accuracy: 0.1)
+  }
+
+  func testStopMotionReplacesAFileAtTheOutputPath() async throws {
+    let frame = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pve_frame_\(UUID().uuidString).png")
+    defer { try? FileManager.default.removeItem(at: frame) }
+    let context = try XCTUnwrap(
+      CGContext(
+        data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+    context.setFillColor(red: 0.8, green: 0.2, blue: 0.2, alpha: 1)
+    context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+    let destination = try XCTUnwrap(
+      CGImageDestinationCreateWithURL(frame as CFURL, "public.png" as CFString, 1, nil))
+    CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+    XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+    let output = try makePartialOutput()
+    defer { try? FileManager.default.removeItem(at: output) }
+
+    let config = try XCTUnwrap(
+      StopMotionConfig.fromArguments([
+        "id": "restart-output",
+        "frames": [["imagePath": frame.path], ["imagePath": frame.path]],
+        "frameRate": NSNumber(value: 2),
+        "outputPath": output.path,
+      ]))
+    let settled = expectation(description: "stop-motion render settles")
+    var failure: Error?
+    StopMotionGenerator.generate(
+      config: config,
+      onProgress: { _ in },
+      onComplete: { _ in settled.fulfill() },
+      onError: { error in
+        failure = error
+        settled.fulfill()
+      })
+    await fulfillment(of: [settled], timeout: 60)
+
+    XCTAssertNil(failure)
+    let seconds = try await videoSeconds(output)
+    XCTAssertEqual(seconds, 1, accuracy: 0.1, "two frames at 2 fps")
   }
 }
 

@@ -35,14 +35,14 @@ internal enum StopMotionGenerator {
     let handle = RenderJobHandle()
     BackgroundSafeJob.run(
       label: "Stop-motion render", handle: handle,
-      attempt: { attemptHandle, onComplete, onError in
+      attempt: { attemptHandle, complete, fail in
         queue.async {
           let task = Task {
             do {
               let data = try await encode(config: config, onProgress: onProgress)
-              onComplete(data)
+              complete(data)
             } catch {
-              onError(error)
+              fail(error)
             }
           }
           attemptHandle.attach(task: task)

@@ -27,6 +27,14 @@ enum BackgroundSafeJob {
   /// it waits until the app is active.
   static let minimumBackgroundTimeToStart: TimeInterval = 10
 
+  /// Starts one run of a job under the handle it is given, and reports
+  /// through one of the two closures, once.
+  typealias Attempt<Output> = (
+    _ attemptHandle: RenderJobHandle,
+    _ complete: @escaping (Output) -> Void,
+    _ fail: @escaping (Error) -> Void
+  ) -> Void
+
   /// Runs `attempt` until it completes, fails while the app stayed in the
   /// foreground, or `handle` is cancelled, then reports through exactly one
   /// of `onComplete` and `onError`.
@@ -36,18 +44,12 @@ enum BackgroundSafeJob {
   ///   - handle: the job's handle. Cancelling it cancels the running attempt
   ///     or ends a wait for the app, with a `CancellationError`.
   ///   - environment: the app the job runs in; tests pass their own.
-  ///   - attempt: starts one run of the job under the handle it is given,
-  ///     and reports through one of the two closures, once.
+  ///   - attempt: one run of the job; see ``Attempt``.
   static func run<Output>(
     label: String,
     handle: RenderJobHandle,
     environment: AppEnvironment = .current,
-    attempt:
-      @escaping (
-        _ attemptHandle: RenderJobHandle,
-        _ onComplete: @escaping (Output) -> Void,
-        _ onError: @escaping (Error) -> Void
-      ) -> Void,
+    attempt: @escaping Attempt<Output>,
     onComplete: @escaping (Output) -> Void,
     onError: @escaping (Error) -> Void
   ) {
@@ -69,12 +71,7 @@ enum BackgroundSafeJob {
     label: String,
     handle: RenderJobHandle,
     environment: AppEnvironment,
-    attempt:
-      @escaping (
-        _ attemptHandle: RenderJobHandle,
-        _ onComplete: @escaping (Output) -> Void,
-        _ onError: @escaping (Error) -> Void
-      ) -> Void,
+    attempt: @escaping Attempt<Output>,
     onComplete: @escaping (Output) -> Void,
     onError: @escaping (Error) -> Void
   ) {
