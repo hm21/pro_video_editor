@@ -2,7 +2,9 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import RENDER_TAG
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Paint
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
@@ -19,6 +21,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import androidx.core.graphics.scale
 import androidx.media3.effect.StaticOverlaySettings
+import androidx.media3.effect.TextureOverlay
 import androidx.media3.effect.TimestampWrapper
 import ch.waio.pro_video_editor.src.features.render.models.ImageLayer
 import ch.waio.pro_video_editor.src.features.render.models.LayerAudioVisualizerConfig
@@ -95,6 +98,11 @@ internal fun resolveOpenEndedOutAnimations(
  * When x/y are null, the image is stretched to fill the video frame.
  * When x/y are set, the image is positioned at the specified offset.
  *
+ * Memory does not grow with every layer: static layers in a row that share a
+ * time range are drawn into one image (see [flattenStaticLayers]), and the
+ * overlays in a row that share a time range are drawn by one effect (see
+ * [OverlayBatch]).
+ *
  * @param videoEffects List to add overlay effects to
  * @param imageLayers List of image layers with timing information
  * @param videoWidth Width of the video frame for positioning
@@ -131,201 +139,235 @@ fun applyTimedImageLayers(
         "Applying ${imageLayers.size} time-based image layer(s) to ${videoWidth}x$videoHeight video" +
                 " (raster scale $rasterScale, raster budget $rasterBudget px)"
     )
-    for (layer in imageLayers) {
-        try {
-            val startTimeUs = layer.startUs
-            val endTimeUs = layer.endUs
-            // Keyframes move the layer as animations do, frame by frame.
-            val isAnimated = layer.animations.isNotEmpty() || layer.keyframes.isNotEmpty()
-
+    val overlays = OverlayBatch(videoEffects)
+    var index = 0
+    while (index < imageLayers.size) {
+        val run = staticLayerRunLength(imageLayers, index)
+        if (run > 1) {
+            val layers = imageLayers.subList(index, index + run)
             Log.d(
                 RENDER_TAG,
-                "Layer timing: ${if (startTimeUs == -1L) "from start" else "start=${startTimeUs}us"}," +
-                        " ${if (endTimeUs == -1L) "until end" else "end=${endTimeUs}us"}"
+                "Layers ${index + 1}-${index + run}: drawing $run static layers as one image"
+            )
+            flattenStaticLayers(layers, videoWidth, videoHeight, rasterScale, rasterBudget)
+                ?.let { overlays.add(it, layers.first().startUs, layers.first().endUs) }
+            index += run
+        } else {
+            addImageLayer(
+                imageLayers[index], overlays, videoEffects,
+                videoWidth, videoHeight, rasterScale, rasterBudget
+            )
+            index++
+        }
+    }
+    overlays.flush()
+}
+
+/**
+ * Adds the overlay of [layer] to [overlays], or the effect of a censor layer to
+ * [videoEffects] after the overlays below it.
+ */
+@UnstableApi
+private fun addImageLayer(
+    layer: VideoSequenceBuilder.ImageLayerConfig,
+    overlays: OverlayBatch,
+    videoEffects: MutableList<Effect>,
+    videoWidth: Int,
+    videoHeight: Int,
+    rasterScale: Float,
+    rasterBudget: Long,
+) {
+    try {
+        val startTimeUs = layer.startUs
+        val endTimeUs = layer.endUs
+        // Keyframes move the layer as animations do, frame by frame.
+        val isAnimated = layer.animations.isNotEmpty() || layer.keyframes.isNotEmpty()
+
+        Log.d(
+            RENDER_TAG,
+            "Layer timing: ${if (startTimeUs == -1L) "from start" else "start=${startTimeUs}us"}," +
+                    " ${if (endTimeUs == -1L) "until end" else "end=${endTimeUs}us"}"
+        )
+
+        // An audio visualizer draws itself into the layer's box on every
+        // frame and never reads the layer's image.
+        val visualizer = layer.audioVisualizer
+        if (visualizer != null) {
+            val overlay = prepareAudioVisualizerOverlay(
+                layer, visualizer, videoWidth, videoHeight, rasterScale, rasterBudget
+            )
+            if (overlay == null) {
+                Log.e(
+                    RENDER_TAG,
+                    "Layer: audio visualizer without a size to fill; skipping layer"
+                )
+                return
+            }
+            Log.d(
+                RENDER_TAG,
+                "Layer: audio visualizer (${visualizer.style}, " +
+                        "${visualizer.bandCount} bands, ${visualizer.frameCount} rows)"
+            )
+            overlays.add(overlay, startTimeUs, endTimeUs)
+            return
+        }
+        val image = layer.image ?: return
+
+        // Animated GIFs decode to several frames; everything else (PNG/JPEG
+        // and static GIFs) decodes to a single bitmap.
+        //
+        // Only the GIF path needs the whole encoded image in memory, so the
+        // magic is sniffed off the first few bytes first — a file-backed
+        // photo would otherwise be read in full just to learn it is a JPEG,
+        // which is exactly the copy a path is meant to avoid.
+        val gifFrames = image.readHeader(GifDecoder.MAGIC_LENGTH)
+            ?.takeIf { GifDecoder.isGif(it) }
+            ?.let { image.readBytes() }
+            ?.let { GifDecoder.decode(it) }
+
+        val bitmapOverlay: BitmapOverlay
+        if (gifFrames != null) {
+            // Prepare every frame identically so they share dimensions and
+            // anchor; the overlay swaps frames over time.
+            val prepared = gifFrames.map {
+                prepareOverlay(
+                    it.bitmap, layer, videoWidth, videoHeight, rasterScale, rasterBudget
+                )
+            }
+            val first = prepared.first()
+            bitmapOverlay = AnimatedBitmapOverlay(
+                frames = prepared.map { it.bitmap },
+                frameDurationsUs = gifFrames.map { it.durationUs },
+                baseNormX = first.baseNormX,
+                baseNormY = first.baseNormY,
+                imageWidth = first.displayWidth,
+                imageHeight = first.displayHeight,
+                videoWidth = videoWidth,
+                videoHeight = videoHeight,
+                layerX = (layer.x ?: 0).toFloat(),
+                layerY = (layer.y ?: 0).toFloat(),
+                layerStartUs = startTimeUs,
+                layerEndUs = endTimeUs,
+                loop = layer.loop,
+                animationOffsetUs = layer.animationOffsetUs,
+                animationStartUs = layer.animationStartUs,
+                animationEndUs = layer.animationEndUs,
+                animations = layer.animations,
+                rasterScaleX = first.rasterScaleX,
+                rasterScaleY = first.rasterScaleY,
+                keyframes = layer.keyframes,
+                keyframeClock = layer.keyframeClock
+            )
+            Log.d(
+                RENDER_TAG,
+                "Layer: animated GIF with ${gifFrames.size} frame(s), loop=${layer.loop}, " +
+                        "animationOffset=${layer.animationOffsetUs}us"
+            )
+        } else {
+            // Decoded through ImageOrientation so a gallery photo carrying an
+            // EXIF orientation is laid in the way the user sees it, not as the
+            // sideways pixels it is stored as.
+            //
+            // `prepareOverlay` scales the result down straight away, so it is
+            // decoded no larger than it will end up: a full-resolution decode
+            // of a phone photo costs a second full-resolution copy when the
+            // orientation has to be turned, which is where an overlay OOMs.
+            val (reqWidth, reqHeight) = overlayDecodeSize(
+                layer, videoWidth, videoHeight, rasterScale, rasterBudget
+            )
+            val layerBitmap = ImageOrientation.decode(
+                image,
+                reqWidth = reqWidth,
+                reqHeight = reqHeight,
+                config = Bitmap.Config.ARGB_8888,
+            )
+            if (layerBitmap == null) {
+                if (layer.censor != null) {
+                    throw CensorLayerException(
+                        "the mask image did not decode (${image.describe()})"
+                    )
+                }
+                Log.e(
+                    RENDER_TAG,
+                    "Layer: image did not decode (${image.describe()}); skipping layer"
+                )
+                return
+            }
+            val prepared = prepareOverlay(
+                layerBitmap, layer, videoWidth, videoHeight, rasterScale, rasterBudget
             )
 
-            // An audio visualizer draws itself into the layer's box on every
-            // frame and never reads the layer's image.
-            val visualizer = layer.audioVisualizer
-            if (visualizer != null) {
-                val overlay = prepareAudioVisualizerOverlay(
-                    layer, visualizer, videoWidth, videoHeight, rasterScale, rasterBudget
-                )
-                if (overlay == null) {
-                    Log.e(
-                        RENDER_TAG,
-                        "Layer: audio visualizer without a size to fill; skipping layer"
-                    )
-                    continue
-                }
+            bitmapOverlay = if (isAnimated) {
                 Log.d(
                     RENDER_TAG,
-                    "Layer: audio visualizer (${visualizer.style}, " +
-                            "${visualizer.bandCount} bands, ${visualizer.frameCount} rows)"
+                    "Layer: using AnimatedBitmapOverlay with " +
+                            "${layer.animations.size} animation(s) and " +
+                            "${layer.keyframes.size} keyframe(s)"
                 )
-                addTimedOverlayEffect(
-                    videoEffects, OverlayEffect(listOf(overlay)), startTimeUs, endTimeUs
-                )
-                continue
-            }
-            val image = layer.image ?: continue
-
-            // Animated GIFs decode to several frames; everything else (PNG/JPEG
-            // and static GIFs) decodes to a single bitmap.
-            //
-            // Only the GIF path needs the whole encoded image in memory, so the
-            // magic is sniffed off the first few bytes first — a file-backed
-            // photo would otherwise be read in full just to learn it is a JPEG,
-            // which is exactly the copy a path is meant to avoid.
-            val gifFrames = image.readHeader(GifDecoder.MAGIC_LENGTH)
-                ?.takeIf { GifDecoder.isGif(it) }
-                ?.let { image.readBytes() }
-                ?.let { GifDecoder.decode(it) }
-
-            val bitmapOverlay: BitmapOverlay
-            if (gifFrames != null) {
-                // Prepare every frame identically so they share dimensions and
-                // anchor; the overlay swaps frames over time.
-                val prepared = gifFrames.map {
-                    prepareOverlay(
-                        it.bitmap, layer, videoWidth, videoHeight, rasterScale, rasterBudget
-                    )
-                }
-                val first = prepared.first()
-                bitmapOverlay = AnimatedBitmapOverlay(
-                    frames = prepared.map { it.bitmap },
-                    frameDurationsUs = gifFrames.map { it.durationUs },
-                    baseNormX = first.baseNormX,
-                    baseNormY = first.baseNormY,
-                    imageWidth = first.displayWidth,
-                    imageHeight = first.displayHeight,
+                AnimatedBitmapOverlay(
+                    bitmap = prepared.bitmap,
+                    baseNormX = prepared.baseNormX,
+                    baseNormY = prepared.baseNormY,
+                    imageWidth = prepared.displayWidth,
+                    imageHeight = prepared.displayHeight,
                     videoWidth = videoWidth,
                     videoHeight = videoHeight,
                     layerX = (layer.x ?: 0).toFloat(),
                     layerY = (layer.y ?: 0).toFloat(),
                     layerStartUs = startTimeUs,
                     layerEndUs = endTimeUs,
-                    loop = layer.loop,
-                    animationOffsetUs = layer.animationOffsetUs,
+                    animations = layer.animations,
+                    rasterScaleX = prepared.rasterScaleX,
+                    rasterScaleY = prepared.rasterScaleY,
                     animationStartUs = layer.animationStartUs,
                     animationEndUs = layer.animationEndUs,
-                    animations = layer.animations,
-                    rasterScaleX = first.rasterScaleX,
-                    rasterScaleY = first.rasterScaleY,
                     keyframes = layer.keyframes,
                     keyframeClock = layer.keyframeClock
                 )
-                Log.d(
-                    RENDER_TAG,
-                    "Layer: animated GIF with ${gifFrames.size} frame(s), loop=${layer.loop}, " +
-                            "animationOffset=${layer.animationOffsetUs}us"
-                )
             } else {
-                // Decoded through ImageOrientation so a gallery photo carrying an
-                // EXIF orientation is laid in the way the user sees it, not as the
-                // sideways pixels it is stored as.
-                //
-                // `prepareOverlay` scales the result down straight away, so it is
-                // decoded no larger than it will end up: a full-resolution decode
-                // of a phone photo costs a second full-resolution copy when the
-                // orientation has to be turned, which is where an overlay OOMs.
-                val (reqWidth, reqHeight) = overlayDecodeSize(
-                    layer, videoWidth, videoHeight, rasterScale, rasterBudget
-                )
-                val layerBitmap = ImageOrientation.decode(
-                    image,
-                    reqWidth = reqWidth,
-                    reqHeight = reqHeight,
-                    config = Bitmap.Config.ARGB_8888,
-                )
-                if (layerBitmap == null) {
-                    if (layer.censor != null) {
-                        throw CensorLayerException(
-                            "the mask image did not decode (${image.describe()})"
-                        )
-                    }
-                    Log.e(
-                        RENDER_TAG,
-                        "Layer: image did not decode (${image.describe()}); skipping layer"
-                    )
-                    continue
-                }
-                val prepared = prepareOverlay(
-                    layerBitmap, layer, videoWidth, videoHeight, rasterScale, rasterBudget
-                )
-
-                bitmapOverlay = if (isAnimated) {
-                    Log.d(
-                        RENDER_TAG,
-                        "Layer: using AnimatedBitmapOverlay with " +
-                                "${layer.animations.size} animation(s) and " +
-                                "${layer.keyframes.size} keyframe(s)"
-                    )
-                    AnimatedBitmapOverlay(
-                        bitmap = prepared.bitmap,
-                        baseNormX = prepared.baseNormX,
-                        baseNormY = prepared.baseNormY,
-                        imageWidth = prepared.displayWidth,
-                        imageHeight = prepared.displayHeight,
-                        videoWidth = videoWidth,
-                        videoHeight = videoHeight,
-                        layerX = (layer.x ?: 0).toFloat(),
-                        layerY = (layer.y ?: 0).toFloat(),
-                        layerStartUs = startTimeUs,
-                        layerEndUs = endTimeUs,
-                        animations = layer.animations,
-                        rasterScaleX = prepared.rasterScaleX,
-                        rasterScaleY = prepared.rasterScaleY,
-                        animationStartUs = layer.animationStartUs,
-                        animationEndUs = layer.animationEndUs,
-                        keyframes = layer.keyframes,
-                        keyframeClock = layer.keyframeClock
-                    )
-                } else {
-                    BitmapOverlay.createStaticBitmapOverlay(
-                        prepared.bitmap, prepared.overlaySettings
-                    )
-                }
-            }
-
-            // A censor layer hides the frame composed so far where the overlay
-            // would have been drawn, instead of drawing it.
-            val censor = layer.censor
-            val layerEffect: GlEffect = if (censor != null) {
-                Log.d(RENDER_TAG, "Layer: censor (${censor.type}, strength ${censor.strength})")
-                LayerCensorEffect(bitmapOverlay, censor)
-            } else {
-                OverlayEffect(listOf(bitmapOverlay))
-            }
-
-            if (censor != null && endTimeUs != -1L &&
-                endTimeUs <= (if (startTimeUs == -1L) 0L else startTimeUs)
-            ) {
-                // An empty window hides nothing; TimestampWrapper would
-                // reject it, which a censor layer turns into a failure.
-                Log.d(RENDER_TAG, "Layer: censor with an empty time range; skipping layer")
-                continue
-            }
-            addTimedOverlayEffect(videoEffects, layerEffect, startTimeUs, endTimeUs)
-
-        } catch (e: OutOfMemoryError) {
-            // An Error, so no catch above sees it: it would unwind the
-            // composition thread and take the whole process down. Fail the
-            // render instead — the caller reports it and the user can retry.
-            // Not skipped like a decode failure below: a video quietly missing
-            // its sticker is worse than one that did not export.
-            throw OverlayOutOfMemoryException(layer, videoWidth, videoHeight, e)
-        } catch (e: Exception) {
-            // A censor layer hides what the creator does not want shown, such
-            // as a face or a license plate. Exporting without it would publish
-            // exactly that, so its failure fails the render instead.
-            if (layer.censor != null) {
-                throw e as? CensorLayerException ?: CensorLayerException(
-                    e.message ?: e.javaClass.simpleName, e
+                BitmapOverlay.createStaticBitmapOverlay(
+                    prepared.bitmap, prepared.overlaySettings
                 )
             }
-            Log.e(RENDER_TAG, "Failed to decode image layer: ${e.message}")
         }
+
+        // A censor layer hides the frame composed so far where the overlay
+        // would have been drawn, instead of drawing it.
+        val censor = layer.censor
+        if (censor == null) {
+            overlays.add(bitmapOverlay, startTimeUs, endTimeUs)
+            return
+        }
+        Log.d(RENDER_TAG, "Layer: censor (${censor.type}, strength ${censor.strength})")
+        if (isEmptyTimeRange(startTimeUs, endTimeUs)) {
+            // An empty window hides nothing; TimestampWrapper would
+            // reject it, which a censor layer turns into a failure.
+            Log.d(RENDER_TAG, "Layer: censor with an empty time range; skipping layer")
+            return
+        }
+        // It hides what the layers below it drew, so those are added first.
+        overlays.flush()
+        addTimedOverlayEffect(
+            videoEffects, LayerCensorEffect(bitmapOverlay, censor), startTimeUs, endTimeUs
+        )
+
+    } catch (e: OutOfMemoryError) {
+        // An Error, so no catch above sees it: it would unwind the
+        // composition thread and take the whole process down. Fail the
+        // render instead — the caller reports it and the user can retry.
+        // Not skipped like a decode failure below: a video quietly missing
+        // its sticker is worse than one that did not export.
+        throw OverlayOutOfMemoryException(layer, videoWidth, videoHeight, e)
+    } catch (e: Exception) {
+        // A censor layer hides what the creator does not want shown, such
+        // as a face or a license plate. Exporting without it would publish
+        // exactly that, so its failure fails the render instead.
+        if (layer.censor != null) {
+            throw e as? CensorLayerException ?: CensorLayerException(
+                e.message ?: e.javaClass.simpleName, e
+            )
+        }
+        Log.e(RENDER_TAG, "Failed to decode image layer: ${e.message}")
     }
 }
 
@@ -348,6 +390,219 @@ private fun addTimedOverlayEffect(
     val effectiveStart = if (startTimeUs == -1L) 0L else startTimeUs
     val effectiveEnd = if (endTimeUs == -1L) Long.MAX_VALUE else endTimeUs
     videoEffects += TimestampWrapper(effect, effectiveStart, effectiveEnd)
+}
+
+/**
+ * Whether a layer shown from [startTimeUs] to [endTimeUs] (`-1` = from the
+ * start, until the end) is never shown, which `TimestampWrapper` rejects.
+ */
+internal fun isEmptyTimeRange(startTimeUs: Long, endTimeUs: Long): Boolean {
+    if (startTimeUs < -1L) return true
+    if (endTimeUs == -1L) return false
+    return endTimeUs <= (if (startTimeUs == -1L) 0L else startTimeUs)
+}
+
+/**
+ * Most overlays one [OverlayEffect] can draw: Media3's `OverlayShaderProgram`
+ * samples every overlay in one pass and takes at most 15 of them.
+ */
+internal const val MAX_OVERLAYS_PER_EFFECT = 15
+
+/**
+ * Collects consecutive overlays shown over the same time range and adds them to
+ * [videoEffects] as one [OverlayEffect], up to [MAX_OVERLAYS_PER_EFFECT] each.
+ *
+ * Media3 gives every effect its own shader program and an output texture of the
+ * whole frame, and a [TimestampWrapper] adds a second one for the frames outside
+ * its range. One effect per layer therefore held up to two frames of graphics
+ * memory per layer for the whole render. An [OverlayEffect] draws its overlays
+ * in order, the last one on top, as separate effects would.
+ */
+@UnstableApi
+internal class OverlayBatch(private val videoEffects: MutableList<Effect>) {
+    private val overlays = mutableListOf<TextureOverlay>()
+    private var startTimeUs = -1L
+    private var endTimeUs = -1L
+
+    /** Adds [overlay], shown from [startTimeUs] to [endTimeUs]. */
+    fun add(overlay: TextureOverlay, startTimeUs: Long, endTimeUs: Long) {
+        if (isEmptyTimeRange(startTimeUs, endTimeUs)) {
+            Log.d(RENDER_TAG, "Layer: empty time range; skipping layer")
+            return
+        }
+        if (overlays.isNotEmpty() &&
+            (startTimeUs != this.startTimeUs || endTimeUs != this.endTimeUs ||
+                    overlays.size == MAX_OVERLAYS_PER_EFFECT)
+        ) {
+            flush()
+        }
+        this.startTimeUs = startTimeUs
+        this.endTimeUs = endTimeUs
+        overlays += overlay
+    }
+
+    /** Adds the overlays collected so far as one effect. */
+    fun flush() {
+        if (overlays.isEmpty()) return
+        addTimedOverlayEffect(
+            videoEffects, OverlayEffect(overlays.toList()), startTimeUs, endTimeUs
+        )
+        overlays.clear()
+    }
+}
+
+/**
+ * Whether [layer] is a still image that looks the same on every frame it shows:
+ * no animation, keyframe, censor or audio visualizer, and not a GIF, which may
+ * animate.
+ */
+internal fun isStaticImageLayer(layer: VideoSequenceBuilder.ImageLayerConfig): Boolean {
+    val image = layer.image ?: return false
+    if (layer.audioVisualizer != null || layer.censor != null) return false
+    if (layer.animations.isNotEmpty() || layer.keyframes.isNotEmpty()) return false
+    val header = image.readHeader(GifDecoder.MAGIC_LENGTH) ?: return false
+    return !GifDecoder.isGif(header)
+}
+
+/**
+ * How many layers from [start] on [flattenStaticLayers] draws as one image: the
+ * static layers (see [isStaticImageLayer]) in a row that share the time range of
+ * the one at [start]. `0` when that one is not static.
+ */
+internal fun staticLayerRunLength(
+    layers: List<VideoSequenceBuilder.ImageLayerConfig>,
+    start: Int,
+): Int {
+    val first = layers[start]
+    if (!isStaticImageLayer(first)) return 0
+    var end = start + 1
+    while (end < layers.size) {
+        val next = layers[end]
+        if (next.startUs != first.startUs || next.endUs != first.endUs) break
+        if (!isStaticImageLayer(next)) break
+        end++
+    }
+    return end - start
+}
+
+/**
+ * Draws [layers], static layers sharing one time range, into one bitmap of the
+ * frame and returns it as one overlay, or `null` when none of them decoded.
+ *
+ * Every overlay keeps its bitmap for the whole render, so 200 stickers kept 200
+ * rasters of up to the frame's size each; drawn into one, they keep one. Each
+ * layer is drawn where its own overlay would have been, over the ones before
+ * it, which blends them as Media3 would have in turn. One layer is decoded at a
+ * time and released once it is drawn.
+ */
+@UnstableApi
+private fun flattenStaticLayers(
+    layers: List<VideoSequenceBuilder.ImageLayerConfig>,
+    videoWidth: Int,
+    videoHeight: Int,
+    rasterScale: Float,
+    rasterBudget: Long,
+): BitmapOverlay? {
+    // The image is one layer stretched over the frame, rastered, capped and
+    // placed like any other.
+    val frame = layers.first().copy(
+        x = null, y = null, width = null, height = null,
+        rotation = 0.0, naturalSizeScale = 1.0
+    )
+    val (rasterWidth, rasterHeight) = overlayDecodeSize(
+        frame, videoWidth, videoHeight, rasterScale, rasterBudget
+    )
+    try {
+        val target = Bitmap.createBitmap(rasterWidth, rasterHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(target)
+        canvas.scale(
+            rasterWidth.toFloat() / videoWidth, rasterHeight.toFloat() / videoHeight
+        )
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+        var drawn = 0
+        for (layer in layers) {
+            try {
+                if (drawStaticLayer(
+                        canvas, paint, layer, videoWidth, videoHeight, rasterScale, rasterBudget
+                    )
+                ) {
+                    drawn++
+                }
+            } catch (e: OutOfMemoryError) {
+                throw OverlayOutOfMemoryException(layer, videoWidth, videoHeight, e)
+            } catch (e: Exception) {
+                Log.e(RENDER_TAG, "Failed to decode image layer: ${e.message}")
+            }
+        }
+        if (drawn == 0) {
+            target.recycle()
+            return null
+        }
+        unpremultiplyAlpha(target)
+        val raster = planOverlayRaster(
+            rasterWidth, rasterHeight, frame, videoWidth, videoHeight, rasterScale, rasterBudget
+        )
+        val prepared = placeOverlay(target, raster, frame, videoWidth, videoHeight)
+        return BitmapOverlay.createStaticBitmapOverlay(prepared.bitmap, prepared.overlaySettings)
+    } catch (e: OutOfMemoryError) {
+        throw OverlayOutOfMemoryException(frame, videoWidth, videoHeight, e)
+    } catch (e: OverlayOutOfMemoryException) {
+        throw e
+    } catch (e: Exception) {
+        // Skipped as a layer that fails on its own is.
+        Log.e(RENDER_TAG, "Failed to draw ${layers.size} static layers: ${e.message}")
+        return null
+    }
+}
+
+/**
+ * Draws [layer] onto [canvas], which is laid out in frame pixels, where its own
+ * overlay would have been: in its box, turned about the box's centre. Returns
+ * whether its image decoded.
+ */
+private fun drawStaticLayer(
+    canvas: Canvas,
+    paint: Paint,
+    layer: VideoSequenceBuilder.ImageLayerConfig,
+    videoWidth: Int,
+    videoHeight: Int,
+    rasterScale: Float,
+    rasterBudget: Long,
+): Boolean {
+    val image = layer.image ?: return false
+    val (reqWidth, reqHeight) = overlayDecodeSize(
+        layer, videoWidth, videoHeight, rasterScale, rasterBudget
+    )
+    val bitmap = ImageOrientation.decode(
+        image,
+        reqWidth = reqWidth,
+        reqHeight = reqHeight,
+        config = Bitmap.Config.ARGB_8888,
+    )
+    if (bitmap == null) {
+        Log.e(RENDER_TAG, "Layer: image did not decode (${image.describe()}); skipping layer")
+        return false
+    }
+    try {
+        val raster = planOverlayRaster(
+            bitmap.width, bitmap.height, layer, videoWidth, videoHeight,
+            rasterScale, rasterBudget
+        )
+        val width = raster.displayWidth.toFloat()
+        val height = raster.displayHeight.toFloat()
+        val left = if (raster.isStretched) 0f else (layer.x ?: 0).toFloat()
+        val top = if (raster.isStretched) 0f else (layer.y ?: 0).toFloat()
+        val matrix = Matrix().apply {
+            setScale(width / bitmap.width, height / bitmap.height)
+            postTranslate(-width / 2f, -height / 2f)
+            postRotate(Math.toDegrees(layer.rotation).toFloat())
+            postTranslate(left + width / 2f, top + height / 2f)
+        }
+        canvas.drawBitmap(bitmap, matrix, paint)
+    } finally {
+        bitmap.recycle()
+    }
+    return true
 }
 
 /**

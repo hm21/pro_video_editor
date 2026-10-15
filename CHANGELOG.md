@@ -1,3 +1,6 @@
+## 2.33.2
+- **FIX**(android, iOS, macOS): A render's memory no longer grows with every still image layer. Still layers in a row that show over the same time range are drawn into one image of the frame, so a video with 200 stickers or drawing strokes keeps one image instead of 200. On Android, the overlays in a row that share a time range are also drawn by one Media3 effect, up to 15 each, instead of each holding up to two frames of graphics memory.
+
 ## 2.33.1
 - **FIX**(iOS): Leaving the app during a render or a stop-motion render no longer fails it with `Operation Interrupted`. It keeps running in the background while iOS allows (about 30 s), and otherwise starts over once the app is back.
 - **FIX**(iOS, macOS): A render without a bitrate cap and a stop-motion render overwrite a file already at the output path instead of failing.

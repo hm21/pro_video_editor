@@ -42,6 +42,9 @@ struct ImageLayer {
   /// Draws an audio visualizer into the layer's box for each frame instead of
   /// `frames`, which is then empty.
   var visualizer: AudioVisualizerRenderer? = nil
+  /// Draws static layers in a row as one image instead of `frames`, which is
+  /// then empty.
+  var flattened: FlattenedLayers? = nil
 
   /// The frame to display at composition time [currentTimeUs].
   ///
@@ -364,62 +367,52 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   func setOverlayImageLayers(from layers: [ImageLayerConfig]) {
     overlayImageLayers = []
     hasUnreadableCensorMask = false
-    for layer in layers {
-      if let visualizer = layer.audioVisualizer {
-        // A positioned visualizer has no box to fill without a size; Android
-        // skips it as well.
-        let isStretched = layer.x == nil && layer.y == nil
-        if !isStretched && (layer.width == nil || layer.height == nil) { continue }
-        // Drawn for each frame; the layer's image is never read. A layer that
-        // keyframes grow is drawn at its largest size, so it stays sharp.
-        let growth = max(1, layer.keyframes.map(\.scale).max() ?? 1)
+    var index = 0
+    while index < layers.count {
+      let run = staticLayerRunLength(layers, from: index)
+      if run > 1 {
+        let first = layers[index]
         overlayImageLayers.append(
           ImageLayer(
             frames: [],
             frameEndsUs: [0],
             loop: false,
             animationOffsetUs: 0,
-            startUs: layer.startUs,
-            endUs: layer.endUs,
-            x: layer.x,
-            y: layer.y,
-            width: layer.width,
-            height: layer.height,
-            rotation: layer.rotation,
-            animations: layer.animations,
-            animationStartUs: layer.animationStartUs,
-            animationEndUs: layer.animationEndUs,
-            keyframes: layer.keyframes,
-            keyframeClock: layer.keyframeClock,
-            visualizer: AudioVisualizerRenderer(
-              config: visualizer, rasterScale: CGFloat(growth))
+            startUs: first.startUs,
+            endUs: first.endUs,
+            x: nil,
+            y: nil,
+            width: nil,
+            height: nil,
+            rotation: 0,
+            animations: [],
+            flattened: FlattenedLayers(layers: Array(layers[index..<index + run]))
           ))
-        continue
-      }
-      let frames: [CIImage]
-      let frameEndsUs: [Int64]
-
-      if let gif = decodeGifFrames(layer.image) {
-        // Animated GIF: keep every frame and its timeline.
-        frames = gif.frames
-        frameEndsUs = gif.frameEndsUs
+        index += run
       } else {
-        // Static image: decode the single frame, honoring its EXIF orientation
-        // so a gallery photo is laid in upright rather than sideways.
-        guard let image = decodeOrientedImage(layer.image) else {
-          if layer.censor != nil { hasUnreadableCensorMask = true }
-          continue
-        }
-        frames = [image]
-        frameEndsUs = [0]
+        appendImageLayer(layers[index])
+        index += 1
       }
+    }
+  }
 
+  /// Adds what `layer` is drawn as to `overlayImageLayers`, unless it cannot be
+  /// drawn.
+  private func appendImageLayer(_ layer: ImageLayerConfig) {
+    if let visualizer = layer.audioVisualizer {
+      // A positioned visualizer has no box to fill without a size; Android
+      // skips it as well.
+      let isStretched = layer.x == nil && layer.y == nil
+      if !isStretched && (layer.width == nil || layer.height == nil) { return }
+      // Drawn for each frame; the layer's image is never read. A layer that
+      // keyframes grow is drawn at its largest size, so it stays sharp.
+      let growth = max(1, layer.keyframes.map(\.scale).max() ?? 1)
       overlayImageLayers.append(
         ImageLayer(
-          frames: frames,
-          frameEndsUs: frameEndsUs,
-          loop: layer.loop,
-          animationOffsetUs: layer.animationOffsetUs,
+          frames: [],
+          frameEndsUs: [0],
+          loop: false,
+          animationOffsetUs: 0,
           startUs: layer.startUs,
           endUs: layer.endUs,
           x: layer.x,
@@ -428,21 +421,115 @@ class VideoCompositor: NSObject, AVVideoCompositing {
           height: layer.height,
           rotation: layer.rotation,
           animations: layer.animations,
-          censor: layer.censor,
           animationStartUs: layer.animationStartUs,
           animationEndUs: layer.animationEndUs,
           keyframes: layer.keyframes,
-          keyframeClock: layer.keyframeClock
+          keyframeClock: layer.keyframeClock,
+          visualizer: AudioVisualizerRenderer(
+            config: visualizer, rasterScale: CGFloat(growth))
         ))
+      return
+    }
+    let frames: [CIImage]
+    let frameEndsUs: [Int64]
+
+    if let gif = decodeGifFrames(layer.image) {
+      // Animated GIF: keep every frame and its timeline.
+      frames = gif.frames
+      frameEndsUs = gif.frameEndsUs
+    } else {
+      // Static image: decode the single frame, honoring its EXIF orientation
+      // so a gallery photo is laid in upright rather than sideways.
+      guard let image = decodeOrientedImage(layer.image) else {
+        if layer.censor != nil { hasUnreadableCensorMask = true }
+        return
+      }
+      frames = [image]
+      frameEndsUs = [0]
+    }
+
+    overlayImageLayers.append(imageLayer(layer, frames: frames, frameEndsUs: frameEndsUs))
+  }
+
+  /// `layer` drawn from `frames`, shown over `frameEndsUs`.
+  private func imageLayer(
+    _ layer: ImageLayerConfig, frames: [CIImage], frameEndsUs: [Int64]
+  ) -> ImageLayer {
+    ImageLayer(
+      frames: frames,
+      frameEndsUs: frameEndsUs,
+      loop: layer.loop,
+      animationOffsetUs: layer.animationOffsetUs,
+      startUs: layer.startUs,
+      endUs: layer.endUs,
+      x: layer.x,
+      y: layer.y,
+      width: layer.width,
+      height: layer.height,
+      rotation: layer.rotation,
+      animations: layer.animations,
+      censor: layer.censor,
+      animationStartUs: layer.animationStartUs,
+      animationEndUs: layer.animationEndUs,
+      keyframes: layer.keyframes,
+      keyframeClock: layer.keyframeClock
+    )
+  }
+
+  /// How many layers of a `FlattenedLayers` are drawn before their image is
+  /// rendered, so that no more than these are decoded at once.
+  private static let flattenBatchSize = 16
+
+  /// The layers of `run` drawn into `imageRect`, each where `drawImageLayer`
+  /// draws it on its own and over the ones before it, or `nil` when none of
+  /// them decoded.
+  func flattenedImage(_ run: FlattenedLayers, in imageRect: CGRect) -> CIImage? {
+    run.image(in: imageRect) {
+      // A context of its own, so nothing it caches outlives the drawing.
+      let context = CIContext(options: [
+        .workingColorSpace: NSNull(),
+        .cacheIntermediates: false,
+      ])
+      guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+      var canvas = CIImage(color: .clear).cropped(to: imageRect)
+      var drawn = false
+      for start in stride(from: 0, to: run.layers.count, by: Self.flattenBatchSize) {
+        let batch = run.layers[start..<min(start + Self.flattenBatchSize, run.layers.count)]
+        autoreleasepool {
+          var image = canvas
+          for config in batch {
+            guard let decoded = decodeOrientedImage(config.image, cache: false) else { continue }
+            let layer = imageLayer(config, frames: [decoded], frameEndsUs: [0])
+            image = drawImageLayer(layer, over: image, imageRect: imageRect, currentTimeUs: 0)
+            drawn = true
+          }
+          // Rendered before the next batch is decoded, which lets go of the
+          // decoded images of this one.
+          guard
+            let rendered = context.createCGImage(
+              image, from: imageRect, format: .RGBA8, colorSpace: colorSpace)
+          else { return }
+          canvas = CIImage(cgImage: rendered).transformed(
+            by: CGAffineTransform(translationX: imageRect.minX, y: imageRect.minY))
+        }
+      }
+      return drawn ? canvas : nil
     }
   }
 
   /// Draws [layer] at [currentTimeUs] over [outputImage], laid out in
   /// [imageRect]; a censor layer instead hides the part of [outputImage] it
   /// covers.
-  private func drawImageLayer(
+  ///
+  /// Internal rather than private so RunnerTests can compare static layers
+  /// drawn as one image with the same layers drawn one by one.
+  func drawImageLayer(
     _ layer: ImageLayer, over outputImage: CIImage, imageRect: CGRect, currentTimeUs: Int64
   ) -> CIImage {
+    if let flattened = layer.flattened {
+      guard let image = flattenedImage(flattened, in: imageRect) else { return outputImage }
+      return image.composited(over: outputImage)
+    }
     var img: CIImage
     if let visualizer = layer.visualizer {
       // The visualizer fills the layer's box, or the frame for a stretched

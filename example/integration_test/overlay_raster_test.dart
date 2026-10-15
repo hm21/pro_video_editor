@@ -333,6 +333,114 @@ void main() {
       expect(_classify(frame.at(0.75, 0.75)), _Hue.yellow);
     });
   });
+
+  /// Static layers in a row that share a time range are drawn into one image,
+  /// so memory stays flat however many stickers a video carries. Each of them
+  /// has to land exactly where it does when it is drawn on its own: these
+  /// repeat the single-layer cases above next to a transparent layer, which
+  /// puts them on that path.
+  group('Static layers drawn as one image', () {
+    late EditorLayerImage transparent;
+
+    setUpAll(() async {
+      transparent = EditorLayerImage.memory(await _encode(4, 4, (_) {}));
+    });
+
+    testWidgets('a positioned layer keeps its box', (_) async {
+      final frame = await renderAndDecode([
+        ImageLayer(image: transparent),
+        ImageLayer(
+          image: EditorLayerImage.memory(await _solidImage(200, 100)),
+          offset: const Offset(100, 50),
+          size: const Size(200, 100),
+        ),
+      ], output: const Size(640, 360));
+      final box = _boundsOf(frame);
+
+      expect(box, isNotNull, reason: 'the layer is not in the frame at all');
+      _expectBox(box!, left: 50, top: 25, right: 150, bottom: 75);
+    });
+
+    testWidgets('a turned layer stays centred on its anchor', (_) async {
+      final frame = await renderAndDecode([
+        ImageLayer(
+          image: EditorLayerImage.memory(await _solidImage(200, 200)),
+          offset: const Offset(540, 260),
+          size: const Size(200, 200),
+          rotation: math.pi / 4,
+        ),
+        ImageLayer(image: transparent),
+      ], output: const Size(640, 360));
+      final box = _boundsOf(frame);
+
+      expect(box, isNotNull, reason: 'the layer is not in the frame at all');
+      _expectBox(
+        box!,
+        left: 249,
+        top: 109,
+        right: 391,
+        bottom: 251,
+        tolerance: 10,
+      );
+      expect(
+        _isSolid(frame.at(250 / 640, 110 / 360)),
+        isFalse,
+        reason: 'the corner of the bounding box is outside the diamond',
+      );
+    });
+
+    testWidgets('a later layer is drawn over an earlier one', (_) async {
+      final quadrants = EditorLayerImage.memory(await _quadrantImage());
+      final box = ImageLayer(
+        image: EditorLayerImage.memory(await _solidImage(200, 100)),
+        offset: const Offset(100, 50),
+        size: const Size(200, 100),
+      );
+
+      final over = await renderAndDecode([
+        ImageLayer(image: quadrants),
+        box,
+      ], output: const Size(640, 360));
+      final under = await renderAndDecode([
+        box,
+        ImageLayer(image: quadrants),
+      ], output: const Size(640, 360));
+
+      expect(_isSolid(over.at(100 / 640, 50 / 360)), isTrue);
+      expect(_classify(over.at(0.75, 0.75)), _Hue.yellow);
+      expect(_isSolid(under.at(100 / 640, 50 / 360)), isFalse);
+      expect(_classify(under.at(100 / 640, 50 / 360)), _Hue.red);
+    });
+
+    testWidgets('layers show only over their time range', (_) async {
+      final quadrants = EditorLayerImage.memory(await _quadrantImage());
+      List<ImageLayer> shownFrom(Duration start, Duration end) => [
+        ImageLayer(image: transparent, startTime: start, endTime: end),
+        ImageLayer(image: quadrants, startTime: start, endTime: end),
+      ];
+
+      final shown = await renderAndDecode(
+        shownFrom(
+          const Duration(milliseconds: 500),
+          const Duration(seconds: 2),
+        ),
+        output: const Size(640, 360),
+      );
+      final hidden = await renderAndDecode(
+        shownFrom(
+          const Duration(milliseconds: 1500),
+          const Duration(seconds: 2),
+        ),
+        output: const Size(640, 360),
+      );
+
+      expect(_classify(shown.at(0.25, 0.25)), _Hue.red);
+      expect(_classify(shown.at(0.25, 0.75)), _Hue.blue);
+      // Checked where the footage carries none of the quadrant colours.
+      expect(_classify(hidden.at(0.25, 0.25)), _Hue.other);
+      expect(_classify(hidden.at(0.25, 0.75)), _Hue.other);
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------

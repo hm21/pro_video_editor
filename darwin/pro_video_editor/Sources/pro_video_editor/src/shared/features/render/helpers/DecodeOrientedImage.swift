@@ -27,14 +27,18 @@ func decodeOrientedImage(_ data: Data) -> CIImage? {
 ///
 /// A file-backed image is decoded straight off its URL, so the encoded bytes
 /// are never copied onto the heap on the way to ImageIO.
-func decodeOrientedImage(_ image: EncodedImage) -> CIImage? {
+///
+/// With `cache` false the image keeps none of its decoded pixels once it is
+/// drawn, for one that is drawn only once.
+func decodeOrientedImage(_ image: EncodedImage, cache: Bool = true) -> CIImage? {
   guard let source = image.imageSource else { return nil }
-  return decodeOrientedImage(source: source)
+  return decodeOrientedImage(source: source, cache: cache)
 }
 
 /// The shared tail of both entry points, once a source has been opened.
-func decodeOrientedImage(source: CGImageSource) -> CIImage? {
-  guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+func decodeOrientedImage(source: CGImageSource, cache: Bool = true) -> CIImage? {
+  let options = [kCGImageSourceShouldCache: cache] as CFDictionary
+  guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, options) else { return nil }
 
   let image = CIImage(cgImage: cgImage)
   let orientation = exifOrientation(of: source)
