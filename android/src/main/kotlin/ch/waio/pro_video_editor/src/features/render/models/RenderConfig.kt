@@ -72,6 +72,11 @@ data class VideoClip(
      */
     val chromaKey: ChromaKeyConfig? = null,
     /**
+     * Per-frame transforms that steady this clip, keyed by source timestamp.
+     * Single-track renders only; null leaves the frames where they are.
+     */
+    val stabilization: StabilizationConfig? = null,
+    /**
      * Opts this clip out of the layer/global key entirely.
      *
      * Internal, never parsed from the platform channel. `chromaKey = null`
@@ -101,7 +106,8 @@ data class VideoClip(
                 transition = transitionRaw?.let { TransitionConfig.fromMap(it) },
                 timelineStartUs = (clipMap["timelineStartUs"] as? Number)?.toLong(),
                 transform = transformRaw?.let { SegmentTransformConfig.fromMap(it) },
-                chromaKey = ChromaKeyConfig.fromMap(chromaKeyRaw)
+                chromaKey = ChromaKeyConfig.fromMap(chromaKeyRaw),
+                stabilization = StabilizationConfig.fromMap(clipMap["stabilization"] as? Map<*, *>)
             )
         }
     }

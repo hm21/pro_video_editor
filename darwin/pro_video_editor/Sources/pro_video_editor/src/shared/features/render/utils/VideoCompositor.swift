@@ -214,6 +214,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
   /// Per-clip chroma-key windows (single-track path).
   private var chromaKeyWindows: [ChromaKeyWindow] = []
+  private var stabilizationWindows: [StabilizationWindow] = []
 
   /// Decoded chroma-key background images, keyed by config, so a background is
   /// decoded once per render rather than once per frame.
@@ -298,6 +299,18 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     self.customEffects = config.customEffects
     self.fadeWindows = config.fadeWindows
     self.chromaKeyWindows = config.chromaKeyWindows
+    self.stabilizationWindows = config.stabilizationWindows
+  }
+
+  /// Steadies the upright source frame with its clip's stabilization, if any.
+  private func applyStabilizationStage(to image: CIImage, at compositionTime: CMTime)
+    -> CIImage
+  {
+    guard !stabilizationWindows.isEmpty else { return image }
+    let tUs = Int64((CMTimeGetSeconds(compositionTime) * 1_000_000).rounded())
+    guard let window = stabilizationWindows.first(where: { tUs >= $0.startUs && tUs < $0.endUs })
+    else { return image }
+    return applyStabilization(window.transform(atCompositionUs: tUs), to: image)
   }
 
   /// The chroma key active at the given composition time, if any.
@@ -1148,6 +1161,10 @@ class VideoCompositor: NSObject, AVVideoCompositing {
           orientation = startTransform
         }
       }
+
+      // On the upright frame, whose size the stabilization's shifts are
+      // fractions of.
+      outputImage = applyStabilizationStage(to: outputImage, at: request.compositionTime)
 
       outputImage = applyCustomEffectStage(
         to: outputImage, request: request, orientation: orientation)

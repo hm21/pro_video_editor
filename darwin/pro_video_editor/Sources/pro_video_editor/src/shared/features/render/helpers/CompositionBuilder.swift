@@ -161,7 +161,9 @@ internal class CompositionBuilder {
     let videoCompositionData = VideoCompositionData(
       instructions: instructions,
       frameDuration: frameDuration,
-      renderSize: compositionRenderSize
+      renderSize: compositionRenderSize,
+      stabilizationWindows: computeStabilizationWindows(
+        videoClips: videoClips, clipInstructions: videoResult.clipInstructions)
     )
 
     PluginLog.print("✅ Composition created successfully with \(videoClips.count) clips")

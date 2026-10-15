@@ -64,6 +64,10 @@ public struct VideoCompositorConfig {
   /// canvas afterwards would be meaningless.
   var chromaKeyWindows: [ChromaKeyWindow] = []
 
+  /// Stabilization windows for the **single-track** path, one per stabilized
+  /// clip.
+  var stabilizationWindows: [StabilizationWindow] = []
+
   var videoRotationDegrees: Double = 0.0
   var shouldApplyOrientationCorrection: Bool = false
 

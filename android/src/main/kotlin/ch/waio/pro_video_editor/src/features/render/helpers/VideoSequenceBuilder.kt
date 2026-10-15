@@ -23,6 +23,7 @@ import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAudioVisualizerConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerCensorConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
+import ch.waio.pro_video_editor.src.features.thumbnail.SequentialFrameDecoder
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.EncodedImage
@@ -547,6 +548,17 @@ class VideoSequenceBuilder(
     }
 
     /**
+     * The presentation time of the first frame of [inputPath] at or after
+     * [startUs]: the frame a clip trimmed to [startUs] starts with, which is
+     * where its stabilization keyframes are anchored.
+     */
+    private fun firstSourcePtsAtOrAfter(inputPath: String, startUs: Long): Long {
+        val samples = SequentialFrameDecoder(context).scan(inputPath).samplePts
+        val index = samples.binarySearch(startUs).let { if (it >= 0) it else -it - 1 }
+        return samples.getOrElse(index) { samples.last() }
+    }
+
+    /**
      * Builds an EditedMediaItem for a single video clip with all effects.
      *
      * @param layerFrame The composition frame the image layers are laid out
@@ -615,6 +627,22 @@ class VideoSequenceBuilder(
         if (clipSpeed != null) {
             Log.d(RENDER_TAG, "Clip $index playback speed: ${clipSpeed}x")
             clipVideoEffects += SpeedChangeEffect(clipSpeed)
+        }
+
+        // Stabilization first: its keyframes are keyed by source frame, so it
+        // must see the frames as decoded, before anything moves or crops them.
+        clip.stabilization?.let { stabilization ->
+            if (clipSpeed != null || clip.reverseVideo) {
+                Log.w(
+                    RENDER_TAG,
+                    "Clip $index: stabilization is not supported with a playback " +
+                            "speed or reverse yet and is skipped"
+                )
+            } else {
+                val firstPts = firstSourcePtsAtOrAfter(clip.inputPath, clip.startUs ?: 0L)
+                Log.d(RENDER_TAG, "Clip $index stabilization from source $firstPts us")
+                clipVideoEffects += StabilizationTransformation(stabilization, firstPts)
+            }
         }
 
         // Chroma key next, so it sees the original decoded colors — before

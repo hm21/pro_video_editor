@@ -259,6 +259,17 @@ class RenderVideo {
           // Dip-to-color (fade-to-black / fade-to-white) clip transitions.
           effectsConfig.fadeWindows = fadeWindows
 
+          // Stabilization keys each frame by its source time, which a
+          // render-wide speed change no longer maps one to one.
+          if !videoCompData.stabilizationWindows.isEmpty {
+            if let speed = workingConfig.playbackSpeed, speed > 0, speed != 1 {
+              PluginLog.print(
+                "⚠️ Stabilization is not supported with a render-wide playback speed yet; skipped")
+            } else {
+              effectsConfig.stabilizationWindows = videoCompData.stabilizationWindows
+            }
+          }
+
           // Apply playback speed to the entire composition
           videoCompConfig.instructions = applyPlaybackSpeed(
             composition: composition, instructions: videoCompConfig.instructions,

@@ -9,6 +9,8 @@ import android.media.MediaMetadataRetriever
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.inspector.frame.FrameExtractor
+import ch.waio.pro_video_editor.src.features.frames.LUMA_FORMAT
+import ch.waio.pro_video_editor.src.features.frames.lumaWithHeader
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailConfig
 import ch.waio.pro_video_editor.src.features.thumbnail.models.ThumbnailJobHandle
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
@@ -739,6 +741,7 @@ class ThumbnailGenerator(private val context: Context) {
      * @return Compressed image as byte array
      */
     private fun compressBitmap(bitmap: Bitmap, format: String, jpegQuality: Int): ByteArray {
+        if (format == LUMA_FORMAT) return lumaWithHeader(bitmap)
         val stream = ByteArrayOutputStream()
         val compressFormat = when (format.lowercase()) {
             "png" -> Bitmap.CompressFormat.PNG

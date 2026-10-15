@@ -9,6 +9,8 @@ import '/core/models/audio/audio_merge_result_model.dart';
 import '/core/models/audio/waveform_chunk_model.dart';
 import '/core/models/audio/waveform_configs_model.dart';
 import '/core/models/audio/waveform_data_model.dart';
+import '/core/models/frame/luma_frame_configs_model.dart';
+import '/core/models/frame/luma_frame_model.dart';
 import '/core/models/platform/native_log_entry.dart';
 import '/core/models/platform/native_log_level.dart';
 import '/core/models/thumbnail/key_frames_configs_model.dart';
@@ -19,6 +21,7 @@ import '/core/models/video/editor_video_model.dart';
 import '/core/models/video/progress_model.dart';
 import '/core/models/video/split_video_model.dart';
 import '/core/models/video/video_metadata_model.dart';
+import '../analysis/video_stabilization_analyzer.dart';
 import '../models/video/stop_motion_render_data_model.dart';
 import '../models/video/video_render_data_model.dart';
 import 'native_method_channel.dart';
@@ -243,6 +246,43 @@ abstract class ProVideoEditor extends PlatformInterface {
     NativeLogLevel? nativeLogLevel,
   }) {
     throw UnimplementedError('getThumbnailStream() has not been implemented.');
+  }
+
+  /// Streams every frame of a video range as raw 8-bit luma.
+  ///
+  /// Frames are decoded in one forward pass, turned upright, scaled into
+  /// [LumaFrameConfigs.outputSize] and emitted in presentation order with
+  /// their source timestamp — the input motion analysis such as
+  /// [VideoStabilizationAnalyzer] needs. No image is encoded, so a few
+  /// hundred small frames arrive in about the time the decoder takes.
+  ///
+  /// Cancelling the subscription cancels the native task. [cancel] with
+  /// [LumaFrameConfigs.id] does the same and surfaces a
+  /// [RenderCanceledException] on the stream.
+  ///
+  /// Throws:
+  /// - [RenderCanceledException] if cancelled via [cancel]
+  /// - [PlatformException] if the video cannot be decoded
+  ///
+  /// Example:
+  /// ```dart
+  /// final analyzer = VideoStabilizationAnalyzer(width: 180, height: 320);
+  /// await for (final frame in ProVideoEditor.instance.getLumaFrameStream(
+  ///   LumaFrameConfigs(
+  ///     video: EditorVideo.file('/path/to/video.mp4'),
+  ///     outputSize: const Size(320, 320),
+  ///     maxFrameRate: 30,
+  ///   ),
+  /// )) {
+  ///   analyzer.addFrame(frame.bytes, frame.time);
+  /// }
+  /// final stabilization = analyzer.finish();
+  /// ```
+  Stream<LumaFrame> getLumaFrameStream(
+    LumaFrameConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) {
+    throw UnimplementedError('getLumaFrameStream() has not been implemented.');
   }
 
   /// Extracts key frames from a video at scene changes.

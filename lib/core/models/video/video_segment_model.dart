@@ -23,7 +23,16 @@ class VideoSegment {
     this.timelineStart,
     this.transform,
     this.chromaKey,
+    this.stabilization,
   }) : assert(
+         stabilization == null ||
+             (!reverseVideo &&
+                 chromaKey == null &&
+                 (playbackSpeed == null || playbackSpeed == 1)),
+         '[stabilization] cannot be combined with a playback speed, '
+         'reverseVideo or a chroma key yet',
+       ),
+       assert(
          startTime == null || endTime == null || startTime < endTime,
          'startTime must be before endTime',
        ),
@@ -144,6 +153,20 @@ class VideoSegment {
   /// pre-rendered from the raw sources and is emitted unkeyed with a warning.
   final ChromaKey? chromaKey;
 
+  /// Steadies this clip's shake with per-frame transforms, typically from a
+  /// `VideoStabilizationAnalyzer` run over the clip's frames.
+  ///
+  /// Each frame takes the keyframe of its own source timestamp, so the
+  /// transforms stay attached to the right frames whatever [startTime] the
+  /// clip is trimmed to; frames the analysis skipped are interpolated, and
+  /// frames outside the keyframes' range hold the nearest one. The frame is
+  /// moved before the render's crop, rotation and layers.
+  ///
+  /// Currently supported on Android and iOS/macOS for [videoSegments] only;
+  /// ignored inside a [VideoComposition], and not yet combined with
+  /// [playbackSpeed], [reverseVideo], [chromaKey] or an overlap [transition].
+  final VideoStabilization? stabilization;
+
   /// Converts this clip to a map for platform channel communication.
   ///
   /// Resolves the input path and any chroma-key background image, so this is
@@ -163,6 +186,7 @@ class VideoSegment {
       'timelineStartUs': timelineStart?.inMicroseconds,
       'transform': transform?.toMap(),
       'chromaKey': await chromaKey?.toAsyncMap(),
+      'stabilization': stabilization?.toMap(),
     };
   }
 
@@ -179,6 +203,7 @@ class VideoSegment {
     Duration? timelineStart,
     SegmentTransform? transform,
     ChromaKey? chromaKey,
+    VideoStabilization? stabilization,
   }) {
     return VideoSegment(
       video: video ?? this.video,
@@ -192,6 +217,7 @@ class VideoSegment {
       timelineStart: timelineStart ?? this.timelineStart,
       transform: transform ?? this.transform,
       chromaKey: chromaKey ?? this.chromaKey,
+      stabilization: stabilization ?? this.stabilization,
     );
   }
 
@@ -209,7 +235,8 @@ class VideoSegment {
         other.transition == transition &&
         other.timelineStart == timelineStart &&
         other.transform == transform &&
-        other.chromaKey == chromaKey;
+        other.chromaKey == chromaKey &&
+        other.stabilization == stabilization;
   }
 
   @override
@@ -224,7 +251,8 @@ class VideoSegment {
         transition.hashCode ^
         timelineStart.hashCode ^
         transform.hashCode ^
-        chromaKey.hashCode;
+        chromaKey.hashCode ^
+        stabilization.hashCode;
   }
 
   @override
@@ -239,7 +267,8 @@ class VideoSegment {
         'transition: $transition, '
         'timelineStart: $timelineStart, '
         'transform: $transform, '
-        'chromaKey: $chromaKey)';
+        'chromaKey: $chromaKey, '
+        'stabilization: $stabilization)';
   }
 
   Map<String, dynamic> toMap() {
@@ -255,6 +284,7 @@ class VideoSegment {
       'timelineStart': timelineStart?.inMicroseconds,
       'transform': transform?.toMap(),
       'chromaKey': chromaKey?.toMap(),
+      'stabilization': stabilization?.toMap(),
     };
   }
 
@@ -284,6 +314,11 @@ class VideoSegment {
           : null,
       chromaKey: map['chromaKey'] != null
           ? ChromaKey.fromMap(map['chromaKey'] as Map<String, dynamic>)
+          : null,
+      stabilization: map['stabilization'] != null
+          ? VideoStabilization.fromMap(
+              map['stabilization'] as Map<String, dynamic>,
+            )
           : null,
     );
   }

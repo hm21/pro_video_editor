@@ -9,6 +9,8 @@ import ch.waio.pro_video_editor.src.features.audio.NoAudioTrackException
 import ch.waio.pro_video_editor.src.features.audio.models.AudioExtractConfig
 import ch.waio.pro_video_editor.src.features.audio.models.AudioExtractTask
 import ch.waio.pro_video_editor.src.features.audio.models.AudioMergeConfig
+import ch.waio.pro_video_editor.src.features.frames.LumaFrameExtractor
+import ch.waio.pro_video_editor.src.features.frames.models.FrameStreamConfig
 import ch.waio.pro_video_editor.src.features.metadata.Metadata
 import ch.waio.pro_video_editor.src.features.metadata.models.MetadataConfig
 import ch.waio.pro_video_editor.src.features.render.RenderVideo
@@ -78,6 +80,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var stopMotionGenerator: StopMotionGenerator
     private lateinit var metadata: Metadata
     private lateinit var thumbnailGenerator: ThumbnailGenerator
+    private lateinit var lumaFrameExtractor: LumaFrameExtractor
     private lateinit var extractAudio: ExtractAudio
     private lateinit var mergeAudio: MergeAudio
     private lateinit var waveformGenerator: WaveformGenerator
@@ -192,6 +195,10 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
         stopMotionGenerator = StopMotionGenerator(flutterPluginBinding.applicationContext)
         metadata = Metadata(flutterPluginBinding.applicationContext)
         thumbnailGenerator = ThumbnailGenerator(flutterPluginBinding.applicationContext)
+        lumaFrameExtractor = LumaFrameExtractor(
+            flutterPluginBinding.applicationContext,
+            thumbnailGenerator,
+        )
         extractAudio = ExtractAudio(flutterPluginBinding.applicationContext)
         mergeAudio = MergeAudio(flutterPluginBinding.applicationContext)
         waveformGenerator = WaveformGenerator(flutterPluginBinding.applicationContext)
@@ -340,6 +347,7 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
             "hasAudioTrack" -> handleHasAudioTrack(call, result)
             "getThumbnails" -> handleGetThumbnails(call, result)
             "startThumbnailStream" -> handleStartThumbnailStream(call, result)
+            "startFrameStream" -> handleStartFrameStream(call, result)
             "renderVideo" -> handleRenderVideo(call, result)
             "renderStopMotion" -> handleRenderStopMotion(call, result)
             "splitVideo" -> handleSplitVideo(call, result)
@@ -570,6 +578,73 @@ class ProVideoEditorPlugin : FlutterPlugin, MethodCallHandler {
                 null
             )
         }
+    }
+
+    /**
+     * Starts streaming every frame of a range as raw 8-bit luma.
+     *
+     * Shares the thumbnail stream's event channel and task table, so
+     * [handleCancelTask] stops it the same way. Emits one event per frame
+     * with its source timestamp and size, in presentation order, then a
+     * `done` event.
+     */
+    private fun handleStartFrameStream(call: MethodCall, result: MethodChannel.Result) {
+        val config = try {
+            FrameStreamConfig.fromMethodCall(call)
+        } catch (e: IllegalArgumentException) {
+            result.error("INVALID_ARGUMENTS", e.message, null)
+            return
+        }
+        val id = config.id
+        if (id.isBlank()) {
+            result.error("INVALID_ARGUMENTS", "Task id is required and cannot be empty", null)
+            return
+        }
+        if (activeThumbnailTasks.containsKey(id)) {
+            result.error("TASK_ALREADY_RUNNING", "A stream with id '$id' is already running", null)
+            return
+        }
+
+        val task = ThumbnailTask()
+        activeThumbnailTasks[id] = task
+        val handle = lumaFrameExtractor.streamFrames(
+            config = config,
+            onFrame = { ptsUs, width, height, luma, progress ->
+                mainHandler.post {
+                    thumbnailStreamSink?.success(
+                        mapOf(
+                            "id" to id,
+                            "ptsUs" to ptsUs,
+                            "width" to width,
+                            "height" to height,
+                            "bytes" to luma,
+                            "progress" to progress,
+                        )
+                    )
+                }
+            },
+            onComplete = {
+                mainHandler.post {
+                    activeThumbnailTasks.remove(id)
+                    thumbnailStreamSink?.success(mapOf("id" to id, "done" to true))
+                }
+            },
+            onError = { error ->
+                mainHandler.post {
+                    activeThumbnailTasks.remove(id)
+                    val code = if (task.isCanceled) "CANCELED" else "FRAME_STREAM_ERROR"
+                    thumbnailStreamSink?.success(
+                        mapOf(
+                            "id" to id,
+                            "error" to (error.message ?: "Frame stream failed"),
+                            "errorCode" to code,
+                        )
+                    )
+                }
+            },
+        )
+        task.attach(handle)
+        result.success(null)
     }
 
     /**

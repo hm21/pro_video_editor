@@ -137,6 +137,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
   /// - getMetadata: Extracts video metadata
   /// - getThumbnails: Generates thumbnails
   /// - startThumbnailStream: Streams thumbnails frame by frame
+  /// - startFrameStream: Streams every frame of a range as raw luma
   /// - renderVideo: Renders video with effects
   /// - extractAudio: Extracts audio from video
   /// - cancelTask: Cancels an active render, audio, waveform or thumbnail stream task
@@ -158,6 +159,9 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
 
     case "startThumbnailStream":
       handleStartThumbnailStream(call: call, result: result)
+
+    case "startFrameStream":
+      handleStartFrameStream(call: call, result: result)
 
     case "renderVideo":
       handleRenderVideo(call: call, result: result)
@@ -379,6 +383,73 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
     task.attachHandle(handle)
 
     // Return immediately - frames will be sent via event channel
+    result(nil)
+  }
+
+  /// Starts streaming every frame of a range as raw 8-bit luma.
+  ///
+  /// Shares the thumbnail stream's event channel and task table, so
+  /// `cancelTask` stops it the same way. Emits one event per frame with its
+  /// source timestamp and size, then a `done` event.
+  private func handleStartFrameStream(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard let config = FrameStreamConfig.fromArguments(call.arguments as? [String: Any]),
+      !config.id.isEmpty
+    else {
+      result(
+        FlutterError(
+          code: "INVALID_ARGUMENTS",
+          message: "A frame stream needs an id, an input path and an output size",
+          details: nil))
+      return
+    }
+    let id = config.id
+    if activeThumbnailTasks[id] != nil {
+      result(
+        FlutterError(
+          code: "TASK_ALREADY_RUNNING",
+          message: "A stream with id \(id) is already running",
+          details: nil))
+      return
+    }
+
+    let task = ThumbnailTask()
+    activeThumbnailTasks[id] = task
+
+    let handle = LumaFrameExtractor.streamFrames(
+      config: config,
+      onFrame: { ptsUs, width, height, data, progress in
+        DispatchQueue.main.async {
+          self.thumbnailStreamSink?([
+            "id": id,
+            "ptsUs": ptsUs,
+            "width": width,
+            "height": height,
+            "bytes": FlutterStandardTypedData(bytes: data),
+            "progress": progress,
+          ])
+        }
+      },
+      onComplete: {
+        DispatchQueue.main.async {
+          self.activeThumbnailTasks.removeValue(forKey: id)
+          self.thumbnailStreamSink?(["id": id, "done": true])
+        }
+      },
+      onError: { error in
+        DispatchQueue.main.async {
+          self.activeThumbnailTasks.removeValue(forKey: id)
+          let flutterError = Self.flutterError(
+            for: error, canceled: task.isCanceled, otherwise: "FRAME_STREAM_ERROR")
+          self.thumbnailStreamSink?([
+            "id": id,
+            "error": error.localizedDescription,
+            "errorCode": flutterError.code,
+          ])
+        }
+      }
+    )
+
+    task.attachHandle(handle)
     result(nil)
   }
 

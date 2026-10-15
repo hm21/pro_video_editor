@@ -1,3 +1,7 @@
+## 2.35.0
+- **FEAT**(android, iOS, macOS): Video stabilization. `VideoStabilizationAnalyzer.analyzeVideo` measures the camera shake in a clip with classical motion estimation in a background isolate (no ML model) and plans a steadier path that zooms in no further than `maxZoom`; where steadying would need more, some shake stays. `VideoSegment.stabilization` applies the result in a render, each frame by its source timestamp.
+- **FEAT**(android, iOS, macOS): `getLumaFrameStream` streams every frame of a range as raw 8-bit grayscale with its source timestamp, upright and in presentation order, for motion analysis without image encoding.
+
 ## 2.34.0
 - **FEAT**(android, iOS, macOS): `VideoLayer.mask` shapes a layer's clips with an alpha matte, so a clip can show in a circle or a heart, or fade out through a soft edge over the layers below. The mask moves, scales and turns with each clip.
 

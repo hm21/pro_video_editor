@@ -39,6 +39,9 @@ internal struct VideoClip: Sendable {
   /// 30 fps phone footage that opens on a sliver of a frame reads 33.3, and
   /// the render derives its frame duration from it. `nil` = use the file's.
   let frameRateOverride: Float?
+  /// Per-frame transforms that steady this clip. Single-track path only;
+  /// `nil` leaves the frames where they are.
+  let stabilization: StabilizationConfig?
 
   init(
     inputPath: String,
@@ -53,7 +56,8 @@ internal struct VideoClip: Sendable {
     transform: SegmentTransformConfig? = nil,
     chromaKey: ChromaKeyConfig? = nil,
     suppressChromaKey: Bool = false,
-    frameRateOverride: Float? = nil
+    frameRateOverride: Float? = nil,
+    stabilization: StabilizationConfig? = nil
   ) {
     self.inputPath = inputPath
     self.startUs = startUs
@@ -68,6 +72,7 @@ internal struct VideoClip: Sendable {
     self.chromaKey = chromaKey
     self.suppressChromaKey = suppressChromaKey
     self.frameRateOverride = frameRateOverride
+    self.stabilization = stabilization
   }
 
   /// This clip playing `startUs..<endUs` of `inputPath` instead of its own
@@ -89,7 +94,10 @@ internal struct VideoClip: Sendable {
       transform: transform,
       chromaKey: chromaKey,
       suppressChromaKey: suppressChromaKey,
-      frameRateOverride: frameRateOverride
+      frameRateOverride: frameRateOverride,
+      // The new file shows this clip's first frame at `startUs` instead of
+      // the source's, so its keyframes move by the difference.
+      stabilization: stabilization?.shifted(by: (self.startUs ?? 0) - (startUs ?? 0))
     )
   }
 
@@ -114,6 +122,9 @@ internal struct VideoClip: Sendable {
       ),
       chromaKey: ChromaKeyConfig.fromArguments(
         clipMap["chromaKey"] as? [String: Any]
+      ),
+      stabilization: StabilizationConfig.fromArguments(
+        clipMap["stabilization"] as? [String: Any]
       )
     )
   }

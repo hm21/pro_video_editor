@@ -14,6 +14,8 @@ import '/core/models/audio/waveform_chunk_model.dart';
 import '/core/models/audio/waveform_configs_model.dart';
 import '/core/models/audio/waveform_data_model.dart';
 import '/core/models/exceptions/render_exceptions.dart';
+import '/core/models/frame/luma_frame_configs_model.dart';
+import '/core/models/frame/luma_frame_model.dart';
 import '/core/models/thumbnail/key_frames_configs_model.dart';
 import '/core/models/thumbnail/single_thumbnail_configs_model.dart';
 import '/core/models/thumbnail/thumbnail_base_abstract.dart';
@@ -262,8 +264,47 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   Stream<ThumbnailFrame> getThumbnailStream(
     ThumbnailConfigs value, {
     NativeLogLevel? nativeLogLevel,
+  }) => _nativeFrameStream(
+    id: value.id,
+    video: value.video,
+    method: 'startThumbnailStream',
+    arguments: value.toMap(),
+    errorCode: 'THUMBNAIL_ERROR',
+    parse: ThumbnailFrame.fromMap,
+    nativeLogLevel: nativeLogLevel,
+  );
+
+  @override
+  Stream<LumaFrame> getLumaFrameStream(
+    LumaFrameConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) => _nativeFrameStream(
+    id: value.id,
+    video: value.video,
+    method: 'startFrameStream',
+    arguments: value.toMap(),
+    errorCode: 'FRAME_STREAM_ERROR',
+    parse: LumaFrame.fromMap,
+    nativeLogLevel: nativeLogLevel,
+  );
+
+  /// Runs a native task that emits one event per frame on the shared
+  /// thumbnail event channel, tagged with [id], until a `done` or `error`
+  /// event.
+  ///
+  /// [method] starts the task with [arguments]; [parse] turns each frame
+  /// event into a [T]. A native error without its own code is reported as a
+  /// [PlatformException] with [errorCode].
+  Stream<T> _nativeFrameStream<T>({
+    required String id,
+    required EditorVideo video,
+    required String method,
+    required Map<String, dynamic> arguments,
+    required String errorCode,
+    required T Function(Map<dynamic, dynamic> event) parse,
+    NativeLogLevel? nativeLogLevel,
   }) {
-    final controller = StreamController<ThumbnailFrame>();
+    final controller = StreamController<T>();
     StreamSubscription<dynamic>? subscription;
     // Set once native reported done/error or the consumer cancelled — from
     // then on nothing is forwarded.
@@ -278,17 +319,14 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     }
 
     void onEvent(dynamic event) {
-      if (finished || event is! Map || event['id'] != value.id) return;
+      if (finished || event is! Map || event['id'] != id) return;
       final error = event['error'] as String?;
       if (error != null) {
-        final errorCode = event['errorCode'] as String?;
+        final code = event['errorCode'] as String?;
         controller.addError(
-          errorCode == renderCanceledErrorCode
+          code == renderCanceledErrorCode
               ? const RenderCanceledException()
-              : PlatformException(
-                  code: errorCode ?? 'THUMBNAIL_ERROR',
-                  message: error,
-                ),
+              : PlatformException(code: code ?? errorCode, message: error),
         );
         finish();
         return;
@@ -298,9 +336,9 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
         return;
       }
       try {
-        controller.add(ThumbnailFrame.fromMap(event));
+        controller.add(parse(event));
       } catch (e, stack) {
-        debugPrint('Error parsing thumbnail frame: $e\n$stack');
+        debugPrint('Error parsing stream frame: $e\n$stack');
         controller.addError(e, stack);
       }
     }
@@ -309,13 +347,13 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       // Registered before the first await so a cancel that lands while the
       // path is still resolving aborts the start instead of launching an
       // un-cancellable native task.
-      _beginDispatch(value.id);
+      _beginDispatch(id);
       try {
-        final inputPath = await value.video.contentOrSafeFilePath();
-        _handoffToNative(value.id);
+        final inputPath = await video.contentOrSafeFilePath();
+        _handoffToNative(id);
         if (finished) return;
         // Subscribe before starting: native emits the first frame as soon as
-        // it is decoded, which can be before `startThumbnailStream` returns.
+        // it is decoded, which can be before the start call returns.
         subscription = _thumbnailEvents.listen(
           onEvent,
           onError: (Object error, StackTrace stack) {
@@ -327,11 +365,11 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
         // A consumer that leaves while this call is in flight sends its
         // `cancelTask` on the same channel, so native handles it after the
         // start and finds the task — no follow-up cancel is needed here.
-        await methodChannel.invokeMethod<void>('startThumbnailStream', {
+        await methodChannel.invokeMethod<void>(method, {
           'inputPath': inputPath,
           'extension': _getFileExtension(inputPath),
           'nativeLogLevel': nativeLogLevel?.methodValue,
-          ...value.toMap(),
+          ...arguments,
         });
       } on RenderCanceledException catch (error, stack) {
         // Cancelled before dispatch. A consumer that left has already closed
@@ -344,7 +382,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
         controller.addError(error, stack);
         finish();
       } finally {
-        _endDispatch(value.id);
+        _endDispatch(id);
       }
     }
 
@@ -359,7 +397,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
         // `_handoffToNative` aborts the start; after it, it stops the task.
         if (finished) return;
         finish();
-        unawaited(cancel(value.id).catchError((_) {}));
+        unawaited(cancel(id).catchError((_) {}));
       };
 
     return controller.stream;
