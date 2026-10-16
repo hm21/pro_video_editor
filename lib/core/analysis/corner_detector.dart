@@ -114,6 +114,139 @@ Float32List detectCorners(
   return Float32List.fromList(out);
 }
 
+/// Finds Shi-Tomasi corners of [level] inside the rect from ([left], [top])
+/// to ([right], [bottom]), in the level's pixels, spread over a grid of
+/// [gridColumns] × [gridRows] cells with at most [perCell] corners each.
+///
+/// Unlike [detectCorners], only the rect is measured, and corners are
+/// compared with the strongest one inside it: a small region on a busy frame
+/// keeps its own corners. Corners weaker than [qualityLevel] times that one
+/// are dropped, and none are placed within [border] pixels of the frame edge.
+///
+/// Returns interleaved `x, y` coordinates.
+Float32List detectCornersInRect(
+  LumaPyramidLevel level, {
+  required double left,
+  required double top,
+  required double right,
+  required double bottom,
+  int gridColumns = 4,
+  int gridRows = 4,
+  int perCell = 4,
+  double qualityLevel = 0.01,
+  int border = 8,
+}) {
+  final w = level.width;
+  final h = level.height;
+  final x0 = math.max(border, left.ceil());
+  final y0 = math.max(border, top.ceil());
+  final x1 = math.min(w - border, right.floor());
+  final y1 = math.min(h - border, bottom.floor());
+  if (x1 - x0 < 3 || y1 - y0 < 3) return Float32List(0);
+
+  // The structure tensor is summed over 5x5 windows, so it needs two more
+  // pixels on every side of the rect.
+  final ax0 = math.max(0, x0 - 3);
+  final ay0 = math.max(0, y0 - 3);
+  final ax1 = math.min(w, x1 + 3);
+  final ay1 = math.min(h, y1 + 3);
+  final rw = ax1 - ax0;
+  final rh = ay1 - ay0;
+  final xx = Float32List(rw * rh);
+  final yy = Float32List(rw * rh);
+  final xy = Float32List(rw * rh);
+  for (var y = 0; y < rh; y++) {
+    final src = (ay0 + y) * w + ax0;
+    final dst = y * rw;
+    for (var x = 0; x < rw; x++) {
+      final a = level.gx[src + x];
+      final b = level.gy[src + x];
+      xx[dst + x] = a * a;
+      yy[dst + x] = b * b;
+      xy[dst + x] = a * b;
+    }
+  }
+  _boxBlur5(xx, rw, rh);
+  _boxBlur5(yy, rw, rh);
+  _boxBlur5(xy, rw, rh);
+
+  final response = Float32List(rw * rh);
+  var maxResponse = 0.0;
+  for (var y = y0; y < y1; y++) {
+    for (var x = x0; x < x1; x++) {
+      final i = (y - ay0) * rw + (x - ax0);
+      final a = xx[i];
+      final c = yy[i];
+      final b = xy[i];
+      final half = (a - c) * 0.5;
+      final r = (a + c) * 0.5 - math.sqrt(half * half + b * b);
+      response[i] = r;
+      if (r > maxResponse) maxResponse = r;
+    }
+  }
+  if (maxResponse <= 0) return Float32List(0);
+  final threshold = maxResponse * qualityLevel;
+
+  final out = <double>[];
+  final cellW = (x1 - x0) / gridColumns;
+  final cellH = (y1 - y0) / gridRows;
+  final minDist = math.max(2, (math.min(cellW, cellH) / 3).floor());
+  final minDist2 = minDist * minDist;
+  final candidates = <int>[];
+  final picked = <int>[];
+  for (var row = 0; row < gridRows; row++) {
+    final cy0 = y0 + (row * cellH).floor();
+    final cy1 = y0 + ((row + 1) * cellH).floor();
+    for (var column = 0; column < gridColumns; column++) {
+      final cx0 = x0 + (column * cellW).floor();
+      final cx1 = x0 + ((column + 1) * cellW).floor();
+      candidates.clear();
+      for (var y = cy0; y < cy1; y++) {
+        for (var x = cx0; x < cx1; x++) {
+          final i = (y - ay0) * rw + (x - ax0);
+          final r = response[i];
+          if (r < threshold) continue;
+          // 3x3 local maximum only; the rect's own edge pixels compare with
+          // neighbours that were never measured and stay 0.
+          if (r < response[i - 1] ||
+              r < response[i + 1] ||
+              r < response[i - rw] ||
+              r < response[i + rw] ||
+              r < response[i - rw - 1] ||
+              r < response[i - rw + 1] ||
+              r < response[i + rw - 1] ||
+              r < response[i + rw + 1]) {
+            continue;
+          }
+          candidates.add(i);
+        }
+      }
+      candidates.sort((p, q) => response[q].compareTo(response[p]));
+      picked.clear();
+      for (final i in candidates) {
+        final x = i % rw;
+        final y = i ~/ rw;
+        var ok = true;
+        for (final j in picked) {
+          final dx = (j % rw) - x;
+          final dy = (j ~/ rw) - y;
+          if (dx * dx + dy * dy < minDist2) {
+            ok = false;
+            break;
+          }
+        }
+        if (!ok) continue;
+        picked.add(i);
+        out
+          ..add((x + ax0).toDouble())
+          ..add((y + ay0).toDouble());
+        if (picked.length >= perCell) break;
+      }
+    }
+  }
+  return Float32List.fromList(out);
+}
+
 /// 5x5 box sum with running sums and clamped borders.
 void _boxBlur5(Float32List data, int w, int h) {
   final tmp = Float32List(data.length);
