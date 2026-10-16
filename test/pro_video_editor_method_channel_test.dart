@@ -179,12 +179,26 @@ void main() {
       return mockModel;
     }
 
-    void throwPlatformError(String code) {
+    void throwPlatformError(String code, {Map<String, Object?>? details}) {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, (methodCall) async {
-            throw PlatformException(code: code, message: 'boom');
+            throw PlatformException(
+              code: code,
+              message: 'boom',
+              details: details,
+            );
           });
     }
+
+    /// What Android attaches when a codec could not be brought up: the Media3
+    /// code of the export failure underneath.
+    Map<String, Object?> media3Details(String codeName, int code) => {
+      'domain':
+          'ch.waio.pro_video_editor.src.features.render.models.'
+          'CodecResourceExhaustedException',
+      'code': code,
+      'codeName': codeName,
+    };
 
     test('ENCODER_NOT_SUPPORTED maps to a permanent failure', () async {
       throwPlatformError('ENCODER_NOT_SUPPORTED');
@@ -257,6 +271,75 @@ void main() {
             'isTransient',
             isFalse,
           ),
+        ),
+      );
+    });
+
+    test('a starved decoder reports the decoder', () async {
+      throwPlatformError(
+        'CODEC_RESOURCE_EXHAUSTED',
+        details: media3Details('ERROR_CODE_DECODER_INIT_FAILED', 3001),
+      );
+
+      await expectLater(
+        platform.renderVideoToFile('/tmp/out.mp4', renderData()),
+        throwsA(
+          isA<RenderEncoderException>()
+              .having((e) => e.isTransient, 'isTransient', isTrue)
+              .having((e) => e.codecKind, 'codecKind', RenderCodecKind.decoder)
+              .having(
+                (e) => e.details?.codeName,
+                'details.codeName',
+                'ERROR_CODE_DECODER_INIT_FAILED',
+              ),
+        ),
+      );
+    });
+
+    test('a starved encoder reports the encoder', () async {
+      throwPlatformError(
+        'CODEC_RESOURCE_EXHAUSTED',
+        details: media3Details('ERROR_CODE_ENCODER_INIT_FAILED', 4001),
+      );
+
+      await expectLater(
+        platform.renderVideoToFile('/tmp/out.mp4', renderData()),
+        throwsA(
+          isA<RenderEncoderException>().having(
+            (e) => e.codecKind,
+            'codecKind',
+            RenderCodecKind.encoder,
+          ),
+        ),
+      );
+    });
+
+    test('an unsupported encoder keeps its details too', () async {
+      throwPlatformError(
+        'ENCODER_NOT_SUPPORTED',
+        details: media3Details('ERROR_CODE_ENCODING_FORMAT_UNSUPPORTED', 4003),
+      );
+
+      await expectLater(
+        platform.renderVideo(renderData()),
+        throwsA(
+          isA<RenderEncoderException>()
+              .having((e) => e.isTransient, 'isTransient', isFalse)
+              .having((e) => e.codecKind, 'codecKind', RenderCodecKind.encoder),
+        ),
+      );
+    });
+
+    test('a failure without details names no codec', () async {
+      // Apple platforms, and Android before the codes were attached.
+      throwPlatformError('CODEC_RESOURCE_EXHAUSTED');
+
+      await expectLater(
+        platform.renderVideoToFile('/tmp/out.mp4', renderData()),
+        throwsA(
+          isA<RenderEncoderException>()
+              .having((e) => e.details, 'details', isNull)
+              .having((e) => e.codecKind, 'codecKind', isNull),
         ),
       );
     });

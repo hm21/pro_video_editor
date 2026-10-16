@@ -11,7 +11,8 @@ import 'package:flutter/services.dart';
 /// details are: the error's domain and code, and the chain of causes below it.
 ///
 /// Attached to `RENDER_ERROR`, `SPLIT_ERROR`, `EXTRACT_ERROR` and
-/// `MERGE_ERROR`. A cancellation, an argument error and a plugin built before
+/// `MERGE_ERROR`, and kept as `RenderEncoderException.details` for the two
+/// encoder codes. A cancellation, an argument error and a plugin built before
 /// 2.13.0 carry none, so [of] is nullable.
 class NativeFailureDetails {
   /// Creates details as the platform attached them.

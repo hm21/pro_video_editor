@@ -1,3 +1,5 @@
+import 'native_failure_details.dart';
+
 /// Exceptions thrown during render operations.
 class RenderCanceledException implements Exception {
   /// Creates a [RenderCanceledException].
@@ -31,14 +33,39 @@ class RenderEncoderException implements Exception {
   ///
   /// Reports a permanent incompatibility; use
   /// [RenderEncoderException.transient] for a retryable codec-resource failure.
-  const RenderEncoderException([this.message]) : isTransient = false;
+  const RenderEncoderException([this.message, this.details])
+    : isTransient = false;
 
   /// Creates a [RenderEncoderException] for a transient codec-resource failure
   /// with an optional [message], i.e. one that is worth retrying.
-  const RenderEncoderException.transient([this.message]) : isTransient = true;
+  const RenderEncoderException.transient([this.message, this.details])
+    : isTransient = true;
 
   /// Human-readable details about the encoder failure, if available.
   final String? message;
+
+  /// What the platform attached to the failure, or `null` when it attached
+  /// nothing.
+  ///
+  /// On Android this names the Media3 error code behind the failure, which is
+  /// where [codecKind] comes from.
+  final NativeFailureDetails? details;
+
+  /// Which codec could not be brought up, or `null` when the platform does not
+  /// say.
+  ///
+  /// A transient failure covers a starved decoder as well as a starved encoder,
+  /// and they call for different advice. A composition decodes all of its
+  /// layers at once, one decoder each, so a [RenderCodecKind.decoder] shortage
+  /// is fixed by rendering fewer layers together; a shortage of the
+  /// [RenderCodecKind.encoder] is not. Read from the Media3 error code in
+  /// [details], so only Android reports it.
+  RenderCodecKind? get codecKind => switch (details?.codeName) {
+    'ERROR_CODE_DECODER_INIT_FAILED' => RenderCodecKind.decoder,
+    'ERROR_CODE_ENCODER_INIT_FAILED' ||
+    'ERROR_CODE_ENCODING_FORMAT_UNSUPPORTED' => RenderCodecKind.encoder,
+    _ => null,
+  };
 
   /// Whether the failure was transient codec-resource pressure (retryable)
   /// rather than an incompatible encoder configuration.
@@ -50,4 +77,13 @@ class RenderEncoderException implements Exception {
   String toString() =>
       'RenderEncoderException${isTransient ? '(transient)' : ''}'
       '${message != null ? ': $message' : ''}';
+}
+
+/// The kind of codec a [RenderEncoderException] could not bring up.
+enum RenderCodecKind {
+  /// A decoder reading one of the render's inputs.
+  decoder,
+
+  /// The encoder writing the render's output.
+  encoder,
 }

@@ -727,6 +727,18 @@ try {
 | iOS, macOS | `NSError.domain`, e.g. `AVFoundationErrorDomain`, `NSPOSIXErrorDomain`, `ExportWatchdog` | `NSError.code` (`-11807` for `AVErrorDiskFull`) | the `NSUnderlyingErrorKey` chain |
 | Android | the outermost throwable's class, e.g. `androidx.media3.transformer.ExportException` | `ExportException.errorCode` and its name, e.g. `ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED` | the Java cause chain |
 
+A `RenderEncoderException` keeps the same details as `details`. When it is transient (`isTransient`), a codec could not be acquired because the device ran out of them, and on Android `codecKind` says which: `RenderCodecKind.decoder` means the render reads more inputs at once than the device can decode, which fewer layers fix; `RenderCodecKind.encoder` means the output encoder was not available.
+
+```dart
+try {
+  await ProVideoEditor.instance.renderVideoToFile(outputPath, renderModel);
+} on RenderEncoderException catch (e) {
+  if (e.isTransient && e.codecKind == RenderCodecKind.decoder) {
+    // Too many layers decoded at once for this device: suggest fewer.
+  }
+}
+```
+
 #### Advanced Example
 ```dart
 /// Every option except videoSegments is optional.

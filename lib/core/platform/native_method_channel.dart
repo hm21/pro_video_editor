@@ -13,6 +13,7 @@ import '/core/models/audio/audio_merge_result_model.dart';
 import '/core/models/audio/waveform_chunk_model.dart';
 import '/core/models/audio/waveform_configs_model.dart';
 import '/core/models/audio/waveform_data_model.dart';
+import '/core/models/exceptions/native_failure_details.dart';
 import '/core/models/exceptions/render_exceptions.dart';
 import '/core/models/frame/luma_frame_configs_model.dart';
 import '/core/models/frame/luma_frame_model.dart';
@@ -169,13 +170,21 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   /// returns `null` when [error] is not an encoder failure.
   ///
   /// The two encoder codes differ only in whether a retry can help, which the
-  /// caller reads from [RenderEncoderException.isTransient].
+  /// caller reads from [RenderEncoderException.isTransient]. The platform's
+  /// details are kept, so [RenderEncoderException.codecKind] can tell a
+  /// starved decoder from a starved encoder.
   RenderEncoderException? _asEncoderException(PlatformException error) {
     if (error.code == encoderNotSupportedErrorCode) {
-      return RenderEncoderException(error.message);
+      return RenderEncoderException(
+        error.message,
+        NativeFailureDetails.of(error),
+      );
     }
     if (error.code == codecResourceExhaustedErrorCode) {
-      return RenderEncoderException.transient(error.message);
+      return RenderEncoderException.transient(
+        error.message,
+        NativeFailureDetails.of(error),
+      );
     }
     return null;
   }
