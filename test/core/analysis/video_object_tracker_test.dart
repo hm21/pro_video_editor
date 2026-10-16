@@ -162,6 +162,29 @@ void main() {
       },
     );
 
+    test('does not fall behind a slow object drawn around loosely', () {
+      // Each step's error is small, but it used to add up from frame to frame
+      // until the region trailed the object by several pixels.
+      final poses = [
+        for (var i = 0; i < 120; i++) ScenePose(45 + i, 68 + 0.2 * i),
+      ];
+      final samples = track(poses, margin: 0.3);
+      for (var i = 0; i < poses.length; i++) {
+        expectAt(samples[i], poses[i], tolerancePx: 1, reason: 'frame $i');
+      }
+    });
+
+    test('measures the growth of an object drawn around loosely', () {
+      final poses = [
+        for (var i = 0; i < 90; i++)
+          ScenePose(120, 68, scale: 1 + 0.4 * i / 89),
+      ];
+      final samples = track(poses, margin: 0.3);
+      expect(samples.every((sample) => sample != null), isTrue);
+      expect(samples.last!.scale, closeTo(1.4, 0.05));
+      expectAt(samples.last, poses.last, tolerancePx: 1.5);
+    });
+
     test('holds still on an object the camera follows', () {
       final poses = [for (var i = 0; i < 40; i++) ScenePose(120, 68)];
       final cameras = [

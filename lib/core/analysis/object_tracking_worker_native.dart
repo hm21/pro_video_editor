@@ -105,21 +105,22 @@ Future<VideoObjectTrack> trackVideoInBackground({
   });
 
   _running.add(id);
-  final isolate = await Isolate.spawn(
-    _worker,
-    (
-      fromWorker.sendPort,
-      region.left,
-      region.top,
-      region.right,
-      region.bottom,
-      smoothing.inMicroseconds,
-    ),
-    errorsAreFatal: true,
-    onError: fromWorker.sendPort,
-    onExit: fromWorker.sendPort,
-  );
+  Isolate? isolate;
   try {
+    isolate = await Isolate.spawn(
+      _worker,
+      (
+        fromWorker.sendPort,
+        region.left,
+        region.top,
+        region.right,
+        region.bottom,
+        smoothing.inMicroseconds,
+      ),
+      errorsAreFatal: true,
+      onError: fromWorker.sendPort,
+      onExit: fromWorker.sendPort,
+    );
     final toWorker = await worker.future;
     void send(int direction, LumaFrame frame) => toWorker.send((
       direction,
@@ -149,37 +150,66 @@ Future<VideoObjectTrack> trackVideoInBackground({
     }
 
     final floor = startTime ?? Duration.zero;
+    // A mark outside the range is taken on the range's nearest end.
+    var anchorAt = anchorTime < floor ? floor : anchorTime;
+    if (endTime != null && anchorAt > endTime) anchorAt = endTime;
     // The share of the progress the forward pass takes, by the length of
     // the range it covers.
     final forwardShare = endTime == null
         ? 0.5
-        : (endTime - anchorTime).inMicroseconds /
+        : (endTime - anchorAt).inMicroseconds /
               math.max(1, (endTime - floor).inMicroseconds);
 
     Duration? anchorFrameTime;
-    if (endTime == null || anchorTime < endTime) {
-      await for (final frame in frames(anchorTime, endTime)) {
-        // The worker failed: stop decoding, which cancels the native task.
-        if (result.isCompleted) break;
-        anchorFrameTime ??= frame.time;
-        send(_forward, frame);
-        onProgress?.call(frame.progress * forwardShare);
-        if (forwardLost) break;
+    PlatformException? forwardError;
+    if (endTime == null || anchorAt < endTime) {
+      try {
+        await for (final frame in frames(anchorAt, endTime)) {
+          // The worker failed: stop decoding, which cancels the native task.
+          if (result.isCompleted) break;
+          anchorFrameTime ??= frame.time;
+          send(_forward, frame);
+          onProgress?.call(frame.progress * forwardShare);
+          if (forwardLost) break;
+        }
+      } on PlatformException catch (error) {
+        // Native refuses a range without frames, as when the mark lies past
+        // the last frame. The backward pass then starts from the last one;
+        // when it finds none either, this was the real failure.
+        if (anchorFrameTime != null) rethrow;
+        forwardError = error;
       }
     }
 
     // Without a frame at or after the anchor, the last one before it is the
-    // marked frame, and the backward pass starts with it.
-    final anchor = anchorFrameTime ?? anchorTime;
+    // marked frame, and the backward pass starts with it. Each piece reaches
+    // up to and includes the earliest frame handed over so far, which is
+    // skipped: native refuses a range without frames, and one that stopped
+    // short of that frame may hold none (before the first frame of the video
+    // or of the range).
+    final anchor = anchorFrameTime ?? anchorAt;
     final backwardSpan = math.max(1, (anchor - floor).inMicroseconds);
+    var earliest = anchorFrameTime;
     var cursor = anchor;
     while (cursor > floor && !backwardLost && !result.isCompleted) {
       final from = cursor - _backwardChunk > floor
           ? cursor - _backwardChunk
           : floor;
-      final chunk = await frames(from, cursor).toList();
+      final List<LumaFrame> chunk;
+      try {
+        chunk = await frames(
+          from,
+          earliest == null
+              ? cursor
+              : earliest + const Duration(microseconds: 1),
+        ).toList();
+      } on PlatformException {
+        if (earliest == null && forwardError != null) throw forwardError;
+        rethrow;
+      }
       for (final frame in chunk.reversed) {
         if (backwardLost || result.isCompleted) break;
+        if (earliest != null && frame.time >= earliest) continue;
         send(_backward, frame);
         onProgress?.call(
           forwardShare +
@@ -188,8 +218,14 @@ Future<VideoObjectTrack> trackVideoInBackground({
                   backwardSpan,
         );
       }
+      if (chunk.isNotEmpty &&
+          (earliest == null || chunk.first.time < earliest)) {
+        earliest = chunk.first.time;
+      }
       cursor = from;
     }
+    // A cancel that came after the last frames were read.
+    if (_canceled.contains(id)) throw const RenderCanceledException();
     toWorker.send(null);
     final track = await result.future;
     onProgress?.call(1);
@@ -199,7 +235,7 @@ Future<VideoObjectTrack> trackVideoInBackground({
     _canceled.remove(id);
     _decoding.remove(id);
     fromWorker.close();
-    isolate.kill(priority: Isolate.immediate);
+    isolate?.kill(priority: Isolate.immediate);
   }
 }
 

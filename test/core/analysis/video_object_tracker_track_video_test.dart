@@ -14,9 +14,11 @@ const _fps = 30;
 Duration _frameTime(int frame) =>
     Duration(microseconds: (frame * 1e6 / _fps).round());
 
+const _us = Duration(microseconds: 1);
+
 /// Plays a synthetic video through `getLumaFrameStream`, like the native
 /// decoder: frames of the requested range, in order, one event loop turn
-/// apart.
+/// apart, and an error for a range without frames.
 class _FakeDecoder extends ProVideoEditor with MockPlatformInterfaceMixin {
   _FakeDecoder(this.frames);
 
@@ -62,6 +64,13 @@ class _FakeDecoder extends ProVideoEditor with MockPlatformInterfaceMixin {
       for (var i = 0; i < frames.length; i++)
         if (_frameTime(i) >= start && _frameTime(i) < end) i,
     ];
+    if (inRange.isEmpty) {
+      _streaming = false;
+      throw PlatformException(
+        code: 'FRAME_STREAM_ERROR',
+        message: 'The frame range holds no frames',
+      );
+    }
     try {
       for (var k = 0; k < inRange.length; k++) {
         await Future<void>(() {});
@@ -154,9 +163,10 @@ void main() {
         }
         expect(track.anchor!.scale, 1);
 
-        // Forward from the marked frame first, then the frames before it.
+        // Forward from the marked frame first, then the frames before it,
+        // up to and including the marked one.
         expect(fake.requests.first, (_frameTime(30), _frameTime(60)));
-        expect(fake.requests.last.$2, _frameTime(30));
+        expect(fake.requests.last.$2, _frameTime(30) + _us);
         expect(progress, orderedEquals([...progress]..sort()));
         expect(progress.last, 1);
       },
@@ -176,14 +186,12 @@ void main() {
 
         expect(track.samples, hasLength(150));
         expect(track.samples.first.center.dx * _width, closeTo(drift(0).x, 1));
+        // Each piece reaches up to the earliest frame read before it.
         expect(fake.requests, [
           (_frameTime(135), _frameTime(150)),
-          (_frameTime(135) - const Duration(seconds: 2), _frameTime(135)),
-          (
-            _frameTime(135) - const Duration(seconds: 4),
-            _frameTime(135) - const Duration(seconds: 2),
-          ),
-          (Duration.zero, _frameTime(135) - const Duration(seconds: 4)),
+          (_frameTime(75), _frameTime(135) + _us),
+          (_frameTime(15), _frameTime(75) + _us),
+          (Duration.zero, _frameTime(15) + _us),
         ]);
       },
     );
@@ -219,6 +227,50 @@ void main() {
         );
       },
     );
+
+    test('marks the first frame of a range that starts between two', () async {
+      // Nothing lies between the start and the first frame, which the
+      // decoder refuses as a range of its own.
+      final fake = decoder(30, drift);
+      final start = _frameTime(10) - const Duration(milliseconds: 10);
+      final track = await VideoObjectTracker.trackVideo(
+        video,
+        region: regionAround(drift(10)),
+        anchorTime: start,
+        startTime: start,
+        endTime: _frameTime(30),
+      );
+      expect(track.anchorTime, _frameTime(10));
+      expect(track.samples.first.time, _frameTime(10));
+      expect(track.samples, hasLength(20));
+      expect(fake.requests.last, (start, _frameTime(10) + _us));
+    });
+
+    test('marks the last frame when the mark lies past it', () async {
+      // A player paused at the end reports the video's duration.
+      decoder(30, drift);
+      final track = await VideoObjectTracker.trackVideo(
+        video,
+        region: regionAround(drift(29)),
+        anchorTime: _frameTime(30),
+      );
+      expect(track.anchorTime, _frameTime(29));
+      expect(track.samples, hasLength(30));
+    });
+
+    test('takes a mark outside the range on its nearest end', () async {
+      decoder(60, drift);
+      final track = await VideoObjectTracker.trackVideo(
+        video,
+        region: regionAround(drift(20)),
+        anchorTime: _frameTime(5),
+        startTime: _frameTime(20),
+        endTime: _frameTime(40),
+      );
+      expect(track.anchorTime, _frameTime(20));
+      expect(track.samples.first.time, _frameTime(20));
+      expect(track.samples.last.time, _frameTime(39));
+    });
 
     test('says where it lost the object', () async {
       // The object comes in from the left and leaves on the right.
