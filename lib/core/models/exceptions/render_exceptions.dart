@@ -56,10 +56,12 @@ class RenderEncoderException implements Exception {
   ///
   /// A transient failure covers a starved decoder as well as a starved encoder,
   /// and they call for different advice. A composition decodes all of its
-  /// layers at once, one decoder each, so a [RenderCodecKind.decoder] shortage
-  /// is fixed by rendering fewer layers together; a shortage of the
-  /// [RenderCodecKind.encoder] is not. Read from the Media3 error code in
-  /// [details], so only Android reports it.
+  /// layers at once, one decoder each, and shares the device's decoders with
+  /// everything else still holding one: preview players, a concurrent export,
+  /// other apps. A [RenderCodecKind.decoder] shortage is therefore fixed by
+  /// rendering fewer layers together or by releasing those players first; a
+  /// shortage of the [RenderCodecKind.encoder] is fixed by neither. Read from
+  /// the Media3 error code in [details], so only Android reports it.
   RenderCodecKind? get codecKind => switch (details?.codeName) {
     'ERROR_CODE_DECODER_INIT_FAILED' => RenderCodecKind.decoder,
     'ERROR_CODE_ENCODER_INIT_FAILED' ||

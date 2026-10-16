@@ -190,12 +190,15 @@ void main() {
           });
     }
 
-    /// What Android attaches when a codec could not be brought up: the Media3
-    /// code of the export failure underneath.
-    Map<String, Object?> media3Details(String codeName, int code) => {
+    /// What Android attaches when a codec could not be brought up: the type it
+    /// was mapped to and the Media3 code of the export failure underneath.
+    Map<String, Object?> media3Details(
+      String codeName,
+      int code, {
+      String exception = 'CodecResourceExhaustedException',
+    }) => {
       'domain':
-          'ch.waio.pro_video_editor.src.features.render.models.'
-          'CodecResourceExhaustedException',
+          'ch.waio.pro_video_editor.src.features.render.models.$exception',
       'code': code,
       'codeName': codeName,
     };
@@ -317,7 +320,11 @@ void main() {
     test('an unsupported encoder keeps its details too', () async {
       throwPlatformError(
         'ENCODER_NOT_SUPPORTED',
-        details: media3Details('ERROR_CODE_ENCODING_FORMAT_UNSUPPORTED', 4003),
+        details: media3Details(
+          'ERROR_CODE_ENCODING_FORMAT_UNSUPPORTED',
+          4003,
+          exception: 'VideoEncoderConfigurationException',
+        ),
       );
 
       await expectLater(
@@ -331,7 +338,7 @@ void main() {
     });
 
     test('a failure without details names no codec', () async {
-      // Apple platforms, and Android before the codes were attached.
+      // A plugin built before 2.13.0 attached no details.
       throwPlatformError('CODEC_RESOURCE_EXHAUSTED');
 
       await expectLater(
