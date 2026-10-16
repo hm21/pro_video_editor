@@ -120,6 +120,48 @@ void main() {
       }
     });
 
+    test(
+      'follows the rest of the object once the part it was found on is gone',
+      () {
+        // A region drawn loosely around a body and its arm. The arm moves
+        // first, so the object is found on it; then the body walks off and
+        // the arm turns out of view.
+        ScenePose body(int i) => ScenePose(i < 6 ? 100 : 100 + 3 * (i - 6), 68);
+        Point<double>? arm(int i) =>
+            i < 14 ? Point(body(i).x + 30, 68 - 1.5 * i) : null;
+        const frames = 30;
+        final tracker = VideoObjectTracker(
+          width: width,
+          height: height,
+          region: const Rect.fromLTRB(
+            66 / width,
+            38 / height,
+            150 / width,
+            98 / height,
+          ),
+        );
+        final samples = [
+          for (var i = 0; i < frames; i++)
+            tracker.addFrame(scene.render(body(i), part: arm(i)), frameTime(i)),
+        ];
+        expect(tracker.isLost, isFalse);
+        // After the arm is gone the region moves the way the body does.
+        for (var i = 18; i < frames; i++) {
+          expect(samples[i], isNotNull, reason: 'frame $i');
+          expect(
+            (samples[i]!.center.dx - samples[i - 1]!.center.dx) * width,
+            closeTo(3, 0.5),
+            reason: 'x step $i',
+          );
+          expect(
+            (samples[i]!.center.dy - samples[i - 1]!.center.dy) * height,
+            closeTo(0, 0.5),
+            reason: 'y step $i',
+          );
+        }
+      },
+    );
+
     test('holds still on an object the camera follows', () {
       final poses = [for (var i = 0; i < 40; i++) ScenePose(120, 68)];
       final cameras = [

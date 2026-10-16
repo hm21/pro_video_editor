@@ -340,18 +340,36 @@ class VideoObjectTracker {
             point.relX * point.relX + point.relY * point.relY > limit * limit) {
           // Once the object is known, a point joins it only when it moved
           // with it since it was found; one on its outline lags behind.
-          point.onObject =
-              !_foundObject || _followsRegion(point, to[2 * i], to[2 * i + 1]);
+          point
+            ..movedAgainstScene = true
+            ..onObject =
+                !_foundObject ||
+                _followsRegion(point, to[2 * i], to[2 * i + 1]);
         }
       }
     }
-    final object = [
+    var object = [
       for (final i in alive)
         if (_points[i].onObject) i,
     ];
     if (object.length < _minPoints && _foundObject) {
-      // The object's own points are gone: it left, or something covers it.
-      return false;
+      // The points the object was found on are gone. In a loosely drawn
+      // region those can be a part that moved first, like an arm swinging
+      // off a body that then turns; the points that moved against the scene
+      // since are the object now. With none left, it left the region, or
+      // something covers it.
+      final movers = [
+        for (final i in alive)
+          if (_points[i].movedAgainstScene) i,
+      ];
+      if (movers.length < _minPoints) return false;
+      for (final i in movers) {
+        _points[i]
+          ..onObject = true
+          ..driftX = 0
+          ..driftY = 0;
+      }
+      object = movers;
     }
     // Once points moved against the scene, they alone are the object. Until
     // then the region moves the way most of what is inside it does: the
@@ -745,6 +763,10 @@ class _Point {
   /// How many frames it has been followed for.
   int age = 0;
 
-  /// Whether it moved far enough against the scene to count as the object.
+  /// Whether it moved far enough against the scene to count as the object,
+  /// whether or not it moved the way the object did.
+  bool movedAgainstScene = false;
+
+  /// Whether it counts as the object.
   bool onObject = false;
 }
