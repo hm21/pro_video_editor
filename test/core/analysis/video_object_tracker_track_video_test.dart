@@ -26,6 +26,9 @@ class _FakeDecoder extends ProVideoEditor with MockPlatformInterfaceMixin {
   /// The `(startTime, endTime)` of every stream asked for.
   final List<(Duration?, Duration?)> requests = [];
 
+  /// The task id of every stream asked for.
+  final List<String> ids = [];
+
   /// Called when a stream is asked for, with its number, counted from one.
   void Function(int request)? onRequest;
 
@@ -43,6 +46,12 @@ class _FakeDecoder extends ProVideoEditor with MockPlatformInterfaceMixin {
     LumaFrameConfigs value, {
     NativeLogLevel? nativeLogLevel,
   }) async* {
+    // Native refuses a task under an id still in use, and a stream left
+    // early is torn down only after the consumer moved on.
+    if (ids.contains(value.id)) {
+      throw PlatformException(code: 'TASK_ALREADY_RUNNING');
+    }
+    ids.add(value.id);
     requests.add((value.startTime, value.endTime));
     final request = requests.length;
     _streaming = true;
@@ -230,6 +239,23 @@ void main() {
         final i = (sample.time.inMicroseconds * _fps / 1e6).round();
         expect(sample.center.dx * _width, closeTo(cross(i).x, 1), reason: '$i');
       }
+    });
+
+    test('reads every stream under its own task id', () async {
+      // The object leaves on the right, so the forward stream is left early
+      // and the backward pass starts while it is still being torn down.
+      ScenePose leave(int i) => ScenePose(150 + 9 * i, 68);
+      final fake = decoder(30, leave);
+      final track = await VideoObjectTracker.trackVideo(
+        video,
+        region: regionAround(leave(5)),
+        anchorTime: _frameTime(5),
+        endTime: _frameTime(30),
+        id: 'track-ids',
+      );
+      expect(track.reachedEnd, isFalse);
+      expect(fake.ids.toSet(), hasLength(fake.ids.length));
+      expect(fake.ids, everyElement(startsWith('track-ids')));
     });
 
     test('gives only the marked frame for a region without detail', () async {

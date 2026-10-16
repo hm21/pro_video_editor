@@ -30,15 +30,23 @@ final Set<String> _running = {};
 /// Ids of running calls that were asked to stop.
 final Set<String> _canceled = {};
 
+/// The task id of the frame stream each running call reads from last.
+final Map<String, String> _decoding = {};
+
+/// Counts the frame streams started, so each gets its own task id.
+int _streams = 0;
+
 /// Stops the [trackVideoInBackground] call started with [id].
 Future<void> cancelTrackVideo(String id) async {
   if (!_running.contains(id)) return;
   _canceled.add(id);
+  final stream = _decoding[id];
+  if (stream == null) return;
   try {
-    await ProVideoEditor.instance.cancel(id);
+    await ProVideoEditor.instance.cancel(stream);
   } on PlatformException {
-    // Between two pieces of the backward pass no decoder runs under [id];
-    // the call stops before it starts the next one.
+    // Between two pieces of the backward pass no decoder runs; the call
+    // stops before it starts the next one.
   }
 }
 
@@ -122,6 +130,11 @@ Future<VideoObjectTrack> trackVideoInBackground({
     ));
     Stream<LumaFrame> frames(Duration from, Duration? to) {
       if (_canceled.contains(id)) throw const RenderCanceledException();
+      // Every stream runs under a task id of its own: a stream left early
+      // (the object was lost) is still being torn down natively when the
+      // next one starts, and native refuses a second task under its id.
+      final stream = '$id-${_streams++}';
+      _decoding[id] = stream;
       return ProVideoEditor.instance.getLumaFrameStream(
         LumaFrameConfigs(
           video: video,
@@ -130,7 +143,7 @@ Future<VideoObjectTrack> trackVideoInBackground({
           endTime: to,
           maxFrameRate: maxFrameRate,
           maxParallelDecoders: maxParallelDecoders,
-          id: id,
+          id: stream,
         ),
       );
     }
@@ -184,6 +197,7 @@ Future<VideoObjectTrack> trackVideoInBackground({
   } finally {
     _running.remove(id);
     _canceled.remove(id);
+    _decoding.remove(id);
     fromWorker.close();
     isolate.kill(priority: Isolate.immediate);
   }
