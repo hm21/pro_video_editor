@@ -237,8 +237,10 @@ Future<void> _worker(
     var track = VideoObjectTrack(
       samples: [...before.reversed, anchor, ...after],
       anchorTime: anchor.time,
-      reachedStart: !backward!.isLost,
-      reachedEnd: !forward!.isLost,
+      // The object was not found in the last frames before the range ended:
+      // it was on its way out of view.
+      reachedStart: !backward!.isLost && backward.missedFrames == 0,
+      reachedEnd: !forward!.isLost && forward.missedFrames == 0,
     );
     if (smoothingUs > 0) {
       track = track.smoothed(position: Duration(microseconds: smoothingUs));

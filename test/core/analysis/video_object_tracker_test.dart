@@ -111,6 +111,41 @@ void main() {
       }
     });
 
+    test('follows an object drawn around loosely, background and all', () {
+      final poses = [for (var i = 0; i < 40; i++) ScenePose(70 + 2 * i, 68)];
+      // Half the region shows the still background around the object.
+      final samples = track(poses, margin: 0.5);
+      for (var i = 0; i < poses.length; i++) {
+        expectAt(samples[i], poses[i], tolerancePx: 2, reason: 'frame $i');
+      }
+    });
+
+    test('holds still on an object the camera follows', () {
+      final poses = [for (var i = 0; i < 40; i++) ScenePose(120, 68)];
+      final cameras = [
+        for (var i = 0; i < 40; i++)
+          SimilarityTransform.fromParams(tx: 3.0 * i),
+      ];
+      final samples = track(poses, cameras: cameras, margin: 0.3);
+      for (var i = 0; i < poses.length; i++) {
+        expectAt(samples[i], poses[i], tolerancePx: 1.5, reason: 'frame $i');
+      }
+    });
+
+    test('moves with the scene while nothing in it moves against it', () {
+      // A still object filmed by a panning camera: the object moves across
+      // the frame exactly as its surroundings do.
+      final poses = [for (var i = 0; i < 20; i++) ScenePose(100 + 2 * i, 60)];
+      final cameras = [
+        for (var i = 0; i < 20; i++)
+          SimilarityTransform.fromParams(tx: 2.0 * i),
+      ];
+      final samples = track(poses, cameras: cameras, margin: 0.3);
+      for (var i = 0; i < poses.length; i++) {
+        expectAt(samples[i], poses[i], tolerancePx: 1, reason: 'frame $i');
+      }
+    });
+
     test('measures how much the object grows', () {
       final poses = [
         for (var i = 0; i < 30; i++)
