@@ -218,6 +218,9 @@ class VideoSegment {
   }
 
   /// Creates a copy with updated values.
+  ///
+  /// A segment plays at either a [playbackSpeed] or a [speedRamp], so passing
+  /// one of them drops the other.
   VideoSegment copyWith({
     EditorVideo? video,
     Duration? startTime,
@@ -239,8 +242,9 @@ class VideoSegment {
       endTime: endTime ?? this.endTime,
       volume: volume ?? this.volume,
       equalizer: equalizer ?? this.equalizer,
-      playbackSpeed: playbackSpeed ?? this.playbackSpeed,
-      speedRamp: speedRamp ?? this.speedRamp,
+      playbackSpeed:
+          playbackSpeed ?? (speedRamp == null ? this.playbackSpeed : null),
+      speedRamp: speedRamp ?? (playbackSpeed == null ? this.speedRamp : null),
       reverseVideo: reverseVideo ?? this.reverseVideo,
       transition: transition ?? this.transition,
       timelineStart: timelineStart ?? this.timelineStart,

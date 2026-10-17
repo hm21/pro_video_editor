@@ -4401,3 +4401,77 @@ final class StabilizationTests: XCTestCase {
     XCTAssertFalse(BitrateCapPolicy.isPassthroughEligible(config))
   }
 }
+
+final class SpeedRampTests: XCTestCase {
+
+  /// Fast, slow motion, fast: 0.4 of the source at 2x, 0.2 at 0.25x, 0.4 at 2x.
+  private let ramp = SpeedRamp(steps: [
+    SpeedRamp.Step(start: 0, end: 0.4, speed: 2),
+    SpeedRamp.Step(start: 0.4, end: 0.6, speed: 0.25),
+    SpeedRamp.Step(start: 0.6, end: 1, speed: 2),
+  ])
+
+  private func seconds(_ value: Double) -> CMTime {
+    CMTime(value: CMTimeValue((value * 1_000_000).rounded()), timescale: 1_000_000)
+  }
+
+  /// Scaling a range moves everything after it, so the last step goes first
+  /// and every range is still where it was computed when its turn comes.
+  func testSpeedScalesComeLastStepFirst() {
+    let clip = VideoClip(
+      inputPath: "/tmp/clip.mp4", startUs: nil, endUs: nil, speedRamp: ramp)
+    let scales = VideoSequenceBuilder.speedScales(
+      for: clip, at: seconds(1), duration: seconds(3))
+
+    XCTAssertEqual(scales.map { $0.range.start.seconds }, [2.8, 2.2, 1.0])
+    XCTAssertEqual(scales.map { $0.range.duration.seconds }, [1.2, 0.6, 1.2])
+    XCTAssertEqual(scales.map { $0.duration.seconds }, [0.6, 2.4, 0.6])
+    let total = scales.reduce(CMTime.zero) { CMTimeAdd($0, $1.duration) }
+    XCTAssertEqual(total.seconds, 3 * ramp.durationFactor, accuracy: 1e-9)
+  }
+
+  func testSpeedScalesForAConstantSpeedAndNone() {
+    let fast = VideoClip(inputPath: "/tmp/clip.mp4", startUs: nil, endUs: nil, playbackSpeed: 2)
+    let plain = VideoClip(inputPath: "/tmp/clip.mp4", startUs: nil, endUs: nil)
+
+    let scales = VideoSequenceBuilder.speedScales(for: fast, at: .zero, duration: seconds(3))
+    XCTAssertEqual(scales.count, 1)
+    XCTAssertEqual(scales.first?.duration.seconds ?? 0, 1.5, accuracy: 1e-9)
+    XCTAssertTrue(VideoSequenceBuilder.speedScales(for: plain, at: .zero, duration: seconds(3)).isEmpty)
+  }
+
+  /// An audio track that ends before the picture used to hold its last
+  /// sample for the rest of the clip, a DC level that clicks in and out.
+  func testResampleIsSilentPastTheDecodedSound() {
+    let source = [Int16](repeating: 1000, count: 100)
+    let constant = SpeedRamp(steps: [SpeedRamp.Step(start: 0, end: 1, speed: 1)])
+    let output = source.withUnsafeBufferPointer {
+      RampAudioRenderer.resample(
+        $0, channelCount: 1, ramp: constant, sourceSeconds: 0.2, sampleRate: 1000,
+        frames: 0..<200)
+    }
+
+    XCTAssertEqual(output.count, 200)
+    XCTAssertTrue(output[0..<99].allSatisfy { $0 == 1000 })
+    XCTAssertTrue(output[100...].allSatisfy { $0 == 0 })
+  }
+
+  /// The renderer writes a slice at a time; the slices join up to exactly
+  /// what one pass over the whole output gives.
+  func testResampleSlicesJoinUpToOnePass() {
+    let source = (0..<4000).map { Int16(truncatingIfNeeded: ($0 * 37) % 2001 - 1000) }
+    let render = { (frames: Range<Int>) in
+      source.withUnsafeBufferPointer {
+        RampAudioRenderer.resample(
+          $0, channelCount: 2, ramp: self.ramp, sourceSeconds: 2, sampleRate: 1000,
+          frames: frames)
+      }
+    }
+    let outputFrames = Int((2 * ramp.durationFactor * 1000).rounded())
+
+    let whole = render(0..<outputFrames)
+    let sliced = render(0..<777) + render(777..<1900) + render(1900..<outputFrames)
+    XCTAssertEqual(whole.count, outputFrames * 2)
+    XCTAssertEqual(sliced, whole)
+  }
+}

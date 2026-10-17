@@ -87,6 +87,14 @@ data class SpeedRamp(val steps: List<Step>) {
         return if (result.isEmpty()) null else SpeedRamp(result)
     }
 
+    /**
+     * The ramp of the clip played the other way round, so every frame keeps
+     * its speed.
+     */
+    fun reversed(): SpeedRamp = SpeedRamp(
+        steps.asReversed().map { Step(start = 1 - it.end, end = 1 - it.start, speed = it.speed) }
+    )
+
     /** Output duration of a clip whose source lasts [sourceDurationUs]. */
     fun outputDurationUs(sourceDurationUs: Long): Long =
         (sourceDurationUs * durationFactor).roundToLong()

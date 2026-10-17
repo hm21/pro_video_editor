@@ -262,7 +262,9 @@ internal class VideoSequenceBuilder {
         PluginLog.print("      Format: \(audioTrack.mediaType)")
 
         do {
-          if let ramp = clip.speedRamp,
+          // A muted clip's sound is never heard, so its scaled source keeps the
+          // track continuous without decoding and resampling it first.
+          if let ramp = clip.speedRamp, (clip.volume ?? 1) > 0,
             let rendered = await Self.rampAudio(
               for: clip,
               ramp: ramp,

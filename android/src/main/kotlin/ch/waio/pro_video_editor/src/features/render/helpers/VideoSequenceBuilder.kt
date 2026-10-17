@@ -321,13 +321,8 @@ class VideoSequenceBuilder(
 
         var totalDurationUs = 0L
         trimmedClips.forEach { clip ->
-            val clipDurationUs = when {
-                clip.endUs != null && clip.startUs != null -> clip.endUs - clip.startUs
-                clip.endUs != null -> clip.endUs
-                else -> mediaInfoExtractor.getVideoDuration(clip.inputPath)
-            }.coerceAtLeast(0L)
             totalDurationUs += VideoTimelineDurationCalculator.renderedClipDurationUs(
-                sourceDurationUs = clipDurationUs,
+                sourceDurationUs = clipSourceDurationUs(clip),
                 clipPlaybackSpeed = clip.playbackSpeed,
                 globalPlaybackSpeed = globalPlaybackSpeed,
                 clipSpeedRamp = clip.speedRamp,
@@ -466,14 +461,12 @@ class VideoSequenceBuilder(
     }
 
     /**
-     * Source duration of a clip after trimming (microseconds).
+     * Source duration of a clip after trimming (microseconds). A clip with a
+     * start but no end plays from its start to the end of the file.
      */
     private fun clipSourceDurationUs(clip: VideoClip): Long {
-        return when {
-            clip.endUs != null && clip.startUs != null -> clip.endUs - clip.startUs
-            clip.endUs != null -> clip.endUs
-            else -> mediaInfoExtractor.getVideoDuration(clip.inputPath)
-        }.coerceAtLeast(0L)
+        val endUs = clip.endUs ?: mediaInfoExtractor.getVideoDuration(clip.inputPath)
+        return (endUs - (clip.startUs ?: 0L)).coerceAtLeast(0L)
     }
 
     /**
@@ -979,7 +972,11 @@ class VideoSequenceBuilder(
                     "Reverse pre-render failed for ${clip.inputPath}: ${e.message}. " +
                             "Falling back to forward playback."
                 )
-                result.add(clip.copy(reverseVideo = false))
+                // The ramp runs in the order the clip was to play, so it
+                // turns round with it.
+                result.add(
+                    clip.copy(reverseVideo = false, speedRamp = clip.speedRamp?.reversed())
+                )
             }
         }
         return result

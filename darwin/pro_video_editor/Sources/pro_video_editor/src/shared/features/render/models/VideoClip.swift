@@ -157,6 +157,14 @@ extension VideoClip {
     return Float(1 / speedRamp.durationFactor)
   }
 
+  /// How long `sourceDurationUs` of this clip plays: along its speed ramp, or
+  /// at `playbackSpeed`.
+  func outputDurationUs(sourceDurationUs: Int64) -> Int64 {
+    if let speedRamp { return speedRamp.outputDurationUs(sourceDurationUs: sourceDurationUs) }
+    return ClipTransitionGeometry.outputDurationUs(
+      sourceDurationUs: sourceDurationUs, speed: playbackSpeed)
+  }
+
   /// The speed the last `outputUs` of this clip play at on average, for an
   /// overlap blend that takes them; `playbackSpeed` without a speed ramp.
   func tailSpeed(outputUs: Int64, sourceDurationUs: Int64) -> Float? {

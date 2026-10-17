@@ -82,63 +82,129 @@ internal enum RampAudioRenderer {
       return nil
     }
 
-    let source: [Int16] = pcm.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) }
-    let sourceFrames = source.count / channelCount
-    guard sourceFrames > 1 else { return nil }
-
-    let output = resample(
-      source,
-      channelCount: channelCount,
-      ramp: ramp,
-      sourceSeconds: segmentDuration.seconds,
-      sampleRate: sampleRate,
-      outputFrames: Int((outputDuration.seconds * sampleRate).rounded()))
-
+    let outputFrames = Int((outputDuration.seconds * sampleRate).rounded())
     let outputURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(
       "ramp_audio_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString).caf")
     do {
-      let bytes = output.withUnsafeBytes { [UInt8]($0) }
-      try AudioReverser.writeCAF(
-        pcmBytes: bytes,
-        to: outputURL,
-        sampleRate: Int(sampleRate),
-        channelCount: channelCount,
-        bitsPerSample: 16)
+      // Read in place: a slowed clip's sound is several times its source, so
+      // only one slice of it is held next to the source at a time.
+      let written = try pcm.withUnsafeBytes { raw -> Bool in
+        let source = raw.bindMemory(to: Int16.self)
+        guard source.count / channelCount > 1, outputFrames > 0 else { return false }
+        try write(
+          source,
+          channelCount: channelCount,
+          ramp: ramp,
+          sourceSeconds: segmentDuration.seconds,
+          sampleRate: sampleRate,
+          outputFrames: outputFrames,
+          to: outputURL)
+        return true
+      }
+      guard written else { return nil }
     } catch {
       PluginLog.print("⚠️ RampAudioRenderer: CAF write failed: \(error)")
+      try? FileManager.default.removeItem(at: outputURL)
       return nil
     }
 
-    let duration = CMTime(
-      value: CMTimeValue(output.count / channelCount), timescale: CMTimeScale(sampleRate))
+    let duration = CMTime(value: CMTimeValue(outputFrames), timescale: CMTimeScale(sampleRate))
     PluginLog.print(
       "⏩ RampAudioRenderer: \(segmentDuration.seconds)s of sound along \(ramp.steps.count) step(s) → \(duration.seconds)s"
     )
     return Result(outputURL: outputURL, duration: duration)
   }
 
-  /// [source] (interleaved frames of [channelCount] samples) resampled along
-  /// [ramp] into [outputFrames] frames.
+  /// Output frames the renderer resamples and writes at a time.
+  private static let sliceFrames = 1 << 16
+
+  /// Writes [source] resampled along [ramp] into [outputFrames] frames of
+  /// 16-bit CAF/PCM at [url], one slice at a time.
+  private static func write(
+    _ source: UnsafeBufferPointer<Int16>,
+    channelCount: Int,
+    ramp: SpeedRamp,
+    sourceSeconds: Double,
+    sampleRate: Double,
+    outputFrames: Int,
+    to url: URL
+  ) throws {
+    let file = try AVAudioFile(
+      forWriting: url,
+      settings: [
+        AVFormatIDKey: kAudioFormatLinearPCM,
+        AVSampleRateKey: Int(sampleRate),
+        AVNumberOfChannelsKey: channelCount,
+        AVLinearPCMBitDepthKey: 16,
+        AVLinearPCMIsFloatKey: false,
+        AVLinearPCMIsBigEndianKey: false,
+        AVLinearPCMIsNonInterleaved: false,
+      ],
+      commonFormat: .pcmFormatInt16,
+      interleaved: true)
+    guard
+      let buffer = AVAudioPCMBuffer(
+        pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(sliceFrames))
+    else {
+      throw NSError(
+        domain: "RampAudioRenderer", code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Failed to allocate PCM buffer"])
+    }
+    let buffers = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+    guard buffers.count == 1, let destination = buffers[0].mData else {
+      throw NSError(
+        domain: "RampAudioRenderer", code: 2,
+        userInfo: [NSLocalizedDescriptionKey: "Unexpected PCM buffer layout"])
+    }
+
+    var frame = 0
+    while frame < outputFrames {
+      let count = min(sliceFrames, outputFrames - frame)
+      let samples = resample(
+        source,
+        channelCount: channelCount,
+        ramp: ramp,
+        sourceSeconds: sourceSeconds,
+        sampleRate: sampleRate,
+        frames: frame..<(frame + count))
+      buffer.frameLength = AVAudioFrameCount(count)
+      samples.withUnsafeBytes { bytes in
+        buffers[0].mDataByteSize = UInt32(bytes.count)
+        if let base = bytes.baseAddress {
+          destination.copyMemory(from: base, byteCount: bytes.count)
+        }
+      }
+      try file.write(from: buffer)
+      frame += count
+    }
+  }
+
+  /// Output [frames] of [source] (interleaved frames of [channelCount]
+  /// samples) resampled along [ramp].
   ///
   /// Each output frame reads the source at the moment the ramp plays then,
   /// between two source frames by linear interpolation. Where the ramp speeds
   /// up it averages the source across the stretch one output frame covers,
   /// which keeps the frequencies a faster play would fold back from turning
-  /// into audible noise.
+  /// into audible noise. Past the end of [source], as when the audio track
+  /// ends a little before the picture, it is silent.
   static func resample(
-    _ source: [Int16],
+    _ source: UnsafeBufferPointer<Int16>,
     channelCount: Int,
     ramp: SpeedRamp,
     sourceSeconds: Double,
     sampleRate: Double,
-    outputFrames: Int
+    frames: Range<Int>
   ) -> [Int16] {
+    guard channelCount > 0, !frames.isEmpty, !ramp.steps.isEmpty else { return [] }
     let sourceFrames = source.count / channelCount
-    guard sourceFrames > 0, outputFrames > 0, channelCount > 0 else { return [] }
-    var output = [Int16](repeating: 0, count: outputFrames * channelCount)
+    var output = [Int16](repeating: 0, count: frames.count * channelCount)
+    guard sourceFrames > 0 else { return output }
+    let lastFrame = Double(sourceFrames - 1)
 
     func sample(_ frame: Double, _ channel: Int) -> Double {
-      let clamped = min(max(frame, 0), Double(sourceFrames - 1))
+      guard frame <= lastFrame else { return 0 }
+      let clamped = max(frame, 0)
       let low = Int(clamped)
       let high = min(low + 1, sourceFrames - 1)
       let mix = clamped - Double(low)
@@ -149,7 +215,7 @@ internal enum RampAudioRenderer {
     var stepIndex = 0
     var stepOutputStart = 0.0
     let steps = ramp.steps
-    for frame in 0..<outputFrames {
+    for frame in frames {
       let time = Double(frame) / sampleRate
       // The step playing at [time], walking forward as time advances.
       while stepIndex < steps.count - 1 {
@@ -163,6 +229,7 @@ internal enum RampAudioRenderer {
       let sourceTime = step.start * sourceSeconds + (time - stepOutputStart) * step.speed
       let center = sourceTime * sampleRate
       let taps = step.speed > 1 ? Int(step.speed.rounded(.up)) + 1 : 1
+      let base = (frame - frames.lowerBound) * channelCount
       for channel in 0..<channelCount {
         var sum = 0.0
         for tap in 0..<taps {
@@ -171,7 +238,7 @@ internal enum RampAudioRenderer {
           sum += sample(center + offset, channel)
         }
         let value = (sum / Double(taps)).rounded()
-        output[frame * channelCount + channel] = Int16(clamping: Int(value))
+        output[base + channel] = Int16(clamping: Int(value))
       }
     }
     return output

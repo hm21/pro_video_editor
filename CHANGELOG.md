@@ -1,5 +1,5 @@
 ## 2.39.0
-- **FEAT**(android, iOS, macOS): Speed ramps. `VideoSegment.speedRamp` lets a clip speed up and slow down while it plays, easing between the speeds its `VideoSpeedRamp` puts along the clip, for example fast into a jump, slow motion on the peak and fast again on the landing. `VideoSpeedRamp.outputDuration`, `sourceToOutput` and `outputToSource` give the timing the render uses, so an editor's timeline matches the export frame for frame, and `cropped` and `reversed` give the ramp of a split or reversed clip. The clip's sound follows the speed like a tape.
+- **FEAT**(android, iOS, macOS): Speed ramps. `VideoSegment.speedRamp` lets a clip speed up and slow down while it plays, eased between the speeds of a `VideoSpeedRamp`, whose `outputDuration`, `sourceToOutput` and `outputToSource` give the exact timing the render uses. The clip's sound follows the speed like a tape.
 
 ## 2.38.0
 - **FEAT**(android, iOS, macOS): Nine more overlap clip transitions: `zoomIn`, `zoomOut`, `spin`, `whipPan`, `blur`, `glitch`, `flash`, `iris` and `stretch`; `whipPan` and `stretch` take a direction. `ClipTransitionType.isDip`, `isOverlap`, `usesDirection` and `flashes` tell the types apart, so an app no longer hard-codes them and can keep flashes within WCAG 2.3.1.

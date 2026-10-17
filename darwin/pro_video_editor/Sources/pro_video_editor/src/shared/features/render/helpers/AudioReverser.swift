@@ -239,7 +239,7 @@ internal enum AudioReverser {
     return tmp.appendingPathComponent(name)
   }
 
-  static func writeCAF(
+  private static func writeCAF(
     pcmBytes: [UInt8],
     to outputURL: URL,
     sampleRate: Int,

@@ -805,14 +805,19 @@ class RenderVideo {
 
       // Resolve the overlap geometry in OUTPUT (post-speed) time so the
       // requested transition duration matches the non-transition timeline and
-      // each side consumes `output * speed` of its own source.
+      // each side consumes `output * speed` of its own source. A ramp's side is
+      // averaged over the blend as it will play, which a shorter clip cuts
+      // below the requested duration.
+      let blendUs = min(
+        t!.durationUs, current.outputDurationUs(sourceDurationUs: curDur),
+        next!.outputDurationUs(sourceDurationUs: nextDur))
       guard
         let plan = ClipTransitionGeometry.planOverlap(
           outgoingSourceDurationUs: curDur,
           incomingSourceDurationUs: nextDur,
           transitionDurationUs: t!.durationUs,
-          outgoingSpeed: current.tailSpeed(outputUs: t!.durationUs, sourceDurationUs: curDur),
-          incomingSpeed: next!.headSpeed(outputUs: t!.durationUs, sourceDurationUs: nextDur))
+          outgoingSpeed: current.tailSpeed(outputUs: blendUs, sourceDurationUs: curDur),
+          incomingSpeed: next!.headSpeed(outputUs: blendUs, sourceDurationUs: nextDur))
       else {
         PluginLog.print("⚠️ Transition: not enough content at boundary \(i); hard cut")
         appendClip(clearedOverlap(current))
@@ -942,8 +947,11 @@ class RenderVideo {
           transitionDurationUs: wrap.durationUs,
           speed: last.playbackSpeed)
       } else {
-        headSpeed = first.headSpeed(outputUs: wrap.durationUs, sourceDurationUs: firstDur)
-        tailSpeed = last.tailSpeed(outputUs: wrap.durationUs, sourceDurationUs: lastDur)
+        let blendUs = min(
+          wrap.durationUs, first.outputDurationUs(sourceDurationUs: firstDur),
+          last.outputDurationUs(sourceDurationUs: lastDur))
+        headSpeed = first.headSpeed(outputUs: blendUs, sourceDurationUs: firstDur)
+        tailSpeed = last.tailSpeed(outputUs: blendUs, sourceDurationUs: lastDur)
         plan = ClipTransitionGeometry.planOverlap(
           outgoingSourceDurationUs: lastDur,
           incomingSourceDurationUs: firstDur,

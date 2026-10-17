@@ -49,6 +49,19 @@ internal class SpeedRampTest {
     }
 
     @Test
+    fun reversed_keepsEverySpeedOnItsFrame() {
+        val lopsided = SpeedRamp(
+            listOf(SpeedRamp.Step(0.0, 0.3, 0.5), SpeedRamp.Step(0.3, 1.0, 2.0))
+        )
+
+        assertEquals(
+            listOf(SpeedRamp.Step(0.0, 0.7, 2.0), SpeedRamp.Step(0.7, 1.0, 0.5)),
+            lopsided.reversed().steps.map { it.copy(start = round(it.start), end = round(it.end)) },
+        )
+        assertEquals(lopsided.durationFactor, lopsided.reversed().durationFactor, 1e-12)
+    }
+
+    @Test
     fun speedProvider_reportsEachStepAndWhereTheNextOneStarts() {
         val provider = RampSpeedProvider(ramp, sourceDurationUs = 3_000_000L)
 

@@ -95,6 +95,30 @@ void main() {
       );
     });
 
+    testWidgets('a segment without an end plays the ramp to the end of the '
+        'file', (_) async {
+      // Only a start: the ramp runs from there to the end of the file, not
+      // along the whole file.
+      final fileDuration = (await pve.getMetadata(inputVideo)).duration;
+      final from = fileDuration - source;
+      final bytes = await render(
+        VideoRenderData(
+          outputFormat: VideoOutputFormat.mp4,
+          videoSegments: [
+            VideoSegment(video: inputVideo, startTime: from, speedRamp: ramp),
+          ],
+        ),
+      );
+      final meta = await pve.getMetadata(EditorVideo.memory(bytes));
+
+      final expected = ramp.outputDuration(fileDuration - from);
+      expect(
+        meta.duration.inMilliseconds,
+        closeTo(expected.inMilliseconds, 200),
+        reason: 'the ramp plays the last $source of the file in $expected',
+      );
+    });
+
     testWidgets("the clip's sound plays through without dropping out", (
       _,
     ) async {

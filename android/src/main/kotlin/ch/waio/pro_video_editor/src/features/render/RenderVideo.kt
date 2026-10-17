@@ -447,7 +447,12 @@ class RenderVideo(private val context: Context) {
                     "Reverse pre-render failed for ${clip.inputPath}: ${e.message}. " +
                             "Falling back to forward playback."
                 )
-                result[clipIdx] = clip.copy(reverseVideo = false)
+                // The ramp runs in the order the clip was to play, so it
+                // turns round with it.
+                result[clipIdx] = clip.copy(
+                    reverseVideo = false,
+                    speedRamp = clip.speedRamp?.reversed(),
+                )
             }
         }
         return result
@@ -570,13 +575,16 @@ class RenderVideo(private val context: Context) {
 
             // Resolve the overlap geometry in OUTPUT (post-speed) time so the
             // requested transition duration matches the non-transition timeline
-            // and each side consumes `output * speed` of its own source.
+            // and each side consumes `output * speed` of its own source. A
+            // ramp's side is averaged over the blend as it will play, which a
+            // shorter clip cuts below the requested duration.
+            val blendUs = minOf(transition.durationUs, outputUs(current), outputUs(next))
             val plan = ClipTransitionGeometry.planOverlap(
                 outgoingSourceDurationUs = curDur,
                 incomingSourceDurationUs = nextDur,
                 transitionDurationUs = transition.durationUs,
-                outgoingSpeed = current.tailSpeed(transition.durationUs, curDur),
-                incomingSpeed = next.headSpeed(transition.durationUs, nextDur),
+                outgoingSpeed = current.tailSpeed(blendUs, curDur),
+                incomingSpeed = next.headSpeed(blendUs, nextDur),
             )
 
             if (plan == null) {
@@ -724,8 +732,9 @@ class RenderVideo(private val context: Context) {
                     speed = last.playbackSpeed,
                 )
             } else {
-                headSpeed = first.headSpeed(wrapTransition.durationUs, firstDur)
-                tailSpeed = last.tailSpeed(wrapTransition.durationUs, lastDur)
+                val blendUs = minOf(wrapTransition.durationUs, outputUs(first), outputUs(last))
+                headSpeed = first.headSpeed(blendUs, firstDur)
+                tailSpeed = last.tailSpeed(blendUs, lastDur)
                 ClipTransitionGeometry.planOverlap(
                     outgoingSourceDurationUs = lastDur,
                     incomingSourceDurationUs = firstDur,

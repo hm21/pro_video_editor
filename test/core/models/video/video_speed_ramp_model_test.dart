@@ -257,6 +257,21 @@ void main() {
         expect(VideoSegment.fromMap(segment.toMap()).speedRamp, hero);
         expect(segment.copyWith(volume: 0.5).speedRamp, hero);
       });
+
+      test('copyWith swaps between a ramp and a constant speed', () {
+        final ramped = VideoSegment(
+          video: EditorVideo.asset('assets/test.mp4'),
+          speedRamp: hero,
+        );
+
+        final constant = ramped.copyWith(playbackSpeed: 2);
+        expect(constant.playbackSpeed, 2);
+        expect(constant.speedRamp, isNull);
+
+        final rampedAgain = constant.copyWith(speedRamp: hero);
+        expect(rampedAgain.speedRamp, hero);
+        expect(rampedAgain.playbackSpeed, isNull);
+      });
     });
 
     group('validation', () {
