@@ -1,3 +1,6 @@
+## 2.38.0
+- **FEAT**(android, iOS, macOS): Nine more clip transitions: `zoomIn`, `zoomOut`, `spin`, `whipPan` (a push with motion blur), `blur`, `glitch`, `flash`, `iris` (a circle reveal) and `stretch`. Each is an overlap transition with the usual duration and curve, `whipPan` and `stretch` take a direction, and all work on the loop-restart wrap. `ClipTransitionType.isDip`, `isOverlap`, `usesDirection` and `flashes` say which family a type belongs to, which controls apply and which one flashes, so an app can keep flashes within the three a second WCAG 2.3.1 allows.
+
 ## 2.37.0
 - **FEAT**(android): `RenderEncoderException.codecKind` says whether a decoder or the encoder could not be acquired, and `RenderEncoderException.details` keeps what the platform reported. Only a decoder shortage is fixed by fewer layers or released preview players, so an app can now tell the user what to change.
 

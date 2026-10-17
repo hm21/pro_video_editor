@@ -81,7 +81,9 @@ struct LayerAnimationConfig {
 /// Configuration for a transition played between a clip and the next one.
 struct ClipTransitionConfig {
   /// Transition kind: "dissolve", "fadeToBlack", "fadeToWhite", "slide",
-  /// "push" or "wipe".
+  /// "push", "wipe", or one ``ClipTransitionEffects`` draws ("zoomIn",
+  /// "zoomOut", "spin", "whipPan", "blur", "glitch", "flash", "iris",
+  /// "stretch").
   let type: String
   /// Transition duration in microseconds.
   let durationUs: Int64
@@ -93,6 +95,7 @@ struct ClipTransitionConfig {
   /// True when this transition overlaps and blends the two clips.
   var isOverlap: Bool {
     type == "dissolve" || type == "slide" || type == "push" || type == "wipe"
+      || ClipTransitionEffects.handles(type)
   }
 
   /// True when this transition dips through a solid color (no overlap).

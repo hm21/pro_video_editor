@@ -23,8 +23,8 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Pre-renders an **overlap** clip transition (dissolve / slide / push / wipe)
- * into a single short MP4 that the main render pipeline consumes as an ordinary
+ * Pre-renders an **overlap** clip transition (dissolve, slide, push, wipe, or
+ * one drawn by [ClipTransitionEffects]) into a single short MP4 that the main render pipeline consumes as an ordinary
  * forward clip.
  *
  * It decodes the **tail** of the outgoing clip and the **head** of the incoming
@@ -206,10 +206,17 @@ object ClipTransitionRenderer {
                             } else inSeg.frameCount - 1
                             readFrame(outRaf, aIdx.coerceIn(0, outSeg.frameCount - 1), outFrameBuf)
                             readFrame(inRaf, bIdx.coerceIn(0, inSeg.frameCount - 1), inFrameBuf)
-                            val blended = blendFrame(
-                                outFrameBuf, inFrameBuf,
-                                width, height, eased, type, direction
-                            )
+                            val blended = if (ClipTransitionEffects.handles(type)) {
+                                ClipTransitionEffects.compose(
+                                    type, direction, outFrameBuf, inFrameBuf,
+                                    width, height, eased, progress, effectiveDurationUs,
+                                )
+                            } else {
+                                blendFrame(
+                                    outFrameBuf, inFrameBuf,
+                                    width, height, eased, type, direction
+                                )
+                            }
                             val encImage = encoder.getInputImage(inIdx)
                             if (encImage != null) {
                                 i420ToImage(blended, encImage, width, height)

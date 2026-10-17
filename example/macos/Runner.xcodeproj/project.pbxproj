@@ -28,6 +28,7 @@
 		A1B2C3D400000000000000F7 /* BackgroundSafeJobTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000000F8 /* BackgroundSafeJobTests.swift */; };
 		A1B2C3D400000000000000FB /* FlattenedLayersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000000FC /* FlattenedLayersTests.swift */; };
 		A1B2C3D40000000000007E01 /* ClipTransitionWindowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000007E02 /* ClipTransitionWindowTests.swift */; };
+		A1B2C3D40000000000008001 /* ClipTransitionEffectsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000008002 /* ClipTransitionEffectsTests.swift */; };
 		335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 335BBD1A22A9A15E00E9071D /* GeneratedPluginRegistrant.swift */; };
 		33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC10F02044A3C60003C045 /* AppDelegate.swift */; };
 		33CC10F32044A3C60003C045 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F22044A3C60003C045 /* Assets.xcassets */; };
@@ -77,6 +78,7 @@
 		A1B2C3D400000000000000F8 /* BackgroundSafeJobTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BackgroundSafeJobTests.swift; path = ../shared_tests/BackgroundSafeJobTests.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D400000000000000FC /* FlattenedLayersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FlattenedLayersTests.swift; path = ../shared_tests/FlattenedLayersTests.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D40000000000007E02 /* ClipTransitionWindowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ClipTransitionWindowTests.swift; path = ../shared_tests/ClipTransitionWindowTests.swift; sourceTree = SOURCE_ROOT; };
+		A1B2C3D40000000000008002 /* ClipTransitionEffectsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ClipTransitionEffectsTests.swift; path = ../shared_tests/ClipTransitionEffectsTests.swift; sourceTree = SOURCE_ROOT; };
 		333000ED22D3DE5D00554162 /* Warnings.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Warnings.xcconfig; sourceTree = "<group>"; };
 		335BBD1A22A9A15E00E9071D /* GeneratedPluginRegistrant.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GeneratedPluginRegistrant.swift; sourceTree = "<group>"; };
 		33CC10ED2044A3C60003C045 /* pro_video_editor_example.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = pro_video_editor_example.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -150,6 +152,7 @@
 				A1B2C3D400000000000000F8 /* BackgroundSafeJobTests.swift */,
 				A1B2C3D400000000000000FC /* FlattenedLayersTests.swift */,
 				A1B2C3D40000000000007E02 /* ClipTransitionWindowTests.swift */,
+				A1B2C3D40000000000008002 /* ClipTransitionEffectsTests.swift */,
 			);
 			path = RunnerTests;
 			sourceTree = "<group>";
@@ -449,6 +452,7 @@
 				A1B2C3D400000000000000F7 /* BackgroundSafeJobTests.swift in Sources */,
 				A1B2C3D400000000000000FB /* FlattenedLayersTests.swift in Sources */,
 				A1B2C3D40000000000007E01 /* ClipTransitionWindowTests.swift in Sources */,
+				A1B2C3D40000000000008001 /* ClipTransitionEffectsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -111,9 +111,9 @@ class VideoSegment {
   /// transition instead **wraps back into the first segment**, turning the
   /// whole track into a seamless loop: the end dissolves (or dips) into the
   /// beginning, so a looping player restarts without a visible cut. For overlap
-  /// transitions (dissolve/slide/push/wipe) the output is shortened by the
-  /// transition duration — exactly like an overlap transition between two clips
-  /// — and for a single segment the clip must be longer than twice the
+  /// transitions ([ClipTransitionType.isOverlap]) the output is shortened by
+  /// the transition duration — exactly like an overlap transition between two
+  /// clips — and for a single segment the clip must be longer than twice the
   /// transition duration (otherwise the wrap is skipped and the loop restarts
   /// hard). Dip transitions (fadeToBlack/fadeToWhite) keep the duration and dip
   /// through the color at the restart seam.
@@ -148,9 +148,10 @@ class VideoSegment {
   /// clip; the three are never merged. When `null`, the clip falls back to its
   /// layer's key, then to the global one.
   ///
-  /// **Ignored inside an overlap [transition]** (dissolve/slide/push/wipe) when
-  /// the two clips at that boundary carry different keys — that blend is
-  /// pre-rendered from the raw sources and is emitted unkeyed with a warning.
+  /// **Ignored inside an overlap [transition]**
+  /// ([ClipTransitionType.isOverlap]) when the two clips at that boundary
+  /// carry different keys — that blend is pre-rendered from the raw sources
+  /// and is emitted unkeyed with a warning.
   final ChromaKey? chromaKey;
 
   /// Steadies this clip's shake with per-frame transforms, typically from a

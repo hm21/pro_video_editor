@@ -2,6 +2,7 @@ package ch.waio.pro_video_editor.src.features.render.models
 
 import PACKAGE_TAG
 import ch.waio.pro_video_editor.src.features.render.helpers.ChromaKeyMath
+import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionEffects
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.EncodedImage
 import io.flutter.plugin.common.MethodCall
@@ -10,7 +11,8 @@ import io.flutter.plugin.common.MethodCall
  * Represents the transition played between a clip and the next one.
  *
  * @property type Transition kind: "dissolve", "fadeToBlack", "fadeToWhite",
- *  "slide", "push" or "wipe"
+ *  "slide", "push", "wipe", "zoomIn", "zoomOut", "spin", "whipPan", "blur",
+ *  "glitch", "flash", "iris" or "stretch"
  * @property durationUs Transition duration in microseconds
  * @property curve Easing curve name (e.g. "linear", "easeInOut")
  * @property direction Direction for directional transitions: "left", "right",
@@ -25,7 +27,7 @@ data class TransitionConfig(
     /** True when this transition overlaps and blends the two clips. */
     val isOverlap: Boolean
         get() = type == "dissolve" || type == "slide" || type == "push" ||
-                type == "wipe"
+                type == "wipe" || ClipTransitionEffects.handles(type)
 
     companion object {
         fun fromMap(map: Map<String, Any?>): TransitionConfig {

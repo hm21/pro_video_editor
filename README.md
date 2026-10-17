@@ -132,7 +132,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🎭 **Layer Masks**: Show a `VideoLayer`'s clips only inside a shape — a circle, a heart, a rounded rectangle — or fade them out through a soft edge over the layers below, via `VideoLayer.mask`. Only the matte image's alpha counts, and the mask moves, scales and turns with each clip.
 - 🫥 **Censor Layers**: Blur or pixelate the part of the picture an image layer covers instead of drawing the layer, e.g. to hide a face or a license plate, via `ImageLayer.censor`. The layer's image is the shape of the area, and image layers after it stay sharp on top.
 - 📊 **Audio Visualizer Layers**: Draw bars, mirrored bars, a wave or a ring of bars that move with the sound in an image layer's box, via `ImageLayer.audioVisualizer`. The app hands over the levels of the sound's bands over time and can set how wide the bars are (`barFill`); `AudioVisualizerPainter` draws the same shapes in an editor preview.
-- 🎞️ **Clip Transitions**: Add transitions between adjacent clips — `dissolve`, `fadeToBlack`, `fadeToWhite`, `slide`, `push`, and `wipe` — with configurable duration, easing curve, and direction.
+- 🎞️ **Clip Transitions**: Add transitions between adjacent clips — `dissolve`, `fadeToBlack`, `fadeToWhite`, `slide`, `push`, `wipe`, `zoomIn`, `zoomOut`, `spin`, `whipPan`, `blur`, `glitch`, `flash`, `iris` and `stretch` — with configurable duration, easing curve, and direction.
 - 🧮 **Color Matrix**: Apply one or multiple 4x5 color matrices (e.g., for filters).
 - 💧 **Blur**: Add a blur effect to the video.
 - ✨ **Video Effects**: `glitch` (channel split and slices that jump sideways), `rgbSplit` (a pulsing color fringe), `vhs` (scanlines, grain and a rolling tracking band), `tvStatic` (heavy flickering grain), `oldFilm` (sepia, grain and flicker), `pixelate`, `pixelPulse` (blocks that sharpen again every second), `strobe`, `negativeFlash`, `vignette`, `blockGlitch` (coarse blocks and slipping slices in short bursts), `filmGrain` (fine, calm grain), `signalInterference` (thin flickering slices and bursts of noise), `crt` (strong scanlines and a slight fringe), `shake`, `zoomPulse` (punches in every half second), `mirror`, `kaleidoscope`, `splitScreen` (the picture four times in a 2×2 grid), `wave` (rows bending along a rolling wave) and `glow` (the brightest areas bloom softly), each with an intensity and an optional time range. With `triggers` an effect fires on given points in time instead, such as the beats of a song: one zoom punch, flash or glitch burst per trigger. `VideoEffectPreview` shows the same frames live over a video player.
@@ -379,9 +379,10 @@ Uint8List result = await ProVideoEditor.instance.renderVideo(data);
 /// The transition describes how a clip moves into the NEXT clip and is
 /// ignored on the last segment.
 ///
-/// Overlap transitions (dissolve, slide, push, wipe) blend the two clips and
-/// shorten the total output by the transition duration. Dip transitions
-/// (fadeToBlack, fadeToWhite) dip through a color and keep the duration.
+/// Overlap transitions (every type but fadeToBlack and fadeToWhite) blend the
+/// two clips and shorten the total output by the transition duration. Dip
+/// transitions (fadeToBlack, fadeToWhite) dip through a color and keep the
+/// duration.
 var data = VideoRenderData(
     videoSegments: [
         VideoSegment(
@@ -395,7 +396,8 @@ var data = VideoRenderData(
         ),
         VideoSegment(
             video: EditorVideo.asset('assets/clip-b.mp4'),
-            // A directional transition (slide / push / wipe) uses `direction`.
+            // A directional transition (slide, push, wipe, whipPan, stretch)
+            // uses `direction`.
             transition: const ClipTransition(
                 type: ClipTransitionType.wipe,
                 duration: Duration(milliseconds: 700),

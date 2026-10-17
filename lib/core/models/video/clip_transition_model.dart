@@ -9,11 +9,17 @@ import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 /// **Overlap transitions** — the two clips overlap and blend during the
 /// transition, so the total output is **shortened** by
 /// [ClipTransition.duration] per transition (e.g. two 5s clips + 1s transition
-/// = 9s). These are [dissolve], [slide], [push] and [wipe].
+/// = 9s). Every type except [fadeToBlack] and [fadeToWhite] is one; see
+/// [isOverlap].
 ///
 /// **Dip transitions** — the dip happens within the clips' own time at the
 /// boundary, so the total duration is **unchanged**. These are [fadeToBlack]
-/// and [fadeToWhite].
+/// and [fadeToWhite]; see [isDip].
+///
+/// Below, *progress* is the transition's progress after its
+/// [ClipTransition.curve], from 0 (only the outgoing clip) to 1 (only the
+/// incoming clip). An elastic curve overshoots that range; movement follows
+/// the overshoot, while opacity, blur and flash stay within it.
 enum ClipTransitionType {
   /// A true cross-dissolve: the two clips overlap and the outgoing clip fades
   /// out while the incoming clip fades in (blend). Overlap transition.
@@ -41,10 +47,88 @@ enum ClipTransitionType {
   /// outgoing clip along the configured [ClipTransition.direction]. Overlap
   /// transition.
   wipe,
+
+  /// The camera flies into the outgoing clip, which zooms in from 1× to 1.5×,
+  /// while the incoming clip grows out of the center from nothing to full
+  /// size (its scale is the progress) and is fully opaque by 40 % progress.
+  /// Overlap transition.
+  zoomIn,
+
+  /// The reverse of [zoomIn]: the outgoing clip shrinks into the center (its
+  /// scale is one minus the progress) and fades out over the last 40 %,
+  /// uncovering the incoming clip, which zooms out from 1.5× to 1×. Overlap
+  /// transition.
+  zoomOut,
+
+  /// Both clips turn clockwise about the center: the outgoing clip from 0° to
+  /// 180°, the incoming clip from -180° to 0°, each zoomed just far enough to
+  /// keep the frame covered. The picture changes clip between 35 % and 65 %
+  /// progress. Overlap transition.
+  spin,
+
+  /// A [push] with motion blur along the configured
+  /// [ClipTransition.direction]. The blur is a box a quarter of the frame long
+  /// at mid-transition and fades to none at either end. Overlap transition.
+  whipPan,
+
+  /// The picture blurs out and back in, changing clip between 30 % and 70 %
+  /// progress. The blur radius is 5 % of the frame's shorter side at
+  /// mid-transition and fades to none at either end. Overlap transition.
+  blur,
+
+  /// A digital glitch: the picture cuts to the incoming clip halfway through,
+  /// while slices of it jump sideways — some showing the other clip — and its
+  /// red and blue channels split apart, most strongly at mid-transition. The
+  /// pattern changes 15 times a second. Overlap transition.
+  glitch,
+
+  /// A flash of white light: the picture cuts to the incoming clip at its
+  /// peak, halfway through, where it is fully white.
+  ///
+  /// It flashes once. Flashes closer than a third of a second apart, from
+  /// flash transitions or flashing video effects, exceed the three flashes a
+  /// second that WCAG 2.3.1 allows; see [flashes]. Overlap transition.
+  flash,
+
+  /// A circle reveal: the incoming clip appears inside a circle that grows
+  /// from the center until, at full progress, it reaches the corners. Overlap
+  /// transition.
+  iris,
+
+  /// The incoming clip stretches in from the edge opposite the configured
+  /// [ClipTransition.direction] while the outgoing clip is squeezed toward
+  /// it; together they always fill the frame. The incoming clip's share of
+  /// the frame is the progress. Overlap transition.
+  stretch;
+
+  /// Whether the transition dips through a color within the clips' own time
+  /// ([fadeToBlack], [fadeToWhite]), leaving the output duration unchanged.
+  bool get isDip => this == fadeToBlack || this == fadeToWhite;
+
+  /// Whether the two clips overlap and blend, shortening the output by the
+  /// transition's duration. Every type that is not [isDip].
+  bool get isOverlap => !isDip;
+
+  /// Whether [ClipTransition.direction] changes the transition.
+  bool get usesDirection =>
+      this == slide ||
+      this == push ||
+      this == wipe ||
+      this == whipPan ||
+      this == stretch;
+
+  /// Whether the transition flashes: [flash] flashes once, at its midpoint.
+  ///
+  /// More than three flashes in any second can trigger seizures (WCAG 2.3.1),
+  /// so space flashing transitions, and the flashing video effects near them,
+  /// accordingly.
+  bool get flashes => this == flash;
 }
 
 /// Direction for directional transitions ([ClipTransitionType.slide],
-/// [ClipTransitionType.push], [ClipTransitionType.wipe]).
+/// [ClipTransitionType.push], [ClipTransitionType.wipe],
+/// [ClipTransitionType.whipPan], [ClipTransitionType.stretch]); see
+/// [ClipTransitionType.usesDirection].
 ///
 /// The direction describes where the incoming content travels **toward** as
 /// the transition progresses. For example [left] means the incoming clip
@@ -80,13 +164,12 @@ enum ClipTransitionDirection {
 /// Clip transitions are currently supported on **Android** and
 /// **iOS/macOS** only. Other platforms ignore the field.
 ///
-/// **Note for overlap transitions** ([ClipTransitionType.dissolve],
-/// [ClipTransitionType.slide], [ClipTransitionType.push],
-/// [ClipTransitionType.wipe]): the two clips must show at the same size
-/// (which split clips from the same source always do). How each is stored
-/// does not matter — a recording kept landscape with a rotation flag blends
-/// with an upright clip of the same picture. When neighbouring clips differ
-/// in display size, the native side falls back to a hard cut.
+/// **Note for overlap transitions** (see [ClipTransitionType.isOverlap]): the
+/// two clips must show at the same size (which split clips from the same
+/// source always do). How each is stored does not matter — a recording kept
+/// landscape with a rotation flag blends with an upright clip of the same
+/// picture. When neighbouring clips differ in display size, the native side
+/// falls back to a hard cut.
 ///
 /// Example:
 /// ```dart
@@ -136,8 +219,8 @@ class ClipTransition {
   /// Defaults to [AnimationCurve.linear].
   final AnimationCurve curve;
 
-  /// The direction for directional transitions ([ClipTransitionType.slide],
-  /// [ClipTransitionType.push], [ClipTransitionType.wipe]).
+  /// The direction for directional transitions (see
+  /// [ClipTransitionType.usesDirection]).
   ///
   /// Ignored for non-directional transitions. Defaults to
   /// [ClipTransitionDirection.left].

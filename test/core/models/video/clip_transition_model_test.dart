@@ -98,4 +98,41 @@ void main() {
       });
     });
   });
+
+  group('ClipTransitionType', () {
+    test('every type round-trips through its map by name', () {
+      for (final type in ClipTransitionType.values) {
+        final restored = ClipTransition.fromMap(
+          ClipTransition(type: type).toMap(),
+        );
+        expect(restored.type, type);
+      }
+    });
+
+    test('only the fades to a color are dips', () {
+      expect(ClipTransitionType.values.where((type) => type.isDip), [
+        ClipTransitionType.fadeToBlack,
+        ClipTransitionType.fadeToWhite,
+      ]);
+      for (final type in ClipTransitionType.values) {
+        expect(type.isOverlap, !type.isDip, reason: type.name);
+      }
+    });
+
+    test('the moving transitions use the direction', () {
+      expect(ClipTransitionType.values.where((type) => type.usesDirection), [
+        ClipTransitionType.slide,
+        ClipTransitionType.push,
+        ClipTransitionType.wipe,
+        ClipTransitionType.whipPan,
+        ClipTransitionType.stretch,
+      ]);
+    });
+
+    test('only the flash flashes', () {
+      expect(ClipTransitionType.values.where((type) => type.flashes), [
+        ClipTransitionType.flash,
+      ]);
+    });
+  });
 }

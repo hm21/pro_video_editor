@@ -76,12 +76,9 @@ void main() {
   // Overlap transitions — blend the clips and shorten the output
   // ───────────────────────────────────────────────────────────
   group('Clip transitions — overlap (shorten timeline)', () {
-    const overlapTypes = [
-      ClipTransitionType.dissolve,
-      ClipTransitionType.slide,
-      ClipTransitionType.push,
-      ClipTransitionType.wipe,
-    ];
+    final overlapTypes = ClipTransitionType.values.where(
+      (type) => type.isOverlap,
+    );
 
     for (final type in overlapTypes) {
       testWidgets(type.name, (_) async {
@@ -103,10 +100,7 @@ void main() {
   // Dip transitions — dip through a color, duration unchanged
   // ───────────────────────────────────────────────────────────
   group('Clip transitions — dip (keep duration)', () {
-    const dipTypes = [
-      ClipTransitionType.fadeToBlack,
-      ClipTransitionType.fadeToWhite,
-    ];
+    final dipTypes = ClipTransitionType.values.where((type) => type.isDip);
 
     for (final type in dipTypes) {
       testWidgets(type.name, (_) async {
@@ -128,11 +122,9 @@ void main() {
   // Directional transitions × all directions
   // ───────────────────────────────────────────────────────────
   group('Clip transitions — directions', () {
-    const directionalTypes = [
-      ClipTransitionType.slide,
-      ClipTransitionType.push,
-      ClipTransitionType.wipe,
-    ];
+    final directionalTypes = ClipTransitionType.values.where(
+      (type) => type.usesDirection,
+    );
 
     for (final type in directionalTypes) {
       for (final dir in ClipTransitionDirection.values) {
