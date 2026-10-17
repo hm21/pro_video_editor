@@ -488,8 +488,15 @@ object ClipTransitionRenderer {
      * Blends two packed I420 frames [a] (outgoing) and [b] (incoming) according
      * to the transition [type]/[direction] at eased [p] (0 = fully outgoing,
      * 1 = fully incoming).
+     *
+     * Rows (and chunks of the dissolve) are blended on every core, and the
+     * type and direction are resolved once rather than per pixel: blending
+     * one row at a time and comparing both strings at every pixel, a 0.5 s
+     * slide between 1080×1920 clips took 6.5 s to pre-render on a Galaxy S26.
+     *
+     * Internal for the JVM tests.
      */
-    private fun blendFrame(
+    internal fun blendFrame(
         a: ByteArray, b: ByteArray, w: Int, h: Int,
         p: Double, type: String, direction: String,
     ): ByteArray {
@@ -497,10 +504,13 @@ object ClipTransitionRenderer {
         if (type == "dissolve") {
             // Linear per-component blend across all three planes.
             val inv = 1.0 - p
-            for (i in a.indices) {
-                val av = a[i].toInt() and 0xFF
-                val bv = b[i].toInt() and 0xFF
-                out[i] = (av * inv + bv * p).roundToInt().coerceIn(0, 255).toByte()
+            val chunk = 4096
+            ClipTransitionEffects.forEachRow((a.size + chunk - 1) / chunk) { part ->
+                for (i in part * chunk until min(a.size, (part + 1) * chunk)) {
+                    val av = a[i].toInt() and 0xFF
+                    val bv = b[i].toInt() and 0xFF
+                    out[i] = (av * inv + bv * p).roundToInt().coerceIn(0, 255).toByte()
+                }
             }
             return out
         }
@@ -509,15 +519,24 @@ object ClipTransitionRenderer {
         val ch = h / 2
         val ySize = w * h
         val cSize = cw * ch
+        val kind = when (type) {
+            "wipe" -> GeometricBlend.WIPE
+            "slide" -> GeometricBlend.SLIDE
+            "push" -> GeometricBlend.PUSH
+            else -> GeometricBlend.NONE
+        }
 
         // Y plane.
-        composePlane(a, b, out, 0, w, h, p, type, direction)
+        composePlane(a, b, out, 0, w, h, p, kind, direction)
         // U plane.
-        composePlane(a, b, out, ySize, cw, ch, p, type, direction)
+        composePlane(a, b, out, ySize, cw, ch, p, kind, direction)
         // V plane.
-        composePlane(a, b, out, ySize + cSize, cw, ch, p, type, direction)
+        composePlane(a, b, out, ySize + cSize, cw, ch, p, kind, direction)
         return out
     }
+
+    /** The geometric transitions [composePlane] draws. */
+    private enum class GeometricBlend { WIPE, SLIDE, PUSH, NONE }
 
     /**
      * Composes a single plane for geometric transitions (wipe/slide/push) by
@@ -526,66 +545,71 @@ object ClipTransitionRenderer {
      */
     private fun composePlane(
         a: ByteArray, b: ByteArray, out: ByteArray, offset: Int,
-        pw: Int, ph: Int, p: Double, type: String, direction: String,
+        pw: Int, ph: Int, p: Double, kind: GeometricBlend, direction: String,
     ) {
         val shiftX = (p * pw).roundToInt()
         val shiftY = (p * ph).roundToInt()
-        for (y in 0 until ph) {
+        val left = direction == "left"
+        val right = direction == "right"
+        val up = direction == "up"
+        val down = direction == "down"
+        ClipTransitionEffects.forEachRow(ph) { y ->
             for (x in 0 until pw) {
                 val o = offset + y * pw + x
                 var useIncoming = false
                 var sx = x
                 var sy = y
-                when (type) {
-                    "wipe" -> {
-                        useIncoming = when (direction) {
-                            "right" -> x < shiftX
-                            "left" -> x >= pw - shiftX
-                            "down" -> y < shiftY
-                            "up" -> y >= ph - shiftY
+                when (kind) {
+                    GeometricBlend.WIPE -> {
+                        useIncoming = when {
+                            right -> x < shiftX
+                            left -> x >= pw - shiftX
+                            down -> y < shiftY
+                            up -> y >= ph - shiftY
                             else -> x < shiftX
                         }
                     }
-                    "slide" -> {
+                    GeometricBlend.SLIDE -> {
                         // Incoming slides in over a stationary outgoing.
-                        when (direction) {
-                            "left" -> {
+                        when {
+                            left -> {
                                 val edge = pw - shiftX
                                 if (x >= edge) { useIncoming = true; sx = x - edge }
                             }
-                            "right" -> {
+                            right -> {
                                 if (x < shiftX) { useIncoming = true; sx = x + (pw - shiftX) }
                             }
-                            "up" -> {
+                            up -> {
                                 val edge = ph - shiftY
                                 if (y >= edge) { useIncoming = true; sy = y - edge }
                             }
-                            "down" -> {
+                            down -> {
                                 if (y < shiftY) { useIncoming = true; sy = y + (ph - shiftY) }
                             }
                         }
                     }
-                    "push" -> {
+                    GeometricBlend.PUSH -> {
                         // Both clips move together.
-                        when (direction) {
-                            "left" -> {
+                        when {
+                            left -> {
                                 if (x < pw - shiftX) { sx = x + shiftX }
                                 else { useIncoming = true; sx = x - (pw - shiftX) }
                             }
-                            "right" -> {
+                            right -> {
                                 if (x >= shiftX) { sx = x - shiftX }
                                 else { useIncoming = true; sx = x + (pw - shiftX) }
                             }
-                            "up" -> {
+                            up -> {
                                 if (y < ph - shiftY) { sy = y + shiftY }
                                 else { useIncoming = true; sy = y - (ph - shiftY) }
                             }
-                            "down" -> {
+                            down -> {
                                 if (y >= shiftY) { sy = y - shiftY }
                                 else { useIncoming = true; sy = y + (ph - shiftY) }
                             }
                         }
                     }
+                    GeometricBlend.NONE -> {}
                 }
                 sx = sx.coerceIn(0, pw - 1)
                 sy = sy.coerceIn(0, ph - 1)

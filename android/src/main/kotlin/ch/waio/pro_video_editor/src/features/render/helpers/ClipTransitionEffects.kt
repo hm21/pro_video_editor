@@ -284,9 +284,10 @@ internal object ClipTransitionEffects {
     /**
      * Runs [body] for every index below [count] across the CPU's cores. Each
      * call writes only its own row (or column, or chunk), so they never touch
-     * the same bytes.
+     * the same bytes. [ClipTransitionRenderer] blends its own transitions
+     * with it too.
      */
-    private inline fun forEachRow(count: Int, crossinline body: (Int) -> Unit) {
+    internal inline fun forEachRow(count: Int, crossinline body: (Int) -> Unit) {
         IntStream.range(0, count).parallel().forEach { body(it) }
     }
 
