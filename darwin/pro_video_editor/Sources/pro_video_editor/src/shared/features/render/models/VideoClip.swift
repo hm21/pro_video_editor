@@ -9,6 +9,10 @@ internal struct VideoClip: Sendable {
   /// Equalizer of this clip's audio. `nil` = unchanged.
   let equalizer: AudioEqualizer?
   let playbackSpeed: Float?
+  /// A speed that changes while the clip plays, instead of `playbackSpeed`.
+  /// Its positions run along this clip's own window, so a clip trimmed to part
+  /// of itself carries the matching `SpeedRamp.cropped(from:to:)`.
+  let speedRamp: SpeedRamp?
   let reverseVideo: Bool
   /// Transition into the next clip (nil = hard cut). On the **last** clip it
   /// wraps into the first clip, making the track loop seamlessly (handled by the
@@ -50,6 +54,7 @@ internal struct VideoClip: Sendable {
     volume: Float? = nil,
     equalizer: AudioEqualizer? = nil,
     playbackSpeed: Float? = nil,
+    speedRamp: SpeedRamp? = nil,
     reverseVideo: Bool = false,
     transition: ClipTransitionConfig? = nil,
     timelineStartUs: Int64? = nil,
@@ -65,6 +70,7 @@ internal struct VideoClip: Sendable {
     self.volume = volume
     self.equalizer = equalizer
     self.playbackSpeed = playbackSpeed
+    self.speedRamp = speedRamp
     self.reverseVideo = reverseVideo
     self.transition = transition
     self.timelineStartUs = timelineStartUs
@@ -82,9 +88,12 @@ internal struct VideoClip: Sendable {
   /// `sourceShiftUs` is how much later in the clip's current file a time in
   /// `inputPath` lies: non-zero only for a pre-transcode of part of it, whose
   /// timeline starts later. A re-trim of the same file leaves it at zero.
+  ///
+  /// The speed ramp is kept as it is, which suits a new file showing the same
+  /// window; a re-trim to part of the window passes the cropped one.
   func reading(
     _ inputPath: String, startUs: Int64?, endUs: Int64?, frameRateOverride: Float? = nil,
-    sourceShiftUs: Int64 = 0
+    sourceShiftUs: Int64 = 0, speedRamp: SpeedRamp?? = nil
   ) -> VideoClip {
     VideoClip(
       inputPath: inputPath,
@@ -93,6 +102,7 @@ internal struct VideoClip: Sendable {
       volume: volume,
       equalizer: equalizer,
       playbackSpeed: playbackSpeed,
+      speedRamp: speedRamp ?? self.speedRamp,
       reverseVideo: reverseVideo,
       transition: transition,
       timelineStartUs: timelineStartUs,
@@ -115,6 +125,7 @@ internal struct VideoClip: Sendable {
       volume: (clipMap["volume"] as? NSNumber)?.floatValue,
       equalizer: AudioEqualizer.from(clipMap["equalizer"]),
       playbackSpeed: (clipMap["playbackSpeed"] as? NSNumber)?.floatValue,
+      speedRamp: SpeedRamp.fromArguments(clipMap["speedRamp"]),
       reverseVideo: clipMap["reverseVideo"] as? Bool ?? false,
       transition: ClipTransitionConfig.fromArguments(
         clipMap["transition"] as? [String: Any]
@@ -130,5 +141,44 @@ internal struct VideoClip: Sendable {
         clipMap["stabilization"] as? [String: Any]
       )
     )
+  }
+}
+
+extension VideoClip {
+  /// Whether the clip plays at anything other than its own speed.
+  var changesSpeed: Bool {
+    speedRamp != nil || (playbackSpeed.map { $0 > 0 && $0 != 1 } ?? false)
+  }
+
+  /// The constant speed that plays `sourceDurationUs` of this clip in the time
+  /// it takes: `playbackSpeed`, or a speed ramp's average.
+  func averageSpeed() -> Float? {
+    guard let speedRamp else { return playbackSpeed }
+    return Float(1 / speedRamp.durationFactor)
+  }
+
+  /// The speed the last `outputUs` of this clip play at on average, for an
+  /// overlap blend that takes them; `playbackSpeed` without a speed ramp.
+  func tailSpeed(outputUs: Int64, sourceDurationUs: Int64) -> Float? {
+    guard let speedRamp, outputUs > 0 else { return playbackSpeed }
+    let sourceUs = speedRamp.tailSourceUs(outputUs: outputUs, sourceDurationUs: sourceDurationUs)
+    return Float(Double(sourceUs) / Double(outputUs))
+  }
+
+  /// The speed the first `outputUs` of this clip play at on average, for an
+  /// overlap blend that takes them; `playbackSpeed` without a speed ramp.
+  func headSpeed(outputUs: Int64, sourceDurationUs: Int64) -> Float? {
+    guard let speedRamp, outputUs > 0 else { return playbackSpeed }
+    let sourceUs = speedRamp.headSourceUs(outputUs: outputUs, sourceDurationUs: sourceDurationUs)
+    return Float(Double(sourceUs) / Double(outputUs))
+  }
+
+  /// This clip's speed ramp for the part of its window from `fromUs` to
+  /// `toUs` of source, counted from its start; `nil` without a speed ramp.
+  func croppedSpeedRamp(fromUs: Int64, toUs: Int64, ofSourceUs sourceDurationUs: Int64) -> SpeedRamp? {
+    guard let speedRamp, sourceDurationUs > 0 else { return nil }
+    return speedRamp.cropped(
+      from: Double(fromUs) / Double(sourceDurationUs),
+      to: Double(toUs) / Double(sourceDurationUs))
   }
 }

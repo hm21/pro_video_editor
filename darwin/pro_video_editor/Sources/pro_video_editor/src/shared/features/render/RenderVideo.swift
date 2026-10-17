@@ -732,7 +732,7 @@ class RenderVideo {
     }
     func plannedOutputUs(_ clip: VideoClip) async -> Int64 {
       ClipTransitionGeometry.outputDurationUs(
-        sourceDurationUs: await plannedSourceUs(clip), speed: clip.playbackSpeed)
+        sourceDurationUs: await plannedSourceUs(clip), speed: clip.averageSpeed())
     }
 
     // Each blend is a full export, so on a long timeline cut short by the
@@ -748,7 +748,10 @@ class RenderVideo {
         timeline.append(
           ClipTransitionGeometry.TimelineClip(
             sourceDurationUs: await plannedSourceUs(clip),
-            speed: clip.playbackSpeed,
+            // A speed ramp lays out at its average speed: good enough to tell
+            // which blends start past the end, which only a few milliseconds
+            // could change.
+            speed: clip.averageSpeed(),
             blendDurationUs: blends ? clip.transition?.durationUs : nil))
       }
       pastEnd = ClipTransitionGeometry.blendsPastEnd(
@@ -808,8 +811,8 @@ class RenderVideo {
           outgoingSourceDurationUs: curDur,
           incomingSourceDurationUs: nextDur,
           transitionDurationUs: t!.durationUs,
-          outgoingSpeed: current.playbackSpeed,
-          incomingSpeed: next!.playbackSpeed)
+          outgoingSpeed: current.tailSpeed(outputUs: t!.durationUs, sourceDurationUs: curDur),
+          incomingSpeed: next!.headSpeed(outputUs: t!.durationUs, sourceDurationUs: nextDur))
       else {
         PluginLog.print("⚠️ Transition: not enough content at boundary \(i); hard cut")
         appendClip(clearedOverlap(current))
@@ -828,14 +831,19 @@ class RenderVideo {
         appendClip(
           outgoing.reading(
             current.inputPath, startUs: curStart, endUs: curEnd - tailSrc,
-            frameRateOverride: current.frameRateOverride))
+            frameRateOverride: current.frameRateOverride,
+            speedRamp: current.croppedSpeedRamp(
+              fromUs: 0, toUs: curDur - tailSrc, ofSourceUs: curDur)))
         appendClip(
           outgoing.reading(
             current.inputPath, startUs: curEnd - tailSrc, endUs: curEnd,
-            frameRateOverride: current.frameRateOverride))
+            frameRateOverride: current.frameRateOverride,
+            speedRamp: current.croppedSpeedRamp(
+              fromUs: curDur - tailSrc, toUs: curDur, ofSourceUs: curDur)))
         work[i + 1] = next!.reading(
           next!.inputPath, startUs: nextStart + headSrc, endUs: nextEnd,
-          frameRateOverride: next!.frameRateOverride)
+          frameRateOverride: next!.frameRateOverride,
+          speedRamp: next!.croppedSpeedRamp(fromUs: headSrc, toUs: nextDur, ofSourceUs: nextDur))
         i += 1
         continue
       }
@@ -870,6 +878,8 @@ class RenderVideo {
             inputPath: current.inputPath, startUs: curStart, endUs: curEnd - tailSrc,
             volume: current.volume, equalizer: current.equalizer,
             playbackSpeed: current.playbackSpeed,
+            speedRamp: current.croppedSpeedRamp(
+              fromUs: 0, toUs: curDur - tailSrc, ofSourceUs: curDur),
             reverseVideo: false, transition: nil, chromaKey: current.chromaKey,
             frameRateOverride: current.frameRateOverride,
             stabilization: current.stabilization))
@@ -884,6 +894,7 @@ class RenderVideo {
           inputPath: next!.inputPath, startUs: nextStart + headSrc, endUs: nextEnd,
           volume: next!.volume, equalizer: next!.equalizer,
           playbackSpeed: next!.playbackSpeed,
+          speedRamp: next!.croppedSpeedRamp(fromUs: headSrc, toUs: nextDur, ofSourceUs: nextDur),
           reverseVideo: next!.reverseVideo, transition: next!.transition,
           chromaKey: next!.chromaKey, frameRateOverride: next!.frameRateOverride,
           stabilization: next!.stabilization)
@@ -905,26 +916,40 @@ class RenderVideo {
       let singleClip = lastIdx == 0
 
       let firstStart = first.startUs ?? 0
+      let firstDur = await sourceEndUs(first) - firstStart
       let lastStart = last.startUs ?? 0
       let lastEnd = await sourceEndUs(last)
+      let lastDur = lastEnd - lastStart
 
       // Single-clip loops carve head and tail from the same source, so they need
       // the stricter head+tail<L guard; multi-clip loops keep two independent
       // sources and reuse the ordinary overlap geometry.
       let plan: ClipTransitionGeometry.OverlapPlan?
-      if singleClip {
+      var headSpeed = first.playbackSpeed
+      var tailSpeed = last.playbackSpeed
+      if singleClip, let ramp = last.speedRamp {
+        // A ramp plays its head and its tail at different speeds; the blend
+        // takes at most half of the clip's output, like `planWrap`.
+        let blendUs = min(wrap.durationUs, ramp.outputDurationUs(sourceDurationUs: lastDur) / 2)
+        headSpeed = last.headSpeed(outputUs: blendUs, sourceDurationUs: lastDur)
+        tailSpeed = last.tailSpeed(outputUs: blendUs, sourceDurationUs: lastDur)
         plan = ClipTransitionGeometry.planWrap(
-          sourceDurationUs: lastEnd - lastStart,
+          sourceDurationUs: lastDur, transitionDurationUs: blendUs,
+          tailSpeed: tailSpeed, headSpeed: headSpeed)
+      } else if singleClip {
+        plan = ClipTransitionGeometry.planWrap(
+          sourceDurationUs: lastDur,
           transitionDurationUs: wrap.durationUs,
           speed: last.playbackSpeed)
       } else {
-        let firstEnd = await sourceEndUs(first)
+        headSpeed = first.headSpeed(outputUs: wrap.durationUs, sourceDurationUs: firstDur)
+        tailSpeed = last.tailSpeed(outputUs: wrap.durationUs, sourceDurationUs: lastDur)
         plan = ClipTransitionGeometry.planOverlap(
-          outgoingSourceDurationUs: lastEnd - lastStart,
-          incomingSourceDurationUs: firstEnd - firstStart,
+          outgoingSourceDurationUs: lastDur,
+          incomingSourceDurationUs: firstDur,
           transitionDurationUs: wrap.durationUs,
-          outgoingSpeed: last.playbackSpeed,
-          incomingSpeed: first.playbackSpeed)
+          outgoingSpeed: tailSpeed,
+          incomingSpeed: headSpeed)
       }
 
       // Where the wrap blend would start: after every clip, less the head it
@@ -936,9 +961,9 @@ class RenderVideo {
         let wrapStartUs =
           timelineUs
           - ClipTransitionGeometry.outputDurationUs(
-            sourceDurationUs: plan.incomingHeadSourceUs, speed: first.playbackSpeed)
+            sourceDurationUs: plan.incomingHeadSourceUs, speed: headSpeed)
           - ClipTransitionGeometry.outputDurationUs(
-            sourceDurationUs: plan.outgoingTailSourceUs, speed: last.playbackSpeed)
+            sourceDurationUs: plan.outgoingTailSourceUs, speed: tailSpeed)
         wrapPastEnd = wrapStartUs >= endUs
       }
 
@@ -949,7 +974,9 @@ class RenderVideo {
         PluginLog.print("✂️ Loop wrap: starts after the render end, not rendered")
         result[0] = first.reading(
           first.inputPath, startUs: firstStart + plan.incomingHeadSourceUs,
-          endUs: first.endUs, frameRateOverride: first.frameRateOverride)
+          endUs: first.endUs, frameRateOverride: first.frameRateOverride,
+          speedRamp: first.croppedSpeedRamp(
+            fromUs: plan.incomingHeadSourceUs, toUs: firstDur, ofSourceUs: firstDur))
       } else if let plan = plan {
         let tailSrc = plan.outgoingTailSourceUs
         let headSrc = plan.incomingHeadSourceUs
@@ -981,20 +1008,28 @@ class RenderVideo {
             result[0] = VideoClip(
               inputPath: first.inputPath, startUs: firstStart + headSrc,
               endUs: lastEnd - tailSrc, volume: first.volume, equalizer: first.equalizer,
-              playbackSpeed: first.playbackSpeed, reverseVideo: false, transition: nil,
+              playbackSpeed: first.playbackSpeed,
+              speedRamp: first.croppedSpeedRamp(
+                fromUs: headSrc, toUs: lastDur - tailSrc, ofSourceUs: lastDur),
+              reverseVideo: false, transition: nil,
               chromaKey: first.chromaKey, frameRateOverride: first.frameRateOverride,
               stabilization: first.stabilization)
           } else {
             result[0] = VideoClip(
               inputPath: first.inputPath, startUs: firstStart + headSrc,
               endUs: first.endUs, volume: first.volume, equalizer: first.equalizer,
-              playbackSpeed: first.playbackSpeed, reverseVideo: false,
+              playbackSpeed: first.playbackSpeed,
+              speedRamp: first.croppedSpeedRamp(
+                fromUs: headSrc, toUs: firstDur, ofSourceUs: firstDur),
+              reverseVideo: false,
               transition: first.transition, chromaKey: first.chromaKey,
               frameRateOverride: first.frameRateOverride, stabilization: first.stabilization)
             result[lastIdx] = VideoClip(
               inputPath: last.inputPath, startUs: last.startUs, endUs: lastEnd - tailSrc,
               volume: last.volume, equalizer: last.equalizer,
               playbackSpeed: last.playbackSpeed,
+              speedRamp: last.croppedSpeedRamp(
+                fromUs: 0, toUs: lastDur - tailSrc, ofSourceUs: lastDur),
               reverseVideo: false, transition: nil, chromaKey: last.chromaKey,
               frameRateOverride: last.frameRateOverride, stabilization: last.stabilization)
           }
@@ -1031,6 +1066,7 @@ class RenderVideo {
     return VideoClip(
       inputPath: clip.inputPath, startUs: clip.startUs, endUs: clip.endUs,
       volume: clip.volume, equalizer: clip.equalizer, playbackSpeed: clip.playbackSpeed,
+      speedRamp: clip.speedRamp,
       reverseVideo: clip.reverseVideo, transition: nil, chromaKey: clip.chromaKey,
       frameRateOverride: clip.frameRateOverride, stabilization: clip.stabilization)
   }

@@ -9,6 +9,7 @@ import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.SonicAudioProcessor
+import androidx.media3.common.audio.SpeedChangingAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.Presentation
@@ -23,6 +24,7 @@ import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAudioVisualizerConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerCensorConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
+import ch.waio.pro_video_editor.src.features.render.models.changesSpeed
 import ch.waio.pro_video_editor.src.features.thumbnail.SequentialFrameDecoder
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
@@ -327,7 +329,8 @@ class VideoSequenceBuilder(
             totalDurationUs += VideoTimelineDurationCalculator.renderedClipDurationUs(
                 sourceDurationUs = clipDurationUs,
                 clipPlaybackSpeed = clip.playbackSpeed,
-                globalPlaybackSpeed = globalPlaybackSpeed
+                globalPlaybackSpeed = globalPlaybackSpeed,
+                clipSpeedRamp = clip.speedRamp,
             )
         }
         Log.d(
@@ -478,6 +481,7 @@ class VideoSequenceBuilder(
      */
     private fun clipOutputDurationUs(clip: VideoClip): Long {
         val src = clipSourceDurationUs(clip)
+        clip.speedRamp?.let { return it.outputDurationUs(src) }
         val speed = clip.playbackSpeed?.takeIf { it > 0f } ?: 1.0f
         return (src / speed).toLong()
     }
@@ -629,7 +633,11 @@ class VideoSequenceBuilder(
         // rate cap all time themselves on it, as on iOS and in the preview.
         // The render-wide speed and the cap lead the global effects below.
         val clipSpeed = clip.playbackSpeed?.takeIf { it > 0f && it != 1.0f }
-        if (clipSpeed != null) {
+        val rampSpeed = clip.speedRamp?.let { RampSpeedProvider(it, clipSourceDurationUs(clip)) }
+        if (rampSpeed != null) {
+            Log.d(RENDER_TAG, "Clip $index speed ramp: ${clip.speedRamp?.steps?.size} step(s)")
+            clipVideoEffects += SpeedChangeEffect(rampSpeed)
+        } else if (clipSpeed != null) {
             Log.d(RENDER_TAG, "Clip $index playback speed: ${clipSpeed}x")
             clipVideoEffects += SpeedChangeEffect(clipSpeed)
         }
@@ -637,7 +645,7 @@ class VideoSequenceBuilder(
         // Stabilization first: its keyframes are keyed by source frame, so it
         // must see the frames as decoded, before anything moves or crops them.
         clip.stabilization?.let { stabilization ->
-            if (clipSpeed != null || clip.reverseVideo) {
+            if (clip.changesSpeed || clip.reverseVideo) {
                 Log.w(
                     RENDER_TAG,
                     "Clip $index: stabilization is not supported with a playback " +
@@ -788,13 +796,17 @@ class VideoSequenceBuilder(
         }
 
         // Per-clip playback speed on this clip's own audio; the video's
-        // SpeedChangeEffect leads the effects above.
-        val finalAudioEffects: List<AudioProcessor> = if (clipSpeed != null) {
-            perClipAudioProcessors.apply {
+        // SpeedChangeEffect leads the effects above. A constant speed keeps
+        // the pitch; under a speed ramp the pitch follows the speed, like a
+        // tape, as on iOS.
+        val finalAudioEffects: List<AudioProcessor> = when {
+            rampSpeed != null -> perClipAudioProcessors.apply {
+                add(SpeedChangingAudioProcessor(rampSpeed))
+            }
+            clipSpeed != null -> perClipAudioProcessors.apply {
                 add(SonicAudioProcessor().apply { setSpeed(clipSpeed) })
             }
-        } else {
-            perClipAudioProcessors
+            else -> perClipAudioProcessors
         }
 
         // Attach the dip (fade-to-black/white) overlay LAST so the entire
@@ -872,6 +884,7 @@ class VideoSequenceBuilder(
                 sourceEndUs = clip.endUs ?: mediaInfoExtractor.getVideoDuration(clip.inputPath),
                 playbackSpeed = clip.playbackSpeed,
                 reverseVideo = clip.reverseVideo,
+                speedRamp = clip.speedRamp,
             )
         }
 
@@ -888,7 +901,13 @@ class VideoSequenceBuilder(
             if (trim == null) {
                 Log.d(RENDER_TAG, "Skipping clip (outside global trim range): ${clip.inputPath}")
             } else {
-                result.add(clip.copy(startUs = trim.sourceStartUs, endUs = trim.sourceEndUs))
+                result.add(
+                    clip.copy(
+                        startUs = trim.sourceStartUs,
+                        endUs = trim.sourceEndUs,
+                        speedRamp = trim.speedRamp,
+                    )
+                )
                 Log.d(
                     RENDER_TAG,
                     "Added trimmed clip: start=${trim.sourceStartUs / 1000}ms, " +

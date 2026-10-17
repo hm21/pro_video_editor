@@ -132,6 +132,31 @@ internal object ClipTransitionGeometry {
     }
 
     /**
+     * [planWrap] for a clip whose head and tail play at different speeds, as
+     * under a speed ramp: [tailSpeed] and [headSpeed] are the average speeds of
+     * the stretches a blend of [transitionDurationUs] takes from either end,
+     * which the caller has already capped at half the clip's output.
+     *
+     * Returns null when no body would remain between head and tail.
+     */
+    fun planWrap(
+        sourceDurationUs: Long,
+        transitionDurationUs: Long,
+        tailSpeed: Float?,
+        headSpeed: Float?,
+    ): OverlapPlan? {
+        if (sourceDurationUs <= 0L || transitionDurationUs <= 0L) return null
+        val tailSourceUs = (transitionDurationUs * validSpeedOrOne(tailSpeed)).roundToLong()
+        val headSourceUs = (transitionDurationUs * validSpeedOrOne(headSpeed)).roundToLong()
+        if (sourceDurationUs - tailSourceUs - headSourceUs <= 0L) return null
+        return OverlapPlan(
+            outputDurationUs = transitionDurationUs,
+            outgoingTailSourceUs = tailSourceUs,
+            incomingHeadSourceUs = headSourceUs,
+        )
+    }
+
+    /**
      * One clip as the overlap pre-render lays it out.
      *
      * @property sourceDurationUs Trimmed source duration of the clip.

@@ -177,7 +177,7 @@ internal enum AudioReverser {
 
   // MARK: - Private helpers
 
-  private static func readPcm(
+  static func readPcm(
     from asset: AVAsset,
     track: AVAssetTrack,
     start: CMTime,
@@ -239,7 +239,7 @@ internal enum AudioReverser {
     return tmp.appendingPathComponent(name)
   }
 
-  private static func writeCAF(
+  static func writeCAF(
     pcmBytes: [UInt8],
     to outputURL: URL,
     sampleRate: Int,

@@ -73,7 +73,7 @@ internal enum BitrateCapPolicy {
       && clip.endUs == nil
       && (clip.volume == nil || clip.volume == 1.0)
       && clip.equalizer == nil
-      && (clip.playbackSpeed == nil || clip.playbackSpeed == 1.0)
+      && !clip.changesSpeed
       && !clip.reverseVideo
       && clip.chromaKey == nil
       && clip.stabilization == nil

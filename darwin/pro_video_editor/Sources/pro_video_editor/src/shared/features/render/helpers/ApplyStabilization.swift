@@ -32,7 +32,7 @@ func computeStabilizationWindows(
   var windows: [StabilizationWindow] = []
   for (index, clip) in videoClips.enumerated() {
     guard index < clipInstructions.count, let config = clip.stabilization else { continue }
-    if clip.reverseVideo || (clip.playbackSpeed.map { $0 > 0 && $0 != 1 } ?? false) {
+    if clip.reverseVideo || clip.changesSpeed {
       PluginLog.print(
         "[\(Tags.render)] ⚠️ Clip \(index): stabilization is not supported with a playback speed or reverse yet and is skipped"
       )

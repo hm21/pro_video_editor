@@ -214,20 +214,24 @@ internal class VideoSequenceBuilder {
         PluginLog.print("⏪ Clip \(index) reversed with \(sourceRanges.count) frame slice(s)")
       }
 
-      // Apply per-clip playback speed by scaling the inserted segment.
-      // The global config.playbackSpeed is still applied via
-      // composition instructions in `applyPlaybackSpeed` and is multiplicative.
-      let effectiveDuration: CMTime
-      if let speed = clip.playbackSpeed, speed > 0, speed != 1.0 {
-        let scaled = CMTimeMultiplyByFloat64(clipDuration, multiplier: 1.0 / Float64(speed))
-        let insertedRange = CMTimeRange(start: insertStart, duration: clipDuration)
-        compositionVideoTrack.scaleTimeRange(insertedRange, toDuration: scaled)
-        effectiveDuration = scaled
+      // Apply per-clip playback speed by scaling the inserted segment, once
+      // for a constant speed and once per step for a speed ramp. The global
+      // config.playbackSpeed is still applied via composition instructions in
+      // `applyPlaybackSpeed` and is multiplicative.
+      let speedScales = Self.speedScales(for: clip, at: insertStart, duration: clipDuration)
+      for scale in speedScales {
+        compositionVideoTrack.scaleTimeRange(scale.range, toDuration: scale.duration)
+      }
+      let effectiveDuration =
+        speedScales.isEmpty
+        ? clipDuration : speedScales.reduce(CMTime.zero) { CMTimeAdd($0, $1.duration) }
+      if !speedScales.isEmpty {
+        let speed =
+          clip.speedRamp.map { "ramp of \($0.steps.count) step(s)" }
+          ?? "\(clip.playbackSpeed ?? 1)×"
         PluginLog.print(
-          "⏩ Clip \(index) playback speed: \(speed)× (duration \(String(format: "%.2f", clipDuration.seconds))s → \(String(format: "%.2f", scaled.seconds))s)"
+          "⏩ Clip \(index) playback speed: \(speed) (duration \(String(format: "%.2f", clipDuration.seconds))s → \(String(format: "%.2f", effectiveDuration.seconds))s)"
         )
-      } else {
-        effectiveDuration = clipDuration
       }
 
       // Store instruction for this clip segment
@@ -247,7 +251,7 @@ internal class VideoSequenceBuilder {
       // Add audio to shared track if enabled
       if enableAudio,
         let audioTrack = try? await MediaInfoExtractor.loadAudioTrack(from: asset),
-        let sharedAudioTrack = sharedAudioTrack
+        let clipAudioTrack = sharedAudioTrack
       {
         PluginLog.print("🔊 Processing audio for clip \(index)...")
         PluginLog.print("   ✅ Audio track loaded from asset")
@@ -258,7 +262,27 @@ internal class VideoSequenceBuilder {
         PluginLog.print("      Format: \(audioTrack.mediaType)")
 
         do {
-          if clip.reverseVideo {
+          if let ramp = clip.speedRamp,
+            let rendered = await Self.rampAudio(
+              for: clip,
+              ramp: ramp,
+              sourceRange: clipTimeRange,
+              outputDuration: effectiveDuration,
+              tempURLs: &reversedAudioTempURLs)
+          {
+            // Already plays at the ramp's speeds, so it goes in unscaled. A
+            // track holds its asset weakly, so the asset has to outlive the
+            // insert.
+            try withExtendedLifetime(rendered.asset) {
+              try clipAudioTrack.insertTimeRange(
+                CMTimeRange(
+                  start: rendered.track.timeRange.start,
+                  duration: CMTimeMinimum(rendered.track.timeRange.duration, effectiveDuration)),
+                of: rendered.track,
+                at: insertStart)
+            }
+            PluginLog.print("   ✅ Speed-ramp audio inserted (\(rendered.duration.seconds)s)")
+          } else if clip.reverseVideo {
             // True PCM-level reversal: decode → reverse samples → CAF/PCM.
             // Keep the reversed audio at its decoded duration; padding it to
             // the video duration changes the exported audio timing on iOS.
@@ -282,14 +306,13 @@ internal class VideoSequenceBuilder {
                   start: reversedTrackRange.start,
                   duration: clampedDuration
                 )
-                try sharedAudioTrack.insertTimeRange(
+                try clipAudioTrack.insertTimeRange(
                   reversedRange,
                   of: reversedTrack,
                   at: insertStart
                 )
-                if let speed = clip.playbackSpeed, speed > 0, speed != 1.0 {
-                  let insertedRange = CMTimeRange(start: insertStart, duration: clipDuration)
-                  sharedAudioTrack.scaleTimeRange(insertedRange, toDuration: effectiveDuration)
+                for scale in speedScales {
+                  clipAudioTrack.scaleTimeRange(scale.range, toDuration: scale.duration)
                 }
                 PluginLog.print(
                   "   ✅ Reversed audio inserted (CAF/PCM, \(reversed.duration.seconds)s)"
@@ -301,16 +324,15 @@ internal class VideoSequenceBuilder {
           } else {
             var audioInsertTime = insertStart
             for sourceRange in sourceRanges {
-              try sharedAudioTrack.insertTimeRange(
+              try clipAudioTrack.insertTimeRange(
                 sourceRange,
                 of: audioTrack,
                 at: audioInsertTime
               )
               audioInsertTime = CMTimeAdd(audioInsertTime, sourceRange.duration)
             }
-            if let speed = clip.playbackSpeed, speed > 0, speed != 1.0 {
-              let insertedAudioRange = CMTimeRange(start: insertStart, duration: clipDuration)
-              sharedAudioTrack.scaleTimeRange(insertedAudioRange, toDuration: effectiveDuration)
+            for scale in speedScales {
+              clipAudioTrack.scaleTimeRange(scale.range, toDuration: scale.duration)
             }
             PluginLog.print("   ✅ Audio inserted into SHARED track!")
           }
@@ -366,6 +388,101 @@ internal class VideoSequenceBuilder {
       clipInstructions: clipInstructions,
       reversedAudioTempURLs: reversedAudioTempURLs
     )
+  }
+
+  /// One `scaleTimeRange` call: the composition range a stretch of a clip
+  /// takes at its own speed, and the duration it plays for.
+  struct SpeedScale: Equatable {
+    let range: CMTimeRange
+    let duration: CMTime
+  }
+
+  /// The `scaleTimeRange` calls that play `clip`'s segment, inserted at
+  /// `insertStart` for `duration`, at the clip's speed: one for a constant
+  /// `playbackSpeed`, one per step for a speed ramp, and none at the clip's
+  /// own speed.
+  ///
+  /// The calls come last stretch first: scaling a range moves everything
+  /// after it, so this order leaves the range of every call still to come
+  /// where it was computed. Applying the same calls to the video and the audio
+  /// track keeps them in step.
+  static func speedScales(
+    for clip: VideoClip, at insertStart: CMTime, duration: CMTime
+  ) -> [SpeedScale] {
+    guard duration > .zero else { return [] }
+    if let ramp = clip.speedRamp {
+      let fine = CMTimeConvertScale(duration, timescale: 1_000_000, method: .roundHalfAwayFromZero)
+      func offset(_ position: Double) -> CMTime {
+        position >= 1 ? duration : CMTimeMultiplyByFloat64(fine, multiplier: max(0, position))
+      }
+      var scales: [SpeedScale] = []
+      for step in ramp.steps.reversed() {
+        let start = offset(step.start)
+        let length = CMTimeSubtract(offset(step.end), start)
+        guard length > .zero else { continue }
+        scales.append(
+          SpeedScale(
+            range: CMTimeRange(start: CMTimeAdd(insertStart, start), duration: length),
+            duration: CMTimeMultiplyByFloat64(length, multiplier: 1.0 / step.speed)))
+      }
+      return scales
+    }
+    guard let speed = clip.playbackSpeed, speed > 0, speed != 1.0 else { return [] }
+    return [
+      SpeedScale(
+        range: CMTimeRange(start: insertStart, duration: duration),
+        duration: CMTimeMultiplyByFloat64(duration, multiplier: 1.0 / Float64(speed)))
+    ]
+  }
+
+  /// The sound of [clip] under its speed [ramp], rendered to play for
+  /// [outputDuration] by `RampAudioRenderer`, with every temporary file it
+  /// wrote appended to [tempURLs]. The ramp runs along the clip as it plays,
+  /// so a reversed clip's sound is reversed first.
+  ///
+  /// AVFoundation drops tens of milliseconds around each time-scaled audio
+  /// edit, and a ramp has one edit per step; the rendered sound needs none.
+  /// `nil` when the clip has no sound or a step fails, and the caller scales
+  /// the source's sound instead.
+  private static func rampAudio(
+    for clip: VideoClip,
+    ramp: SpeedRamp,
+    sourceRange: CMTimeRange,
+    outputDuration: CMTime,
+    tempURLs: inout [URL]
+  ) async -> (asset: AVAsset, track: AVAssetTrack, duration: CMTime)? {
+    var inputPath = clip.inputPath
+    var start = sourceRange.start
+    if clip.reverseVideo {
+      guard
+        let reversed = await AudioReverser.reverse(
+          inputPath: clip.inputPath,
+          startTime: sourceRange.start,
+          endTime: CMTimeRangeGetEnd(sourceRange))
+      else { return nil }
+      tempURLs.append(reversed.outputURL)
+      inputPath = reversed.outputURL.path
+      start = .zero
+    }
+    guard
+      let rendered = await RampAudioRenderer.render(
+        inputPath: inputPath,
+        startTime: start,
+        endTime: CMTimeAdd(start, sourceRange.duration),
+        ramp: ramp,
+        outputDuration: outputDuration)
+    else { return nil }
+    tempURLs.append(rendered.outputURL)
+
+    let asset = AVURLAsset(url: rendered.outputURL)
+    let tracks: [AVAssetTrack]
+    if #available(macOS 12.0, iOS 15.0, *) {
+      tracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
+    } else {
+      tracks = asset.tracks(withMediaType: .audio)
+    }
+    guard let track = tracks.first else { return nil }
+    return (asset, track, rendered.duration)
   }
 
   /// The part of a clip's source the composition plays: its own range,
@@ -485,8 +602,8 @@ internal struct VideoSequenceResult {
   let renderSize: CGSize
   let frameRate: Float
   let clipInstructions: [ClipInstruction]
-  /// Temporary audio files created by AudioReverser for reversed clips.
-  /// Must be deleted after the export session finishes.
+  /// Temporary audio files written for reversed clips and for clips under a
+  /// speed ramp. Must be deleted after the export session finishes.
   let reversedAudioTempURLs: [URL]
 }
 

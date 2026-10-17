@@ -134,8 +134,11 @@ class VideoLayer {
       'videoSegments when you need clip transitions.',
     );
     assert(
-      clips.every((c) => c.playbackSpeed == null && !c.reverseVideo),
-      'playbackSpeed and reverseVideo are not supported within a '
+      clips.every(
+        (c) =>
+            c.playbackSpeed == null && c.speedRamp == null && !c.reverseVideo,
+      ),
+      'playbackSpeed, speedRamp and reverseVideo are not supported within a '
       'VideoComposition. Pre-render them into the source, or use '
       'videoSegments.',
     );

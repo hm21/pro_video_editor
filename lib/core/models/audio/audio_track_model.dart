@@ -13,8 +13,8 @@ import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 ///
 /// [startTime] and [endTime] are measured on the exported video: zero is its
 /// first frame, after `VideoRenderData.startTime` has trimmed the front and
-/// each segment's `playbackSpeed` has been applied. The track itself always
-/// plays at its own speed.
+/// each segment's `playbackSpeed` or `speedRamp` has been applied. The track
+/// itself always plays at its own speed.
 ///
 /// If [startTime] and [endTime] are both `null`, the audio plays for the
 /// entire duration of the exported video.

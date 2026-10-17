@@ -1,5 +1,6 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
+import ch.waio.pro_video_editor.src.features.render.models.SpeedRamp
 import kotlin.math.roundToLong
 
 /**
@@ -27,12 +28,18 @@ internal object VideoGlobalTrimCalculator {
         val sourceEndUs: Long,
         val playbackSpeed: Float?,
         val reverseVideo: Boolean,
+        /** Replaces [playbackSpeed] when set; runs in the order the clip plays. */
+        val speedRamp: SpeedRamp? = null,
     )
 
-    /** Resolved source range for a surviving clip, in SOURCE microseconds. */
+    /**
+     * Resolved source range for a surviving clip, in SOURCE microseconds, and
+     * the part of its speed ramp that still plays.
+     */
     data class ClipTrimResult(
         val sourceStartUs: Long,
         val sourceEndUs: Long,
+        val speedRamp: SpeedRamp? = null,
     )
 
     /**
@@ -53,7 +60,7 @@ internal object VideoGlobalTrimCalculator {
         frameCompensationUs: Long = 33333L, // ~33ms = 1 frame at 30fps
     ): List<ClipTrimResult?> {
         if (globalStartUs == null && globalEndUs == null) {
-            return clips.map { ClipTrimResult(it.sourceStartUs, it.sourceEndUs) }
+            return clips.map { ClipTrimResult(it.sourceStartUs, it.sourceEndUs, it.speedRamp) }
         }
 
         val globalStart = globalStartUs ?: 0L
@@ -69,6 +76,7 @@ internal object VideoGlobalTrimCalculator {
                 sourceDurationUs = sourceDurationUs,
                 clipPlaybackSpeed = clip.playbackSpeed,
                 globalPlaybackSpeed = globalPlaybackSpeed,
+                clipSpeedRamp = clip.speedRamp,
             )
 
             val clipStartInComposition = compositionTimeUs
@@ -95,9 +103,25 @@ internal object VideoGlobalTrimCalculator {
                     0L
                 }
 
-                // Convert the output-time offsets back into source units.
-                val startTrimSourceUs = (startTrimOutputUs * effectiveSpeed).roundToLong()
-                val endTrimSourceUs = (endTrimOutputUs * effectiveSpeed).roundToLong()
+                // Convert the output-time offsets back into source units. A
+                // ramp's offsets count in the order the clip plays, and on the
+                // clip's own timeline, before the render-wide speed.
+                val ramp = clip.speedRamp
+                val globalSpeed = validSpeedOrOne(globalPlaybackSpeed)
+                val startTrimSourceUs = if (ramp != null) {
+                    ramp.headSourceUs(
+                        (startTrimOutputUs * globalSpeed).roundToLong(), sourceDurationUs
+                    )
+                } else {
+                    (startTrimOutputUs * effectiveSpeed).roundToLong()
+                }
+                val endTrimSourceUs = if (ramp != null) {
+                    ramp.tailSourceUs(
+                        (endTrimOutputUs * globalSpeed).roundToLong(), sourceDurationUs
+                    )
+                } else {
+                    (endTrimOutputUs * effectiveSpeed).roundToLong()
+                }
 
                 // Adjust start if the global start cuts into this clip.
                 if (startTrimSourceUs > 0L) {
@@ -125,7 +149,13 @@ internal object VideoGlobalTrimCalculator {
 
                 // Only keep the clip if there is still content left.
                 if (newEndInSource > newStartInSource) {
-                    results.add(ClipTrimResult(newStartInSource, newEndInSource))
+                    results.add(
+                        ClipTrimResult(
+                            newStartInSource,
+                            newEndInSource,
+                            croppedRamp(clip, newStartInSource, newEndInSource),
+                        )
+                    )
                 } else {
                     results.add(null)
                 }
@@ -135,6 +165,21 @@ internal object VideoGlobalTrimCalculator {
         }
 
         return results
+    }
+
+    /**
+     * The part of [clip]'s speed ramp that plays [startUs] to [endUs] of its
+     * source; the ramp runs from the source's end for a reversed clip.
+     */
+    private fun croppedRamp(clip: ClipInput, startUs: Long, endUs: Long): SpeedRamp? {
+        val ramp = clip.speedRamp ?: return null
+        val span = (clip.sourceEndUs - clip.sourceStartUs).toDouble()
+        if (span <= 0.0) return ramp
+        return if (clip.reverseVideo) {
+            ramp.cropped((clip.sourceEndUs - endUs) / span, (clip.sourceEndUs - startUs) / span)
+        } else {
+            ramp.cropped((startUs - clip.sourceStartUs) / span, (endUs - clip.sourceStartUs) / span)
+        }
     }
 
     private fun effectiveSpeed(clipSpeed: Float?, globalSpeed: Float?): Double {

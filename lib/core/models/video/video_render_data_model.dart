@@ -254,14 +254,16 @@ class VideoRenderData {
   /// Optional start time for trimming the entire composition across all
   /// segments.
   ///
-  /// Measured after each segment's [VideoSegment.playbackSpeed] is applied.
-  /// The trimmed result is the timeline [audioTracks] are placed on.
+  /// Measured after each segment's [VideoSegment.playbackSpeed] or
+  /// [VideoSegment.speedRamp] is applied. The trimmed result is the timeline
+  /// [audioTracks] are placed on.
   final Duration? startTime;
 
   /// Optional end time for trimming the entire composition across all
   /// segments.
   ///
-  /// Measured after each segment's [VideoSegment.playbackSpeed] is applied.
+  /// Measured after each segment's [VideoSegment.playbackSpeed] or
+  /// [VideoSegment.speedRamp] is applied.
   final Duration? endTime;
 
   /// A list of color filters with optional time ranges.

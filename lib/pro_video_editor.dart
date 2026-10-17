@@ -38,6 +38,7 @@ export 'core/models/video/editor_video_model.dart';
 export 'core/models/video/export_transform_model.dart';
 export 'core/models/video/video_render_data_model.dart';
 export 'core/models/video/video_segment_model.dart';
+export 'core/models/video/video_speed_ramp_model.dart';
 export 'core/models/video/video_object_track_model.dart';
 export 'core/models/video/video_stabilization_model.dart';
 export 'core/models/video/segment_transform_model.dart';

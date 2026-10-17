@@ -174,6 +174,31 @@ internal class ClipTransitionGeometryTest {
     }
 
     @Test
+    fun planWrap_takesHeadAndTailAtTheirOwnSpeedsUnderARamp() {
+        // A ramp that starts at 2x and ends at 0.5x: 300ms of OUTPUT takes
+        // 600ms of source from the head and 150ms from the tail.
+        val plan = ClipTransitionGeometry.planWrap(
+            sourceDurationUs = 4_000_000L,
+            transitionDurationUs = 300_000L,
+            tailSpeed = 0.5f,
+            headSpeed = 2.0f,
+        )
+        assertEquals(
+            ClipTransitionGeometry.OverlapPlan(300_000L, 150_000L, 600_000L),
+            plan,
+        )
+        // Head and tail together may not use up the clip.
+        assertNull(
+            ClipTransitionGeometry.planWrap(
+                sourceDurationUs = 700_000L,
+                transitionDurationUs = 300_000L,
+                tailSpeed = 0.5f,
+                headSpeed = 2.0f,
+            )
+        )
+    }
+
+    @Test
     fun planWrap_returnsNullWhenHeadAndTailWouldOverlap() {
         // A 1s clip with a 600ms wrap: head + tail (1200ms) exceed the source,
         // so no middle body remains → null (no wrap, hard restart).

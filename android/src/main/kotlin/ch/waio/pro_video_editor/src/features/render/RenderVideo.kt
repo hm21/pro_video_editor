@@ -32,6 +32,10 @@ import ch.waio.pro_video_editor.src.features.render.models.CodecResourceExhauste
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
 import ch.waio.pro_video_editor.src.features.render.models.RenderJobHandle
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
+import ch.waio.pro_video_editor.src.features.render.models.averageSpeed
+import ch.waio.pro_video_editor.src.features.render.models.croppedSpeedRamp
+import ch.waio.pro_video_editor.src.features.render.models.headSpeed
+import ch.waio.pro_video_editor.src.features.render.models.tailSpeed
 import ch.waio.pro_video_editor.src.features.render.models.VideoEncoderConfigurationException
 import ch.waio.pro_video_editor.src.shared.concurrency.ExportGate
 import ch.waio.pro_video_editor.src.shared.concurrency.ExportGateGuard
@@ -495,7 +499,7 @@ class RenderVideo(private val context: Context) {
                 mediaInfoExtractor.getVideoDuration(clip.inputPath)
             }
         fun outputUs(clip: VideoClip): Long = ClipTransitionGeometry.outputDurationUs(
-            sourceEndUs(clip) - (clip.startUs ?: 0L), clip.playbackSpeed
+            sourceEndUs(clip) - (clip.startUs ?: 0L), clip.averageSpeed()
         )
 
         // Each blend is a full encode, so on a long timeline cut short by the
@@ -506,7 +510,10 @@ class RenderVideo(private val context: Context) {
                     val next = clips.getOrNull(index + 1)
                     ClipTransitionGeometry.TimelineClip(
                         sourceDurationUs = sourceEndUs(clip) - (clip.startUs ?: 0L),
-                        speed = clip.playbackSpeed,
+                        // A speed ramp lays out at its average speed: good
+                        // enough to tell which blends start past the end,
+                        // which only a few milliseconds could change.
+                        speed = clip.averageSpeed(),
                         blendDurationUs = clip.transition?.takeIf {
                             it.isOverlap && next != null &&
                                     !clip.reverseVideo && !next.reverseVideo
@@ -568,8 +575,8 @@ class RenderVideo(private val context: Context) {
                 outgoingSourceDurationUs = curDur,
                 incomingSourceDurationUs = nextDur,
                 transitionDurationUs = transition.durationUs,
-                outgoingSpeed = current.playbackSpeed,
-                incomingSpeed = next.playbackSpeed,
+                outgoingSpeed = current.tailSpeed(transition.durationUs, curDur),
+                incomingSpeed = next.headSpeed(transition.durationUs, nextDur),
             )
 
             if (plan == null) {
@@ -588,9 +595,25 @@ class RenderVideo(private val context: Context) {
                 // The outgoing tail stands in for the blend nobody sees. It is
                 // split off so the first and last clips, which a loop wrap
                 // reads, end up as they would beside a blend.
-                addClip(current.copy(endUs = curEnd - tailSrc, transition = null))
-                addClip(current.copy(startUs = curEnd - tailSrc, endUs = curEnd, transition = null))
-                work[i + 1] = next.copy(startUs = nextStart + headSrc)
+                addClip(
+                    current.copy(
+                        endUs = curEnd - tailSrc,
+                        transition = null,
+                        speedRamp = current.croppedSpeedRamp(0L, curDur - tailSrc, curDur),
+                    )
+                )
+                addClip(
+                    current.copy(
+                        startUs = curEnd - tailSrc,
+                        endUs = curEnd,
+                        transition = null,
+                        speedRamp = current.croppedSpeedRamp(curDur - tailSrc, curDur, curDur),
+                    )
+                )
+                work[i + 1] = next.copy(
+                    startUs = nextStart + headSrc,
+                    speedRamp = next.croppedSpeedRamp(headSrc, nextDur, nextDur),
+                )
                 i++
                 continue
             }
@@ -623,7 +646,13 @@ class RenderVideo(private val context: Context) {
                 collectPath(rendered.outputPath)
                 // Keep the outgoing clip's speed; it now ends `tailSrc` of source
                 // earlier (those frames moved into the speed-adjusted blend).
-                addClip(current.copy(endUs = curEnd - tailSrc, transition = null))
+                addClip(
+                    current.copy(
+                        endUs = curEnd - tailSrc,
+                        transition = null,
+                        speedRamp = current.croppedSpeedRamp(0L, curDur - tailSrc, curDur),
+                    )
+                )
                 val blendKey = blendChromaKey(current, next, globalChromaKey, "$i")
                 result.add(
                     VideoClip(
@@ -635,7 +664,10 @@ class RenderVideo(private val context: Context) {
                     )
                 )
                 // Trim the incoming head in place; it keeps its own speed/transition.
-                work[i + 1] = next.copy(startUs = nextStart + headSrc)
+                work[i + 1] = next.copy(
+                    startUs = nextStart + headSrc,
+                    speedRamp = next.croppedSpeedRamp(headSrc, nextDur, nextDur),
+                )
             } else {
                 Log.w(RENDER_TAG, "Transition render failed for boundary $i, hard cut")
                 addClip(current.copy(transition = null))
@@ -659,25 +691,47 @@ class RenderVideo(private val context: Context) {
 
             val firstStart = first.startUs ?: 0L
             val firstEnd = sourceEndUs(first)
+            val firstDur = firstEnd - firstStart
             val lastStart = last.startUs ?: 0L
             val lastEnd = sourceEndUs(last)
+            val lastDur = lastEnd - lastStart
 
             // Single-clip loops carve the head and tail from the same source, so
             // they need the stricter head+tail<L guard; multi-clip loops keep two
             // independent sources and reuse the ordinary overlap geometry.
-            val plan = if (singleClip) {
+            var headSpeed = first.playbackSpeed
+            var tailSpeed = last.playbackSpeed
+            val lastRamp = last.speedRamp
+            val plan = if (singleClip && lastRamp != null) {
+                // A ramp plays its head and its tail at different speeds; the
+                // blend takes at most half of the clip's output, like planWrap.
+                val blendUs = minOf(
+                    wrapTransition.durationUs,
+                    lastRamp.outputDurationUs(lastDur) / 2,
+                )
+                headSpeed = last.headSpeed(blendUs, lastDur)
+                tailSpeed = last.tailSpeed(blendUs, lastDur)
                 ClipTransitionGeometry.planWrap(
-                    sourceDurationUs = lastEnd - lastStart,
+                    sourceDurationUs = lastDur,
+                    transitionDurationUs = blendUs,
+                    tailSpeed = tailSpeed,
+                    headSpeed = headSpeed,
+                )
+            } else if (singleClip) {
+                ClipTransitionGeometry.planWrap(
+                    sourceDurationUs = lastDur,
                     transitionDurationUs = wrapTransition.durationUs,
                     speed = last.playbackSpeed,
                 )
             } else {
+                headSpeed = first.headSpeed(wrapTransition.durationUs, firstDur)
+                tailSpeed = last.tailSpeed(wrapTransition.durationUs, lastDur)
                 ClipTransitionGeometry.planOverlap(
-                    outgoingSourceDurationUs = lastEnd - lastStart,
-                    incomingSourceDurationUs = firstEnd - firstStart,
+                    outgoingSourceDurationUs = lastDur,
+                    incomingSourceDurationUs = firstDur,
                     transitionDurationUs = wrapTransition.durationUs,
-                    outgoingSpeed = last.playbackSpeed,
-                    incomingSpeed = first.playbackSpeed,
+                    outgoingSpeed = tailSpeed,
+                    incomingSpeed = headSpeed,
                 )
             }
 
@@ -686,10 +740,10 @@ class RenderVideo(private val context: Context) {
             fun wrapStartUs(plan: ClipTransitionGeometry.OverlapPlan): Long =
                 result.sumOf { outputUs(it) } -
                         ClipTransitionGeometry.outputDurationUs(
-                            plan.incomingHeadSourceUs, first.playbackSpeed
+                            plan.incomingHeadSourceUs, headSpeed
                         ) -
                         ClipTransitionGeometry.outputDurationUs(
-                            plan.outgoingTailSourceUs, last.playbackSpeed
+                            plan.outgoingTailSourceUs, tailSpeed
                         )
 
             if (plan == null) {
@@ -700,7 +754,12 @@ class RenderVideo(private val context: Context) {
                 // stays where the wrap puts it; the last keeps its tail in place
                 // of the blend.
                 Log.d(RENDER_TAG, "Loop wrap: starts after the render end, not rendered")
-                result[0] = first.copy(startUs = firstStart + plan.incomingHeadSourceUs)
+                result[0] = first.copy(
+                    startUs = firstStart + plan.incomingHeadSourceUs,
+                    speedRamp = first.croppedSpeedRamp(
+                        plan.incomingHeadSourceUs, firstDur, firstDur
+                    ),
+                )
             } else {
                 val tailSrc = plan.outgoingTailSourceUs
                 val headSrc = plan.incomingHeadSourceUs
@@ -734,10 +793,19 @@ class RenderVideo(private val context: Context) {
                         result[0] = first.copy(
                             startUs = firstStart + headSrc,
                             endUs = lastEnd - tailSrc,
+                            speedRamp = first.croppedSpeedRamp(
+                                headSrc, lastDur - tailSrc, lastDur
+                            ),
                         )
                     } else {
-                        result[0] = first.copy(startUs = firstStart + headSrc)
-                        result[lastIdx] = last.copy(endUs = lastEnd - tailSrc)
+                        result[0] = first.copy(
+                            startUs = firstStart + headSrc,
+                            speedRamp = first.croppedSpeedRamp(headSrc, firstDur, firstDur),
+                        )
+                        result[lastIdx] = last.copy(
+                            endUs = lastEnd - tailSrc,
+                            speedRamp = last.croppedSpeedRamp(0L, lastDur - tailSrc, lastDur),
+                        )
                     }
                     val wrapKey =
                         blendChromaKey(last, first, globalChromaKey, "loop wrap")

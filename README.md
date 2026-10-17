@@ -109,6 +109,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🔗 **Merge Videos**: Concatenate multiple video clips into a single output.
 - 🎬 **Stop-Motion**: Turn a sequence of still images into a video, each frame held for a configurable duration.
 - ⏩ **Playback Speed**: Adjust the playback speed of the video.
+- 🎢 **Speed Ramps**: Let a clip speed up and slow down while it plays, eased between the speeds you set.
 - ⏪ **Reverse Video**: Play a video segment backwards.
 - 🔇 **Mute Audio**: Remove or mute the audio track from the video.
 - 🎚️ **Equalizer**: Raise or lower parts of the audio of a clip or a custom audio track with an `AudioEqualizer` of any number of bands, each a low shelf, a peak or a high shelf.
@@ -468,8 +469,8 @@ var data = VideoRenderData(
 Uint8List result = await ProVideoEditor.instance.renderVideo(data);
 
 /// Note: provide exactly one of `video`, `videoSegments` or `composition`.
-/// Per-clip `transition`, `playbackSpeed` and `reverseVideo` are not applied
-/// inside a composition — use `videoSegments` if you need those.
+/// Per-clip `transition`, `playbackSpeed`, `speedRamp` and `reverseVideo` are
+/// not applied inside a composition — use `videoSegments` if you need those.
 ```
 
 #### Custom Video Effect Example
@@ -953,6 +954,7 @@ VideoSegment({
   double? volume,                // Optional: Per-clip volume multiplier
   AudioEqualizer? equalizer,     // Optional: Per-clip equalizer bands
   double? playbackSpeed,         // Optional: Per-clip playback speed
+  VideoSpeedRamp? speedRamp,     // Optional: Speed that changes while it plays
   bool reverseVideo = false,     // Optional: Play this clip backwards
   ClipTransition? transition,    // Optional: Transition into the NEXT clip
 })
@@ -965,6 +967,7 @@ VideoSegment({
 - `volume` (optional): Per-clip audio volume multiplier (`0.0` = mute, `1.0` = original).
 - `equalizer` (optional): An `AudioEqualizer` whose `bands` raise or lower parts of the clip's audio, one after the other. Each `AudioEqualizerBand` is a `lowShelf` (everything below its `frequency`), a `peak` (a bell around its `frequency`, as narrow as its `q`) or a `highShelf` (everything above its `frequency`), with a `gain` in decibels, and there can be any number of them. Applied before `volume`; while any band boosts, the result is limited at -1 dBFS rather than clipped.
 - `playbackSpeed` (optional): Per-clip playback speed (e.g. `0.5` = half, `2.0` = double).
+- `speedRamp` (optional): A `VideoSpeedRamp` whose points put speeds along the clip, from `0` at its first frame to `1` at its last; the speed eases from one point to the next. Replaces `playbackSpeed`. `outputDuration`, `sourceToOutput` and `outputToSource` give the same timing the render uses, for laying out a timeline. The clip's sound follows the speed like a tape, so its pitch rises and falls with it.
 - `reverseVideo` (optional): Renders this clip backwards when `true`.
 - `transition` (optional): A `ClipTransition` describing how this clip transitions into the **next** clip (dissolve, fade-to-black, slide, etc.). Ignored on the last segment.
 
@@ -998,6 +1001,17 @@ VideoSegment(
       ),
     ],
   ),
+)
+
+// Fast run-up, slow motion on the peak, fast landing
+VideoSegment(
+  video: EditorVideo.asset('jump.mp4'),
+  speedRamp: const VideoSpeedRamp([
+    VideoSpeedRampPoint(position: 0, speed: 2),
+    VideoSpeedRampPoint(position: 0.45, speed: 0.3),
+    VideoSpeedRampPoint(position: 0.55, speed: 0.3),
+    VideoSpeedRampPoint(position: 1, speed: 2),
+  ]),
 )
 ```
 

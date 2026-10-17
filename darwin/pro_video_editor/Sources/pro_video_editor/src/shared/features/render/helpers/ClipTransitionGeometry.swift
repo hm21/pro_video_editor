@@ -104,6 +104,29 @@ internal enum ClipTransitionGeometry {
     )
   }
 
+  /// `planWrap` for a clip whose head and tail play at different speeds, as
+  /// under a speed ramp: `tailSpeed` and `headSpeed` are the average speeds of
+  /// the stretches a blend of `transitionDurationUs` takes from either end,
+  /// which the caller has already capped at half the clip's output.
+  ///
+  /// Returns `nil` when no body would remain between head and tail.
+  static func planWrap(
+    sourceDurationUs: Int64,
+    transitionDurationUs: Int64,
+    tailSpeed: Float?,
+    headSpeed: Float?
+  ) -> OverlapPlan? {
+    guard sourceDurationUs > 0, transitionDurationUs > 0 else { return nil }
+    let tailSourceUs = Int64((Double(transitionDurationUs) * validSpeedOrOne(tailSpeed)).rounded())
+    let headSourceUs = Int64((Double(transitionDurationUs) * validSpeedOrOne(headSpeed)).rounded())
+    guard sourceDurationUs - tailSourceUs - headSourceUs > 0 else { return nil }
+    return OverlapPlan(
+      outputDurationUs: transitionDurationUs,
+      outgoingTailSourceUs: tailSourceUs,
+      incomingHeadSourceUs: headSourceUs
+    )
+  }
+
   /// One clip as the overlap pre-render lays it out.
   struct TimelineClip: Equatable {
     /// Trimmed source duration of the clip.

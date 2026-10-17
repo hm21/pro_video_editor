@@ -50,6 +50,9 @@ data class TransitionConfig(
  * @property volume Volume multiplier for this clip (null = unchanged, 0.0=mute, 1.0=original)
  * @property equalizer Equalizer of this clip's audio (null = unchanged)
  * @property playbackSpeed Speed multiplier for this clip (null = unchanged, 0.5=half, 2.0=double)
+ * @property speedRamp A speed that changes while the clip plays, instead of
+ *  [playbackSpeed]. Its positions run along this clip's own window, so a clip
+ *  trimmed to part of itself carries the matching [SpeedRamp.cropped].
  * @property reverseVideo Whether to render this clip backwards
  * @property transition Transition into the next clip (null = hard cut). On the
  *  **last** clip it wraps into the first clip, making the track loop seamlessly
@@ -62,6 +65,7 @@ data class VideoClip(
     val volume: Float? = null,
     val equalizer: EqualizerConfig? = null,
     val playbackSpeed: Float? = null,
+    val speedRamp: SpeedRamp? = null,
     val reverseVideo: Boolean = false,
     val transition: TransitionConfig? = null,
     /** Start position on the layer timeline in microseconds (composition only). */
@@ -104,6 +108,7 @@ data class VideoClip(
                 volume = (clipMap["volume"] as? Number)?.toFloat(),
                 equalizer = EqualizerConfig.fromMap(clipMap["equalizer"] as? Map<*, *>),
                 playbackSpeed = (clipMap["playbackSpeed"] as? Number)?.toFloat(),
+                speedRamp = SpeedRamp.fromList(clipMap["speedRamp"]),
                 reverseVideo = clipMap["reverseVideo"] as? Boolean ?: false,
                 transition = transitionRaw?.let { TransitionConfig.fromMap(it) },
                 timelineStartUs = (clipMap["timelineStartUs"] as? Number)?.toLong(),

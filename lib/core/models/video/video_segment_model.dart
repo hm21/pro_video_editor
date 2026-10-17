@@ -18,6 +18,7 @@ class VideoSegment {
     this.volume,
     this.equalizer,
     this.playbackSpeed,
+    this.speedRamp,
     this.reverseVideo = false,
     this.transition,
     this.timelineStart,
@@ -28,9 +29,14 @@ class VideoSegment {
          stabilization == null ||
              (!reverseVideo &&
                  chromaKey == null &&
+                 speedRamp == null &&
                  (playbackSpeed == null || playbackSpeed == 1)),
-         '[stabilization] cannot be combined with a playback speed, '
-         'reverseVideo or a chroma key yet',
+         '[stabilization] cannot be combined with a playback speed, a speed '
+         'ramp, reverseVideo or a chroma key yet',
+       ),
+       assert(
+         speedRamp == null || playbackSpeed == null,
+         'Set either [playbackSpeed] or [speedRamp], not both',
        ),
        assert(
          startTime == null || endTime == null || startTime < endTime,
@@ -89,6 +95,24 @@ class VideoSegment {
   /// ignored for composition clips. Pre-render the speed change into the source
   /// or use [videoSegments] instead.
   final double? playbackSpeed;
+
+  /// A speed that changes while this segment plays, instead of the one
+  /// constant [playbackSpeed].
+  ///
+  /// Its points run along the segment from [startTime] to [endTime], in the
+  /// order the segment plays. [VideoSpeedRamp.outputDuration] tells how long
+  /// the segment plays with it, and [VideoRenderData.startTime] and
+  /// [VideoRenderData.endTime] are measured after it, like after a constant
+  /// speed.
+  ///
+  /// Inside an overlap [transition] each side plays its stretch of the ramp at
+  /// that stretch's average speed.
+  ///
+  /// If null, the segment plays at [playbackSpeed].
+  ///
+  /// **Not supported inside a [VideoComposition]:** like [playbackSpeed], a
+  /// speed ramp is ignored for composition clips.
+  final VideoSpeedRamp? speedRamp;
 
   /// Whether to render this segment backwards.
   ///
@@ -165,7 +189,8 @@ class VideoSegment {
   ///
   /// Currently supported on Android and iOS/macOS for [videoSegments] only;
   /// ignored inside a [VideoComposition], and not yet combined with
-  /// [playbackSpeed], [reverseVideo], [chromaKey] or an overlap [transition].
+  /// [playbackSpeed], [speedRamp], [reverseVideo], [chromaKey] or an overlap
+  /// [transition].
   final VideoStabilization? stabilization;
 
   /// Converts this clip to a map for platform channel communication.
@@ -182,6 +207,7 @@ class VideoSegment {
       'volume': volume,
       'equalizer': equalizer?.toMap(),
       'playbackSpeed': playbackSpeed,
+      'speedRamp': speedRamp?.toChannelSteps(),
       'reverseVideo': reverseVideo,
       'transition': transition?.toMap(),
       'timelineStartUs': timelineStart?.inMicroseconds,
@@ -199,6 +225,7 @@ class VideoSegment {
     double? volume,
     AudioEqualizer? equalizer,
     double? playbackSpeed,
+    VideoSpeedRamp? speedRamp,
     bool? reverseVideo,
     ClipTransition? transition,
     Duration? timelineStart,
@@ -213,6 +240,7 @@ class VideoSegment {
       volume: volume ?? this.volume,
       equalizer: equalizer ?? this.equalizer,
       playbackSpeed: playbackSpeed ?? this.playbackSpeed,
+      speedRamp: speedRamp ?? this.speedRamp,
       reverseVideo: reverseVideo ?? this.reverseVideo,
       transition: transition ?? this.transition,
       timelineStart: timelineStart ?? this.timelineStart,
@@ -232,6 +260,7 @@ class VideoSegment {
         other.volume == volume &&
         other.equalizer == equalizer &&
         other.playbackSpeed == playbackSpeed &&
+        other.speedRamp == speedRamp &&
         other.reverseVideo == reverseVideo &&
         other.transition == transition &&
         other.timelineStart == timelineStart &&
@@ -248,6 +277,7 @@ class VideoSegment {
         volume.hashCode ^
         equalizer.hashCode ^
         playbackSpeed.hashCode ^
+        speedRamp.hashCode ^
         reverseVideo.hashCode ^
         transition.hashCode ^
         timelineStart.hashCode ^
@@ -264,6 +294,7 @@ class VideoSegment {
         'volume: $volume, '
         'equalizer: $equalizer, '
         'playbackSpeed: $playbackSpeed, '
+        'speedRamp: $speedRamp, '
         'reverseVideo: $reverseVideo, '
         'transition: $transition, '
         'timelineStart: $timelineStart, '
@@ -280,6 +311,7 @@ class VideoSegment {
       'volume': volume,
       'equalizer': equalizer?.toMap(),
       'playbackSpeed': playbackSpeed,
+      'speedRamp': speedRamp?.toMap(),
       'reverseVideo': reverseVideo,
       'transition': transition?.toMap(),
       'timelineStart': timelineStart?.inMicroseconds,
@@ -303,6 +335,9 @@ class VideoSegment {
           ? AudioEqualizer.fromMap(map['equalizer'] as Map<String, dynamic>)
           : null,
       playbackSpeed: tryParseDouble(map['playbackSpeed']),
+      speedRamp: map['speedRamp'] != null
+          ? VideoSpeedRamp.fromMap(map['speedRamp'] as Map<String, dynamic>)
+          : null,
       reverseVideo: map['reverseVideo'] as bool? ?? false,
       transition: map['transition'] != null
           ? ClipTransition.fromMap(map['transition'] as Map<String, dynamic>)
