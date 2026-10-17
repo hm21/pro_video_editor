@@ -113,21 +113,33 @@ internal enum ClipTransitionRenderer {
 
       let outStart = CMTime(value: outTailStartUs, timescale: 1_000_000)
       let inStart = CMTime(value: inHeadStartUs, timescale: 1_000_000)
-      try trackA.insertTimeRange(
-        CMTimeRange(start: outStart, duration: outTailDur), of: outVideo, at: .zero)
-      try trackB.insertTimeRange(
-        CMTimeRange(start: inStart, duration: inHeadDur), of: inVideo, at: .zero)
+      // Only the part of each span its video track holds. A container can
+      // outlast its video (demo_world.mp4 by ~0.5 s), and `insertTimeRange`
+      // silently stops at the track's end: the blend then had no outgoing
+      // frames for its last part, so the compositor failed the export (a hard
+      // cut) and the ramps drew nothing for the outgoing clip. Spreading what
+      // the track holds over the blend matches Android, which spreads the
+      // frames it decodes.
+      let outVideoRange = CMTimeRangeGetIntersection(
+        CMTimeRange(start: outStart, duration: outTailDur),
+        otherRange: await TrackEndTrimmer.timeRange(of: outVideo))
+      let inVideoRange = CMTimeRangeGetIntersection(
+        CMTimeRange(start: inStart, duration: inHeadDur),
+        otherRange: await TrackEndTrimmer.timeRange(of: inVideo))
+      guard outVideoRange.duration > .zero, inVideoRange.duration > .zero else { return nil }
+      try trackA.insertTimeRange(outVideoRange, of: outVideo, at: .zero)
+      try trackB.insertTimeRange(inVideoRange, of: inVideo, at: .zero)
 
       // Apply each side's playback speed by scaling its inserted span to the
       // shared output duration, so the footage inside the blend plays at the
       // requested speed (the ramps below all run over the output duration `d`).
-      if outTailDur != d {
+      if outVideoRange.duration != d {
         trackA.scaleTimeRange(
-          CMTimeRange(start: .zero, duration: outTailDur), toDuration: d)
+          CMTimeRange(start: .zero, duration: outVideoRange.duration), toDuration: d)
       }
-      if inHeadDur != d {
+      if inVideoRange.duration != d {
         trackB.scaleTimeRange(
-          CMTimeRange(start: .zero, duration: inHeadDur), toDuration: d)
+          CMTimeRange(start: .zero, duration: inVideoRange.duration), toDuration: d)
       }
 
       let transformA = try await loadPreferredTransform(outVideo)

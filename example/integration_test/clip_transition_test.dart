@@ -541,6 +541,49 @@ void main() {
         reason: 'the frame at $sampleAt must show the dissolve in both renders',
       );
     });
+
+    testWidgets('a clip whose container outlasts its video blends with every '
+        'overlap type', (_) async {
+      // The blend's outgoing side reaches into the last ~0.5 s of
+      // demo_world.mp4, which holds no video. iOS and macOS drew the newer
+      // types with nothing there and fell back to a hard cut, which runs
+      // longer than the dissolve.
+      Future<double> secondsWith(ClipTransitionType type) async {
+        final result = await ProVideoEditor.instance.renderVideo(
+          VideoRenderData(
+            outputFormat: VideoOutputFormat.mp4,
+            videoSegments: [
+              VideoSegment(
+                video: EditorVideo.asset(kVideoEditorExampleAssetWorldPath),
+                startTime: const Duration(seconds: 29),
+                transition: ClipTransition(
+                  type: type,
+                  duration: overlapDuration,
+                ),
+              ),
+              VideoSegment(
+                video: inputVideo,
+                startTime: Duration.zero,
+                endTime: windowDuration,
+              ),
+            ],
+          ),
+        );
+        final meta = await ProVideoEditor.instance.getMetadata(
+          EditorVideo.memory(result),
+        );
+        return meta.duration.inMilliseconds / 1000;
+      }
+
+      final dissolveSeconds = await secondsWith(ClipTransitionType.dissolve);
+      for (final type in ClipTransitionType.values.where((t) => t.isOverlap)) {
+        expect(
+          await secondsWith(type),
+          closeTo(dissolveSeconds, 0.1),
+          reason: '${type.name} must blend like the dissolve, not cut',
+        );
+      }
+    });
   });
 
   // ───────────────────────────────────────────────────────────

@@ -86,25 +86,31 @@ internal final class ClipTransitionCompositor: NSObject, AVVideoCompositing {
   }
 
   func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
-    guard let instruction = request.videoCompositionInstruction as? ClipTransitionInstruction,
-      let outgoingBuffer = request.sourceFrame(byTrackID: instruction.outgoingTrackID),
-      let incomingBuffer = request.sourceFrame(byTrackID: instruction.incomingTrackID),
+    let size = request.renderContext.size
+    let instruction = request.videoCompositionInstruction as? ClipTransitionInstruction
+    // A track with a gap leaves the other clip to draw from, as a layer
+    // instruction draws only the clips it has, rather than failing the
+    // whole blend into a hard cut.
+    let outgoingFrame = instruction.flatMap {
+      source(request, $0.outgoingTrackID, $0.outgoingTransform, size: size)
+    }
+    let incomingFrame = instruction.flatMap {
+      source(request, $0.incomingTrackID, $0.incomingTransform, size: size)
+    }
+    guard let instruction,
+      let outgoing = outgoingFrame ?? incomingFrame,
+      let incoming = incomingFrame ?? outgoingFrame,
       let target = request.renderContext.newPixelBuffer()
     else {
       request.finish(
         with: NSError(
           domain: "ClipTransitionCompositor", code: 0,
           userInfo: [
-            NSLocalizedDescriptionKey: "A transition frame is missing a source or an output buffer"
+            NSLocalizedDescriptionKey: "A transition frame is missing its sources or an output buffer"
           ]))
       return
     }
 
-    let size = request.renderContext.size
-    let outgoing = upright(
-      CIImage(cvPixelBuffer: outgoingBuffer), instruction.outgoingTransform, size: size)
-    let incoming = upright(
-      CIImage(cvPixelBuffer: incomingBuffer), instruction.incomingTransform, size: size)
     let linear = instruction.linearProgress(at: request.compositionTime)
     let durationUs = Int64(
       (CMTimeGetSeconds(instruction.timeRange.duration) * 1_000_000).rounded())
@@ -116,6 +122,17 @@ internal final class ClipTransitionCompositor: NSObject, AVVideoCompositing {
       linearProgress: linear, durationUs: durationUs)
     context.render(image, to: target)
     request.finish(withComposedVideoFrame: target)
+  }
+
+  /// The frame of track `trackID` at the request's time, upright, or nil when
+  /// the track has none there.
+  private func source(
+    _ request: AVAsynchronousVideoCompositionRequest, _ trackID: CMPersistentTrackID,
+    _ transform: CGAffineTransform, size: CGSize
+  ) -> CIImage? {
+    request.sourceFrame(byTrackID: trackID).map {
+      upright(CIImage(cvPixelBuffer: $0), transform, size: size)
+    }
   }
 
   /// `image` turned upright by its track's `transform` and, should its size
