@@ -1,5 +1,5 @@
 ## 2.40.0
-- **FEAT**(android, iOS, macOS): Loop point search. `VideoLoopPointFinder.findLoopPoint` compares the frames near the end of a video with its first frames and returns the `VideoLoopPoint` where cutting makes it loop without a visible jump: right before the frame that looks most like the first one, so the restart reads as one more step of the motion. Neighbouring frames are compared too, so a pendulum in the same place but swinging the other way does not match, and among cuts that match about equally the one closest to the current trim wins. Plain frame comparison on small grayscale frames, no ML model. The start can be searched as well, and it can lie in another file than the end, like the first clip of a composition.
+- **FEAT**(android, iOS, macOS): Loop point search. `VideoLoopPointFinder.findLoopPoint` finds where to cut a video so it loops without a visible jump, matching the last frames and their motion against the first ones, optionally also searching the start or reading it from another clip.
 
 ## 2.39.0
 - **FEAT**(android, iOS, macOS): Speed ramps. `VideoSegment.speedRamp` lets a clip speed up and slow down while it plays, eased between the speeds of a `VideoSpeedRamp`, whose `outputDuration`, `sourceToOutput` and `outputToSource` give the exact timing the render uses. The clip's sound follows the speed like a tape.

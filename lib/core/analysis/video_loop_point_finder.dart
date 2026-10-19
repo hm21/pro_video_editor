@@ -56,12 +56,17 @@ class VideoLoopPointFinder {
   /// [frameSize] bounds the decoded frames. [onProgress] reports the share
   /// of the frames decoded so far.
   ///
+  /// The frames are compared on the calling isolate, which takes a few
+  /// milliseconds for a range of a few seconds. A start range multiplies
+  /// that by its frame count, so keep both ranges short when searching both.
+  ///
   /// Cancel with [cancel] and the same [id]; the future then fails with a
   /// [RenderCanceledException].
   ///
-  /// Throws an [ArgumentError] for an empty range, a [StateError] when a
-  /// range holds no frames, a [PlatformException] when the video cannot be
-  /// decoded and an [UnsupportedError] on the web.
+  /// Throws an [ArgumentError] for an empty range, a [StateError] when no
+  /// frame lies in a range to cut in, a [PlatformException] when the video
+  /// cannot be decoded or a range lies past its end, and an
+  /// [UnsupportedError] on the web.
   static Future<VideoLoopPoint> findLoopPoint(
     EditorVideo video, {
     EditorVideo? startVideo,
@@ -99,7 +104,8 @@ class VideoLoopPointFinder {
         (headTo - headFrom).inMicroseconds /
         ((headTo - headFrom) + (tailTo - tailFrom)).inMicroseconds;
 
-    _running.add(taskId);
+    final search = _Search();
+    final searches = _searches.putIfAbsent(taskId, () => {})..add(search);
     try {
       VideoLoopPointFinder? finder;
       Future<void> read(
@@ -109,11 +115,12 @@ class VideoLoopPointFinder {
         required double progressFrom,
         required double progressShare,
       }) async {
-        if (_canceled.contains(taskId)) throw const RenderCanceledException();
+        if (search.canceled) throw const RenderCanceledException();
         // Every stream runs under a task id of its own: native refuses a
-        // second task under an id whose decoder is still being torn down.
-        final stream = '$taskId-${head ? 'head' : 'tail'}';
-        _decoding[taskId] = stream;
+        // second task under an id whose decoder is still being torn down, as
+        // after a cancel or in an earlier call under the same id.
+        final stream = '$taskId-${head ? 'head' : 'tail'}-${_streams++}';
+        search.stream = stream;
         await for (final frame in ProVideoEditor.instance.getLumaFrameStream(
           LumaFrameConfigs(
             video: head ? startVideo ?? video : video,
@@ -162,7 +169,7 @@ class VideoLoopPointFinder {
         progressShare: 1 - headShare,
       );
       // A cancel that came after the last frames were read.
-      if (_canceled.contains(taskId)) throw const RenderCanceledException();
+      if (search.canceled) throw const RenderCanceledException();
       if (finder == null) throw StateError('No frames were decoded');
       final result = finder!.find(
         start: start,
@@ -176,26 +183,20 @@ class VideoLoopPointFinder {
       onProgress?.call(1);
       return result;
     } finally {
-      _running.remove(taskId);
-      _canceled.remove(taskId);
-      _decoding.remove(taskId);
+      searches.remove(search);
+      if (searches.isEmpty) _searches.remove(taskId);
     }
   }
 
-  /// Cancels the [findLoopPoint] call started with [id], including the frame
-  /// decoding it runs. The call then fails with a [RenderCanceledException].
-  /// Does nothing when no such call runs.
+  /// Cancels the [findLoopPoint] calls started with [id], including the
+  /// frame decoding they run. They then fail with a
+  /// [RenderCanceledException]. Does nothing when no such call runs.
   static Future<void> cancel(String id) async {
-    if (!_running.contains(id)) return;
-    _canceled.add(id);
-    final stream = _decoding[id];
-    if (stream == null) return;
-    try {
-      await ProVideoEditor.instance.cancel(stream);
-    } on PlatformException {
-      // Between the head and the tail no decoder runs; the call stops
-      // before it reads the tail.
-    }
+    final searches = _searches[id];
+    if (searches == null) return;
+    await Future.wait([
+      for (final search in searches.toList()) search.cancel(),
+    ]);
   }
 
   /// Frame width in pixels.
@@ -216,8 +217,9 @@ class VideoLoopPointFinder {
   static const List<double> _weights = [1, 0.5, 0.25];
 
   /// How much wider than the cuts it allows a range is read, so the
-  /// neighbours of its first and last cut are decoded too.
-  static const Duration _margin = Duration(milliseconds: 120);
+  /// neighbours of its first and last cut are decoded too: [_reach] frames
+  /// down to about 10 fps.
+  static const Duration _margin = Duration(milliseconds: 250);
 
   /// Cuts whose [VideoLoopPoint.difference] is within this share of one
   /// frame's worth of motion of the best one match about equally well. A
@@ -228,14 +230,14 @@ class VideoLoopPointFinder {
   /// frames do not change at all.
   static const double _tieFloor = 0.0002;
 
-  /// Ids of the [findLoopPoint] calls running now.
-  static final Set<String> _running = {};
+  /// The [findLoopPoint] calls running now, by the id they were started
+  /// with. A call canceled under an id may still be stopping when the next
+  /// one under that id starts.
+  static final Map<String, Set<_Search>> _searches = {};
 
-  /// Ids of running calls that were asked to stop.
-  static final Set<String> _canceled = {};
-
-  /// The task id of the frame stream each running call reads from.
-  static final Map<String, String> _decoding = {};
+  /// How many frame streams were started, so that each gets a task id of
+  /// its own.
+  static int _streams = 0;
 
   late final int _analysisWidth;
   late final int _analysisHeight;
@@ -498,4 +500,27 @@ class _Frame {
 
   final Duration time;
   final Uint8List pixels;
+}
+
+/// One running [VideoLoopPointFinder.findLoopPoint] call.
+class _Search {
+  /// Whether the call was asked to stop.
+  bool canceled = false;
+
+  /// The task id of the frame stream the call reads from.
+  String? stream;
+
+  /// Stops the call: it cancels the frame stream running now and starts no
+  /// other.
+  Future<void> cancel() async {
+    canceled = true;
+    final stream = this.stream;
+    if (stream == null) return;
+    try {
+      await ProVideoEditor.instance.cancel(stream);
+    } on PlatformException {
+      // Between the head and the tail no decoder runs; the call stops
+      // before it reads the tail.
+    }
+  }
 }

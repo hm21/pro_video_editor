@@ -31,9 +31,15 @@ Uint8List _doubled(Uint8List frame) {
 
 /// Plays a synthetic video through `getLumaFrameStream`, like the native
 /// decoder: frames of the requested range, in order, one event loop turn
-/// apart, and an error for a range without frames.
+/// apart, and an error for a range without frames. Like native, it refuses
+/// a task id it has seen before.
 class _FakeDecoder extends ProVideoEditor with MockPlatformInterfaceMixin {
-  _FakeDecoder(this.frames, {this.startVideo, this.startFrames});
+  _FakeDecoder(
+    this.frames, {
+    this.startVideo,
+    this.startFrames,
+    this.fps = _fps,
+  });
 
   /// Every frame of the video.
   final List<Uint8List> frames;
@@ -44,6 +50,9 @@ class _FakeDecoder extends ProVideoEditor with MockPlatformInterfaceMixin {
   /// Every frame of [startVideo].
   final List<Uint8List>? startFrames;
 
+  /// The frame rate of both videos.
+  final int fps;
+
   /// The video of every stream asked for.
   final List<EditorVideo> videos = [];
 
@@ -53,12 +62,18 @@ class _FakeDecoder extends ProVideoEditor with MockPlatformInterfaceMixin {
   /// The task id of every stream asked for.
   final List<String> ids = [];
 
+  /// The times of the frames every stream delivered.
+  final List<List<Duration>> delivered = [];
+
   /// Called when a stream delivered a frame, with the stream's number,
   /// counted from one.
   void Function(int request)? onFrame;
 
   final Set<String> _cancelled = {};
-  String? _streaming;
+  final Set<String> _streaming = {};
+
+  Duration _time(int frame) =>
+      Duration(microseconds: (frame * 1e6 / fps).round());
 
   @override
   void initializeStream() {}
@@ -74,13 +89,15 @@ class _FakeDecoder extends ProVideoEditor with MockPlatformInterfaceMixin {
     ids.add(value.id);
     videos.add(value.video);
     requests.add((value.startTime, value.endTime));
+    final times = <Duration>[];
+    delivered.add(times);
     final request = requests.length;
     final frames = value.video == startVideo ? startFrames! : this.frames;
     final start = value.startTime ?? Duration.zero;
-    final end = value.endTime ?? _frameTime(frames.length);
+    final end = value.endTime ?? _time(frames.length);
     final inRange = [
       for (var i = 0; i < frames.length; i++)
-        if (_frameTime(i) >= start && _frameTime(i) < end) i,
+        if (_time(i) >= start && _time(i) < end) i,
     ];
     if (inRange.isEmpty) {
       throw PlatformException(
@@ -88,7 +105,7 @@ class _FakeDecoder extends ProVideoEditor with MockPlatformInterfaceMixin {
         message: 'The frame range holds no frames',
       );
     }
-    _streaming = value.id;
+    _streaming.add(value.id);
     try {
       for (var k = 0; k < inRange.length; k++) {
         await Future<void>(() {});
@@ -96,8 +113,9 @@ class _FakeDecoder extends ProVideoEditor with MockPlatformInterfaceMixin {
           throw const RenderCanceledException();
         }
         final i = inRange[k];
+        times.add(_time(i));
         yield LumaFrame(
-          time: _frameTime(i),
+          time: _time(i),
           width: _width,
           height: _height,
           bytes: frames[i],
@@ -106,13 +124,13 @@ class _FakeDecoder extends ProVideoEditor with MockPlatformInterfaceMixin {
         onFrame?.call(request);
       }
     } finally {
-      _streaming = null;
+      _streaming.remove(value.id);
     }
   }
 
   @override
   Future<void> cancel(String taskId) async {
-    if (_streaming != taskId) {
+    if (!_streaming.contains(taskId)) {
       throw PlatformException(code: 'TASK_NOT_FOUND');
     }
     _cancelled.add(taskId);
@@ -454,12 +472,12 @@ void main() {
         );
 
         expect(point.end, _frameTime(_period));
-        expect(fake.ids, ['loop-head', 'loop-tail']);
+        expect(fake.ids, [startsWith('loop-head-'), startsWith('loop-tail-')]);
         expect(fake.requests, [
-          (Duration.zero, const Duration(milliseconds: 120)),
+          (Duration.zero, const Duration(milliseconds: 250)),
           (
-            _frameTime(22) - const Duration(milliseconds: 120),
-            _frameTime(64) + const Duration(milliseconds: 120),
+            _frameTime(22) - const Duration(milliseconds: 250),
+            _frameTime(64) + const Duration(milliseconds: 250),
           ),
         ]);
         expect(progress.last, 1);
@@ -507,9 +525,10 @@ void main() {
       });
 
       test('can run again under the same id once a call is canceled', () async {
-        decoder(64, circle).onFrame = (request) {
-          if (request == 1) unawaited(VideoLoopPointFinder.cancel('loop'));
-        };
+        final fake = decoder(64, circle)
+          ..onFrame = (request) {
+            if (request == 1) unawaited(VideoLoopPointFinder.cancel('loop'));
+          };
         await expectLater(
           VideoLoopPointFinder.findLoopPoint(
             video,
@@ -522,7 +541,7 @@ void main() {
           throwsA(isA<RenderCanceledException>()),
         );
 
-        decoder(64, circle);
+        fake.onFrame = null;
         final point = await VideoLoopPointFinder.findLoopPoint(
           video,
           start: Duration.zero,
@@ -534,6 +553,79 @@ void main() {
 
         expect(point.end, _frameTime(_period));
       });
+
+      Future<VideoLoopPoint> search() => VideoLoopPointFinder.findLoopPoint(
+        video,
+        start: Duration.zero,
+        end: _frameTime(64),
+        endFrom: _frameTime(22),
+        endTo: _frameTime(64),
+        id: 'loop',
+      );
+
+      test('runs a call started under the id of a canceled one that has not '
+          'stopped yet', () async {
+        final firstFrame = Completer<void>();
+        decoder(64, circle).onFrame = (_) {
+          if (!firstFrame.isCompleted) firstFrame.complete();
+        };
+        final first = expectLater(
+          search(),
+          throwsA(isA<RenderCanceledException>()),
+        );
+        await firstFrame.future;
+        await VideoLoopPointFinder.cancel('loop');
+
+        final second = search();
+        await first;
+
+        expect((await second).end, _frameTime(_period));
+      });
+
+      test('cancels a call started under the id of a canceled one after that '
+          'one stopped', () async {
+        final firstFrame = Completer<void>();
+        decoder(64, circle).onFrame = (_) {
+          if (!firstFrame.isCompleted) firstFrame.complete();
+        };
+        final first = expectLater(
+          search(),
+          throwsA(isA<RenderCanceledException>()),
+        );
+        await firstFrame.future;
+        await VideoLoopPointFinder.cancel('loop');
+        final second = expectLater(
+          search(),
+          throwsA(isA<RenderCanceledException>()),
+        );
+        await first;
+
+        await VideoLoopPointFinder.cancel('loop');
+
+        await second;
+      });
+
+      test(
+        'reads two neighbours past either end of a range at 10 fps',
+        () async {
+          const fps = 10;
+          Duration at(int frame) => Duration(milliseconds: frame * 1000 ~/ fps);
+          final fake = _FakeDecoder(render(64, circle), fps: fps);
+          ProVideoEditor.instance = fake;
+
+          await VideoLoopPointFinder.findLoopPoint(
+            video,
+            start: Duration.zero,
+            end: at(45),
+            endFrom: at(30),
+            endTo: at(50),
+          );
+
+          expect(fake.delivered[0].take(3), [at(0), at(1), at(2)]);
+          expect(fake.delivered[1].first, at(28));
+          expect(fake.delivered[1].last, at(52));
+        },
+      );
     });
   });
 }
