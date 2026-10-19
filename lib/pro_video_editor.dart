@@ -27,12 +27,14 @@ export 'core/models/image/timeline_keyframe_model.dart'
     hide sortTimelineKeyframes;
 export 'core/models/video/chroma_key_model.dart';
 export 'core/utils/chroma_key_detector.dart';
+export 'core/analysis/video_loop_point_finder.dart';
 export 'core/analysis/video_object_tracker.dart';
 export 'core/analysis/video_stabilization_analyzer.dart';
 export 'core/models/video/color_filter_model.dart';
 export 'core/models/video/custom_video_effect_model.dart';
 export 'core/models/video/video_effect_model.dart';
 export 'core/models/video/video_effect_frame_model.dart';
+export 'core/models/video/video_loop_point_model.dart';
 export 'core/models/video/progress_model.dart';
 export 'core/models/video/editor_video_model.dart';
 export 'core/models/video/export_transform_model.dart';
