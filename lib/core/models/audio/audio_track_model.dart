@@ -14,7 +14,7 @@ import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 /// [startTime] and [endTime] are measured on the exported video: zero is its
 /// first frame, after `VideoRenderData.startTime` has trimmed the front and
 /// each segment's `playbackSpeed` or `speedRamp` has been applied. The track
-/// itself always plays at its own speed.
+/// plays at its own [playbackSpeed], independently of the video speed.
 ///
 /// If [startTime] and [endTime] are both `null`, the audio plays for the
 /// entire duration of the exported video.
@@ -24,6 +24,7 @@ class VideoAudioTrack with TimeRangeMixin {
   const VideoAudioTrack({
     required this.path,
     this.volume = 1.0,
+    this.playbackSpeed = 1.0,
     this.equalizer,
     this.loop = false,
     this.audioStartTime,
@@ -34,12 +35,25 @@ class VideoAudioTrack with TimeRangeMixin {
     this.fadeOutDuration = Duration.zero,
   }) : assert(volume >= 0, '[volume] must be greater than or equal to 0'),
        assert(
+         playbackSpeed > 0 && playbackSpeed < double.infinity,
+         '[playbackSpeed] must be finite and greater than 0',
+       ),
+       assert(
          startTime == null || endTime == null || startTime < endTime,
          'startTime must be before endTime',
        );
 
   /// Path to the audio file.
   final String path;
+
+  /// Playback multiplier at unchanged pitch: `0.5` doubles the source's
+  /// duration; `2` halves it. Must be finite and greater than zero.
+  ///
+  /// [audioStartTime] and [audioEndTime] remain offsets in the original file.
+  /// That source window is stretched before looping, silence padding and
+  /// fades. [startTime], [endTime] and fade durations stay in output time.
+  /// Stereo channels stay together. Supported on Android, iOS and macOS.
+  final double playbackSpeed;
 
   /// Volume multiplier for this audio track.
   ///
@@ -104,6 +118,7 @@ class VideoAudioTrack with TimeRangeMixin {
   VideoAudioTrack copyWith({
     String? path,
     double? volume,
+    double? playbackSpeed,
     AudioEqualizer? equalizer,
     bool? loop,
     Duration? audioStartTime,
@@ -116,6 +131,7 @@ class VideoAudioTrack with TimeRangeMixin {
     return VideoAudioTrack(
       path: path ?? this.path,
       volume: volume ?? this.volume,
+      playbackSpeed: playbackSpeed ?? this.playbackSpeed,
       equalizer: equalizer ?? this.equalizer,
       loop: loop ?? this.loop,
       audioStartTime: audioStartTime ?? this.audioStartTime,
@@ -131,6 +147,7 @@ class VideoAudioTrack with TimeRangeMixin {
     return <String, dynamic>{
       'path': path,
       'volume': volume,
+      'playbackSpeed': playbackSpeed,
       'equalizer': equalizer?.toMap(),
       'loop': loop,
       'audioStartTime': audioStartTime?.inMicroseconds,
@@ -146,6 +163,7 @@ class VideoAudioTrack with TimeRangeMixin {
     return VideoAudioTrack(
       path: map['path'] as String,
       volume: safeParseDouble(map['volume'], fallback: 1.0),
+      playbackSpeed: safeParseDouble(map['playbackSpeed'], fallback: 1.0),
       equalizer: map['equalizer'] != null
           ? AudioEqualizer.fromMap(map['equalizer'] as Map<String, dynamic>)
           : null,
@@ -179,6 +197,7 @@ class VideoAudioTrack with TimeRangeMixin {
   @override
   String toString() {
     return 'VideoAudioTrack(path: $path, volume: $volume, '
+        'playbackSpeed: $playbackSpeed, '
         'equalizer: $equalizer, loop: $loop, '
         'audioStartTime: $audioStartTime, audioEndTime: $audioEndTime, '
         'startTime: $startTime, endTime: $endTime, '
@@ -191,6 +210,7 @@ class VideoAudioTrack with TimeRangeMixin {
 
     return other.path == path &&
         other.volume == volume &&
+        other.playbackSpeed == playbackSpeed &&
         other.equalizer == equalizer &&
         other.loop == loop &&
         other.audioStartTime == audioStartTime &&
@@ -205,6 +225,7 @@ class VideoAudioTrack with TimeRangeMixin {
   int get hashCode {
     return path.hashCode ^
         volume.hashCode ^
+        playbackSpeed.hashCode ^
         equalizer.hashCode ^
         loop.hashCode ^
         audioStartTime.hashCode ^
