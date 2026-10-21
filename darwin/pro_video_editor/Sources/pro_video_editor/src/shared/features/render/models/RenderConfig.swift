@@ -535,6 +535,8 @@ public struct ChromaKeyConfig: Sendable, Equatable {
 struct AudioTrackConfig {
   let path: String
   let volume: Float
+  /// Pitch-preserving speed of the trimmed source, before looping and fades.
+  let playbackSpeed: Double
   /// Equalizer of the track. `nil` = unchanged.
   let equalizer: AudioEqualizer?
   let loop: Bool
@@ -558,6 +560,7 @@ struct AudioTrackConfig {
     return AudioTrackConfig(
       path: path,
       volume: (args["volume"] as? NSNumber)?.floatValue ?? 1.0,
+      playbackSpeed: (args["playbackSpeed"] as? NSNumber)?.doubleValue ?? 1.0,
       equalizer: AudioEqualizer.from(args["equalizer"]),
       loop: args["loop"] as? Bool ?? true,
       audioStartUs: (args["audioStartUs"] as? NSNumber)?.int64Value,

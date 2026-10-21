@@ -176,6 +176,19 @@ void main() {
   });
 
   group('VideoRenderData audioTracks', () {
+    test('sends each audio speed to the native renderer', () async {
+      final data = VideoRenderData(
+        videoSegments: [VideoSegment(video: EditorVideo.file('/video.mp4'))],
+        audioTracks: const [
+          VideoAudioTrack(path: '/audio.wav', playbackSpeed: 0.5),
+          VideoAudioTrack(path: '/normal.wav'),
+        ],
+      );
+      final tracks = (await data.toAsyncMap())['audioTracks'] as List;
+      expect(tracks[0]['playbackSpeed'], 0.5);
+      expect(tracks[1]['playbackSpeed'], 1.0);
+    });
+
     test(
       'toAsyncMap sends each track\'s fade over the platform channel',
       () async {

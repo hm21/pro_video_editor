@@ -24,6 +24,7 @@ internal class AudioSequenceBuilder {
   /// count from its start, and the track never plays past its end.
   private let window: CMTimeRange
   private var loopAudio: Bool = true
+  private var playbackSpeed: Double = 1
   private var audioStartTime: CMTime = .zero
   private var audioEndTime: CMTime?
   /// Where on the output timeline (from `window.start`) this track starts.
@@ -46,6 +47,13 @@ internal class AudioSequenceBuilder {
   @discardableResult
   func setLoop(_ loop: Bool) -> AudioSequenceBuilder {
     self.loopAudio = loop
+    return self
+  }
+
+  /// Sets the source speed before looping, padding and fades.
+  @discardableResult
+  func setPlaybackSpeed(_ speed: Double) -> AudioSequenceBuilder {
+    self.playbackSpeed = speed
     return self
   }
 
@@ -94,6 +102,10 @@ internal class AudioSequenceBuilder {
   /// Pre-renders the audio and inserts it into `composition` with a
   /// single `insertTimeRange` call.
   func build(in composition: AVMutableComposition) async throws -> BuildResult? {
+    guard playbackSpeed.isFinite, playbackSpeed > 0 else {
+      throw NSError(domain: "AudioSequenceBuilder", code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Audio speed must be finite and positive"])
+    }
     // Compute play duration in the composition.
     let remainingCompositionTime = CMTimeSubtract(window.duration, compositionInsertTime)
     let playDuration = compositionPlayDuration ?? remainingCompositionTime
@@ -113,6 +125,7 @@ internal class AudioSequenceBuilder {
         audioEndTime: audioEndTime,
         loop: loopAudio,
         targetBodyDuration: effectivePlayDuration,
+        playbackSpeed: playbackSpeed,
         fadeIn: fadeIn,
         fadeOut: fadeOut
       )

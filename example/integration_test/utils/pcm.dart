@@ -7,8 +7,8 @@ class Pcm {
   /// Wraps [samples] (in -1..1) played at [sampleRate].
   Pcm(this.samples, this.sampleRate);
 
-  /// Reads 16-bit integer or 32-bit float PCM, averaging the channels.
-  factory Pcm.parseWav(Uint8List bytes) {
+  /// Reads PCM, averaging the channels unless [channel] selects one.
+  factory Pcm.parseWav(Uint8List bytes, {int? channel}) {
     final data = ByteData.sublistView(bytes);
     var offset = 12;
     int? format;
@@ -28,10 +28,17 @@ class Pcm {
         final bytesPerSample = bitsPerSample ~/ 8;
         final end = math.min(body + size, bytes.length);
         final frames = (end - body) ~/ (bytesPerSample * channels);
+        if (channel != null && (channel < 0 || channel >= channels)) {
+          throw ArgumentError.value(channel, 'channel');
+        }
         final samples = Float64List(frames);
         for (var f = 0; f < frames; f++) {
           var sum = 0.0;
-          for (var c = 0; c < channels; c++) {
+          for (
+            var c = channel ?? 0;
+            c < (channel == null ? channels : channel + 1);
+            c++
+          ) {
             final p = body + (f * channels + c) * bytesPerSample;
             sum += switch ((format, bitsPerSample)) {
               (3, 32) => data.getFloat32(p, Endian.little),
@@ -40,7 +47,7 @@ class Pcm {
               _ => throw UnsupportedError('$bitsPerSample-bit PCM'),
             };
           }
-          samples[f] = sum / channels;
+          samples[f] = sum / (channel == null ? channels : 1);
         }
         return Pcm(samples, sampleRate);
       }

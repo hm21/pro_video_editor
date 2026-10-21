@@ -328,6 +328,7 @@ class LayeredCompositionBuilder(
         val audioSequences = audioTracks.mapNotNull { track ->
             AudioSequenceBuilder(context, track.path, globalDurationUs)
                 .setLoop(track.loop)
+                .setPlaybackSpeed(track.playbackSpeed)
                 .setStartTime(track.audioStartUs)
                 .setAudioEndTime(track.audioEndUs)
                 .setCompositionStartTime(track.startUs)
