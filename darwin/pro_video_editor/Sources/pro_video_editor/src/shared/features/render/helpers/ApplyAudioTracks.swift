@@ -33,6 +33,7 @@ func applyAudioTracks(
       PluginLog.print("🎵 Adding audio track: \(trackConfig.path)")
       let audioBuilder = AudioSequenceBuilder(audioPath: trackConfig.path, window: window)
         .setLoop(trackConfig.loop)
+        .setPlaybackSpeed(trackConfig.playbackSpeed)
         .setAudioStartTime(trackConfig.audioStartUs)
         .setAudioEndTime(trackConfig.audioEndUs)
         .setCompositionStartTime(trackConfig.startUs == -1 ? nil : trackConfig.startUs)

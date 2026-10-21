@@ -30,20 +30,52 @@ class VideoSpeedRamp {
   ///
   /// [points] must not be empty; their positions must lie between `0` and `1`
   /// and increase, and their speeds must be greater than `0`.
-  const VideoSpeedRamp(this.points);
+  const VideoSpeedRamp(this.points) : _source = null, _start = 0, _end = 1;
+
+  /// The stretch of [_source] from [_start] to [_end], see [cropped].
+  const VideoSpeedRamp._crop(
+    this.points,
+    VideoSpeedRamp this._source,
+    this._start,
+    this._end,
+  );
 
   /// Creates a [VideoSpeedRamp] from a map written by [toMap].
   factory VideoSpeedRamp.fromMap(Map<String, dynamic> map) {
     final raw = map['points'] as List<dynamic>? ?? const [];
-    return VideoSpeedRamp([
+    final points = [
       for (final point in raw)
         VideoSpeedRampPoint.fromMap(Map<String, dynamic>.from(point as Map)),
-    ]);
+    ];
+    final crop = map['crop'];
+    if (crop is Map && crop['source'] is Map) {
+      final source = VideoSpeedRamp.fromMap(
+        Map<String, dynamic>.from(crop['source'] as Map),
+      );
+      final start = safeParseDouble(crop['start']);
+      final end = safeParseDouble(crop['end'], fallback: 1);
+      // Without a usable original ramp, play the points like an old reader.
+      if (source.points.isNotEmpty && 0 <= start && start < end && end <= 1) {
+        return VideoSpeedRamp._crop(points, source, start, end);
+      }
+    }
+    return VideoSpeedRamp(points);
   }
 
   /// The speeds the curve passes through, sorted by
   /// [VideoSpeedRampPoint.position].
+  ///
+  /// For a [cropped] ramp these are the curve's speeds at both cut edges and
+  /// the points of the original ramp between them, which is what an editor
+  /// draws for it.
   final List<VideoSpeedRampPoint> points;
+
+  /// The uncropped ramp a [cropped] ramp plays a stretch of, or `null`.
+  final VideoSpeedRamp? _source;
+
+  /// Where the stretch a [cropped] ramp plays starts and ends on [_source].
+  final double _start;
+  final double _end;
 
   /// The largest change of speed between two neighbouring [steps], as a
   /// factor.
@@ -61,14 +93,21 @@ class VideoSpeedRamp {
     'VideoSpeedRamp.steps',
   );
 
-  /// Whether every point has the same speed, so the segment plays at one
-  /// speed throughout.
-  bool get isConstant => points.every((p) => p.speed == points.first.speed);
+  /// Whether the segment plays at one speed throughout, which is then
+  /// [averageSpeed].
+  ///
+  /// A [cropped] ramp inside a single one of the [steps] plays at one speed
+  /// even though its [points] differ slightly.
+  bool get isConstant => _source == null
+      ? points.every((p) => p.speed == points.first.speed)
+      : steps.every((s) => s.speed == steps.first.speed);
 
   /// The speed of the smooth curve at [position], between `0` and `1`.
   ///
   /// This is the curve to draw in an editor; the render plays its [steps].
   double speedAt(double position) {
+    final source = _source;
+    if (source != null) return source.speedAt(_sourcePosition(position));
     _debugCheckPoints();
     return math.exp(_logSpeedAt(position.clamp(0.0, 1.0)));
   }
@@ -80,7 +119,9 @@ class VideoSpeedRamp {
   /// stretch that changes speed is split finely enough that two neighbouring
   /// steps differ by at most [maxStepChange].
   List<VideoSpeedRampStep> get steps {
-    return _stepCache[this] ??= List.unmodifiable(_buildSteps());
+    return _stepCache[this] ??= List.unmodifiable(
+      _source == null ? _buildSteps() : _cropSteps(_source),
+    );
   }
 
   /// How long the segment plays compared to its source: `2.0` when the ramp
@@ -153,45 +194,96 @@ class VideoSpeedRamp {
   /// between `0` and `1`), stretched back onto `0` to `1`: what a segment
   /// split or trimmed down to that part plays.
   ///
-  /// Keeps the points inside the part and pins the speed the curve has at
-  /// both cut edges, so every frame plays at about the speed it had. The curve
-  /// eases into and out of the new ends, which can move the part's timing by a
-  /// few frames.
+  /// The part plays the very steps the whole played there, cut at its edges,
+  /// so every frame keeps its speed and its place: the parts of a split play
+  /// for exactly as long as the whole did, and a cut lands on the frame it
+  /// was made on. [points] show the stretch of the curve the part covers.
   VideoSpeedRamp cropped(double start, double end) {
     assert(
       0 <= start && start < end && end <= 1,
       'cropped needs 0 <= start < end <= 1',
     );
     if (start <= 0 && end >= 1) return this;
+    final source = _source;
+    if (source != null) {
+      // A crop of a crop is a stretch of the same original ramp.
+      return source.cropped(_sourcePosition(start), _sourcePosition(end));
+    }
     final width = end - start;
-    return VideoSpeedRamp([
-      VideoSpeedRampPoint(position: 0, speed: speedAt(start)),
-      for (final point in points)
-        if (point.position > start && point.position < end)
-          VideoSpeedRampPoint(
-            position: (point.position - start) / width,
-            speed: point.speed,
-          ),
-      VideoSpeedRampPoint(position: 1, speed: speedAt(end)),
-    ]);
+    return VideoSpeedRamp._crop(
+      [
+        VideoSpeedRampPoint(position: 0, speed: speedAt(start)),
+        for (final point in points)
+          if (point.position > start && point.position < end)
+            VideoSpeedRampPoint(
+              position: (point.position - start) / width,
+              speed: point.speed,
+            ),
+        VideoSpeedRampPoint(position: 1, speed: speedAt(end)),
+      ],
+      this,
+      start,
+      end,
+    );
   }
 
   /// The ramp of the segment played backwards, so every frame keeps its
   /// speed: the slow motion stays on the same moment.
-  VideoSpeedRamp get reversed => VideoSpeedRamp([
-    for (final point in points.reversed)
-      VideoSpeedRampPoint(position: 1 - point.position, speed: point.speed),
-  ]);
+  VideoSpeedRamp get reversed {
+    final source = _source;
+    if (source != null) return source.reversed.cropped(1 - _end, 1 - _start);
+    return VideoSpeedRamp([
+      for (final point in points.reversed)
+        VideoSpeedRampPoint(position: 1 - point.position, speed: point.speed),
+    ]);
+  }
 
   /// Converts this ramp to a map that [VideoSpeedRamp.fromMap] reads back.
+  ///
+  /// A [cropped] ramp adds its original ramp and where it was cut under
+  /// `crop`. A reader that does not know it plays [points] instead, eased as
+  /// a ramp of its own.
   Map<String, dynamic> toMap() => <String, dynamic>{
     'points': [for (final point in points) point.toMap()],
+    if (_source case final source?)
+      'crop': <String, dynamic>{
+        'source': source.toMap(),
+        'start': _start,
+        'end': _end,
+      },
   };
 
   /// The [steps] as the native renderers read them.
   List<Map<String, double>> toChannelSteps() => [
     for (final step in steps) step.toMap(),
   ];
+
+  /// Where [position] of a [cropped] ramp lies on [_source]. Both edges map
+  /// exactly onto the cut, so trimming one end of a crop keeps the other.
+  double _sourcePosition(double position) {
+    if (position <= 0) return _start;
+    if (position >= 1) return _end;
+    return _start + (_end - _start) * position;
+  }
+
+  /// [source]'s steps between [_start] and [_end], stretched onto `0` to `1`.
+  List<VideoSpeedRampStep> _cropSteps(VideoSpeedRamp source) {
+    final width = _end - _start;
+    final steps = <VideoSpeedRampStep>[];
+    for (final step in source.steps) {
+      final start = math.max(step.start, _start);
+      final end = math.min(step.end, _end);
+      if (end <= start) continue;
+      steps.add(
+        VideoSpeedRampStep(
+          start: (start - _start) / width,
+          end: (end - _start) / width,
+          speed: step.speed,
+        ),
+      );
+    }
+    return steps;
+  }
 
   List<VideoSpeedRampStep> _buildSteps() {
     _debugCheckPoints();
@@ -346,14 +438,22 @@ class VideoSpeedRamp {
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    return other is VideoSpeedRamp && listEquals(other.points, points);
+    return other is VideoSpeedRamp &&
+        listEquals(other.points, points) &&
+        other._source == _source &&
+        other._start == _start &&
+        other._end == _end;
   }
 
   @override
-  int get hashCode => Object.hashAll(points);
+  int get hashCode =>
+      Object.hash(Object.hashAll(points), _source, _start, _end);
 
   @override
-  String toString() => 'VideoSpeedRamp(points: $points)';
+  String toString() => _source == null
+      ? 'VideoSpeedRamp(points: $points)'
+      : 'VideoSpeedRamp(points: $points, cropped from $_source at '
+            '$_start to $_end)';
 }
 
 /// One speed a [VideoSpeedRamp] passes through.

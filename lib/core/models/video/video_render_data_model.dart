@@ -485,6 +485,7 @@ class VideoRenderData {
           (t) => {
             'path': t.path,
             'volume': t.volume,
+            'playbackSpeed': t.playbackSpeed,
             'loop': t.loop,
             'audioStartUs': t.audioStartTime?.inMicroseconds,
             'audioEndUs': t.audioEndTime?.inMicroseconds,

@@ -48,6 +48,7 @@ class AudioSequenceBuilder(
     )
 
     private var loopAudio: Boolean = true
+    private var playbackSpeed: Float = 1.0f
     private var startTimeUs: Long = 0
     private var audioEndTimeUs: Long? = null
     private var compositionStartTimeUs: Long? = null
@@ -62,6 +63,13 @@ class AudioSequenceBuilder(
      */
     fun setLoop(loop: Boolean): AudioSequenceBuilder {
         this.loopAudio = loop
+        return this
+    }
+
+    /** Sets the source speed before looping, padding and fades. */
+    fun setPlaybackSpeed(speed: Float): AudioSequenceBuilder {
+        require(speed.isFinite() && speed > 0f) { "Audio speed must be finite and positive" }
+        playbackSpeed = speed
         return this
     }
 
@@ -159,6 +167,7 @@ class AudioSequenceBuilder(
         val preRender = AudioPreRenderer.render(
             context = context,
             audioPath = audioPath,
+            playbackSpeed = playbackSpeed,
             audioStartUs = startTimeUs,
             audioEndUs = audioEndTimeUs,
             loop = loopAudio,

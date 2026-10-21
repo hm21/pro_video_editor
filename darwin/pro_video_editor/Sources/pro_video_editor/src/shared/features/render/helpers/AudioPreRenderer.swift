@@ -46,6 +46,8 @@ internal enum AudioPreRenderer {
   ///   - loop: If true, the trimmed window repeats to fill
   ///     `targetBodyDuration`. If false, the source plays once and the
   ///     remaining time is filled with silence.
+  ///   - playbackSpeed: Speed of the trimmed source at unchanged pitch. A
+  ///     looped source is stretched as one sound, so its seams stay gap-less.
   ///   - targetBodyDuration: How long the output audio should sound.
   ///   - fadeIn: How long the audio rises from silence to full level
   ///     after it starts.
@@ -59,6 +61,7 @@ internal enum AudioPreRenderer {
     audioEndTime: CMTime?,
     loop: Bool,
     targetBodyDuration: CMTime,
+    playbackSpeed: Double = 1,
     fadeIn: CMTime = .zero,
     fadeOut: CMTime = .zero
   ) async -> Result? {
@@ -153,7 +156,7 @@ internal enum AudioPreRenderer {
       AVLinearPCMIsNonInterleaved: false,
     ]
 
-    let trimmedPcm: Data
+    var trimmedPcm: Data
     do {
       trimmedPcm = try await readPcm(
         from: asset,
@@ -178,6 +181,11 @@ internal enum AudioPreRenderer {
       sampleRate: sampleRate,
       bytesPerFrame: bytesPerFrame
     )
+
+    // A looped source comes back as the whole body, seams included.
+    trimmedPcm = AudioTimeStretch.stretch(
+      trimmedPcm, sampleRate: Int(sampleRate), channels: channelCount,
+      speed: playbackSpeed, maxFrames: targetBytes / bytesPerFrame, loop: loop)
 
     var outputBytes = Data(capacity: targetBytes)
 

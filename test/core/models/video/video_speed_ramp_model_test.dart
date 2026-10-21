@@ -196,16 +196,104 @@ void main() {
         expect(tail.points[1].speed, 0.3);
       });
 
-      test('plays the part in about the time it took inside the whole', () {
-        final whole = hero.outputDuration(source);
-        final half = source * 0.5;
-        final head = hero.cropped(0, 0.5).outputDuration(half);
-        final tail = hero.cropped(0.5, 1).outputDuration(half);
+      test('plays the steps the whole played there, cut at its edges', () {
+        final part = hero.cropped(0.3, 0.8);
+
+        expect(part.steps.first.start, 0);
+        expect(part.steps.last.end, 1);
+        for (final step in part.steps) {
+          // Back on the whole's positions, the same speed plays there.
+          final middle = 0.3 + 0.5 * (step.start + step.end) / 2;
+          final original = hero.steps.firstWhere(
+            (s) => s.start <= middle && middle < s.end,
+          );
+          expect(step.speed, original.speed);
+        }
+        for (var i = 1; i < part.steps.length; i++) {
+          expect(part.steps[i].start, part.steps[i - 1].end);
+        }
+      });
+
+      test('splits the playback time without moving the cut', () {
+        // A cut in the middle of the slow-down, where easing a new curve into
+        // the cut used to move it by several frames.
+        const sixSeconds = Duration(seconds: 6);
+        const cut = Duration(seconds: 4);
+        final at = cut.inMicroseconds / sixSeconds.inMicroseconds;
+        final head = hero.cropped(0, at).outputDuration(cut);
+        final tail = hero.cropped(at, 1).outputDuration(sixSeconds - cut);
 
         expect(
-          (head + tail - whole).inMilliseconds.abs(),
-          lessThan(whole.inMilliseconds * 0.05),
+          (head - hero.sourceToOutput(cut, sourceDuration: sixSeconds))
+              .inMicroseconds
+              .abs(),
+          lessThanOrEqualTo(1),
         );
+        expect(
+          (head + tail - hero.outputDuration(sixSeconds)).inMicroseconds.abs(),
+          lessThanOrEqualTo(1),
+        );
+      });
+
+      test('keeps the curve its frames had', () {
+        final part = hero.cropped(0.3, 0.8);
+
+        for (var i = 0; i <= 10; i++) {
+          final position = i / 10;
+          expect(
+            part.speedAt(position),
+            closeTo(hero.speedAt(0.3 + 0.5 * position), 1e-12),
+          );
+        }
+      });
+
+      test('crops a crop as a stretch of the original ramp', () {
+        final twice = hero.cropped(0.2, 0.8).cropped(0.5, 1);
+
+        expect(twice, hero.cropped(0.5, 0.8));
+        expect(twice.steps, hero.cropped(0.5, 0.8).steps);
+      });
+
+      test('keeps the edge a crop of a crop leaves alone', () {
+        // 0.3 + (0.9 - 0.3) is 0.9000000000000001 in doubles.
+        final part = hero.cropped(0.3, 0.9);
+        const middle = 0.3 + (0.9 - 0.3) * 0.5;
+
+        expect(part.cropped(0.5, 1), hero.cropped(middle, 0.9));
+        expect(part.cropped(0, 0.5), hero.cropped(0.3, middle));
+        expect(part.speedAt(0), part.points.first.speed);
+        expect(part.speedAt(1), part.points.last.speed);
+      });
+
+      test('round-trips through toMap and fromMap', () {
+        final part = hero.cropped(0.25, 0.7);
+        final restored = VideoSpeedRamp.fromMap(part.toMap());
+
+        expect(restored, part);
+        expect(restored.steps, part.steps);
+      });
+
+      test('plays its points without a usable original ramp', () {
+        final part = hero.cropped(0.25, 0.7);
+        final map = part.toMap();
+        (map['crop'] as Map)['source'] = <String, dynamic>{'points': []};
+
+        expect(VideoSpeedRamp.fromMap(map), VideoSpeedRamp(part.points));
+      });
+
+      test('reverses as the crop of the reversed ramp', () {
+        final part = hero.cropped(0.1, 0.45);
+
+        expect(part.reversed, hero.reversed.cropped(0.55, 0.9));
+        expect(
+          part.reversed.outputDuration(source),
+          hero.reversed.cropped(0.55, 0.9).outputDuration(source),
+        );
+      });
+
+      test('is constant when the part it takes plays at one speed', () {
+        expect(hero.cropped(0.45, 0.55).isConstant, isTrue);
+        expect(hero.cropped(0.3, 0.55).isConstant, isFalse);
       });
 
       test('returns the ramp itself for the whole segment', () {

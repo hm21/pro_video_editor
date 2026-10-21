@@ -6,6 +6,7 @@ void main() {
     final track = VideoAudioTrack(
       path: '/audio/music.mp3',
       volume: 0.8,
+      playbackSpeed: 0.5,
       loop: true,
       audioStartTime: const Duration(seconds: 5),
       audioEndTime: const Duration(seconds: 30),
@@ -14,6 +15,38 @@ void main() {
       fadeInDuration: const Duration(milliseconds: 500),
       fadeOutDuration: const Duration(seconds: 1),
     );
+
+    group('playbackSpeed', () {
+      test(
+        'survives JSON and copyWith without moving source trim or fades',
+        () {
+          final restored = VideoAudioTrack.fromJson(track.toJson());
+          expect(restored.playbackSpeed, 0.5);
+          final faster = restored.copyWith(playbackSpeed: 2);
+          expect(faster.playbackSpeed, 2);
+          expect(faster.audioStartTime, const Duration(seconds: 5));
+          expect(faster.audioEndTime, const Duration(seconds: 30));
+          expect(faster.startTime, const Duration(seconds: 2));
+          expect(faster.fadeInDuration, const Duration(milliseconds: 500));
+          expect(faster, isNot(restored));
+          expect(faster.hashCode, isNot(restored.hashCode));
+        },
+      );
+
+      test('old saved tracks default to normal playback', () {
+        final oldMap = track.toMap()..remove('playbackSpeed');
+        expect(VideoAudioTrack.fromMap(oldMap).playbackSpeed, 1);
+      });
+
+      for (final speed in [0.0, -1.0, double.nan, double.infinity]) {
+        test('rejects invalid speed $speed', () {
+          expect(
+            () => VideoAudioTrack(path: '/audio.wav', playbackSpeed: speed),
+            throwsAssertionError,
+          );
+        });
+      }
+    });
 
     group('toMap', () {
       test('serializes all fields correctly', () {

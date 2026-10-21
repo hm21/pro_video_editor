@@ -466,6 +466,7 @@ data class EqualizerConfig(val bands: List<EqualizerBand> = emptyList()) {
 data class AudioTrackConfig(
     val path: String,
     val volume: Float = 1.0f,
+    val playbackSpeed: Float = 1.0f,
     val equalizer: EqualizerConfig? = null,
     val loop: Boolean = false,
     val audioStartUs: Long? = null,
@@ -480,6 +481,7 @@ data class AudioTrackConfig(
             return AudioTrackConfig(
                 path = map["path"] as String,
                 volume = (map["volume"] as? Number)?.toFloat() ?: 1.0f,
+                playbackSpeed = (map["playbackSpeed"] as? Number)?.toFloat() ?: 1.0f,
                 equalizer = EqualizerConfig.fromMap(map["equalizer"] as? Map<*, *>),
                 loop = map["loop"] as? Boolean ?: false,
                 audioStartUs = (map["audioStartUs"] as? Number)?.toLong(),
