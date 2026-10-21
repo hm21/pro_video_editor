@@ -409,12 +409,12 @@ internal enum BitrateCappedExporter {
 
   /// The decoded audio format the reader delivers and the writer encodes.
   ///
-  /// [channels] is clamped to at most stereo and [sampleRate] to what AAC
-  /// accepts. A mono source stays mono; stereo and any surround layout
-  /// (5.1, 7.1, …) resolve to stereo, and the reader is given an explicit
-  /// channel layout ([readerLPCMSettings]) so it performs the downmix
-  /// deterministically instead of leaving multichannel reduction to the AAC
-  /// encoder (whose implicit behavior varies by OS version).
+  /// [channels] is clamped to at most stereo and [sampleRate] to a rate AAC
+  /// accepts ([aacSampleRate(for:)]). A mono source stays mono; stereo and
+  /// any surround layout (5.1, 7.1, …) resolve to stereo, and the reader is
+  /// given an explicit channel layout ([readerLPCMSettings]) so it performs
+  /// the downmix deterministically instead of leaving multichannel reduction
+  /// to the AAC encoder (whose implicit behavior varies by OS version).
   private struct AudioFormat {
     let sampleRate: Double
     let channels: Int
@@ -446,8 +446,24 @@ internal enum BitrateCappedExporter {
     }
 
     return AudioFormat(
-      sampleRate: sampleRate > 48_000 ? 48_000 : sampleRate,
+      sampleRate: aacSampleRate(for: sampleRate),
       channels: min(max(channels, 1), 2))
+  }
+
+  /// The sample rates the AAC encoder takes, as listed by
+  /// `kAudioFormatProperty_AvailableEncodeSampleRates`.
+  private static let aacSampleRates: [Double] = [
+    8_000, 11_025, 12_000, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000,
+  ]
+
+  /// The lowest AAC sample rate at or above [sampleRate], or 48 kHz above
+  /// that; the reader resamples to it.
+  ///
+  /// At any other rate (7.35, 37.8, 47.952 kHz) `AVAssetWriterInput` or the
+  /// reader output raises an `NSInvalidArgumentException` that crashes the
+  /// app. Rounding up keeps the source's full bandwidth.
+  static func aacSampleRate(for sampleRate: Double) -> Double {
+    return aacSampleRates.first { $0 >= sampleRate } ?? aacSampleRates.last!
   }
 
   /// Interleaved 16-bit LPCM reader settings at [format]. The explicit

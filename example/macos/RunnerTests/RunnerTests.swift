@@ -4480,7 +4480,8 @@ final class SpeedRampTests: XCTestCase {
 
 /// The AAC bitrate the bitrate-capped writer asks for has to lie in the
 /// encoder's range for the source's sample rate and channel count; 128 kbps at
-/// 22.05 kHz mono failed the whole render with -11861 (issue #255).
+/// 22.05 kHz mono failed the whole render with -11861 (issue #255). The sample
+/// rate itself has to be one the encoder takes.
 final class BitrateCappedAACTests: XCTestCase {
 
   func testAacBitrateKeeps128kWhereTheEncoderTakesIt() {
@@ -4497,7 +4498,41 @@ final class BitrateCappedAACTests: XCTestCase {
     XCTAssertEqual(BitrateCappedExporter.aacBitrate(sampleRate: 8_000, channels: 1), 24_000)
   }
 
+  func testAacSampleRateRoundsUpToAnEncoderRate() {
+    XCTAssertEqual(BitrateCappedExporter.aacSampleRate(for: 7_350), 8_000)
+    XCTAssertEqual(BitrateCappedExporter.aacSampleRate(for: 37_800), 44_100)
+    XCTAssertEqual(BitrateCappedExporter.aacSampleRate(for: 47_952), 48_000)
+    XCTAssertEqual(BitrateCappedExporter.aacSampleRate(for: 96_000), 48_000)
+    for rate in [8_000.0, 11_025, 12_000, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000] {
+      XCTAssertEqual(BitrateCappedExporter.aacSampleRate(for: rate), rate)
+      // The encoder takes the rate: a converter for it can be built.
+      XCTAssertNotNil(
+        BitrateCappedExporter.aacBitrate(sampleRate: rate, channels: 1), "\(rate) Hz")
+    }
+  }
+
   func testExportsLowSampleRateMonoAudio() async throws {
+    let stream = try await exportTone(sampleRate: 22_050)
+    XCTAssertEqual(stream.mFormatID, kAudioFormatMPEG4AAC)
+    XCTAssertEqual(stream.mSampleRate, 22_050)
+    XCTAssertEqual(stream.mChannelsPerFrame, 1)
+  }
+
+  /// 37.8 and 7.35 kHz are no AAC encoder rates. At the source rate the writer
+  /// input (37.8 kHz) and the reader output (7.35 kHz) raised an
+  /// `NSInvalidArgumentException` that crashed the app.
+  func testExportsAudioAtRatesTheEncoderLacks() async throws {
+    for (source, encoded) in [(37_800.0, 44_100.0), (7_350, 8_000)] {
+      let stream = try await exportTone(sampleRate: source)
+      XCTAssertEqual(stream.mFormatID, kAudioFormatMPEG4AAC, "\(source) Hz")
+      XCTAssertEqual(stream.mSampleRate, encoded, "\(source) Hz")
+      XCTAssertEqual(stream.mChannelsPerFrame, 1, "\(source) Hz")
+    }
+  }
+
+  /// Exports a 2 s clip with a mono 440 Hz tone at [sampleRate] through
+  /// `BitrateCappedExporter` and returns the output's audio format.
+  private func exportTone(sampleRate: Double) async throws -> AudioStreamBasicDescription {
     let directory = FileManager.default.temporaryDirectory
       .appendingPathComponent("aac-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -4507,11 +4542,13 @@ final class BitrateCappedAACTests: XCTestCase {
     let videoURL = try ThumbnailTimestampFixture.makeColorVideo(colors: [palette[0], palette[1]])
     defer { try? FileManager.default.removeItem(at: videoURL) }
     let audioURL = directory.appendingPathComponent("tone.caf")
-    let format = AVAudioFormat(standardFormatWithSampleRate: 22_050, channels: 1)!
-    let tone = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44_100)!
-    tone.frameLength = 44_100
-    for frame in 0..<44_100 {
-      tone.floatChannelData![0][frame] = 0.5 * sin(Float(frame) * 2 * .pi * 440 / 22_050)
+    let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+    let frames = AVAudioFrameCount(sampleRate * 2)
+    let tone = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+    tone.frameLength = frames
+    for frame in 0..<Int(frames) {
+      tone.floatChannelData![0][frame] =
+        0.5 * sin(Float(frame) * 2 * .pi * 440 / Float(sampleRate))
     }
     try AVAudioFile(forWriting: audioURL, settings: format.settings).write(from: tone)
 
@@ -4539,8 +4576,6 @@ final class BitrateCappedAACTests: XCTestCase {
     let description = try await XCTUnwrap(track).load(.formatDescriptions).first
     let stream = try XCTUnwrap(
       CMAudioFormatDescriptionGetStreamBasicDescription(try XCTUnwrap(description)))
-    XCTAssertEqual(stream.pointee.mFormatID, kAudioFormatMPEG4AAC)
-    XCTAssertEqual(stream.pointee.mSampleRate, 22_050)
-    XCTAssertEqual(stream.pointee.mChannelsPerFrame, 1)
+    return stream.pointee
   }
 }
