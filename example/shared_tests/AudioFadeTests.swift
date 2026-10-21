@@ -279,6 +279,26 @@ final class AudioTrackSpeedTests: XCTestCase {
     XCTAssertEqual(frequency(output, channel: 0), 440, accuracy: 5)
   }
 
+  func testSoundStartsOnTheFirstSampleAndEndsAtFullLevel() {
+    let source = periodicTone(seconds: 2)
+    for speed in [0.5, 0.8, 1.25, 2, 3] {
+      let output = AudioTimeStretch.stretch(
+        source, sampleRate: rate, channels: 2, speed: speed, maxFrames: rate * 12)
+      XCTAssertEqual(output.prefix(400), source.prefix(400), "start at \(speed)")
+      assertQuietestPeriod(output, above: 0.95, "once at \(speed)")
+    }
+  }
+
+  func testLoopStretchesEachSeamWithoutAGap() {
+    let source = periodicTone(seconds: 1)
+    for speed in [0.5, 0.8, 1.25, 2, 3] {
+      let output = AudioTimeStretch.stretch(
+        source, sampleRate: rate, channels: 2, speed: speed, maxFrames: rate * 5, loop: true)
+      XCTAssertEqual(output.count, rate * 5 * 4, "body length at \(speed)")
+      assertQuietestPeriod(output, above: 0.95, "loop at \(speed)")
+    }
+  }
+
   func testUnityIsExactAndRenderingStopsAtTheOutputSlot() {
     let source = tone(seconds: 2)
     XCTAssertEqual(AudioTimeStretch.stretch(
@@ -300,6 +320,32 @@ final class AudioTrackSpeedTests: XCTestCase {
       }
     }
     return pcm
+  }
+
+  /// A 400 Hz tone of whole periods, so the source loops without a jump.
+  private func periodicTone(seconds: Int) -> Data {
+    var pcm = Data()
+    for frame in 0..<(rate * seconds) {
+      var value = Int16((12000 * sin(2 * .pi * 400 * Double(frame) / Double(rate))).rounded())
+        .littleEndian
+      for _ in 0..<2 { withUnsafeBytes(of: &value) { pcm.append(contentsOf: $0) } }
+    }
+    return pcm
+  }
+
+  /// Fails when any whole 400 Hz period peaks below `share` of the tone.
+  private func assertQuietestPeriod(_ pcm: Data, above share: Double, _ message: String) {
+    pcm.withUnsafeBytes { raw in
+      let samples = raw.bindMemory(to: Int16.self)
+      let period = rate / 400
+      for start in Swift.stride(from: 0, through: samples.count / 2 - period, by: period) {
+        let peak = (start..<(start + period)).map { abs(Int(samples[$0 * 2])) }.max() ?? 0
+        if Double(peak) < 12000 * share {
+          XCTFail("\(message): peak \(peak) at frame \(start)")
+          return
+        }
+      }
+    }
   }
 
   private func frequency(_ pcm: Data, channel: Int) -> Double {

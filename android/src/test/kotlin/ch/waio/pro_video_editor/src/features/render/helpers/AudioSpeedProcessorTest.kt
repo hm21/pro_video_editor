@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -36,6 +37,27 @@ internal class AudioSpeedProcessorTest {
     }
 
     @Test
+    fun soundStartsOnTheFirstSampleAndEndsAtFullLevel() {
+        for (speed in listOf(0.5f, 0.8f, 1.25f, 2f, 3f)) {
+            val pcm = periodicTone(seconds = 2)
+            val output = stretch(pcm, speed)
+            assertTrue(pcm.copyOf(400).contentEquals(output.copyOf(400)), "start at $speed")
+            assertQuietestPeriodAbove(output, 0.95, "once at $speed")
+        }
+    }
+
+    @Test
+    fun loopStretchesEachSeamWithoutAGap() {
+        for (speed in listOf(0.5f, 0.8f, 1.25f, 2f, 3f)) {
+            val output = stretch(
+                periodicTone(seconds = 1), speed, maxFrames = sampleRate * 5L, loop = true
+            )
+            assertEquals(sampleRate * 5 * 4, output.size, "body length at $speed")
+            assertQuietestPeriodAbove(output, 0.95, "loop at $speed")
+        }
+    }
+
+    @Test
     fun normalSpeedCopiesTheExactPcm() {
         val input = tone(seconds = 1, oppositePhase = false)
         assertTrue(input.contentEquals(stretch(input, 1f)))
@@ -52,12 +74,34 @@ internal class AudioSpeedProcessorTest {
         return pcm.array()
     }
 
-    private fun stretch(pcm: ByteArray, speed: Float): ByteArray {
+    /** A 400 Hz tone of whole periods, so the source loops without a jump. */
+    private fun periodicTone(seconds: Int): ByteArray {
+        val pcm = ByteBuffer.allocate(sampleRate * seconds * 4).order(ByteOrder.LITTLE_ENDIAN)
+        for (frame in 0 until sampleRate * seconds) {
+            val value = (12000 * sin(2 * PI * 400 * frame / sampleRate)).roundToInt().toShort()
+            pcm.putShort(value).putShort(value)
+        }
+        return pcm.array()
+    }
+
+    /** Fails when any whole 400 Hz period peaks below [share] of the tone. */
+    private fun assertQuietestPeriodAbove(pcm: ByteArray, share: Double, message: String) {
+        val samples = ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        val period = sampleRate / 400
+        for (start in 0 until samples.limit() / 2 - period + 1 step period) {
+            val peak = (start until start + period).maxOf { abs(samples.get(it * 2).toInt()) }
+            assertTrue(peak >= 12000 * share, "$message: peak $peak at frame $start")
+        }
+    }
+
+    private fun stretch(
+        pcm: ByteArray, speed: Float, maxFrames: Long = Long.MAX_VALUE, loop: Boolean = false
+    ): ByteArray {
         val source = File.createTempFile("speed_source", ".raw")
         val output = File.createTempFile("speed_output", ".raw")
         try {
             source.writeBytes(pcm)
-            AudioSpeedProcessor.stretch(source, output, sampleRate, 2, speed)
+            AudioSpeedProcessor.stretch(source, output, sampleRate, 2, speed, maxFrames, loop)
             assertEquals(pcm.size.toLong(), source.length())
             return output.readBytes()
         } finally {

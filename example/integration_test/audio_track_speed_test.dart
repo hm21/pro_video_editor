@@ -120,12 +120,28 @@ void main() {
     );
   }
 
-  testWidgets('a sped-up source loops before the output fade', (_) async {
-    final bytes = await render(2, loop: true);
-    final pcm = Pcm.parseWav(bytes, channel: 0);
-    expect(pcm.rms(3.3, 3.7), greaterThan(0.2));
-    expect(pcm.rms(5.3, 5.7), greaterThan(0.2));
-    expect(pcm.toneFrequency(3.3, 3.7), closeTo(440, 8));
-    expect(pcm.rms(5.96, 6), lessThan(0.08));
-  }, skip: !supported);
+  for (final speed in [0.5, 2.0]) {
+    testWidgets(
+      'a ${speed}x source loops without a gap before the output fade',
+      (_) async {
+        final bytes = await render(speed, loop: true);
+        final pcm = Pcm.parseWav(bytes, channel: 0);
+        final level = pcm.rms(3.3, 3.7);
+        expect(level, greaterThan(0.2));
+        expect(pcm.rms(5.3, 5.7), greaterThan(0.2));
+        expect(pcm.toneFrequency(3.3, 3.7), closeTo(440, 8));
+        expect(pcm.rms(5.96, 6), lessThan(0.08));
+        // The two-second window is whole periods of its tone, so every seam
+        // (each second from 2 s at 2x, at 5 s at 0.5x) plays on at full level.
+        for (var t = 1.3; t < 5.7; t += 0.005) {
+          expect(
+            pcm.rms(t, t + 0.01),
+            greaterThan(level * 0.7),
+            reason: '$t s',
+          );
+        }
+      },
+      skip: !supported,
+    );
+  }
 }

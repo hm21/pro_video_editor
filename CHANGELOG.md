@@ -1,5 +1,5 @@
-## Unreleased
-- **FEAT**(android, iOS, macOS): `VideoAudioTrack.playbackSpeed` speeds up or slows down a trimmed sound at unchanged pitch, preserving stereo. The speed is baked before looping, padding and fades; source trim offsets remain in source time and track placement/fades remain in output time.
+## 2.41.0
+- **FEAT**(android, iOS, macOS): `VideoAudioTrack.playbackSpeed` plays a custom audio track faster or slower at unchanged pitch, keeping stereo and gap-less loops. Source trims stay in source time; placement and fades stay in output time.
 
 ## 2.40.0
 - **FEAT**(android, iOS, macOS): Loop point search. `VideoLoopPointFinder.findLoopPoint` finds where to cut a video so it loops without a visible jump, matching the last frames and their motion against the first ones, optionally also searching the start or reading it from another clip.

@@ -83,7 +83,8 @@ object AudioPreRenderer {
      *   on the composition timeline.
      * @param videoDurationUs Total duration of the composition (used to
      *   determine trailing silence).
-     * @param playbackSpeed Pitch-preserving speed of the trimmed source, before looping.
+     * @param playbackSpeed Speed of the trimmed source at unchanged pitch. A
+     *   looped source is stretched as one sound, so its seams stay gap-less.
      * @param fadeInUs How long the body rises from silence to full level
      *   after it starts.
      * @param fadeOutUs How long the body falls to silence before its audio
@@ -128,12 +129,21 @@ object AudioPreRenderer {
         var stretchedFile: File? = null
         try {
             val source = if (playbackSpeed != 1f) {
-                val file = File.createTempFile("speed_audio_", ".raw", context.cacheDir)
-                stretchedFile = file
-                AudioSpeedProcessor.stretch(
-                    decoded.pcmFile, file, decoded.sampleRate, decoded.channelCount, playbackSpeed,
-                    maxFrames = usToFrames(compositionDurationUs, decoded.sampleRate)
-                )
+                // A looped source comes back as the whole body, seams included.
+                val file = try {
+                    File.createTempFile("speed_audio_", ".raw", context.cacheDir).also {
+                        stretchedFile = it
+                        AudioSpeedProcessor.stretch(
+                            decoded.pcmFile, it, decoded.sampleRate, decoded.channelCount,
+                            playbackSpeed,
+                            maxFrames = usToFrames(compositionDurationUs, decoded.sampleRate),
+                            loop = loop
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e(RENDER_TAG, "AudioPreRenderer: speed change failed: ${e.message}")
+                    return null
+                }
                 DecodedAudio(file, file.length(), decoded.sampleRate, decoded.channelCount)
             } else decoded
             return assemble(
