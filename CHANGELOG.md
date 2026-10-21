@@ -1,3 +1,6 @@
+## 2.41.2
+- **FIX**(iOS, macOS): A render with a `bitrate` no longer fails with `RENDER_ERROR` (-11861) when the source audio has a low sample rate, such as 22.05 kHz mono. The AAC bitrate now stays within what the encoder accepts for the format.
+
 ## 2.41.1
 - **FIX**: `VideoSpeedRamp.cropped` keeps the steps the whole ramp played there, so splitting or trimming a ramped segment no longer moves the cut or changes its length. `toMap` stores the crop under `crop`.
 
