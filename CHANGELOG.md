@@ -1,3 +1,6 @@
+## 2.41.0
+- **FIX**: `VideoSpeedRamp.cropped` keeps the steps the whole ramp played in the part it takes, so splitting or trimming a ramped segment no longer changes its timing. It used to ease a new curve between the cut's speeds: splitting a 6 s segment under a fast, slow, fast ramp moved the cut 235 ms and shortened the whole by 214 ms. A cropped ramp's `points` still show the stretch of the curve it covers, and `toMap` writes where it was cut under `crop`.
+
 ## 2.40.0
 - **FEAT**(android, iOS, macOS): Loop point search. `VideoLoopPointFinder.findLoopPoint` finds where to cut a video so it loops without a visible jump, matching the last frames and their motion against the first ones, optionally also searching the start or reading it from another clip.
 
