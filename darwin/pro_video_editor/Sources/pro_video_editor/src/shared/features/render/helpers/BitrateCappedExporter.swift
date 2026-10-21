@@ -1,4 +1,5 @@
 import AVFoundation
+import AudioToolbox
 import Foundation
 
 /// Renders a composition through AVAssetReader → AVAssetWriter so the
@@ -469,12 +470,69 @@ internal enum BitrateCappedExporter {
 
   /// AAC writer settings matching the reader's LPCM channel count/sample rate.
   private static func writerAACSettings(_ format: AudioFormat) -> [String: Any] {
-    return [
+    var settings: [String: Any] = [
       AVFormatIDKey: kAudioFormatMPEG4AAC,
       AVSampleRateKey: format.sampleRate,
       AVNumberOfChannelsKey: format.channels,
-      AVEncoderBitRateKey: 128_000,
     ]
+    if let bitrate = aacBitrate(sampleRate: format.sampleRate, channels: format.channels) {
+      settings[AVEncoderBitRateKey] = bitrate
+    }
+    return settings
+  }
+
+  /// The AAC bitrate for [sampleRate]/[channels]: [preferred] when the
+  /// encoder accepts it, otherwise the highest rate below it that it does.
+  ///
+  /// AAC-LC limits the bitrate per sample rate and channel count (22.05 kHz
+  /// mono tops out at 64 kbps, 16 kHz stereo at 96 kbps), and AVAssetWriter
+  /// fails the whole render with -11861 (`AVErrorUnsupportedOutputSettings`)
+  /// on a rate outside that range. Returns nil when the encoder cannot be
+  /// queried, so the writer falls back to its own default.
+  static func aacBitrate(
+    sampleRate: Double, channels: Int, preferred: Int = 128_000
+  ) -> Int? {
+    let channelCount = UInt32(channels)
+    var input = AudioStreamBasicDescription(
+      mSampleRate: sampleRate, mFormatID: kAudioFormatLinearPCM,
+      mFormatFlags: kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked,
+      mBytesPerPacket: 2 * channelCount, mFramesPerPacket: 1,
+      mBytesPerFrame: 2 * channelCount, mChannelsPerFrame: channelCount,
+      mBitsPerChannel: 16, mReserved: 0)
+    var output = AudioStreamBasicDescription(
+      mSampleRate: sampleRate, mFormatID: kAudioFormatMPEG4AAC, mFormatFlags: 0,
+      mBytesPerPacket: 0, mFramesPerPacket: 1024, mBytesPerFrame: 0,
+      mChannelsPerFrame: channelCount, mBitsPerChannel: 0, mReserved: 0)
+    var converter: AudioConverterRef?
+    guard AudioConverterNew(&input, &output, &converter) == noErr,
+      let converter = converter
+    else { return nil }
+    defer { AudioConverterDispose(converter) }
+
+    var size: UInt32 = 0
+    guard
+      AudioConverterGetPropertyInfo(
+        converter, kAudioConverterApplicableEncodeBitRates, &size, nil) == noErr,
+      size > 0
+    else { return nil }
+    var ranges = [AudioValueRange](
+      repeating: AudioValueRange(),
+      count: Int(size) / MemoryLayout<AudioValueRange>.stride)
+    guard
+      AudioConverterGetProperty(
+        converter, kAudioConverterApplicableEncodeBitRates, &size, &ranges) == noErr
+    else { return nil }
+    // The info call over-reports the size; the get call trims it to the
+    // ranges actually written.
+    let applicable = ranges.prefix(Int(size) / MemoryLayout<AudioValueRange>.stride)
+      .filter { $0.mMaximum > 0 }
+    guard !applicable.isEmpty else { return nil }
+
+    let preferredRate = Double(preferred)
+    let fitting = applicable.filter { $0.mMinimum <= preferredRate }
+      .map { min($0.mMaximum, preferredRate) }
+    if let best = fitting.max() { return Int(best) }
+    return applicable.map { $0.mMinimum }.min().map { Int($0) }
   }
 
   /// Encodes a mono or stereo `AudioChannelLayout` as `Data` for

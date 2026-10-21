@@ -4475,3 +4475,72 @@ final class SpeedRampTests: XCTestCase {
     XCTAssertEqual(sliced, whole)
   }
 }
+
+// MARK: - Bitrate-capped AAC
+
+/// The AAC bitrate the bitrate-capped writer asks for has to lie in the
+/// encoder's range for the source's sample rate and channel count; 128 kbps at
+/// 22.05 kHz mono failed the whole render with -11861 (issue #255).
+final class BitrateCappedAACTests: XCTestCase {
+
+  func testAacBitrateKeeps128kWhereTheEncoderTakesIt() {
+    XCTAssertEqual(BitrateCappedExporter.aacBitrate(sampleRate: 48_000, channels: 2), 128_000)
+    XCTAssertEqual(BitrateCappedExporter.aacBitrate(sampleRate: 44_100, channels: 2), 128_000)
+    XCTAssertEqual(BitrateCappedExporter.aacBitrate(sampleRate: 44_100, channels: 1), 128_000)
+    XCTAssertEqual(BitrateCappedExporter.aacBitrate(sampleRate: 22_050, channels: 2), 128_000)
+  }
+
+  func testAacBitrateStaysInsideTheEncoderRange() {
+    XCTAssertEqual(BitrateCappedExporter.aacBitrate(sampleRate: 22_050, channels: 1), 64_000)
+    XCTAssertEqual(BitrateCappedExporter.aacBitrate(sampleRate: 32_000, channels: 1), 96_000)
+    XCTAssertEqual(BitrateCappedExporter.aacBitrate(sampleRate: 16_000, channels: 2), 96_000)
+    XCTAssertEqual(BitrateCappedExporter.aacBitrate(sampleRate: 8_000, channels: 1), 24_000)
+  }
+
+  func testExportsLowSampleRateMonoAudio() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("aac-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let palette = ThumbnailTimestampFixture.palette
+    let videoURL = try ThumbnailTimestampFixture.makeColorVideo(colors: [palette[0], palette[1]])
+    defer { try? FileManager.default.removeItem(at: videoURL) }
+    let audioURL = directory.appendingPathComponent("tone.caf")
+    let format = AVAudioFormat(standardFormatWithSampleRate: 22_050, channels: 1)!
+    let tone = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44_100)!
+    tone.frameLength = 44_100
+    for frame in 0..<44_100 {
+      tone.floatChannelData![0][frame] = 0.5 * sin(Float(frame) * 2 * .pi * 440 / 22_050)
+    }
+    try AVAudioFile(forWriting: audioURL, settings: format.settings).write(from: tone)
+
+    let video = AVURLAsset(url: videoURL)
+    let audio = AVURLAsset(url: audioURL)
+    let duration = try await video.load(.duration)
+    let range = CMTimeRange(start: .zero, duration: duration)
+    let composition = AVMutableComposition()
+    for (asset, type) in [(video, AVMediaType.video), (audio, .audio)] {
+      let track = composition.addMutableTrack(
+        withMediaType: type, preferredTrackID: kCMPersistentTrackID_Invalid)!
+      try track.insertTimeRange(
+        range, of: try await asset.loadTracks(withMediaType: type)[0], at: .zero)
+    }
+    let videoComposition = AVMutableVideoComposition(propertiesOf: composition)
+    videoComposition.renderSize = CGSize(width: 160, height: 90)
+
+    let output = directory.appendingPathComponent("capped.mp4")
+    try await BitrateCappedExporter.export(
+      asset: composition, videoComposition: videoComposition, audioMix: nil,
+      outputURL: output, fileType: .mp4, videoBitrate: 500_000, timeRange: nil,
+      optimizeForNetworkUse: false, onProgress: { _ in })
+
+    let track = try await AVURLAsset(url: output).loadTracks(withMediaType: .audio).first
+    let description = try await XCTUnwrap(track).load(.formatDescriptions).first
+    let stream = try XCTUnwrap(
+      CMAudioFormatDescriptionGetStreamBasicDescription(try XCTUnwrap(description)))
+    XCTAssertEqual(stream.pointee.mFormatID, kAudioFormatMPEG4AAC)
+    XCTAssertEqual(stream.pointee.mSampleRate, 22_050)
+    XCTAssertEqual(stream.pointee.mChannelsPerFrame, 1)
+  }
+}
