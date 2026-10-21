@@ -254,12 +254,31 @@ void main() {
         expect(twice.steps, hero.cropped(0.5, 0.8).steps);
       });
 
+      test('keeps the edge a crop of a crop leaves alone', () {
+        // 0.3 + (0.9 - 0.3) is 0.9000000000000001 in doubles.
+        final part = hero.cropped(0.3, 0.9);
+        const middle = 0.3 + (0.9 - 0.3) * 0.5;
+
+        expect(part.cropped(0.5, 1), hero.cropped(middle, 0.9));
+        expect(part.cropped(0, 0.5), hero.cropped(0.3, middle));
+        expect(part.speedAt(0), part.points.first.speed);
+        expect(part.speedAt(1), part.points.last.speed);
+      });
+
       test('round-trips through toMap and fromMap', () {
         final part = hero.cropped(0.25, 0.7);
         final restored = VideoSpeedRamp.fromMap(part.toMap());
 
         expect(restored, part);
         expect(restored.steps, part.steps);
+      });
+
+      test('plays its points without a usable original ramp', () {
+        final part = hero.cropped(0.25, 0.7);
+        final map = part.toMap();
+        (map['crop'] as Map)['source'] = <String, dynamic>{'points': []};
+
+        expect(VideoSpeedRamp.fromMap(map), VideoSpeedRamp(part.points));
       });
 
       test('reverses as the crop of the reversed ramp', () {
