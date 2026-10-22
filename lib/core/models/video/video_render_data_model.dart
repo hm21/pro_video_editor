@@ -494,6 +494,8 @@ class VideoRenderData {
             'fadeInUs': t.fadeInDuration.inMicroseconds,
             'fadeOutUs': t.fadeOutDuration.inMicroseconds,
             'equalizer': t.equalizer?.toMap(),
+            if (t.volumeCurve case final curve? when !curve.isFlat)
+              'volumeCurve': curve.toChannelData(),
           },
         )
         .toList();

@@ -114,6 +114,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🔇 **Mute Audio**: Remove or mute the audio track from the video.
 - ⏩ **Audio Track Speed**: Speed up or slow down custom audio tracks with `VideoAudioTrack.playbackSpeed`, preserving pitch and stereo on Android, iOS and macOS. Source trims stay in source time; placement and fades stay in output time.
 - 🎚️ **Equalizer**: Raise or lower parts of the audio of a clip or a custom audio track with an `AudioEqualizer` of any number of bands, each a low shelf, a peak or a high shelf.
+- 🦆 **Audio Ducking**: Lower the music automatically while a voice-over talks and bring it back up when it stops. `AudioDucking.analyze` measures the voice tracks' loudness (no speech recognition) and returns an `AudioVolumeCurve` for `VideoAudioTrack.volumeCurve`; a preview that scales its volume by `AudioVolumeCurve.volumeAt` plays the same dips.
 - 📊 **Waveform**: Generate audio waveform data for visualization, with support for streaming mode.
 
 #### 🔧 **Transformations**
@@ -183,6 +184,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 | `Custom Video Effects`     | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Custom Audio Tracks`      | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Audio Equalizer`          | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
+| `Audio Ducking`            | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Merge Videos`             | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Stop-Motion (Images→Video)`| ✅     | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Extract Audio`            | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
@@ -593,6 +595,39 @@ StreamBuilder<ProgressModel>(
     }
 )
 ```
+
+#### Audio Ducking Example
+
+Lower the music while a voice-over talks. The voice tracks are measured by their loudness, and the music follows the returned curve: down to `volume` by the time the voice starts, back up `hold` after it stops.
+
+```dart
+final voiceOver = VideoAudioTrack(
+  path: voiceOverPath,
+  startTime: const Duration(seconds: 2),
+);
+
+// Lower the music to a quarter of its volume while somebody talks.
+final duck = await const AudioDucking(volume: 0.25).analyze(
+  [voiceOver],
+  videoDuration: const Duration(seconds: 6),
+);
+
+await ProVideoEditor.instance.renderVideoToFile(
+  outputPath,
+  VideoRenderData(
+    videoSegments: [VideoSegment(video: video)],
+    audioTracks: [
+      voiceOver,
+      VideoAudioTrack(path: musicPath, volume: 0.8, volumeCurve: duck),
+    ],
+  ),
+);
+
+// A preview plays the same dips by scaling the music's volume.
+musicPlayer.setVolume(0.8 * duck.volumeAt(position));
+```
+
+`AudioVolumeCurve` works without ducking too: any list of `AudioVolumePoint`s automates a track's volume, moving in a straight line from one point to the next.
 
 #### Waveform Example
 

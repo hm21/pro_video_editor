@@ -5,6 +5,7 @@ import android.content.Context
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import androidx.media3.common.util.UnstableApi
+import ch.waio.pro_video_editor.src.features.render.models.VolumeCurve
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.PcmRangeDecoder
 import ch.waio.pro_video_editor.src.shared.media.contentDataSource
@@ -36,8 +37,9 @@ import java.nio.ByteOrder
  *   3. Trailing silence (matching `videoDurationUs - compositionStartUs -
  *      compositionDurationUs`)
  *
- * An optional linear fade in and out is baked into the audio body (2), so
- * the mixer needs no time-varying gain of its own.
+ * An optional linear fade in and out and an optional [VolumeCurve] are baked
+ * into the audio body (2), so the mixer needs no time-varying gain of its
+ * own.
  *
  * The output sample rate matches the decoder output of the source file.
  * Float PCM is converted to 16-bit signed PCM, and more than two channels are
@@ -90,6 +92,8 @@ object AudioPreRenderer {
      * @param fadeOutUs How long the body falls to silence before its audio
      *   ends — the end of the body, or earlier when a non-looping source runs
      *   out first.
+     * @param volumeCurve Scales the body over the composition timeline, on
+     *   top of the fades; null leaves it as it is.
      * @return [Result] on success, null on failure (file missing, decode
      *   error, invalid parameters).
      */
@@ -104,7 +108,8 @@ object AudioPreRenderer {
         videoDurationUs: Long,
         fadeInUs: Long = 0L,
         fadeOutUs: Long = 0L,
-        playbackSpeed: Float = 1.0f
+        playbackSpeed: Float = 1.0f,
+        volumeCurve: VolumeCurve? = null
     ): Result? {
         if (!mediaSourceExists(context, audioPath)) {
             Log.e(RENDER_TAG, "AudioPreRenderer: source file not found: $audioPath")
@@ -154,7 +159,8 @@ object AudioPreRenderer {
                 compositionDurationUs = compositionDurationUs,
                 videoDurationUs = videoDurationUs,
                 fadeInUs = fadeInUs,
-                fadeOutUs = fadeOutUs
+                fadeOutUs = fadeOutUs,
+                volumeCurve = volumeCurve
             )
         } finally {
             stretchedFile?.delete()
@@ -174,7 +180,8 @@ object AudioPreRenderer {
         compositionDurationUs: Long,
         videoDurationUs: Long,
         fadeInUs: Long,
-        fadeOutUs: Long
+        fadeOutUs: Long,
+        volumeCurve: VolumeCurve?
     ): Result? {
         if (decoded.byteLength <= 0L) {
             Log.e(RENDER_TAG, "AudioPreRenderer: decoder produced no PCM data")
@@ -225,19 +232,33 @@ object AudioPreRenderer {
 
                 writeSilence(raf, trailingSilenceBytes)
 
+                val audibleBytes = audibleBodyBytes(
+                    bodyBytes = bodyBytesWritten,
+                    sourceBytes = decoded.byteLength,
+                    loop = loop,
+                    bytesPerFrame = bytesPerFrame
+                )
                 applyFade(
                     raf = raf,
                     bodyStart = WAV_HEADER_BYTES + leadingSilenceBytes,
-                    audibleBytes = audibleBodyBytes(
-                        bodyBytes = bodyBytesWritten,
-                        sourceBytes = decoded.byteLength,
-                        loop = loop,
-                        bytesPerFrame = bytesPerFrame
-                    ),
+                    audibleBytes = audibleBytes,
                     bytesPerFrame = bytesPerFrame,
                     fadeInFrames = usToFrames(fadeInUs, sampleRate),
                     fadeOutFrames = usToFrames(fadeOutUs, sampleRate)
                 )
+                if (volumeCurve != null) {
+                    // The WAV starts at the composition's first frame, so a
+                    // frame's index is its place on the curve's timeline.
+                    val firstFrame = leadingSilenceBytes / bytesPerFrame
+                    applyVolumeCurve(
+                        raf = raf,
+                        dataStart = WAV_HEADER_BYTES,
+                        frames = firstFrame until firstFrame + audibleBytes / bytesPerFrame,
+                        bytesPerFrame = bytesPerFrame,
+                        sampleRate = sampleRate,
+                        curve = volumeCurve
+                    )
+                }
 
                 // Update RIFF/data chunk sizes in the header.
                 val totalDataBytes =
@@ -257,7 +278,8 @@ object AudioPreRenderer {
                     "leadSilence=${compositionStartUs / 1000}ms, " +
                     "body=${compositionDurationUs / 1000}ms, " +
                     "loop=$loop, fadeIn=${fadeInUs / 1000}ms, " +
-                    "fadeOut=${fadeOutUs / 1000}ms"
+                    "fadeOut=${fadeOutUs / 1000}ms, " +
+                    "volumeCurve=${volumeCurve?.timesUs?.size ?: 0} points"
         )
 
         return Result(outputFile, sampleRate, channelCount)
@@ -609,6 +631,68 @@ object AudioPreRenderer {
             }
         }
         raf.seek(raf.length())
+    }
+
+    /**
+     * Scales the 16-bit PCM [frames] of [raf], counted from [dataStart], by
+     * [curve] at each frame's time (`frame / sampleRate`).
+     *
+     * Only the frames where the curve is below 1 are read back and
+     * rewritten; the rest stay untouched, like the frames around a fade.
+     */
+    internal fun applyVolumeCurve(
+        raf: RandomAccessFile,
+        dataStart: Long,
+        frames: LongRange,
+        bytesPerFrame: Int,
+        sampleRate: Int,
+        curve: VolumeCurve
+    ) {
+        if (frames.isEmpty()) return
+        val usPerFrame = 1_000_000.0 / sampleRate
+        val chunkFrames = (1 shl 16) / bytesPerFrame
+        val buffer = ByteArray(chunkFrames * bytesPerFrame)
+        for (lowered in curve.loweredRangesUs()) {
+            val from = maxOf(frames.first, framesFromUs(lowered.first, sampleRate, ceil = true))
+            val to = minOf(frames.last, framesFromUs(lowered.last, sampleRate, ceil = false))
+            var frame = from
+            while (frame <= to) {
+                val count = minOf(chunkFrames.toLong(), to - frame + 1).toInt()
+                val length = count * bytesPerFrame
+                val offset = dataStart + frame * bytesPerFrame
+                raf.seek(offset)
+                raf.readFully(buffer, 0, length)
+                for (i in 0 until count) {
+                    val gain = curve.volumeAt((frame + i) * usPerFrame)
+                    if (gain >= 1.0) continue
+                    var p = i * bytesPerFrame
+                    val frameEnd = p + bytesPerFrame
+                    while (p < frameEnd) {
+                        val sample = ((buffer[p].toInt() and 0xFF) or
+                                (buffer[p + 1].toInt() shl 8)).toShort()
+                        val scaled = Math.round(sample * gain).toInt()
+                        buffer[p] = (scaled and 0xFF).toByte()
+                        buffer[p + 1] = ((scaled shr 8) and 0xFF).toByte()
+                        p += 2
+                    }
+                }
+                raf.seek(offset)
+                raf.write(buffer, 0, length)
+                frame += count
+            }
+        }
+        raf.seek(raf.length())
+    }
+
+    /**
+     * The frame at [timeUs]: the first one at or after it when [ceil], else
+     * the last one at or before it. Unbounded times stay unbounded.
+     */
+    private fun framesFromUs(timeUs: Long, sampleRate: Int, ceil: Boolean): Long {
+        if (timeUs == Long.MIN_VALUE) return Long.MIN_VALUE
+        if (timeUs == Long.MAX_VALUE) return Long.MAX_VALUE
+        val frames = timeUs.toDouble() * sampleRate / 1_000_000.0
+        return if (ceil) Math.ceil(frames).toLong() else Math.floor(frames).toLong()
     }
 
     /**

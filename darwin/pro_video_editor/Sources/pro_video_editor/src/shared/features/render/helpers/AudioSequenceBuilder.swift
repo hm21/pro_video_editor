@@ -36,6 +36,8 @@ internal class AudioSequenceBuilder {
   private var fadeIn: CMTime = .zero
   /// How long the track fades out before its audio ends.
   private var fadeOut: CMTime = .zero
+  /// How the volume changes over the output timeline; nil keeps it constant.
+  private var volumeCurve: VolumeCurve?
 
   /// Initializes builder with audio path and the span of the composition the
   /// export keeps.
@@ -99,6 +101,15 @@ internal class AudioSequenceBuilder {
     return self
   }
 
+  /// Sets how the volume changes over the output timeline; nil keeps it
+  /// constant. Baked into the pre-rendered audio with the fades, see
+  /// `AudioPreRenderer.render`.
+  @discardableResult
+  func setVolumeCurve(_ curve: VolumeCurve?) -> AudioSequenceBuilder {
+    self.volumeCurve = curve
+    return self
+  }
+
   /// Pre-renders the audio and inserts it into `composition` with a
   /// single `insertTimeRange` call.
   func build(in composition: AVMutableComposition) async throws -> BuildResult? {
@@ -127,7 +138,9 @@ internal class AudioSequenceBuilder {
         targetBodyDuration: effectivePlayDuration,
         playbackSpeed: playbackSpeed,
         fadeIn: fadeIn,
-        fadeOut: fadeOut
+        fadeOut: fadeOut,
+        volumeCurve: volumeCurve,
+        outputStart: compositionInsertTime
       )
     else {
       return nil

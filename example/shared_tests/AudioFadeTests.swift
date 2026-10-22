@@ -75,6 +75,40 @@ final class AudioFadeTests: XCTestCase {
     XCTAssertEqual(pcm, original)
   }
 
+  // MARK: - Volume curve
+
+  /// A volume curve scales each frame by the curve at the frame's place on
+  /// the output timeline, `outputStart + frame / sampleRate`, and leaves the
+  /// silence after the audible bytes and the frames at 1 untouched.
+  func testAVolumeCurveScalesFramesAtTheirTime() {
+    // One frame per millisecond; the audio starts 1 ms into the output, and
+    // the curve goes down to half from 2 to 4 ms and back up from 6 to 8 ms.
+    let curve = VolumeCurve.from([2000, 1, 4000, 0.5, 6000, 0.5, 8000, 1] as [NSNumber])!
+    var pcm = levelFrames(8, level: level) + Data(count: 2 * bytesPerFrame)
+    AudioPreRenderer.applyVolumeCurve(
+      to: &pcm,
+      audibleBytes: 8 * bytesPerFrame,
+      bytesPerFrame: bytesPerFrame,
+      sampleRate: 1000,
+      startUs: 1000,
+      curve: curve
+    )
+
+    XCTAssertEqual(
+      leftSamples(pcm), [level, level, 7500, 5000, 5000, 5000, 7500, level, 0, 0])
+    XCTAssertEqual(leftSamples(pcm), rightSamples(pcm), "both channels share one gain")
+  }
+
+  /// The curve arrives as interleaved microseconds and volumes; only the
+  /// stretches below 1 are worth rewriting.
+  func testAVolumeCurveKnowsWhereItLowersTheVolume() {
+    let curve = VolumeCurve.from([0, 1, 1000, 0.25, 2000, 1, 5000, 1, 6000, 0.5] as [NSNumber])!
+    XCTAssertEqual(curve.volume(atUs: 500), 0.625, accuracy: 1e-9)
+    XCTAssertEqual(curve.volume(atUs: 9000), 0.5, accuracy: 1e-9)
+    XCTAssertEqual(curve.loweredRangesUs(), [0...2000, 5000...Int64.max])
+    XCTAssertNil(VolumeCurve.from([1] as [NSNumber]))
+  }
+
   // MARK: - Helpers
 
   /// Frames of `level` on both channels, faded, read back as the left channel.

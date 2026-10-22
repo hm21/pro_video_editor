@@ -1,11 +1,14 @@
 // ignore_for_file: directives_ordering
 
+export '/core/analysis/audio_level_envelope.dart';
+export '/core/models/audio/audio_ducking_model.dart';
 export '/core/models/audio/audio_equalizer_model.dart';
 export '/core/models/audio/audio_extract_configs_model.dart';
 export '/core/models/audio/audio_format_model.dart';
 export '/core/models/audio/audio_merge_configs_model.dart';
 export '/core/models/audio/audio_merge_result_model.dart';
 export '/core/models/audio/audio_track_model.dart';
+export '/core/models/audio/audio_volume_curve_model.dart';
 export '/core/models/audio/waveform_chunk_model.dart';
 export '/core/models/audio/waveform_configs_model.dart';
 export '/core/models/audio/waveform_data_model.dart';

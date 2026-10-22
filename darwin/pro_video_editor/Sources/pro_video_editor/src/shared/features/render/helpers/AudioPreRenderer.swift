@@ -35,8 +35,9 @@ internal enum AudioPreRenderer {
   /// composition timeline is handled implicitly by inserting this file
   /// at the correct `compositionInsertTime`.
   ///
-  /// An optional linear fade in and out is baked into the samples, so the
-  /// audio mix needs no volume ramp of its own.
+  /// An optional linear fade in and out and an optional `VolumeCurve` are
+  /// baked into the samples, so the audio mix needs no volume ramp of its own.
+  /// AVAudioMix ramps would also misbehave at the short dips of a curve.
   ///
   /// - Parameters:
   ///   - audioPath: Absolute path to the source audio file.
@@ -54,6 +55,10 @@ internal enum AudioPreRenderer {
   ///   - fadeOut: How long the audio falls to silence before it ends —
   ///     the end of the body, or earlier when a non-looping source runs
   ///     out first.
+  ///   - volumeCurve: Scales the audio over the output timeline, on top of
+  ///     the fades; nil leaves it as it is.
+  ///   - outputStart: Where on the output timeline the audio starts, which
+  ///     places it on `volumeCurve`.
   /// - Returns: A [Result] on success, nil on failure.
   static func render(
     audioPath: String,
@@ -63,7 +68,9 @@ internal enum AudioPreRenderer {
     targetBodyDuration: CMTime,
     playbackSpeed: Double = 1,
     fadeIn: CMTime = .zero,
-    fadeOut: CMTime = .zero
+    fadeOut: CMTime = .zero,
+    volumeCurve: VolumeCurve? = nil,
+    outputStart: CMTime = .zero
   ) async -> Result? {
     let sourceURL = URL(fileURLWithPath: audioPath)
     guard FileManager.default.fileExists(atPath: sourceURL.path) else {
@@ -219,6 +226,18 @@ internal enum AudioPreRenderer {
       fadeInFrames: framesForDuration(fadeIn, sampleRate: sampleRate),
       fadeOutFrames: framesForDuration(fadeOut, sampleRate: sampleRate)
     )
+    if let volumeCurve {
+      applyVolumeCurve(
+        to: &outputBytes,
+        audibleBytes: audibleBytes,
+        bytesPerFrame: bytesPerFrame,
+        sampleRate: sampleRate,
+        startUs: Double(CMTimeConvertScale(
+          outputStart, timescale: 1_000_000, method: .roundHalfAwayFromZero
+        ).value),
+        curve: volumeCurve
+      )
+    }
 
     // Step 3: write the WAV file.
     let outputURL = makeTemporaryWavURL()
@@ -239,7 +258,7 @@ internal enum AudioPreRenderer {
     let outputDuration = CMTime(value: CMTimeValue(frameCount), timescale: CMTimeScale(sampleRate))
 
     PluginLog.print(
-      "🎼 AudioPreRenderer: rendered \(outputBytes.count) bytes (\(outputDuration.seconds)s), loop=\(loop), fadeIn=\(fadeIn.seconds)s, fadeOut=\(fadeOut.seconds)s"
+      "🎼 AudioPreRenderer: rendered \(outputBytes.count) bytes (\(outputDuration.seconds)s), loop=\(loop), fadeIn=\(fadeIn.seconds)s, fadeOut=\(fadeOut.seconds)s, volumeCurve=\(volumeCurve?.timesUs.count ?? 0) points"
     )
 
     return Result(outputURL: outputURL, duration: outputDuration)
@@ -281,6 +300,57 @@ internal enum AudioPreRenderer {
               fadeInFrames: fadeInFrames,
               fadeOutFrames: fadeOutFrames
             )
+            if gain >= 1 { continue }
+            let first = frame * samplesPerFrame
+            for index in first..<(first + samplesPerFrame) {
+              let sample = Double(Int16(littleEndian: samples[index]))
+              samples[index] = Int16((sample * gain).rounded()).littleEndian
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // MARK: - Volume curve
+
+  /// Scales the first `audibleBytes` of 16-bit little-endian PCM in `pcm` by
+  /// `curve`, where frame `n` sits at `startUs + n / sampleRate` on the
+  /// curve's timeline.
+  ///
+  /// Only the frames where the curve is below 1 are touched, like the frames
+  /// around a fade.
+  static func applyVolumeCurve(
+    to pcm: inout Data,
+    audibleBytes: Int,
+    bytesPerFrame: Int,
+    sampleRate: Double,
+    startUs: Double,
+    curve: VolumeCurve
+  ) {
+    let audibleFrames = min(audibleBytes, pcm.count) / bytesPerFrame
+    if audibleFrames <= 0 { return }
+    let usPerFrame = 1_000_000 / sampleRate
+    let samplesPerFrame = bytesPerFrame / 2
+
+    /// The frame at `timeUs` on the curve: the first one at or after it, or
+    /// the last one at or before it; clamped to the audible frames.
+    func frame(atUs timeUs: Int64, roundingUp: Bool) -> Int {
+      if timeUs == .min { return 0 }
+      if timeUs == .max { return audibleFrames - 1 }
+      let exact = (Double(timeUs) - startUs) / usPerFrame
+      let rounded = roundingUp ? exact.rounded(.up) : exact.rounded(.down)
+      return Int(min(max(rounded, -1), Double(audibleFrames)))
+    }
+
+    pcm.withUnsafeMutableBytes { raw in
+      raw.withMemoryRebound(to: Int16.self) { samples in
+        for lowered in curve.loweredRangesUs() {
+          let from = max(frame(atUs: lowered.lowerBound, roundingUp: true), 0)
+          let to = min(frame(atUs: lowered.upperBound, roundingUp: false), audibleFrames - 1)
+          if from > to { continue }
+          for frame in from...to {
+            let gain = curve.volume(atUs: startUs + Double(frame) * usPerFrame)
             if gain >= 1 { continue }
             let first = frame * samplesPerFrame
             for index in first..<(first + samplesPerFrame) {

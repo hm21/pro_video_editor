@@ -39,6 +39,7 @@ func applyAudioTracks(
         .setCompositionStartTime(trackConfig.startUs == -1 ? nil : trackConfig.startUs)
         .setCompositionEndTime(trackConfig.endUs == -1 ? nil : trackConfig.endUs)
         .setFade(inUs: trackConfig.fadeInUs, outUs: trackConfig.fadeOutUs)
+        .setVolumeCurve(trackConfig.volumeCurve)
 
       guard let result = try await audioBuilder.build(in: composition) else { continue }
       temporaryURLs.append(result.temporaryURL)

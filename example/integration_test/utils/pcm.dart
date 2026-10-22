@@ -106,11 +106,15 @@ class Pcm {
 
   /// Encodes [seconds] of a [frequency] Hz sine at [amplitude] as a 16-bit
   /// mono WAV file.
+  ///
+  /// With [bursts] the tone sounds only between each pair of seconds and is
+  /// silent elsewhere, like speech with pauses.
   static Uint8List toneWav({
     required double seconds,
     double frequency = 440,
     double amplitude = 0.5,
     int sampleRate = 44100,
+    List<(double, double)>? bursts,
   }) {
     final frames = (seconds * sampleRate).round();
     final bytes = ByteData(44 + frames * 2);
@@ -135,8 +139,12 @@ class Pcm {
     ascii(36, 'data');
     bytes.setUint32(40, frames * 2, Endian.little);
     for (var i = 0; i < frames; i++) {
-      final value =
-          amplitude * math.sin(2 * math.pi * frequency * i / sampleRate);
+      final t = i / sampleRate;
+      final sounding =
+          bursts == null || bursts.any((b) => t >= b.$1 && t < b.$2);
+      final value = sounding
+          ? amplitude * math.sin(2 * math.pi * frequency * i / sampleRate)
+          : 0.0;
       bytes.setInt16(44 + i * 2, (value * 32767).round(), Endian.little);
     }
     return bytes.buffer.asUint8List();

@@ -556,6 +556,8 @@ struct AudioTrackConfig {
   let fadeInUs: Int64
   /// How long the track falls to silence before its audio ends, in microseconds.
   let fadeOutUs: Int64
+  /// Scales `volume` over the exported video. `nil` = constant.
+  let volumeCurve: VolumeCurve?
 
   static func fromArguments(_ args: [String: Any]?) -> AudioTrackConfig? {
     guard let args = args,
@@ -572,7 +574,8 @@ struct AudioTrackConfig {
       startUs: (args["startUs"] as? NSNumber)?.int64Value ?? -1,
       endUs: (args["endUs"] as? NSNumber)?.int64Value ?? -1,
       fadeInUs: (args["fadeInUs"] as? NSNumber)?.int64Value ?? 0,
-      fadeOutUs: (args["fadeOutUs"] as? NSNumber)?.int64Value ?? 0
+      fadeOutUs: (args["fadeOutUs"] as? NSNumber)?.int64Value ?? 0,
+      volumeCurve: VolumeCurve.from(args["volumeCurve"])
     )
   }
 }

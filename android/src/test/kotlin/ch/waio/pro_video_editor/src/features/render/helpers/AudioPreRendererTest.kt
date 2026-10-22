@@ -1,5 +1,6 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
+import ch.waio.pro_video_editor.src.features.render.models.VolumeCurve
 import java.io.File
 import java.io.RandomAccessFile
 import kotlin.test.Test
@@ -253,6 +254,61 @@ internal class AudioPreRendererTest {
             listOf(LEVEL, LEVEL, 10000, 5000, 0, 0, 0, 0),
             leftSamples(output.readBytes().toList()),
         )
+    }
+
+    /**
+     * A volume curve scales each frame by the curve at the frame's time,
+     * `frame / sampleRate`, from where the data starts, and leaves the
+     * header, the frames outside the audible range and the frames where the
+     * curve is 1 untouched.
+     */
+    @Test
+    fun aVolumeCurveScalesFramesAtTheirTime() {
+        val prefix = 12
+        val output = File.createTempFile("prerender_curve", ".wav")
+        output.deleteOnExit()
+        val prefixBytes = ByteArray(prefix) { 0x7F }
+        output.writeBytes(prefixBytes + levelFrames(frames = 10, level = LEVEL))
+        // One frame per millisecond: down to half from 2 to 4 ms, back up from
+        // 6 to 8 ms.
+        val curve = VolumeCurve.fromChannel(
+            doubleArrayOf(2000.0, 1.0, 4000.0, 0.5, 6000.0, 0.5, 8000.0, 1.0)
+        )!!
+
+        RandomAccessFile(output, "rw").use { raf ->
+            AudioPreRenderer.applyVolumeCurve(
+                raf = raf,
+                dataStart = prefix.toLong(),
+                frames = 0L until 7L,
+                bytesPerFrame = bytesPerFrame,
+                sampleRate = 1000,
+                curve = curve,
+            )
+        }
+
+        val bytes = output.readBytes()
+        assertEquals(prefixBytes.toList(), bytes.take(prefix))
+        val body = bytes.drop(prefix)
+        assertEquals(
+            listOf(LEVEL, LEVEL, LEVEL, 7500, 5000, 5000, 5000, LEVEL, LEVEL, LEVEL),
+            leftSamples(body),
+        )
+        assertEquals(leftSamples(body), rightSamples(body), "both channels share one gain")
+    }
+
+    /**
+     * The curve arrives as interleaved microseconds and volumes; only the
+     * stretches below 1 are worth rewriting.
+     */
+    @Test
+    fun aVolumeCurveKnowsWhereItLowersTheVolume() {
+        val curve = VolumeCurve.fromChannel(
+            listOf(0, 1, 1000, 0.25, 2000, 1, 5000, 1, 6000, 0.5)
+        )!!
+        assertEquals(0.625, curve.volumeAt(500.0), 1e-9)
+        assertEquals(0.5, curve.volumeAt(9000.0), 1e-9)
+        assertEquals(listOf(0L..2000L, 5000L..Long.MAX_VALUE), curve.loweredRangesUs())
+        assertEquals(null, VolumeCurve.fromChannel(doubleArrayOf(1.0)))
     }
 
     /**

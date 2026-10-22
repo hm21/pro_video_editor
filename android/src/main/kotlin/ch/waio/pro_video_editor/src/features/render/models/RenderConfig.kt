@@ -466,6 +466,7 @@ data class EqualizerConfig(val bands: List<EqualizerBand> = emptyList()) {
  * @property endUs Composition end time in microseconds (when in the video timeline this track ends)
  * @property fadeInUs How long the track rises from silence to [volume] after it starts, in microseconds
  * @property fadeOutUs How long the track falls to silence before its audio ends, in microseconds
+ * @property volumeCurve Scales [volume] over the exported video (null = constant)
  */
 data class AudioTrackConfig(
     val path: String,
@@ -478,7 +479,8 @@ data class AudioTrackConfig(
     val startUs: Long? = null,
     val endUs: Long? = null,
     val fadeInUs: Long = 0L,
-    val fadeOutUs: Long = 0L
+    val fadeOutUs: Long = 0L,
+    val volumeCurve: VolumeCurve? = null
 ) {
     companion object {
         fun fromMap(map: Map<String, Any?>): AudioTrackConfig {
@@ -493,7 +495,8 @@ data class AudioTrackConfig(
                 startUs = (map["startUs"] as? Number)?.toLong(),
                 endUs = (map["endUs"] as? Number)?.toLong(),
                 fadeInUs = (map["fadeInUs"] as? Number)?.toLong() ?: 0L,
-                fadeOutUs = (map["fadeOutUs"] as? Number)?.toLong() ?: 0L
+                fadeOutUs = (map["fadeOutUs"] as? Number)?.toLong() ?: 0L,
+                volumeCurve = VolumeCurve.fromChannel(map["volumeCurve"])
             )
         }
     }

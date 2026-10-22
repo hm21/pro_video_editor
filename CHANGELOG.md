@@ -1,3 +1,6 @@
+## 2.43.0
+- **FEAT**(android, iOS, macOS): Audio ducking. `AudioDucking.analyze` measures voice-over tracks by their loudness and returns the `AudioVolumeCurve` a music track follows to go down while somebody talks and come back up when they stop, with an adjustable depth, attack, release, hold and threshold. `VideoAudioTrack.volumeCurve` applies any such curve in the render, sample-exact on the output timeline, and `AudioVolumeCurve.volumeAt` gives a preview the same volume. `AudioLevelEnvelope` places tracks on the output timeline the way the render does, for measuring their loudness.
+
 ## 2.42.0
 - **FEAT**(android, iOS, macOS): Blend modes. `ImageLayer.blendMode` and `VideoLayer.blendMode` blend a layer with the picture beneath it (`multiply`, `screen`, `overlay`, `softLight`, `darken`, `lighten`, `add`, `difference`), e.g. for a double exposure or a light leak. `LayerBlendMode.blendMode` is the Flutter `BlendMode` that previews the same result.
 

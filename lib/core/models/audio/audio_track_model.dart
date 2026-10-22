@@ -2,6 +2,7 @@
 import 'dart:convert';
 
 import 'package:pro_video_editor/core/models/audio/audio_equalizer_model.dart';
+import 'package:pro_video_editor/core/models/audio/audio_volume_curve_model.dart';
 import 'package:pro_video_editor/shared/models/time_range_mixin.dart';
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
@@ -33,6 +34,7 @@ class VideoAudioTrack with TimeRangeMixin {
     this.endTime,
     this.fadeInDuration = Duration.zero,
     this.fadeOutDuration = Duration.zero,
+    this.volumeCurve,
   }) : assert(volume >= 0, '[volume] must be greater than or equal to 0'),
        assert(
          playbackSpeed > 0 && playbackSpeed < double.infinity,
@@ -115,6 +117,18 @@ class VideoAudioTrack with TimeRangeMixin {
   /// **Default**: [Duration.zero] (stops at full volume)
   final Duration fadeOutDuration;
 
+  /// Scales [volume] over time, for example to lower music while a
+  /// voice-over talks (see [AudioDucking]).
+  ///
+  /// Its times are on the exported video, like [startTime], whatever part of
+  /// it the track covers. It is applied together with the fades, before the
+  /// [equalizer] and [volume], so a track that [volume] amplifies is still
+  /// limited rather than clipped.
+  ///
+  /// If null, the volume stays at [volume]. Supported on Android, iOS and
+  /// macOS.
+  final AudioVolumeCurve? volumeCurve;
+
   VideoAudioTrack copyWith({
     String? path,
     double? volume,
@@ -127,6 +141,7 @@ class VideoAudioTrack with TimeRangeMixin {
     Duration? endTime,
     Duration? fadeInDuration,
     Duration? fadeOutDuration,
+    AudioVolumeCurve? volumeCurve,
   }) {
     return VideoAudioTrack(
       path: path ?? this.path,
@@ -140,6 +155,7 @@ class VideoAudioTrack with TimeRangeMixin {
       endTime: endTime ?? this.endTime,
       fadeInDuration: fadeInDuration ?? this.fadeInDuration,
       fadeOutDuration: fadeOutDuration ?? this.fadeOutDuration,
+      volumeCurve: volumeCurve ?? this.volumeCurve,
     );
   }
 
@@ -156,6 +172,7 @@ class VideoAudioTrack with TimeRangeMixin {
       'endTime': endTime?.inMicroseconds,
       'fadeInDuration': fadeInDuration.inMicroseconds,
       'fadeOutDuration': fadeOutDuration.inMicroseconds,
+      'volumeCurve': volumeCurve?.toMap(),
     };
   }
 
@@ -186,6 +203,11 @@ class VideoAudioTrack with TimeRangeMixin {
       fadeOutDuration: Duration(
         microseconds: safeParseInt(map['fadeOutDuration']),
       ),
+      volumeCurve: map['volumeCurve'] != null
+          ? AudioVolumeCurve.fromMap(
+              Map<String, dynamic>.from(map['volumeCurve'] as Map),
+            )
+          : null,
     );
   }
 
@@ -201,7 +223,8 @@ class VideoAudioTrack with TimeRangeMixin {
         'equalizer: $equalizer, loop: $loop, '
         'audioStartTime: $audioStartTime, audioEndTime: $audioEndTime, '
         'startTime: $startTime, endTime: $endTime, '
-        'fadeInDuration: $fadeInDuration, fadeOutDuration: $fadeOutDuration)';
+        'fadeInDuration: $fadeInDuration, fadeOutDuration: $fadeOutDuration, '
+        'volumeCurve: $volumeCurve)';
   }
 
   @override
@@ -218,7 +241,8 @@ class VideoAudioTrack with TimeRangeMixin {
         other.startTime == startTime &&
         other.endTime == endTime &&
         other.fadeInDuration == fadeInDuration &&
-        other.fadeOutDuration == fadeOutDuration;
+        other.fadeOutDuration == fadeOutDuration &&
+        other.volumeCurve == volumeCurve;
   }
 
   @override
@@ -233,6 +257,7 @@ class VideoAudioTrack with TimeRangeMixin {
         startTime.hashCode ^
         endTime.hashCode ^
         // Hashed as a pair: XOR-ing them would cancel out equal fades.
-        Object.hash(fadeInDuration, fadeOutDuration);
+        Object.hash(fadeInDuration, fadeOutDuration) ^
+        volumeCurve.hashCode;
   }
 }

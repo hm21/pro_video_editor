@@ -10,6 +10,7 @@ import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import ch.waio.pro_video_editor.src.features.render.models.EqualizerConfig
+import ch.waio.pro_video_editor.src.features.render.models.VolumeCurve
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.mediaSourceExists
 import java.io.File
@@ -57,6 +58,7 @@ class AudioSequenceBuilder(
     private var fadeOutUs: Long = 0L
     private var volume: Float = 1.0f
     private var equalizer: EqualizerConfig? = null
+    private var volumeCurve: VolumeCurve? = null
 
     /**
      * Sets whether the audio should loop to fill the play range.
@@ -142,6 +144,16 @@ class AudioSequenceBuilder(
     }
 
     /**
+     * Sets how the volume changes over the exported video; null keeps it
+     * constant. Baked into the pre-rendered audio with the fades, see
+     * [AudioPreRenderer.render].
+     */
+    fun setVolumeCurve(curve: VolumeCurve?): AudioSequenceBuilder {
+        this.volumeCurve = curve
+        return this
+    }
+
+    /**
      * Builds the audio sequence by pre-rendering the source into a single
      * gap-less PCM WAV file.
      *
@@ -175,7 +187,8 @@ class AudioSequenceBuilder(
             compositionDurationUs = playDurationUs,
             videoDurationUs = videoDurationUs,
             fadeInUs = fadeInUs,
-            fadeOutUs = fadeOutUs
+            fadeOutUs = fadeOutUs,
+            volumeCurve = volumeCurve
         ) ?: return null
 
         val mediaItem = MediaItem.Builder()
