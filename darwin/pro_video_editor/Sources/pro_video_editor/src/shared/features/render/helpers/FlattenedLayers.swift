@@ -5,8 +5,12 @@ import ImageIO
 /// Whether `layer` is a still image that looks the same on every frame it
 /// shows: no animation, keyframe, censor or audio visualizer, and not an
 /// animated image.
+///
+/// A blended layer is drawn on its own as well: it combines with the picture
+/// beneath it, which an image of static layers drawn over transparency does
+/// not hold.
 func isStaticImageLayer(_ layer: ImageLayerConfig) -> Bool {
-  guard layer.audioVisualizer == nil, layer.censor == nil,
+  guard layer.audioVisualizer == nil, layer.censor == nil, layer.blendMode == .normal,
     layer.animations.isEmpty, layer.keyframes.isEmpty,
     let source = layer.image.imageSource
   else { return false }

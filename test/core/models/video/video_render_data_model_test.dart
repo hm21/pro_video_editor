@@ -8,6 +8,7 @@ import 'package:pro_video_editor/core/models/audio/audio_track_model.dart';
 import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart';
 import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
 import 'package:pro_video_editor/core/models/image/keyframe_clock_point_model.dart';
+import 'package:pro_video_editor/core/models/image/layer_blend_mode_model.dart';
 import 'package:pro_video_editor/core/models/image/timeline_keyframe_model.dart';
 import 'package:pro_video_editor/core/models/video/chroma_key_model.dart';
 import 'package:pro_video_editor/core/models/video/custom_video_effect_model.dart';
@@ -404,6 +405,17 @@ void main() {
       ).toAsyncMap();
       return (map['imageLayers'] as List).cast<Map<String, dynamic>>();
     }
+
+    test('sends each layer\'s blend mode over the platform channel', () async {
+      final image = EditorLayerImage.memory(Uint8List.fromList([1, 2, 3]));
+
+      final maps = await layerMaps([
+        ImageLayer(image: image),
+        ImageLayer(image: image, blendMode: LayerBlendMode.softLight),
+      ]);
+
+      expect(maps.map((m) => m['blendMode']), ['normal', 'softLight']);
+    });
 
     test('sends a file-backed layer as a path, not bytes', () async {
       final file = File('${tempDir.path}/overlay.png')

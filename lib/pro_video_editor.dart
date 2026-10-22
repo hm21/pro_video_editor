@@ -22,6 +22,7 @@ export 'core/models/image/keyframe_clock_point_model.dart'
 export 'core/models/image/layer_animation_model.dart';
 export 'core/models/image/layer_audio_visualizer_model.dart'
     hide audioVisualizerUnitLevel;
+export 'core/models/image/layer_blend_mode_model.dart';
 export 'core/models/image/layer_censor_model.dart';
 export 'core/models/image/timeline_keyframe_model.dart'
     hide sortTimelineKeyframes;

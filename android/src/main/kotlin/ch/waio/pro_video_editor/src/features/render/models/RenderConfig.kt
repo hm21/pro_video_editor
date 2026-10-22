@@ -169,6 +169,8 @@ data class SegmentTransformConfig(
  * @property mask Alpha matte stretched over each clip's own frame, after its
  *   chroma key and before it is placed; see `MaskEffect`. Null = every clip
  *   shows whole
+ * @property blendMode How the layer's clips combine with the layers below them;
+ *   see `CapturedVideoLayers`
  */
 data class LayerConfig(
     val clips: List<VideoClip>,
@@ -182,7 +184,8 @@ data class LayerConfig(
     val mask: EncodedImage? = null,
     val keyframes: List<KeyframeConfig> = emptyList(),
     /** The clock [keyframes] are timed on; see [KeyframeClock]. */
-    val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT
+    val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT,
+    val blendMode: LayerBlendMode = LayerBlendMode.NORMAL
 ) {
     companion object {
         fun fromMap(map: Map<String, Any?>): LayerConfig? {
@@ -201,7 +204,8 @@ data class LayerConfig(
                 chromaKey = ChromaKeyConfig.fromMap(chromaKeyRaw),
                 mask = EncodedImage.fromMap(map, "maskPath", "maskData"),
                 keyframes = KeyframeConfig.listFrom(map["keyframes"]),
-                keyframeClock = KeyframeClock.from(map["keyframeClock"])
+                keyframeClock = KeyframeClock.from(map["keyframeClock"]),
+                blendMode = LayerBlendMode.from(map["blendMode"])
             )
         }
     }
@@ -685,6 +689,8 @@ data class KeyframeConfig(
  * @property audioVisualizer Draws bars or a wave that move with the sound in
  *   the layer's box instead of [image], which is then not read (null = draw
  *   the image)
+ * @property blendMode How the layer combines with the picture beneath it; see
+ *   `LayerBlendEffect`. A censor layer draws nothing and ignores it
  */
 data class ImageLayer(
     val image: EncodedImage,
@@ -704,7 +710,8 @@ data class ImageLayer(
     val keyframes: List<KeyframeConfig> = emptyList(),
     /** The clock [keyframes] are timed on; see [KeyframeClock]. */
     val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT,
-    val audioVisualizer: LayerAudioVisualizerConfig? = null
+    val audioVisualizer: LayerAudioVisualizerConfig? = null,
+    val blendMode: LayerBlendMode = LayerBlendMode.NORMAL
 )
 
 data class RenderConfig(
@@ -839,7 +846,8 @@ data class RenderConfig(
                         KeyframeClock.from(layerMap["keyframeClock"]),
                         LayerAudioVisualizerConfig.fromMap(
                             layerMap["audioVisualizer"] as? Map<*, *>
-                        )
+                        ),
+                        LayerBlendMode.from(layerMap["blendMode"])
                     )
                 }
             } ?: emptyList()

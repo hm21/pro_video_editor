@@ -21,6 +21,7 @@ import ch.waio.pro_video_editor.src.features.render.models.AudioTrackConfig
 import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
 import ch.waio.pro_video_editor.src.features.render.models.CompositionConfig
 import ch.waio.pro_video_editor.src.features.render.models.EqualizerConfig
+import ch.waio.pro_video_editor.src.features.render.models.LayerBlendMode
 import ch.waio.pro_video_editor.src.features.render.models.SegmentTransformConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
@@ -48,6 +49,10 @@ import kotlin.math.max
  *
  * Global color/blur effects and image overlays are applied at the composition
  * level (on top of the composed frame).
+ *
+ * A layer with a [LayerBlendMode] other than [LayerBlendMode.NORMAL] cannot be
+ * blended by the compositor, so it and every layer above it are drawn by
+ * [CapturedVideoLayers] instead, before the composition's other effects.
  */
 @UnstableApi
 class LayeredCompositionBuilder(
@@ -93,7 +98,9 @@ class LayeredCompositionBuilder(
         val builder: EditedMediaItemSequence.Builder,
         val durationUs: Long,
         /** Whether the layer's last clip ends before its source end. */
-        val endsBeforeSource: Boolean
+        val endsBeforeSource: Boolean,
+        /** The [CapturedVideoLayers] slot of a captured layer, else `null`. */
+        val captureSlot: Int? = null
     )
 
     /**
@@ -151,9 +158,23 @@ class LayeredCompositionBuilder(
         val pending = mutableListOf<PendingLayer>()
         var globalDurationUs = 0L
 
+        // The lowest blended layer and every layer above it are drawn by
+        // [CapturedVideoLayers] rather than by the compositor, one slot each.
+        val firstCapturedIndex = config.layers.indexOfFirst {
+            it.blendMode != LayerBlendMode.NORMAL
+        }
+        val captured = if (firstCapturedIndex < 0) null else {
+            CapturedVideoLayers(config.layers.drop(firstCapturedIndex).map { it.blendMode })
+        }
+
         for ((layerIndex, layer) in config.layers.withIndex()) {
             val seqBuilder = EditedMediaItemSequence.Builder(trackTypes)
                 .setIsLooping(false)
+            val captureSlot = if (captured != null && layerIndex >= firstCapturedIndex) {
+                layerIndex - firstCapturedIndex
+            } else {
+                null
+            }
             // Probed here, once per layer, so a matte that is not an image
             // fails the render before it starts, as on iOS and macOS. Only the
             // header is read: a file that breaks off after it still fails,
@@ -210,7 +231,12 @@ class LayeredCompositionBuilder(
                 // Leading gap in the output timeline.
                 val gapUs = (outputStartUs - outputCursorUs).coerceAtLeast(0L)
                 if (gapUs > 0) {
-                    seqBuilder.addItem(transparentGapItem(gapUs, canvasW, canvasH))
+                    seqBuilder.addItem(
+                        transparentGapItem(
+                            gapUs, canvasW, canvasH,
+                            captureSlot?.let { captured!!.gapCaptureEffect(it) }
+                        )
+                    )
                     outputCursorUs += gapUs
                 }
 
@@ -245,7 +271,8 @@ class LayeredCompositionBuilder(
                     buildClipItem(
                         clip, srcStartUs, srcEndUs, effectivePath, placement,
                         displayW, displayH, layer.opacity, canvasW, canvasH,
-                        layer.chromaKey, maskEffect, keyframeAnimator
+                        layer.chromaKey, maskEffect, keyframeAnimator,
+                        captureSlot?.let { captured!!.captureEffect(it) }
                     )
                 )
                 val volume = clip.volume ?: 1.0f
@@ -269,13 +296,16 @@ class LayeredCompositionBuilder(
             }
 
             if (itemCount == 0) continue
-            pending.add(PendingLayer(seqBuilder, outputCursorUs, lastClipEndsBeforeSource))
+            pending.add(
+                PendingLayer(seqBuilder, outputCursorUs, lastClipEndsBeforeSource, captureSlot)
+            )
             globalDurationUs = max(globalDurationUs, outputCursorUs)
             pathsUsedByPriorLayers.addAll(pathsInThisLayer)
             Log.d(
                 RENDER_TAG,
                 "  Layer $layerIndex: items=$itemCount duration=${outputCursorUs / 1000}ms " +
-                    "opacity=${layer.opacity} masked=${maskEffect != null}"
+                    "opacity=${layer.opacity} masked=${maskEffect != null} " +
+                    "blend=${layer.blendMode.wireName} captured=${captureSlot != null}"
             )
         }
 
@@ -286,17 +316,22 @@ class LayeredCompositionBuilder(
         // Media3 compositor draws the first sequence on top, and layer 0 is the
         // bottom layer.
         val layerSequences = pending.map { layer ->
+            val capture = layer.captureSlot?.let { captured!!.gapCaptureEffect(it) }
             when {
                 layer.durationUs < globalDurationUs ->
                     // Shorter layer: pad to full length. The pad also acts as the
                     // following item that flushes this layer's last clip.
                     layer.builder.addItem(
-                        transparentGapItem(globalDurationUs - layer.durationUs, canvasW, canvasH)
+                        transparentGapItem(
+                            globalDurationUs - layer.durationUs, canvasW, canvasH, capture
+                        )
                     )
                 layer.endsBeforeSource ->
                     // Longest layer whose last clip is cut before its source end:
                     // append a short tail so Media3 doesn't drop its final GOP.
-                    layer.builder.addItem(transparentGapItem(FLUSH_TAIL_US, canvasW, canvasH))
+                    layer.builder.addItem(
+                        transparentGapItem(FLUSH_TAIL_US, canvasW, canvasH, capture)
+                    )
             }
             layer.builder.build()
         }.reversed()
@@ -350,9 +385,12 @@ class LayeredCompositionBuilder(
                 "duration=${globalDurationUs / 1000}ms"
         )
 
-        // Composition-level video effects: global color/blur first, then image
+        // Composition-level video effects: the captured layers first, which
+        // complete the composed frame, then global color/blur, then image
         // overlays on top, then the canvas presentation last.
-        val compositionEffects = globalVideoEffects.toMutableList()
+        val compositionEffects = mutableListOf<Effect>()
+        captured?.let { compositionEffects += it.compositeEffect() }
+        compositionEffects += globalVideoEffects
         // Resolve "until end" layers with an out-phase animation to the full
         // composition length so their animateOut can play (the composition has a
         // single global timeline, so this is unambiguous here).
@@ -383,7 +421,8 @@ class LayeredCompositionBuilder(
         canvasH: Int,
         layerChromaKey: ChromaKeyConfig?,
         maskEffect: MaskEffect?,
-        keyframeAnimator: SegmentKeyframeAnimator? = null
+        keyframeAnimator: SegmentKeyframeAnimator? = null,
+        captureEffect: Effect? = null
     ): EditedMediaItem {
         val mediaItemBuilder = MediaItem.Builder().contentUri(inputPath)
         if (srcStartUs != null || srcEndUs != null) {
@@ -440,6 +479,10 @@ class LayeredCompositionBuilder(
         // transformation applies it frame by frame.
         if (keyframeAnimator == null) applyOpacity(effects, opacity)
 
+        // Last, once the frame is placed and faded as it would reach the
+        // compositor: see [CapturedVideoLayers].
+        if (captureEffect != null) effects += captureEffect
+
         // Note: no setDurationUs here. For video, Media3's duration is the input
         // media length (pre-clip); the playable span is defined by the clipping
         // above. Setting it to the clipped output makes Media3 treat the source
@@ -455,8 +498,16 @@ class LayeredCompositionBuilder(
     /**
      * A fully transparent, canvas-sized item of [durationUs], used to delay a
      * layer's entry or bridge a gap between clips without `addGap`.
+     *
+     * [captureEffect] goes last for a layer [CapturedVideoLayers] draws, which
+     * has to know when the layer shows nothing.
      */
-    private fun transparentGapItem(durationUs: Long, canvasW: Int, canvasH: Int): EditedMediaItem {
+    private fun transparentGapItem(
+        durationUs: Long,
+        canvasW: Int,
+        canvasH: Int,
+        captureEffect: Effect? = null
+    ): EditedMediaItem {
         val gapFile = File(context.cacheDir, "pve_transparent_gap.png")
         if (!gapFile.exists()) {
             try {
@@ -487,6 +538,7 @@ class LayeredCompositionBuilder(
             x = -100.0, y = -100.0, width = 1.0, height = 1.0,
             videoWidth = 1, videoHeight = 1, renderWidth = canvasW, renderHeight = canvasH
         )
+        if (captureEffect != null) effects += captureEffect
         return EditedMediaItem.Builder(mediaItem)
             .setFrameRate(30)
             .setEffects(Effects(emptyList(), effects))

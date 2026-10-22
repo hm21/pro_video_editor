@@ -32,6 +32,7 @@ import ch.waio.pro_video_editor.src.shared.media.EncodedImage
 import ch.waio.pro_video_editor.src.shared.media.contentUri
 import ch.waio.pro_video_editor.src.shared.media.isContentUri
 import java.io.File
+import ch.waio.pro_video_editor.src.features.render.models.LayerBlendMode
 
 /**
  * Builder class for creating video sequences with effects in video compositions.
@@ -129,7 +130,12 @@ class VideoSequenceBuilder(
          * Draws bars or a wave that move with the sound in the layer's box
          * instead of [image]; see [AudioVisualizerOverlay].
          */
-        val audioVisualizer: LayerAudioVisualizerConfig? = null
+        val audioVisualizer: LayerAudioVisualizerConfig? = null,
+        /**
+         * How the layer combines with the picture beneath it; see
+         * [LayerBlendEffect]. A censor layer ignores it.
+         */
+        val blendMode: LayerBlendMode = LayerBlendMode.NORMAL
     )
 
     /**

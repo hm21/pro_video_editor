@@ -27,6 +27,7 @@ import androidx.media3.effect.TextureOverlay
 import androidx.media3.effect.TimestampWrapper
 import ch.waio.pro_video_editor.src.features.render.models.ImageLayer
 import ch.waio.pro_video_editor.src.features.render.models.LayerAudioVisualizerConfig
+import ch.waio.pro_video_editor.src.features.render.models.LayerBlendMode
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.ImageOrientation
 
@@ -210,7 +211,7 @@ private fun addImageLayer(
                 "Layer: audio visualizer (${visualizer.style}, " +
                         "${visualizer.bandCount} bands, ${visualizer.frameCount} rows)"
             )
-            overlays.add(overlay, startTimeUs, endTimeUs)
+            addLayerOverlay(layer, overlay, overlays, videoEffects)
             return
         }
         val image = layer.image ?: return
@@ -337,7 +338,7 @@ private fun addImageLayer(
         // would have been drawn, instead of drawing it.
         val censor = layer.censor
         if (censor == null) {
-            overlays.add(bitmapOverlay, startTimeUs, endTimeUs)
+            addLayerOverlay(layer, bitmapOverlay, overlays, videoEffects)
             return
         }
         Log.d(RENDER_TAG, "Layer: censor (${censor.type}, strength ${censor.strength})")
@@ -371,6 +372,36 @@ private fun addImageLayer(
         }
         Log.e(RENDER_TAG, "Failed to decode image layer: ${e.message}")
     }
+}
+
+/**
+ * Adds [overlay], what [layer] is drawn as, to [overlays], or the effect that
+ * blends it onto the frame to [videoEffects] after the overlays below it when
+ * the layer has a [LayerBlendMode] other than [LayerBlendMode.NORMAL].
+ */
+@UnstableApi
+private fun addLayerOverlay(
+    layer: VideoSequenceBuilder.ImageLayerConfig,
+    overlay: BitmapOverlay,
+    overlays: OverlayBatch,
+    videoEffects: MutableList<Effect>,
+) {
+    val mode = layer.blendMode
+    if (mode == LayerBlendMode.NORMAL) {
+        overlays.add(overlay, layer.startUs, layer.endUs)
+        return
+    }
+    if (isEmptyTimeRange(layer.startUs, layer.endUs)) {
+        // TimestampWrapper would reject the range; an empty one draws nothing.
+        Log.d(RENDER_TAG, "Layer: empty time range; skipping layer")
+        return
+    }
+    Log.d(RENDER_TAG, "Layer: blended (${mode.wireName})")
+    // It blends with what the layers below it drew, so those are added first.
+    overlays.flush()
+    addTimedOverlayEffect(
+        videoEffects, LayerBlendEffect(overlay, mode), layer.startUs, layer.endUs
+    )
 }
 
 /**
@@ -457,10 +488,15 @@ internal class OverlayBatch(private val videoEffects: MutableList<Effect>) {
  * Whether [layer] is a still image that looks the same on every frame it shows:
  * no animation, keyframe, censor or audio visualizer, and not a GIF, which may
  * animate.
+ *
+ * A blended layer is drawn on its own as well: it combines with the frame
+ * beneath it, which an image of static layers drawn over transparency does not
+ * hold.
  */
 internal fun isStaticImageLayer(layer: VideoSequenceBuilder.ImageLayerConfig): Boolean {
     val image = layer.image ?: return false
     if (layer.audioVisualizer != null || layer.censor != null) return false
+    if (layer.blendMode != LayerBlendMode.NORMAL) return false
     if (layer.animations.isNotEmpty() || layer.keyframes.isNotEmpty()) return false
     val header = image.readHeader(GifDecoder.MAGIC_LENGTH) ?: return false
     return !GifDecoder.isGif(header)

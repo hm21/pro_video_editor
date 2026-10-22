@@ -52,6 +52,8 @@ internal class LayeredCompositionBuilder {
     let keyframeClock: KeyframeClock
     /// The layer's decoded mask, filled in once the whole layer is placed.
     var matte: LayerMatte? = nil
+    /// How the layer combines with the layers below it.
+    var blendMode: LayerBlendMode = .normal
   }
 
   private struct AudioWindow {
@@ -170,7 +172,8 @@ internal class LayeredCompositionBuilder {
             displaySize: displaySize,
             chromaKey: clip.chromaKey ?? layer.chromaKey ?? globalChromaKey,
             keyframes: layer.keyframes,
-            keyframeClock: layer.keyframeClock))
+            keyframeClock: layer.keyframeClock,
+            blendMode: layer.blendMode))
       }
 
       if let mask = layer.mask {
@@ -285,7 +288,8 @@ internal class LayeredCompositionBuilder {
           chromaKey: clip.chromaKey,
           matte: clip.matte,
           keyframes: clip.keyframes,
-          keyframeClock: clip.keyframeClock)
+          keyframeClock: clip.keyframeClock,
+          blendMode: clip.blendMode)
       }
 
       let timeRange = CMTimeRange(

@@ -21,7 +21,8 @@ import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 /// one (its z-order). The whole layer is rendered with [opacity] and, unless a
 /// clip provides its own [VideoSegment.transform], placed using [transform]. A
 /// [mask] shows its clips only within a shape, or fades them out through a soft
-/// edge.
+/// edge, and [blendMode] combines them with the layers below, such as a double
+/// exposure of two clips.
 class VideoLayer {
   /// Creates a [VideoLayer] from a list of [clips].
   const VideoLayer({
@@ -32,6 +33,7 @@ class VideoLayer {
     this.mask,
     this.keyframes = const [],
     this.keyframeClock = const [],
+    this.blendMode = LayerBlendMode.normal,
   }) : assert(clips.length > 0, 'A layer must contain at least one clip'),
        assert(
          opacity >= 0 && opacity <= 1,
@@ -119,6 +121,30 @@ class VideoLayer {
   /// timeline.
   final List<KeyframeClockPoint> keyframeClock;
 
+  /// How the layer combines with the layers below it; see [LayerBlendMode].
+  ///
+  /// The backdrop is everything composited beneath the layer at that pixel:
+  /// the layers before it in [VideoComposition.layers] over
+  /// [VideoComposition.backgroundColor]. Each clip is blended as it is
+  /// placed, after its chroma key and [mask], and its alpha there — what the
+  /// key and the mask leave of it, times [opacity] or a keyframe's opacity —
+  /// fades between the backdrop and the blended color. Where the layer has no
+  /// clip, or a [SegmentFit.contain] fit leaves its box empty, the backdrop
+  /// stays as it is. The layers above it draw over the result, and the
+  /// composition's [VideoRenderData.imageLayers] over all of them.
+  ///
+  /// [LayerBlendMode.screen] over a clip recorded against black adds only its
+  /// light, such as a flame or a light leak; [LayerBlendMode.multiply] or
+  /// [LayerBlendMode.screen] of a portrait over a landscape makes a double
+  /// exposure.
+  ///
+  /// **Default**: [LayerBlendMode.normal], which draws the clips over the
+  /// layers below.
+  ///
+  /// **Note:** Ignored on Web, Windows and Linux, which have no render
+  /// pipeline.
+  final LayerBlendMode blendMode;
+
   /// Converts this layer to a map for platform channel communication.
   ///
   /// Resolves each clip's input path, any chroma-key background image and the
@@ -161,6 +187,7 @@ class VideoLayer {
         keyframes,
       ).map((k) => k.toMap()).toList(),
       'keyframeClock': keyframeClock.map((p) => p.toMap()).toList(),
+      'blendMode': blendMode.name,
     };
   }
 
@@ -173,6 +200,7 @@ class VideoLayer {
     EditorLayerImage? mask,
     List<TimelineKeyframe>? keyframes,
     List<KeyframeClockPoint>? keyframeClock,
+    LayerBlendMode? blendMode,
   }) {
     return VideoLayer(
       clips: clips ?? this.clips,
@@ -182,6 +210,7 @@ class VideoLayer {
       mask: mask ?? this.mask,
       keyframes: keyframes ?? this.keyframes,
       keyframeClock: keyframeClock ?? this.keyframeClock,
+      blendMode: blendMode ?? this.blendMode,
     );
   }
 
@@ -194,6 +223,7 @@ class VideoLayer {
       'mask': mask?.toMap(),
       'keyframes': keyframes.map((k) => k.toMap()).toList(),
       'keyframeClock': keyframeClock.map((p) => p.toMap()).toList(),
+      'blendMode': blendMode.name,
     };
   }
 
@@ -224,6 +254,7 @@ class VideoLayer {
               .toList() ??
           const [],
       keyframeClock: keyframeClockFromMap(map['keyframeClock']),
+      blendMode: LayerBlendMode.fromName(map['blendMode']),
     );
   }
 
@@ -236,7 +267,7 @@ class VideoLayer {
   String toString() =>
       'VideoLayer(clips: $clips, opacity: $opacity, transform: $transform, '
       'chromaKey: $chromaKey, mask: $mask, keyframes: $keyframes, '
-      'keyframeClock: $keyframeClock)';
+      'keyframeClock: $keyframeClock, blendMode: $blendMode)';
 
   @override
   bool operator ==(covariant VideoLayer other) {
@@ -248,7 +279,8 @@ class VideoLayer {
         other.chromaKey == chromaKey &&
         other.mask == mask &&
         listEquals(other.keyframes, keyframes) &&
-        listEquals(other.keyframeClock, keyframeClock);
+        listEquals(other.keyframeClock, keyframeClock) &&
+        other.blendMode == blendMode;
   }
 
   @override
@@ -259,5 +291,6 @@ class VideoLayer {
       chromaKey.hashCode ^
       mask.hashCode ^
       Object.hashAll(keyframes) ^
-      Object.hashAll(keyframeClock);
+      Object.hashAll(keyframeClock) ^
+      blendMode.hashCode;
 }

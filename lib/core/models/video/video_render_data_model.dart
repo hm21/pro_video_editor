@@ -524,6 +524,7 @@ class VideoRenderData {
                 'animationEndUs': layer.animationEndTime?.inMicroseconds,
                 'censor': layer.censor?.toMap(),
                 'audioVisualizer': layer.audioVisualizer?.toChannelMap(),
+                'blendMode': layer.blendMode.name,
                 // A stretched layer has no placement for keyframes to move.
                 'keyframes': layer.offset == null
                     ? const <Map<String, dynamic>>[]

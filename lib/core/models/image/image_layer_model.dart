@@ -12,6 +12,7 @@ import 'editor_layer_image_model.dart';
 import 'keyframe_clock_point_model.dart';
 import 'layer_animation_model.dart';
 import 'layer_audio_visualizer_model.dart';
+import 'layer_blend_mode_model.dart';
 import 'layer_censor_model.dart';
 import 'timeline_keyframe_model.dart';
 
@@ -35,6 +36,7 @@ class ImageLayer with TimeRangeMixin {
     this.keyframes = const [],
     this.keyframeClock = const [],
     this.audioVisualizer,
+    this.blendMode = LayerBlendMode.normal,
   }) : assert(
          startTime == null || endTime == null || startTime < endTime,
          'startTime must be before endTime',
@@ -60,6 +62,11 @@ class ImageLayer with TimeRangeMixin {
        assert(
          audioVisualizer == null || offset == null || size != null,
          'An audio visualizer fills a box; set [size] with [offset]',
+       ),
+       assert(
+         censor == null || blendMode == LayerBlendMode.normal,
+         'A censor layer hides the picture beneath it and draws nothing to '
+         'blend',
        );
 
   /// Creates a layer that draws [visualizer] instead of an image; see
@@ -79,6 +86,7 @@ class ImageLayer with TimeRangeMixin {
     Duration? animationEndTime,
     List<TimelineKeyframe> keyframes = const [],
     List<KeyframeClockPoint> keyframeClock = const [],
+    LayerBlendMode blendMode = LayerBlendMode.normal,
   }) : this(
          image: EditorLayerImage.memory(_transparentPixelPng),
          startTime: startTime,
@@ -92,6 +100,7 @@ class ImageLayer with TimeRangeMixin {
          keyframes: keyframes,
          keyframeClock: keyframeClock,
          audioVisualizer: visualizer,
+         blendMode: blendMode,
        );
 
   /// The image to overlay on the video.
@@ -245,6 +254,25 @@ class ImageLayer with TimeRangeMixin {
   /// **Default**: `null`, which draws [image].
   final LayerAudioVisualizer? audioVisualizer;
 
+  /// How the layer combines with the picture beneath it; see
+  /// [LayerBlendMode].
+  ///
+  /// The picture is everything the layer covers: the video with its
+  /// [VideoRenderData.effects], [VideoRenderData.colorFilters] and
+  /// [VideoRenderData.blur], and every image layer before it in
+  /// [VideoRenderData.imageLayers]. The layer's alpha — its image's own
+  /// transparency, a fade animation and its keyframes' opacity — fades
+  /// between that picture and the blended color.
+  ///
+  /// A [censor] layer draws nothing and keeps [LayerBlendMode.normal].
+  ///
+  /// **Default**: [LayerBlendMode.normal], which draws the image over the
+  /// picture.
+  ///
+  /// **Note:** Ignored on Web, Windows and Linux, which have no render
+  /// pipeline.
+  final LayerBlendMode blendMode;
+
   ImageLayer copyWith({
     EditorLayerImage? image,
     Duration? startTime,
@@ -261,6 +289,7 @@ class ImageLayer with TimeRangeMixin {
     List<TimelineKeyframe>? keyframes,
     List<KeyframeClockPoint>? keyframeClock,
     LayerAudioVisualizer? audioVisualizer,
+    LayerBlendMode? blendMode,
   }) {
     return ImageLayer(
       image: image ?? this.image,
@@ -278,6 +307,7 @@ class ImageLayer with TimeRangeMixin {
       keyframes: keyframes ?? this.keyframes,
       keyframeClock: keyframeClock ?? this.keyframeClock,
       audioVisualizer: audioVisualizer ?? this.audioVisualizer,
+      blendMode: blendMode ?? this.blendMode,
     );
   }
 
@@ -300,6 +330,7 @@ class ImageLayer with TimeRangeMixin {
       'keyframes': keyframes.map((k) => k.toMap()).toList(),
       'keyframeClock': keyframeClock.map((p) => p.toMap()).toList(),
       'audioVisualizer': audioVisualizer?.toMap(),
+      'blendMode': blendMode.name,
     };
   }
 
@@ -357,6 +388,7 @@ class ImageLayer with TimeRangeMixin {
               Map<String, dynamic>.from(map['audioVisualizer'] as Map),
             )
           : null,
+      blendMode: LayerBlendMode.fromName(map['blendMode']),
     );
   }
 
@@ -382,7 +414,8 @@ class ImageLayer with TimeRangeMixin {
         'censor: $censor, '
         'keyframes: $keyframes, '
         'keyframeClock: $keyframeClock, '
-        'audioVisualizer: $audioVisualizer'
+        'audioVisualizer: $audioVisualizer, '
+        'blendMode: $blendMode'
         ')';
   }
 
@@ -404,7 +437,8 @@ class ImageLayer with TimeRangeMixin {
         other.censor == censor &&
         listEquals(other.keyframes, keyframes) &&
         listEquals(other.keyframeClock, keyframeClock) &&
-        other.audioVisualizer == audioVisualizer;
+        other.audioVisualizer == audioVisualizer &&
+        other.blendMode == blendMode;
   }
 
   @override
@@ -423,7 +457,8 @@ class ImageLayer with TimeRangeMixin {
         censor.hashCode ^
         Object.hashAll(keyframes) ^
         Object.hashAll(keyframeClock) ^
-        audioVisualizer.hashCode;
+        audioVisualizer.hashCode ^
+        blendMode.hashCode;
   }
 }
 

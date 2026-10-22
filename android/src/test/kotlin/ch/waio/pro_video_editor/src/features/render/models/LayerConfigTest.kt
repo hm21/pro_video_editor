@@ -24,6 +24,22 @@ internal class LayerConfigTest {
         LayerConfig.fromMap(mapOf<String, Any?>("clips" to listOf(clip)) + extra)
 
     @Test
+    fun readsTheBlendModeByName() {
+        assertEquals(
+            LayerBlendMode.DIFFERENCE,
+            layer(mapOf("blendMode" to "difference"))!!.blendMode
+        )
+        assertEquals(LayerBlendMode.SOFT_LIGHT, layer(mapOf("blendMode" to "softLight"))!!.blendMode)
+    }
+
+    @Test
+    fun aLayerWithoutAKnownBlendModeIsNormal() {
+        assertEquals(LayerBlendMode.NORMAL, layer()!!.blendMode)
+        assertEquals(LayerBlendMode.NORMAL, layer(mapOf("blendMode" to "colorBurn"))!!.blendMode)
+        assertEquals(LayerBlendMode.NORMAL, layer(mapOf("blendMode" to 3))!!.blendMode)
+    }
+
+    @Test
     fun aLayerWithoutMaskShowsItsClipsWhole() {
         assertNull(layer()!!.mask)
     }

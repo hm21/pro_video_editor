@@ -40,6 +40,7 @@ import ch.waio.pro_video_editor.src.features.render.models.VideoEncoderConfigura
 import ch.waio.pro_video_editor.src.shared.concurrency.ExportGate
 import ch.waio.pro_video_editor.src.shared.concurrency.ExportGateGuard
 import android.os.SystemClock
+import ch.waio.pro_video_editor.src.features.render.models.LayerBlendMode
 
 /**
  * Service for rendering video with applied effects and transformations.
@@ -115,8 +116,14 @@ class RenderVideo(private val context: Context) {
         // So is a layer mask's shader; it only exists on the layered path.
         val hasLayerMask = config.composition?.layers?.any { it.mask != null } == true
 
+        // And the shaders that capture and blend the layers from the lowest
+        // blended one up (see CapturedVideoLayers).
+        val hasLayerBlend = config.composition?.layers?.any {
+            it.blendMode != LayerBlendMode.NORMAL
+        } == true
+
         return hasImageLayers || hasBlur || hasColorFilters || hasChromaKey || hasEffects ||
-                hasLayerMask
+                hasLayerMask || hasLayerBlend
     }
 
     /**

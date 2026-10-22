@@ -45,6 +45,8 @@ struct ImageLayer {
   /// Draws static layers in a row as one image instead of `frames`, which is
   /// then empty.
   var flattened: FlattenedLayers? = nil
+  /// How the layer combines with the picture beneath it; see `blendLayer`.
+  var blendMode: LayerBlendMode = .normal
 
   /// The frame to display at composition time [currentTimeUs].
   ///
@@ -437,7 +439,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
           keyframes: layer.keyframes,
           keyframeClock: layer.keyframeClock,
           visualizer: AudioVisualizerRenderer(
-            config: visualizer, rasterScale: CGFloat(growth))
+            config: visualizer, rasterScale: CGFloat(growth)),
+          blendMode: layer.blendMode
         ))
       return
     }
@@ -483,7 +486,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       animationStartUs: layer.animationStartUs,
       animationEndUs: layer.animationEndUs,
       keyframes: layer.keyframes,
-      keyframeClock: layer.keyframeClock
+      keyframeClock: layer.keyframeClock,
+      blendMode: layer.blendMode
     )
   }
 
@@ -595,8 +599,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       keyframe: keyframe
     )
     guard let censor = layer.censor else {
-      return compositeOverlay(
-        rotated, over: outputImage, opacity: opacity, transform: animTransform)
+      return blendLayer(
+        placedOverlay(rotated, opacity: opacity, transform: animTransform),
+        over: outputImage, mode: layer.blendMode)
     }
     let mask = placedOverlay(rotated, opacity: opacity, transform: animTransform)
     // A wiggle or a keyframe turn tilts the hidden area, but its pixelate
@@ -1013,9 +1018,10 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       //     the box edge instead of swinging back into view.
       img = rotateOverlayAroundCenter(img, radians: rotation)
 
-      // 5. Apply opacity and composite over the canvas.
-      canvas = compositeOverlay(
-        img, over: canvas, opacity: Double(opacity), transform: .identity)
+      // 5. Apply opacity and blend onto the canvas composed below.
+      canvas = blendLayer(
+        placedOverlay(img, opacity: Double(opacity), transform: .identity),
+        over: canvas, mode: placement.blendMode)
     }
 
     return canvas.cropped(to: CGRect(origin: .zero, size: renderSize))

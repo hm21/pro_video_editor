@@ -368,16 +368,6 @@ func computeAnimation(
   return (opacity, placed(tilt: turn + wiggle), placed(tilt: 0))
 }
 
-/// Composites an overlay image onto the output with animation effects applied.
-func compositeOverlay(
-  _ overlay: CIImage,
-  over outputImage: CIImage,
-  opacity: Double,
-  transform: CGAffineTransform
-) -> CIImage {
-  placedOverlay(overlay, opacity: opacity, transform: transform).composited(over: outputImage)
-}
-
 /// [overlay] with its animation applied: moved and scaled by [transform] and
 /// faded to [opacity].
 func placedOverlay(

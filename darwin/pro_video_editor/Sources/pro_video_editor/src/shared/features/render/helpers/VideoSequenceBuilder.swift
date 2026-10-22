@@ -652,6 +652,9 @@ internal struct LayerPlacement: Sendable {
   var keyframes: [KeyframeConfig] = []
   /// The clock `keyframes` are timed on; see `KeyframeClock`.
   var keyframeClock: KeyframeClock = .output
+  /// How the layer's frame combines with the canvas composed below it; see
+  /// `blendLayer`.
+  var blendMode: LayerBlendMode = .normal
 }
 
 extension LayerPlacement {

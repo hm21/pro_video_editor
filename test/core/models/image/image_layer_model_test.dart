@@ -6,6 +6,7 @@ import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart
 import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
 import 'package:pro_video_editor/core/models/image/keyframe_clock_point_model.dart';
 import 'package:pro_video_editor/core/models/image/layer_audio_visualizer_model.dart';
+import 'package:pro_video_editor/core/models/image/layer_blend_mode_model.dart';
 import 'package:pro_video_editor/core/models/image/layer_censor_model.dart';
 import 'package:pro_video_editor/core/models/image/timeline_keyframe_model.dart';
 
@@ -255,6 +256,72 @@ void main() {
 
         expect(layer.copyWith(loop: false).censor, layer.censor);
         expect(layer == ImageLayer(image: image), isFalse);
+      });
+    });
+
+    group('blendMode', () {
+      test('draws the layer over the picture by default', () {
+        final layer = ImageLayer(image: image);
+
+        expect(layer.blendMode, LayerBlendMode.normal);
+        expect(layer.toMap()['blendMode'], 'normal');
+      });
+
+      test('roundtrips through toMap / fromMap', () {
+        final layer = ImageLayer(
+          image: image,
+          blendMode: LayerBlendMode.screen,
+        );
+
+        expect(layer.toMap()['blendMode'], 'screen');
+        expect(
+          ImageLayer.fromMap(layer.toMap()).blendMode,
+          LayerBlendMode.screen,
+        );
+      });
+
+      test('reads a map from before blend modes as normal', () {
+        final map = ImageLayer(image: image).toMap()..remove('blendMode');
+
+        expect(ImageLayer.fromMap(map).blendMode, LayerBlendMode.normal);
+      });
+
+      test('is kept by copyWith and tells layers apart', () {
+        final layer = ImageLayer(
+          image: image,
+          blendMode: LayerBlendMode.multiply,
+        );
+
+        expect(layer.copyWith(loop: false).blendMode, LayerBlendMode.multiply);
+        expect(layer == ImageLayer(image: image), isFalse);
+        expect(
+          layer.hashCode,
+          ImageLayer(image: image, blendMode: LayerBlendMode.multiply).hashCode,
+        );
+      });
+
+      test('is carried by an audio visualizer layer', () {
+        final layer = ImageLayer.audioVisualizer(
+          visualizer: LayerAudioVisualizer(
+            style: AudioVisualizerStyle.wave,
+            bandCount: 1,
+            levels: Float32List.fromList([0.5]),
+          ),
+          blendMode: LayerBlendMode.add,
+        );
+
+        expect(layer.blendMode, LayerBlendMode.add);
+      });
+
+      test('is not combined with a censor', () {
+        expect(
+          () => ImageLayer(
+            image: image,
+            censor: const LayerCensor.blur(),
+            blendMode: LayerBlendMode.screen,
+          ),
+          throwsAssertionError,
+        );
       });
     });
 

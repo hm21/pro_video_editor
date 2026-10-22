@@ -7,6 +7,7 @@ import androidx.media3.effect.TimestampWrapper
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAudioVisualizerConfig
+import ch.waio.pro_video_editor.src.features.render.models.LayerBlendMode
 import ch.waio.pro_video_editor.src.features.render.models.LayerCensorConfig
 import ch.waio.pro_video_editor.src.shared.media.EncodedImage
 import org.mockito.Mockito.mock
@@ -38,6 +39,7 @@ internal class StaticLayerRunTest {
         keyframes: List<KeyframeConfig> = emptyList(),
         censor: LayerCensorConfig? = null,
         audioVisualizer: LayerAudioVisualizerConfig? = null,
+        blendMode: LayerBlendMode = LayerBlendMode.NORMAL,
     ) = VideoSequenceBuilder.ImageLayerConfig(
         image = image,
         scaleX = null,
@@ -52,6 +54,7 @@ internal class StaticLayerRunTest {
         keyframes = keyframes,
         censor = censor,
         audioVisualizer = audioVisualizer,
+        blendMode = blendMode,
     )
 
     @Test
@@ -91,6 +94,17 @@ internal class StaticLayerRunTest {
         val censor = LayerCensorConfig(LayerCensorConfig.Type.BLUR, 10.0)
 
         assertEquals(1, staticLayerRunLength(listOf(layer(), layer(censor = censor)), 0))
+    }
+
+    @Test
+    fun aRunEndsAtABlendedLayer() {
+        // It blends with the frame beneath it, which an image of the static
+        // layers drawn over transparency does not hold.
+        val blended = layer(blendMode = LayerBlendMode.SCREEN)
+
+        assertEquals(1, staticLayerRunLength(listOf(layer(), blended, layer()), 0))
+        assertEquals(0, staticLayerRunLength(listOf(blended, layer()), 0))
+        assertFalse(isStaticImageLayer(blended))
     }
 
     @Test

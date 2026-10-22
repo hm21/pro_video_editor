@@ -132,6 +132,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🎬 **Layer Animations**: Animate image layers with fade, slide, scale, wiggle and bounce effects, configurable easing curves, and in/out/inOut phases, or `loop` to keep a layer moving while it is visible. A slide travels to a canvas edge or to a start point you pick yourself. `animationStartTime`/`animationEndTime` let several layers that each show part of one overlay share one run of animations.
 - 🗝️ **Layer Keyframes**: Move image layers and composition layers between keyframes — position, size, rotation and opacity over time, eased with the same curves as the animations. A loop animation can play over the stretch between two keyframes only, `loopPhase` starts it part way into its cycle, and a `keyframeClock` keeps keyframes on the timing they were made on.
 - 🎭 **Layer Masks**: Show a `VideoLayer`'s clips only inside a shape — a circle, a heart, a rounded rectangle — or fade them out through a soft edge over the layers below, via `VideoLayer.mask`. Only the matte image's alpha counts, and the mask moves, scales and turns with each clip.
+- 🌗 **Blend Modes**: Combine an image layer or a `VideoLayer` with the picture beneath it instead of drawing it over it, via `ImageLayer.blendMode` and `VideoLayer.blendMode`: `multiply`, `screen`, `overlay`, `softLight`, `darken`, `lighten`, `add` and `difference` — for a double exposure of two clips, a light leak recorded against black that only adds its light, or a colored shape that tints the video. Opacity, masks, chroma keys, animations and keyframes fade the layer before it is blended, and `LayerBlendMode.blendMode` is the Flutter `BlendMode` a preview paints the same result with.
 - 🫥 **Censor Layers**: Blur or pixelate the part of the picture an image layer covers instead of drawing the layer, e.g. to hide a face or a license plate, via `ImageLayer.censor`. The layer's image is the shape of the area, and image layers after it stay sharp on top.
 - 📊 **Audio Visualizer Layers**: Draw bars, mirrored bars, a wave or a ring of bars that move with the sound in an image layer's box, via `ImageLayer.audioVisualizer`. The app hands over the levels of the sound's bands over time and can set how wide the bars are (`barFill`); `AudioVisualizerPainter` draws the same shapes in an editor preview.
 - 🎞️ **Clip Transitions**: Add transitions between adjacent clips — `dissolve`, `fadeToBlack`, `fadeToWhite`, `slide`, `push`, `wipe`, `zoomIn`, `zoomOut`, `spin`, `whipPan`, `blur`, `glitch`, `flash`, `iris` and `stretch` — with configurable duration, easing curve, and direction.
@@ -171,6 +172,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 | `Clip Transitions`          | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Layer Size`                | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Layer Masks`               | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
+| `Blend Modes`               | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Censor Layers`             | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Audio Visualizer Layers`   | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
 | `Multiple ColorMatrix 4x5` | ✅      | ✅  | ✅     | ❌      | ❌     | 🚫   |
@@ -454,6 +456,9 @@ var data = VideoRenderData(
                 // Draw it at the clip's aspect ratio, and note that `cover`
                 // cuts off whatever of the shape overflows the box.
                 mask: EditorLayerImage.asset('assets/circle_mask.png'),
+                // Optional: blend the clip with the layers below instead of
+                // drawing it over them, e.g. `screen` for a double exposure.
+                blendMode: LayerBlendMode.screen,
                 clips: [
                     VideoSegment(
                         video: EditorVideo.asset('assets/pip.mp4'),

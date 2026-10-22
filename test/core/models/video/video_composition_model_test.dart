@@ -313,6 +313,50 @@ void main() {
         expect(layer.copyWith(mask: matte).toString(), contains('mask:'));
       });
     });
+
+    group('blendMode', () {
+      // toAsyncMap resolves each clip's source to a local path.
+      final local = VideoLayer(
+        clips: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+      );
+
+      test('draws the clips over the layers below by default', () {
+        expect(layer.blendMode, LayerBlendMode.normal);
+      });
+
+      test('toAsyncMap sends the mode over the platform channel', () async {
+        final blended = local.copyWith(blendMode: LayerBlendMode.difference);
+
+        expect((await blended.toAsyncMap())['blendMode'], 'difference');
+        expect((await local.toAsyncMap())['blendMode'], 'normal');
+      });
+
+      test('toJson / fromJson roundtrip preserves the mode', () {
+        final blended = layer.copyWith(blendMode: LayerBlendMode.overlay);
+
+        expect(VideoLayer.fromJson(blended.toJson()), blended);
+      });
+
+      test('reads a map from before blend modes as normal', () {
+        final map = layer.toMap()..remove('blendMode');
+
+        expect(VideoLayer.fromMap(map).blendMode, LayerBlendMode.normal);
+      });
+
+      test('is kept by copyWith and breaks equality', () {
+        final blended = layer.copyWith(blendMode: LayerBlendMode.screen);
+
+        expect(
+          blended.copyWith(opacity: 0.25).blendMode,
+          LayerBlendMode.screen,
+        );
+        expect(blended, isNot(layer));
+        expect(
+          blended.hashCode,
+          layer.copyWith(blendMode: LayerBlendMode.screen).hashCode,
+        );
+      });
+    });
   });
 
   group('VideoComposition', () {

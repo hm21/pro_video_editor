@@ -14,6 +14,7 @@
 		A1B2C3D400000000000000F1 /* AudioFadeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000000F2 /* AudioFadeTests.swift */; };
 		A1B2C3D400000000000000F5 /* BackgroundSafeJobTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000000F6 /* BackgroundSafeJobTests.swift */; };
 		A1B2C3D400000000000000F9 /* FlattenedLayersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000000FA /* FlattenedLayersTests.swift */; };
+		BE1D0B1E0000000000000003 /* LayerBlendTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE1D0B1E0000000000000004 /* LayerBlendTests.swift */; };
 		A1B2C3D40000000000007E03 /* ClipTransitionWindowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000007E04 /* ClipTransitionWindowTests.swift */; };
 		A1B2C3D40000000000008003 /* ClipTransitionEffectsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000008004 /* ClipTransitionEffectsTests.swift */; };
 		3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */; };
@@ -60,6 +61,7 @@
 		A1B2C3D400000000000000F2 /* AudioFadeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AudioFadeTests.swift; path = ../shared_tests/AudioFadeTests.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D400000000000000F6 /* BackgroundSafeJobTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BackgroundSafeJobTests.swift; path = ../shared_tests/BackgroundSafeJobTests.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D400000000000000FA /* FlattenedLayersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FlattenedLayersTests.swift; path = ../shared_tests/FlattenedLayersTests.swift; sourceTree = SOURCE_ROOT; };
+		BE1D0B1E0000000000000004 /* LayerBlendTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LayerBlendTests.swift; path = ../shared_tests/LayerBlendTests.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D40000000000007E04 /* ClipTransitionWindowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ClipTransitionWindowTests.swift; path = ../shared_tests/ClipTransitionWindowTests.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D40000000000008004 /* ClipTransitionEffectsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ClipTransitionEffectsTests.swift; path = ../shared_tests/ClipTransitionEffectsTests.swift; sourceTree = SOURCE_ROOT; };
 		331C8081294A63A400263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -128,6 +130,7 @@
 				A1B2C3D400000000000000F2 /* AudioFadeTests.swift */,
 				A1B2C3D400000000000000F6 /* BackgroundSafeJobTests.swift */,
 				A1B2C3D400000000000000FA /* FlattenedLayersTests.swift */,
+				BE1D0B1E0000000000000004 /* LayerBlendTests.swift */,
 				A1B2C3D40000000000007E04 /* ClipTransitionWindowTests.swift */,
 				A1B2C3D40000000000008004 /* ClipTransitionEffectsTests.swift */,
 			);
@@ -391,6 +394,7 @@
 				A1B2C3D400000000000000F1 /* AudioFadeTests.swift in Sources */,
 				A1B2C3D400000000000000F5 /* BackgroundSafeJobTests.swift in Sources */,
 				A1B2C3D400000000000000F9 /* FlattenedLayersTests.swift in Sources */,
+				BE1D0B1E0000000000000003 /* LayerBlendTests.swift in Sources */,
 				A1B2C3D40000000000007E03 /* ClipTransitionWindowTests.swift in Sources */,
 				A1B2C3D40000000000008003 /* ClipTransitionEffectsTests.swift in Sources */,
 			);
