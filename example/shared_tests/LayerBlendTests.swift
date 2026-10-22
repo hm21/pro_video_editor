@@ -122,6 +122,22 @@ final class LayerBlendTests: XCTestCase {
     XCTAssertEqual(rgba8(drawn, at: CGPoint(x: 6, y: 4)), [0x80, 0x40, 0xC0, 255])
   }
 
+  func testALayerUntilTheEndThatAnimatesOutKeepsItsMode() {
+    // Its end is resolved to the composition's length on a copy of it.
+    let fadeOut = LayerAnimationConfig(
+      type: "fade", phase: "animateOut", durationUs: 500_000, curve: "linear",
+      slideDirection: nil, slideFrom: nil, scaleFrom: nil)
+    let screened = ImageLayerConfig(
+      image: .bytes(encodedPng(color: [255, 0, 0])), startUs: -1, endUs: -1, x: 0, y: 0,
+      width: 8, height: 8, rotation: 0, loop: true, animationOffsetUs: 0,
+      animations: [fadeOut], blendMode: .screen)
+
+    let resolved = resolveOpenEndedOutAnimations([screened], totalDurationUs: 2_000_000)
+
+    XCTAssertEqual(resolved[0].endUs, 2_000_000)
+    XCTAssertEqual(resolved[0].blendMode, .screen)
+  }
+
   // MARK: - Arguments
 
   func testTheModeIsReadByName() {

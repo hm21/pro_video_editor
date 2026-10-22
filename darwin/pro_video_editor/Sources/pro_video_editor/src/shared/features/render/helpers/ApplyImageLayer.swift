@@ -53,20 +53,9 @@ func resolveOpenEndedOutAnimations(
         $0.phase == "animateOut" || $0.phase == "animateInOut"
       }
     guard hasOutPhase else { return layer }
-    return ImageLayerConfig(
-      image: layer.image,
-      startUs: layer.startUs,
-      endUs: totalDurationUs,
-      x: layer.x, y: layer.y,
-      width: layer.width, height: layer.height,
-      rotation: layer.rotation, loop: layer.loop,
-      animationOffsetUs: layer.animationOffsetUs,
-      animations: layer.animations,
-      censor: layer.censor,
-      animationStartUs: layer.animationStartUs,
-      animationEndUs: layer.animationEndUs,
-      keyframes: layer.keyframes,
-      keyframeClock: layer.keyframeClock,
-      audioVisualizer: layer.audioVisualizer)
+    // A copy, so every other field — the blend mode among them — stays.
+    var resolved = layer
+    resolved.endUs = totalDurationUs
+    return resolved
   }
 }

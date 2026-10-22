@@ -307,6 +307,76 @@ void main() {
       );
     });
 
+    testWidgets('more layers than one pass draws keep their order', (_) async {
+      // Android draws at most seven captured layers a pass: the blended
+      // layer and the seven above it take two, and the top one blends with
+      // what the first drew.
+      final (backdrop, backdropGray) = lightBackdropVideo;
+      final (layer, layerGray) = darkLayerVideo;
+      final (top, topGray) = lightLayerVideo;
+      final (cover, coverGray) = coverVideo;
+      final out = await pve.renderVideo(
+        VideoRenderData(
+          composition: VideoComposition(
+            canvasSize: canvas,
+            layers: [
+              VideoLayer(clips: [VideoSegment(video: backdrop)]),
+              VideoLayer(
+                clips: [VideoSegment(video: layer)],
+                blendMode: LayerBlendMode.multiply,
+              ),
+              // Six boxes of 80 by 90 along the top edge.
+              for (var column = 0; column < 6; column++)
+                VideoLayer(
+                  clips: [VideoSegment(video: cover)],
+                  transform: SegmentTransform(
+                    offset: Offset(column * 80.0, 0),
+                    size: const Size(80, 90),
+                    fit: SegmentFit.fill,
+                  ),
+                ),
+              // Over the left half.
+              VideoLayer(
+                clips: [VideoSegment(video: top)],
+                transform: const SegmentTransform(
+                  offset: Offset.zero,
+                  size: Size(320, 360),
+                  fit: SegmentFit.fill,
+                ),
+                blendMode: LayerBlendMode.difference,
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final multiplied = blended(
+        LayerBlendMode.multiply,
+        backdropGray,
+        layerGray,
+      );
+      await expectGray(
+        await samplePixel(out, 40 / 640, 45 / 360),
+        blended(LayerBlendMode.difference, coverGray, topGray),
+        'difference over a box',
+      );
+      await expectGray(
+        await samplePixel(out, 440 / 640, 45 / 360),
+        coverGray,
+        'a box',
+      );
+      await expectGray(
+        await samplePixel(out, 0.25, 0.75),
+        blended(LayerBlendMode.difference, multiplied, topGray),
+        'difference over the multiply',
+      );
+      await expectGray(
+        await samplePixel(out, 0.875, 0.75),
+        multiplied,
+        'multiply',
+      );
+    });
+
     testWidgets('blends only while its clip plays', (_) async {
       final (backdrop, backdropGray) = lightBackdropVideo;
       final (layer, layerGray) = darkLayerVideo;

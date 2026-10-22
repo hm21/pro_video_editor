@@ -291,7 +291,7 @@ public struct ImageLayerConfig: Sendable {
   let image: EncodedImage
   let startUs: Int64
   /// endUs of -1 indicates the image should be displayed until the end of the video.
-  let endUs: Int64
+  var endUs: Int64
   /// x position in pixels. When nil, the image is stretched to fill the video frame.
   let x: Int64?
   /// y position in pixels. When nil, the image is stretched to fill the video frame.
