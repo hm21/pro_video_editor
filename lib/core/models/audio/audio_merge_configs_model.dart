@@ -1,4 +1,5 @@
 import '/core/models/video/editor_video_model.dart';
+import '/shared/utils/unique_task_id.dart';
 import 'audio_format_model.dart';
 
 /// A single trimmed audio window that participates in an audio merge.
@@ -145,7 +146,7 @@ class AudioMergeConfigs {
          '[sampleRate] must be greater than 0',
        ),
        assert(channels == null || channels > 0, '[channels] must be > 0'),
-       id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
+       id = id ?? uniqueTaskId();
 
   /// The ordered list of windows to concatenate, in output order.
   final List<AudioMergeSegment> segments;

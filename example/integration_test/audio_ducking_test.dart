@@ -77,6 +77,29 @@ void main() {
     return Pcm.parseWav(await File(wavPath).readAsBytes());
   }
 
+  testWidgets('ducks under every voice-over take, not just one', (_) async {
+    // Two takes in two files, measured together: their waveform requests
+    // used to share a millisecond id, and the platforms refused the second.
+    final first = await writeTemp(
+      'take1',
+      Pcm.toneWav(seconds: 2, frequency: 1000, bursts: [(0.5, 1.5)]),
+    );
+    final second = await writeTemp(
+      'take2',
+      Pcm.toneWav(seconds: 2, frequency: 800, bursts: [(0.5, 1.5)]),
+    );
+
+    final curve = await ducking.analyze([
+      VideoAudioTrack(path: first),
+      VideoAudioTrack(path: second, startTime: const Duration(seconds: 3)),
+    ], videoDuration: window);
+
+    // Talking from 0.5 s to 1.5 s and from 3.5 s to 4.5 s.
+    expect(curve.volumeAt(const Duration(seconds: 1)), 0.25);
+    expect(curve.volumeAt(const Duration(milliseconds: 2800)), 1);
+    expect(curve.volumeAt(const Duration(seconds: 4)), 0.25);
+  }, skip: !isSupported);
+
   testWidgets(
     'music goes down while the voice talks and back up after it',
     (_) async {

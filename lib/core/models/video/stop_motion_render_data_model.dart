@@ -5,6 +5,7 @@ import 'dart:ui' show Size;
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
+import '../../../shared/utils/unique_task_id.dart';
 
 /// Describes how a single frame is mapped onto the output video size when its
 /// aspect ratio differs from the target resolution.
@@ -136,7 +137,7 @@ class StopMotionRenderData {
     this.outputFormat = VideoOutputFormat.mp4,
     this.qualityConfig,
     this.bitrate,
-  }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+  }) : id = id ?? uniqueTaskId(),
        assert(frames.isNotEmpty, 'frames must not be empty'),
        assert(frameRate > 0, '[frameRate] must be greater than 0'),
        assert(

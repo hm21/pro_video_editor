@@ -1,4 +1,5 @@
 import '/core/models/video/editor_video_model.dart';
+import '/shared/utils/unique_task_id.dart';
 import 'audio_format_model.dart';
 
 /// Configuration for extracting audio from a video.
@@ -27,7 +28,7 @@ class AudioExtractConfigs {
     this.speed = 1.0,
     String? id,
   }) : assert(speed > 0, '[speed] must be greater than 0'),
-       id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
+       id = id ?? uniqueTaskId();
 
   /// The source video to extract audio from.
   final EditorVideo video;

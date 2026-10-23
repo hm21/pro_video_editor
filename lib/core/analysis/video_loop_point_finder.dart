@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../../shared/utils/unique_task_id.dart';
 import '../models/exceptions/render_exceptions.dart';
 import '../models/frame/luma_frame_configs_model.dart';
 import '../models/video/editor_video_model.dart';
@@ -93,7 +94,7 @@ class VideoLoopPointFinder {
       startTo: startTo,
       startsInSameVideo: startVideo == null,
     );
-    final taskId = id ?? DateTime.now().microsecondsSinceEpoch.toString();
+    final taskId = id ?? uniqueTaskId();
     // The neighbours each side of a cut are compared too, so both ranges are
     // read a little wider than the cuts they allow.
     final headFrom = _atLeastZero(_min(startFrom ?? start, start) - _margin);

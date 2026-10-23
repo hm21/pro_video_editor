@@ -1,5 +1,6 @@
 import 'dart:ui';
 
+import '../../../shared/utils/unique_task_id.dart';
 import '../video/editor_video_model.dart';
 
 /// Configuration for streaming every frame of a video range as raw luma.
@@ -30,7 +31,7 @@ class LumaFrameConfigs {
          startTime == null || endTime == null || endTime > startTime,
          '[endTime] must be after [startTime]',
        ),
-       id = id ?? DateTime.now().microsecondsSinceEpoch.toString();
+       id = id ?? uniqueTaskId();
 
   /// Unique ID for the task, used to cancel it.
   final String id;

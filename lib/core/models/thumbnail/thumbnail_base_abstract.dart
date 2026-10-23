@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import '../../../shared/utils/unique_task_id.dart';
 import '../../platform/platform_interface.dart';
 import '../video/editor_video_model.dart';
 import '../video/progress_model.dart';
@@ -22,7 +23,7 @@ abstract class ThumbnailBase {
          jpegQuality >= 0 && jpegQuality <= 100,
          'jpegQuality must be between 0 and 100',
        ),
-       id = id ?? DateTime.now().microsecondsSinceEpoch.toString();
+       id = id ?? uniqueTaskId();
 
   /// Unique ID for the task, useful when running multiple tasks at once.
   final String id;

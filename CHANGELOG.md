@@ -1,3 +1,6 @@
+## 2.43.2
+- **FIX**: Tasks created in one go no longer share an id. Every config's default task id was the current time, so two `getWaveform` calls started together, like `AudioDucking.analyze` measuring two voice-overs, often got the same one, and the platforms refused the second with `TASK_ALREADY_RUNNING`; with several voice-overs nothing ducked. Default ids now never repeat within an isolate.
+
 ## 2.43.1
 - **FIX**(iOS, macOS): A clip whose first video frame starts a few milliseconds late, as in many ffmpeg transcodes and fragmented mp4s, no longer opens with a black frame and plays one frame late; it starts on its first frame, as on Android.
 - **FIX**(iOS, macOS): A layered composition ends a clip at its last video frame, as on Android, instead of showing the layer below while the container runs on.

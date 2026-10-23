@@ -9,6 +9,7 @@ import 'package:pro_video_editor/core/utils/video_effect_frames.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
+import '../../../shared/utils/unique_task_id.dart';
 
 /// A model describing settings for rendering or exporting a video.
 ///
@@ -46,7 +47,7 @@ class VideoRenderData {
     this.maxFrameRate,
     this.shouldOptimizeForNetworkUse = false,
     this.imageBytesWithCropping = false,
-  }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+  }) : id = id ?? uniqueTaskId(),
        assert(
          (videoSegments != null ? 1 : 0) + (composition != null ? 1 : 0) == 1,
          'You must provide exactly one of videoSegments or composition',

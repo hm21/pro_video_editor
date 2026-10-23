@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 
+import '../../shared/utils/unique_task_id.dart';
 import '../models/video/editor_video_model.dart';
 import '../models/video/video_object_track_model.dart';
 import 'corner_detector.dart';
@@ -98,7 +99,7 @@ class VideoObjectTracker {
     smoothing: smoothing,
     maxFrameRate: maxFrameRate,
     maxParallelDecoders: maxParallelDecoders,
-    id: id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+    id: id ?? uniqueTaskId(),
     onProgress: onProgress,
   );
 

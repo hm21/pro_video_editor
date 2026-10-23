@@ -1,4 +1,5 @@
 import '/core/models/video/editor_video_model.dart';
+import '/shared/utils/unique_task_id.dart';
 
 /// Resolution presets for waveform generation.
 ///
@@ -86,7 +87,7 @@ class WaveformConfigs {
     this.endTime,
     this.chunkSize = 100,
     String? id,
-  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
+  }) : id = id ?? uniqueTaskId();
 
   /// The source video to extract audio waveform from.
   final EditorVideo video;

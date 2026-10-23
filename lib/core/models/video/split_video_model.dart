@@ -1,5 +1,6 @@
 // ignore_for_file: sort_constructors_first
 import 'package:pro_video_editor/pro_video_editor.dart';
+import '../../../shared/utils/unique_task_id.dart';
 
 /// Configuration for a frame-accurate video split.
 ///
@@ -41,7 +42,7 @@ class SplitVideoModel {
     this.enableAudio = true,
     this.exportTimeout = const Duration(seconds: 120),
     this.stallTimeout = const Duration(seconds: 12),
-  }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+  }) : id = id ?? uniqueTaskId(),
        assert(
          splitPosition > Duration.zero,
          'splitPosition must be greater than zero',
