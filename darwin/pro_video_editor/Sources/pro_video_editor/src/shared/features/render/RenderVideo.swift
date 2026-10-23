@@ -712,16 +712,17 @@ class RenderVideo {
     // clip a blend cuts short only places that blend a little early, which
     // renders it.
     var plannedSources: [String: (asset: AVURLAsset, videoTrack: AVAssetTrack)] = [:]
+    func plannedSource(_ clip: VideoClip) async -> (asset: AVURLAsset, videoTrack: AVAssetTrack)? {
+      if let known = plannedSources[clip.inputPath] { return known }
+      let asset = AVURLAsset(url: URL(fileURLWithPath: clip.inputPath))
+      guard let videoTrack = try? await loadVideoTrack(from: asset) else { return nil }
+      plannedSources[clip.inputPath] = (asset, videoTrack)
+      return (asset, videoTrack)
+    }
     func plannedSourceUs(_ clip: VideoClip) async -> Int64 {
-      var source = plannedSources[clip.inputPath]
-      if source == nil {
-        let asset = AVURLAsset(url: URL(fileURLWithPath: clip.inputPath))
-        if let videoTrack = try? await loadVideoTrack(from: asset) {
-          source = (asset, videoTrack)
-          plannedSources[clip.inputPath] = source
-        }
+      guard let source = await plannedSource(clip) else {
+        return await sourceEndUs(clip) - (clip.startUs ?? 0)
       }
-      guard let source else { return await sourceEndUs(clip) - (clip.startUs ?? 0) }
       let played = await VideoSequenceBuilder.playedTimeRange(
         for: clip, from: source.asset, videoTrack: source.videoTrack,
         trimToCommonTrackEnd: trimToCommonTrackEnd && enableAudio,
@@ -733,6 +734,25 @@ class RenderVideo {
     func plannedOutputUs(_ clip: VideoClip) async -> Int64 {
       ClipTransitionGeometry.outputDurationUs(
         sourceDurationUs: await plannedSourceUs(clip), speed: clip.averageSpeed())
+    }
+
+    // Where the composition starts playing a clip: its first frame, which a
+    // short delay can hold back past `startUs` (see
+    // `TrackEndTrimmer.mediaTimeRange`). A blend takes the incoming head from
+    // there; carved from inside the delay, the head held fewer frames than
+    // the blend and was stretched over it, slowing the picture against its
+    // sound.
+    var playedStarts: [String: Int64] = [:]
+    func playedStartUs(_ clip: VideoClip) async -> Int64 {
+      let startUs = clip.startUs ?? 0
+      if let known = playedStarts[clip.inputPath] { return max(startUs, known) }
+      guard let source = await plannedSource(clip) else { return startUs }
+      let mediaStart = await TrackEndTrimmer.mediaTimeRange(of: source.videoTrack).start
+      let mediaStartUs = CMTimeConvertScale(
+        mediaStart, timescale: 1_000_000, method: .roundAwayFromZero
+      ).value
+      playedStarts[clip.inputPath] = mediaStartUs
+      return max(startUs, mediaStartUs)
     }
 
     // Each blend is a full export, so on a long timeline cut short by the
@@ -796,9 +816,9 @@ class RenderVideo {
         continue
       }
 
-      let curStart = current.startUs ?? 0
+      let curStart = await playedStartUs(current)
       let curEnd = await sourceEndUs(current)
-      let nextStart = next!.startUs ?? 0
+      let nextStart = await playedStartUs(next!)
       let nextEnd = await sourceEndUs(next!)
       let curDur = curEnd - curStart
       let nextDur = nextEnd - nextStart
@@ -920,9 +940,9 @@ class RenderVideo {
       let last = result[lastIdx]
       let singleClip = lastIdx == 0
 
-      let firstStart = first.startUs ?? 0
+      let firstStart = await playedStartUs(first)
       let firstDur = await sourceEndUs(first) - firstStart
-      let lastStart = last.startUs ?? 0
+      let lastStart = await playedStartUs(last)
       let lastEnd = await sourceEndUs(last)
       let lastDur = lastEnd - lastStart
 

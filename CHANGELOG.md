@@ -1,5 +1,6 @@
 ## 2.43.1
-- **FIX**(iOS, macOS): A clip whose video track opens with a short empty edit no longer starts with a black frame. Muxers such as ffmpeg's often delay the first video frame by the AAC priming, about 23 ms; the render carried that gap into the composition, filled it with black and showed the clip one frame late, both at the start of the export and at every cut to such a clip. An empty edit of up to 100 ms is now skipped, as Android already did; a longer one stays as content.
+- **FIX**(iOS, macOS): A clip whose first video frame starts a few milliseconds late, as in many ffmpeg transcodes and fragmented mp4s, no longer opens with a black frame and plays one frame late; it starts on its first frame, as on Android.
+- **FIX**(iOS, macOS): A layered composition ends a clip at its last video frame, as on Android, instead of showing the layer below while the container runs on.
 
 ## 2.43.0
 - **FEAT**(android, iOS, macOS): Audio ducking. `AudioDucking.analyze` turns voice-over tracks into an `AudioVolumeCurve` that lowers the music while somebody talks, and `VideoAudioTrack.volumeCurve` applies any such curve in the render.

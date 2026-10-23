@@ -8,7 +8,7 @@ import Foundation
 /// because capture and export stop them independently. A range that spans the
 /// longer track ends on missing audio — the seam a looping player replays
 /// every cycle. At the other end, `mediaTimeRange(of:)` skips the short
-/// empty edit some muxers open the video track with.
+/// delay some muxers open the video track with.
 ///
 /// Both render paths that can honour `trimToCommonTrackEnd` go through here:
 /// the composition path (`VideoSequenceBuilder`, per clip) and the lossless
@@ -24,14 +24,16 @@ internal enum TrackEndTrimmer {
   /// it would swallow content instead of a seam.
   static let maxTrackEndMismatch = CMTime(value: 500, timescale: 1000)
 
-  /// How long an empty edit opening a video track may last before it counts
+  /// How late a video track's first frame may start before the delay counts
   /// as the source's own content rather than a muxer artifact.
   ///
   /// A muxer that moves AAC priming out of the audio track pushes the video
   /// back by the same amount instead, so ffmpeg-transcoded mp4s commonly open
   /// their video with a 21–23 ms empty edit (`divine_transcribed.mp4` does).
-  /// An intentionally late start lasts longer than this.
-  static let maxLeadingEmptyEdit = CMTime(value: 100, timescale: 1000)
+  /// A file without an edit list starts its first frame late by its B-frame
+  /// delay instead, two frames for x264 (`fragmented_b_frames.mp4`). An
+  /// intentionally late start lasts longer than this.
+  static let maxLateStart = CMTime(value: 100, timescale: 1000)
 
   /// The track's time range, loaded asynchronously where the OS supports it.
   static func timeRange(of track: AVAssetTrack) async -> CMTimeRange {
@@ -47,34 +49,60 @@ internal enum TrackEndTrimmer {
     return track.timeRange
   }
 
-  /// The part of the track's time range that holds frames: the range with a
-  /// leading empty edit of at most `maxLeadingEmptyEdit` cut off.
+  /// The part of the track's time range that holds frames: the range from
+  /// its first frame on, when that frame starts at most `maxLateStart` late.
   ///
   /// AVFoundation folds a leading empty edit into the track's duration rather
-  /// than into its start, so `timeRange(of:)` still begins at zero. A clip
-  /// inserted from there has no frame until the edit ends, and the compositor
-  /// fills that gap with a black frame at the clip's start.
+  /// than into its start, and a file without an edit list maps its media from
+  /// zero even where B-frames hold its first frame back, so `timeRange(of:)`
+  /// still begins at zero. A clip inserted from there has no frame until the
+  /// first one starts, and the compositor fills that gap with a black frame at
+  /// the clip's start.
   static func mediaTimeRange(of track: AVAssetTrack) async -> CMTimeRange {
     let range = await timeRange(of: track)
     let end = CMTimeRangeGetEnd(range)
-    let mediaStart = await leadingEmptyEditEnd(of: track)
+    let mediaStart = await lateStart(of: track)
     guard mediaStart > range.start, mediaStart < end else { return range }
     return CMTimeRange(start: mediaStart, end: end)
   }
 
-  /// Where the track's media starts when a short empty edit holds it back;
-  /// zero when the track opens with media or with a longer empty edit.
-  private static func leadingEmptyEditEnd(of track: AVAssetTrack) async -> CMTime {
+  /// Where the track's first frame starts when a short delay holds it back:
+  /// the empty edits before its first media edit, plus the time that edit
+  /// runs before its first frame. Zero when the track opens with a frame or
+  /// with a longer delay.
+  private static func lateStart(of track: AVAssetTrack) async -> CMTime {
     let segments: [AVAssetTrackSegment]
     if #available(iOS 15.0, macOS 13.0, *) {
       segments = (try? await track.load(.segments)) ?? track.segments
     } else {
       segments = track.segments
     }
-    guard let first = segments.first, first.isEmpty else { return .zero }
-    let end = first.timeMapping.target.end
-    guard end.isNumeric, end > .zero, end <= maxLeadingEmptyEdit else { return .zero }
-    return end
+    guard let media = segments.first(where: { !$0.isEmpty }) else { return .zero }
+    let start = media.timeMapping.target.start + (await firstFrameDelay(in: media, of: track))
+    guard start.isNumeric, start > .zero, start <= maxLateStart else { return .zero }
+    return start
+  }
+
+  /// How far into `segment` its first frame starts, in track time.
+  ///
+  /// An edit list starts its edit at the first frame, but a file without one
+  /// maps its media from zero, before B-frames let the first frame start.
+  /// Zero where the OS cannot look a frame up by its time.
+  private static func firstFrameDelay(
+    in segment: AVAssetTrackSegment, of track: AVAssetTrack
+  ) async -> CMTime {
+    let source = segment.timeMapping.source
+    guard #available(iOS 16.0, macOS 13.0, *),
+      (try? await track.load(.canProvideSampleCursors)) == true,
+      // The last frame starting at or before the edit, else the first after.
+      let cursor = track.makeSampleCursor(presentationTimeStamp: source.start)
+    else { return .zero }
+    let delay = cursor.presentationTimeStamp - source.start
+    guard delay.isNumeric, delay > .zero, source.duration > .zero else { return .zero }
+    // An edit that plays its media at another rate scales the delay alike.
+    let target = segment.timeMapping.target
+    return target.duration == source.duration
+      ? delay : CMTimeMultiplyByFloat64(delay, multiplier: target.duration.seconds / source.duration.seconds)
   }
 
   /// Returns `range` cut back to where `asset`'s audio track also has content,

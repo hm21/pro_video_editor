@@ -13,6 +13,7 @@ const String kVideoEditorExampleAssetWorldPath = 'assets/demo_world.mp4';
 /// A local path to a H.264 MP4 where the container duration slightly exceeds
 /// the video track's actual frame duration. Used to reproduce issue #131
 /// (compositor crash: "No source tracks available") reported by @rabble.
+/// Its video also opens with a 23 ms empty edit, as ffmpeg transcodes do.
 const String kVideoEditorExampleDivinePath =
     'assets/tests/divine_transcribed.mp4';
 

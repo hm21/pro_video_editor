@@ -119,8 +119,10 @@ internal enum ClipTransitionRenderer {
       // frames for its last part, so the compositor failed the export (a hard
       // cut) and the ramps drew nothing for the outgoing clip. Spreading what
       // the track holds over the blend matches Android, which spreads the
-      // frames it decodes. The incoming head likewise skips a short empty
-      // edit, which would otherwise start the blend without an incoming frame.
+      // frames it decodes. The planning already starts the incoming head at
+      // the clip's first frame, past any short delay before it, so the head
+      // keeps its timing; a head that still began in such a delay would be
+      // cut to the first frame here and stretched like a short tail.
       let outVideoRange = CMTimeRangeGetIntersection(
         CMTimeRange(start: outStart, duration: outTailDur),
         otherRange: await TrackEndTrimmer.mediaTimeRange(of: outVideo))

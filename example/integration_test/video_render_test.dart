@@ -2096,9 +2096,17 @@ void main() {
     // as ffmpeg-transcoded mp4s commonly do. Darwin carried the edit into the
     // composition, and the compositor filled the frame it left without a
     // picture with black: the export began with a black frame, and the clip
-    // followed one frame late.
-    group('short empty edit opening the video track', () {
+    // followed one frame late. fragmented_b_frames.mp4 has no edit list, and
+    // its B-frames start its first frame two frames late instead.
+    group('short delay before the first video frame', () {
       final divineVideo = EditorVideo.asset(kVideoEditorExampleDivinePath);
+      final fragmentedVideo = EditorVideo.asset(
+        'assets/tests/fragmented_b_frames.mp4',
+      );
+      final quality = VideoQualityConfig.custom(
+        bitrate: 4000000,
+        resolution: const ui.Size(720, 1280),
+      );
 
       /// The mean luma of every frame of [video], in presentation order.
       Future<List<double>> frameLumas(EditorVideo video) async {
@@ -2114,21 +2122,12 @@ void main() {
         ];
       }
 
-      /// Renders [segments] the way a re-encoding export does and returns the
-      /// result as a file.
-      Future<EditorVideo> render(List<VideoSegment> segments) async {
-        final bytes = await ProVideoEditor.instance.renderVideo(
-          VideoRenderData(
-            videoSegments: segments,
-            qualityConfig: VideoQualityConfig.custom(
-              bitrate: 4000000,
-              resolution: const ui.Size(720, 1280),
-            ),
-          ),
-        );
+      /// Renders [data] and returns the result as a file.
+      Future<EditorVideo> render(VideoRenderData data) async {
+        final bytes = await ProVideoEditor.instance.renderVideo(data);
         final dir = await getTemporaryDirectory();
         final file = File(
-          '${dir.path}/empty_edit_${DateTime.now().microsecondsSinceEpoch}.mp4',
+          '${dir.path}/late_start_${DateTime.now().microsecondsSinceEpoch}.mp4',
         );
         await file.writeAsBytes(bytes);
         addTearDown(() {
@@ -2140,7 +2139,12 @@ void main() {
       testWidgets('the export starts on the clip\'s first frame', (_) async {
         final source = await frameLumas(divineVideo);
         final output = await frameLumas(
-          await render([VideoSegment(video: divineVideo)]),
+          await render(
+            VideoRenderData(
+              videoSegments: [VideoSegment(video: divineVideo)],
+              qualityConfig: quality,
+            ),
+          ),
         );
 
         expect(output, hasLength(source.length));
@@ -2150,15 +2154,81 @@ void main() {
       testWidgets('no frame turns black where two such clips meet', (_) async {
         final source = await frameLumas(divineVideo);
         final output = await frameLumas(
-          await render([
-            VideoSegment(video: divineVideo),
-            VideoSegment(video: divineVideo),
-          ]),
+          await render(
+            VideoRenderData(
+              videoSegments: [
+                VideoSegment(video: divineVideo),
+                VideoSegment(video: divineVideo),
+              ],
+              qualityConfig: quality,
+            ),
+          ),
         );
 
         // The clip never gets darker than ~77; black decodes to 16.
         expect(output, hasLength(2 * source.length));
         expect(output, everyElement(greaterThan(50)));
+      });
+
+      testWidgets('a dissolve into such a clip keeps every frame lit', (
+        _,
+      ) async {
+        final source = await frameLumas(divineVideo);
+        final output = await frameLumas(
+          await render(
+            VideoRenderData(
+              videoSegments: [
+                VideoSegment(
+                  video: divineVideo,
+                  transition: const ClipTransition(
+                    type: ClipTransitionType.dissolve,
+                  ),
+                ),
+                VideoSegment(video: divineVideo),
+              ],
+              qualityConfig: quality,
+            ),
+          ),
+        );
+
+        // The 500 ms blend overlaps 15 frames of the two clips.
+        expect(output.length, closeTo(2 * source.length - 15, 2));
+        expect(output, everyElement(greaterThan(50)));
+      });
+
+      testWidgets('a layered composition starts on the first frame', (_) async {
+        final source = await frameLumas(divineVideo);
+        final output = await frameLumas(
+          await render(
+            VideoRenderData(
+              composition: VideoComposition(
+                canvasSize: const ui.Size(720, 1280),
+                layers: [
+                  VideoLayer(clips: [VideoSegment(video: divineVideo)]),
+                ],
+              ),
+              qualityConfig: quality,
+            ),
+          ),
+        );
+
+        expect(output, hasLength(source.length));
+        expect(output.first, closeTo(source.first, 8));
+      });
+
+      testWidgets('a fragmented mp4 starts on its first frame', (_) async {
+        final source = await frameLumas(fragmentedVideo);
+        final output = await frameLumas(
+          await render(
+            VideoRenderData(
+              videoSegments: [VideoSegment(video: fragmentedVideo)],
+              qualityConfig: quality,
+            ),
+          ),
+        );
+
+        expect(output, hasLength(source.length));
+        expect(output.first, closeTo(source.first, 8));
       });
     });
   });

@@ -488,8 +488,9 @@ internal class VideoSequenceBuilder {
   }
 
   /// The part of a clip's source the composition plays: its own range,
-  /// clamped to the video track and, with `trimToCommonTrackEnd`, cut back to
-  /// where the audio track also has content.
+  /// clamped to the video track's frames (`TrackEndTrimmer.mediaTimeRange`)
+  /// and, with `trimToCommonTrackEnd`, cut back to where the audio track also
+  /// has content.
   ///
   /// The overlap pre-render lays the clips out with this as well
   /// (`RenderVideo.preRenderTransitions`), so a clip takes the same time there
@@ -506,7 +507,7 @@ internal class VideoSequenceBuilder {
     // the insert but the ClipInstruction keeps the longer duration, creating a gap
     // where AVFoundation calls the compositor with no source frame available
     // (sourceTrackIDs empty), causing a RENDER_ERROR crash. The same gap opens
-    // at the head when a short empty edit holds the first frame back, and the
+    // at the head when a short delay holds the first frame back, and the
     // compositor's fallback renders it as a black first frame.
     let videoTrackTimeRange = await TrackEndTrimmer.mediaTimeRange(of: videoTrack)
     let clampedRange = CMTimeRangeGetIntersection(
