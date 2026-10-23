@@ -2091,5 +2091,75 @@ void main() {
         expect(result.lengthInBytes, greaterThan(10000));
       }, skip: !isIOS && !isMacOS);
     });
+
+    // divine_transcribed.mp4 opens its video track with a 23 ms empty edit,
+    // as ffmpeg-transcoded mp4s commonly do. Darwin carried the edit into the
+    // composition, and the compositor filled the frame it left without a
+    // picture with black: the export began with a black frame, and the clip
+    // followed one frame late.
+    group('short empty edit opening the video track', () {
+      final divineVideo = EditorVideo.asset(kVideoEditorExampleDivinePath);
+
+      /// The mean luma of every frame of [video], in presentation order.
+      Future<List<double>> frameLumas(EditorVideo video) async {
+        final frames = await ProVideoEditor.instance
+            .getLumaFrameStream(
+              LumaFrameConfigs(video: video, outputSize: const ui.Size(64, 64)),
+            )
+            .toList();
+        return [
+          for (final frame in frames)
+            frame.bytes.fold<int>(0, (sum, value) => sum + value) /
+                frame.bytes.length,
+        ];
+      }
+
+      /// Renders [segments] the way a re-encoding export does and returns the
+      /// result as a file.
+      Future<EditorVideo> render(List<VideoSegment> segments) async {
+        final bytes = await ProVideoEditor.instance.renderVideo(
+          VideoRenderData(
+            videoSegments: segments,
+            qualityConfig: VideoQualityConfig.custom(
+              bitrate: 4000000,
+              resolution: const ui.Size(720, 1280),
+            ),
+          ),
+        );
+        final dir = await getTemporaryDirectory();
+        final file = File(
+          '${dir.path}/empty_edit_${DateTime.now().microsecondsSinceEpoch}.mp4',
+        );
+        await file.writeAsBytes(bytes);
+        addTearDown(() {
+          if (file.existsSync()) file.deleteSync();
+        });
+        return EditorVideo.file(file);
+      }
+
+      testWidgets('the export starts on the clip\'s first frame', (_) async {
+        final source = await frameLumas(divineVideo);
+        final output = await frameLumas(
+          await render([VideoSegment(video: divineVideo)]),
+        );
+
+        expect(output, hasLength(source.length));
+        expect(output.first, closeTo(source.first, 8));
+      });
+
+      testWidgets('no frame turns black where two such clips meet', (_) async {
+        final source = await frameLumas(divineVideo);
+        final output = await frameLumas(
+          await render([
+            VideoSegment(video: divineVideo),
+            VideoSegment(video: divineVideo),
+          ]),
+        );
+
+        // The clip never gets darker than ~77; black decodes to 16.
+        expect(output, hasLength(2 * source.length));
+        expect(output, everyElement(greaterThan(50)));
+      });
+    });
   });
 }

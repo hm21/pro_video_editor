@@ -505,8 +505,10 @@ internal class VideoSequenceBuilder {
     // track's decoded frames. Without clamping, insertTimeRange silently truncates
     // the insert but the ClipInstruction keeps the longer duration, creating a gap
     // where AVFoundation calls the compositor with no source frame available
-    // (sourceTrackIDs empty), causing a RENDER_ERROR crash.
-    let videoTrackTimeRange = await TrackEndTrimmer.timeRange(of: videoTrack)
+    // (sourceTrackIDs empty), causing a RENDER_ERROR crash. The same gap opens
+    // at the head when a short empty edit holds the first frame back, and the
+    // compositor's fallback renders it as a black first frame.
+    let videoTrackTimeRange = await TrackEndTrimmer.mediaTimeRange(of: videoTrack)
     let clampedRange = CMTimeRangeGetIntersection(
       rawClipTimeRange, otherRange: videoTrackTimeRange)
     let clipTimeRange = clampedRange.duration > .zero ? clampedRange : rawClipTimeRange

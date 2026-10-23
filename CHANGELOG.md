@@ -1,3 +1,6 @@
+## 2.43.1
+- **FIX**(iOS, macOS): A clip whose video track opens with a short empty edit no longer starts with a black frame. Muxers such as ffmpeg's often delay the first video frame by the AAC priming, about 23 ms; the render carried that gap into the composition, filled it with black and showed the clip one frame late, both at the start of the export and at every cut to such a clip. An empty edit of up to 100 ms is now skipped, as Android already did; a longer one stays as content.
+
 ## 2.43.0
 - **FEAT**(android, iOS, macOS): Audio ducking. `AudioDucking.analyze` turns voice-over tracks into an `AudioVolumeCurve` that lowers the music while somebody talks, and `VideoAudioTrack.volumeCurve` applies any such curve in the render.
 - **FIX**(android, iOS, macOS): `getWaveform` keeps time at sample rates that `high` and `ultra` do not divide evenly, like 44.1 kHz, and Android no longer stretches audio with more than two channels.

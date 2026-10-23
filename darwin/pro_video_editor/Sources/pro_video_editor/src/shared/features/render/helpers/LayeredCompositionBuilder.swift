@@ -96,7 +96,13 @@ internal class LayeredCompositionBuilder {
         guard let assetVideoTrack = await firstTrack(asset, .video) else { continue }
 
         let assetDurationUs = await durationUs(of: asset)
-        let srcStartUs = max(0, clip.startUs ?? 0)
+        // Start at the first frame when a short empty edit opens the track, as
+        // the single-track path does; the gap would otherwise draw nothing.
+        let mediaStart = await TrackEndTrimmer.mediaTimeRange(of: assetVideoTrack).start
+        let mediaStartUs = CMTimeConvertScale(
+          mediaStart, timescale: 1_000_000, method: .roundAwayFromZero
+        ).value
+        let srcStartUs = max(mediaStartUs, clip.startUs ?? 0)
         let srcEndUs = clip.endUs ?? assetDurationUs
         let srcDurUs = srcEndUs - srcStartUs
         guard srcDurUs > 0 else { continue }

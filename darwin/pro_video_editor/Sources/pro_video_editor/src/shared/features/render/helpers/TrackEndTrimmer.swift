@@ -7,7 +7,8 @@ import Foundation
 /// A source asset's two tracks routinely end tens of milliseconds apart,
 /// because capture and export stop them independently. A range that spans the
 /// longer track ends on missing audio — the seam a looping player replays
-/// every cycle.
+/// every cycle. At the other end, `mediaTimeRange(of:)` skips the short
+/// empty edit some muxers open the video track with.
 ///
 /// Both render paths that can honour `trimToCommonTrackEnd` go through here:
 /// the composition path (`VideoSequenceBuilder`, per clip) and the lossless
@@ -23,6 +24,15 @@ internal enum TrackEndTrimmer {
   /// it would swallow content instead of a seam.
   static let maxTrackEndMismatch = CMTime(value: 500, timescale: 1000)
 
+  /// How long an empty edit opening a video track may last before it counts
+  /// as the source's own content rather than a muxer artifact.
+  ///
+  /// A muxer that moves AAC priming out of the audio track pushes the video
+  /// back by the same amount instead, so ffmpeg-transcoded mp4s commonly open
+  /// their video with a 21–23 ms empty edit (`divine_transcribed.mp4` does).
+  /// An intentionally late start lasts longer than this.
+  static let maxLeadingEmptyEdit = CMTime(value: 100, timescale: 1000)
+
   /// The track's time range, loaded asynchronously where the OS supports it.
   static func timeRange(of track: AVAssetTrack) async -> CMTimeRange {
     #if os(iOS)
@@ -35,6 +45,36 @@ internal enum TrackEndTrimmer {
       }
     #endif
     return track.timeRange
+  }
+
+  /// The part of the track's time range that holds frames: the range with a
+  /// leading empty edit of at most `maxLeadingEmptyEdit` cut off.
+  ///
+  /// AVFoundation folds a leading empty edit into the track's duration rather
+  /// than into its start, so `timeRange(of:)` still begins at zero. A clip
+  /// inserted from there has no frame until the edit ends, and the compositor
+  /// fills that gap with a black frame at the clip's start.
+  static func mediaTimeRange(of track: AVAssetTrack) async -> CMTimeRange {
+    let range = await timeRange(of: track)
+    let end = CMTimeRangeGetEnd(range)
+    let mediaStart = await leadingEmptyEditEnd(of: track)
+    guard mediaStart > range.start, mediaStart < end else { return range }
+    return CMTimeRange(start: mediaStart, end: end)
+  }
+
+  /// Where the track's media starts when a short empty edit holds it back;
+  /// zero when the track opens with media or with a longer empty edit.
+  private static func leadingEmptyEditEnd(of track: AVAssetTrack) async -> CMTime {
+    let segments: [AVAssetTrackSegment]
+    if #available(iOS 15.0, macOS 13.0, *) {
+      segments = (try? await track.load(.segments)) ?? track.segments
+    } else {
+      segments = track.segments
+    }
+    guard let first = segments.first, first.isEmpty else { return .zero }
+    let end = first.timeMapping.target.end
+    guard end.isNumeric, end > .zero, end <= maxLeadingEmptyEdit else { return .zero }
+    return end
   }
 
   /// Returns `range` cut back to where `asset`'s audio track also has content,
