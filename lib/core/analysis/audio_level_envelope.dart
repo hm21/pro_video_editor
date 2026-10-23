@@ -12,7 +12,8 @@ import '../platform/platform_interface.dart';
 ///
 /// Each track is placed the way the render places it: at its
 /// `startTime`, trimmed to its source window, sped up or slowed down,
-/// looped, faded and scaled by its volume. Its equalizer is left out.
+/// looped, faded and scaled by its volume and `volumeCurve`. Its equalizer
+/// is left out.
 ///
 /// [AudioDucking.curve] reads an envelope of the voice-over tracks to find
 /// where somebody talks.
@@ -222,7 +223,10 @@ class _Placement {
       var gain = 1.0;
       if (fadeInUs > 0) gain = math.min(gain, (atUs - startUs) / fadeInUs);
       if (fadeOutUs > 0) gain = math.min(gain, (endUs - atUs) / fadeOutUs);
-      final level = peak * track.volume * gain.clamp(0, 1);
+      final curve =
+          track.volumeCurve?.volumeAt(Duration(microseconds: atUs.round())) ??
+          1;
+      final level = peak * track.volume * gain.clamp(0, 1) * curve;
       if (level > levels[step]) levels[step] = level;
     }
   }

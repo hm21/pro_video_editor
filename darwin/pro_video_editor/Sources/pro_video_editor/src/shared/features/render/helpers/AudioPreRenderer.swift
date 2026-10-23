@@ -288,27 +288,14 @@ internal enum AudioPreRenderer {
     // One pass when the ramps meet, so no frame is scaled twice.
     let ranges: [Range<Int>] =
       inEnd >= outStart ? [0..<audibleFrames] : [0..<inEnd, outStart..<audibleFrames]
-    let samplesPerFrame = bytesPerFrame / 2
 
-    pcm.withUnsafeMutableBytes { raw in
-      raw.withMemoryRebound(to: Int16.self) { samples in
-        for range in ranges {
-          for frame in range {
-            let gain = fadeGain(
-              frame: frame,
-              audibleFrames: audibleFrames,
-              fadeInFrames: fadeInFrames,
-              fadeOutFrames: fadeOutFrames
-            )
-            if gain >= 1 { continue }
-            let first = frame * samplesPerFrame
-            for index in first..<(first + samplesPerFrame) {
-              let sample = Double(Int16(littleEndian: samples[index]))
-              samples[index] = Int16((sample * gain).rounded()).littleEndian
-            }
-          }
-        }
-      }
+    scaleFrames(in: &pcm, ranges: ranges, bytesPerFrame: bytesPerFrame) { frame in
+      fadeGain(
+        frame: frame,
+        audibleFrames: audibleFrames,
+        fadeInFrames: fadeInFrames,
+        fadeOutFrames: fadeOutFrames
+      )
     }
   }
 
@@ -331,7 +318,6 @@ internal enum AudioPreRenderer {
     let audibleFrames = min(audibleBytes, pcm.count) / bytesPerFrame
     if audibleFrames <= 0 { return }
     let usPerFrame = 1_000_000 / sampleRate
-    let samplesPerFrame = bytesPerFrame / 2
 
     /// The frame at `timeUs` on the curve: the first one at or after it, or
     /// the last one at or before it; clamped to the audible frames.
@@ -343,15 +329,32 @@ internal enum AudioPreRenderer {
       return Int(min(max(rounded, -1), Double(audibleFrames)))
     }
 
+    let ranges: [Range<Int>] = curve.loweredRangesUs().compactMap { lowered in
+      let from = max(frame(atUs: lowered.lowerBound, roundingUp: true), 0)
+      let to = min(frame(atUs: lowered.upperBound, roundingUp: false), audibleFrames - 1)
+      return from <= to ? from..<(to + 1) : nil
+    }
+
+    scaleFrames(in: &pcm, ranges: ranges, bytesPerFrame: bytesPerFrame) { frame in
+      curve.volume(atUs: startUs + Double(frame) * usPerFrame)
+    }
+  }
+
+  /// Scales every frame in `ranges` of the 16-bit little-endian PCM in `pcm`
+  /// by `gainOf` its index. Only a gain below 1 changes a frame.
+  private static func scaleFrames(
+    in pcm: inout Data,
+    ranges: [Range<Int>],
+    bytesPerFrame: Int,
+    gainOf: (Int) -> Double
+  ) {
+    let samplesPerFrame = bytesPerFrame / 2
     pcm.withUnsafeMutableBytes { raw in
       raw.withMemoryRebound(to: Int16.self) { samples in
-        for lowered in curve.loweredRangesUs() {
-          let from = max(frame(atUs: lowered.lowerBound, roundingUp: true), 0)
-          let to = min(frame(atUs: lowered.upperBound, roundingUp: false), audibleFrames - 1)
-          if from > to { continue }
-          for frame in from...to {
-            let gain = curve.volume(atUs: startUs + Double(frame) * usPerFrame)
-            if gain >= 1 { continue }
+        for range in ranges {
+          for frame in range {
+            let gain = gainOf(frame)
+            guard gain < 1 else { continue }
             let first = frame * samplesPerFrame
             for index in first..<(first + samplesPerFrame) {
               let sample = Double(Int16(littleEndian: samples[index]))

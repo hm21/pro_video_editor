@@ -601,36 +601,9 @@ object AudioPreRenderer {
             listOf(0L until inEnd, outStart until audibleFrames)
         }
 
-        val chunkFrames = (1 shl 16) / bytesPerFrame
-        val buffer = ByteArray(chunkFrames * bytesPerFrame)
-        for (range in ranges) {
-            var frame = range.first
-            while (frame <= range.last) {
-                val frames = minOf(chunkFrames.toLong(), range.last - frame + 1).toInt()
-                val length = frames * bytesPerFrame
-                val offset = bodyStart + frame * bytesPerFrame
-                raf.seek(offset)
-                raf.readFully(buffer, 0, length)
-                for (i in 0 until frames) {
-                    val gain = fadeGain(frame + i, audibleFrames, fadeInFrames, fadeOutFrames)
-                    if (gain >= 1.0) continue
-                    var p = i * bytesPerFrame
-                    val frameEnd = p + bytesPerFrame
-                    while (p < frameEnd) {
-                        val sample = ((buffer[p].toInt() and 0xFF) or
-                                (buffer[p + 1].toInt() shl 8)).toShort()
-                        val scaled = Math.round(sample * gain).toInt()
-                        buffer[p] = (scaled and 0xFF).toByte()
-                        buffer[p + 1] = ((scaled shr 8) and 0xFF).toByte()
-                        p += 2
-                    }
-                }
-                raf.seek(offset)
-                raf.write(buffer, 0, length)
-                frame += frames
-            }
+        scaleFrames(raf, bodyStart, ranges, bytesPerFrame) { frame ->
+            fadeGain(frame, audibleFrames, fadeInFrames, fadeOutFrames)
         }
-        raf.seek(raf.length())
     }
 
     /**
@@ -650,20 +623,39 @@ object AudioPreRenderer {
     ) {
         if (frames.isEmpty()) return
         val usPerFrame = 1_000_000.0 / sampleRate
+        val ranges = curve.loweredRangesUs().map { lowered ->
+            maxOf(frames.first, framesFromUs(lowered.first, sampleRate, ceil = true))..
+                minOf(frames.last, framesFromUs(lowered.last, sampleRate, ceil = false))
+        }
+        scaleFrames(raf, dataStart, ranges, bytesPerFrame) { frame ->
+            curve.volumeAt(frame * usPerFrame)
+        }
+    }
+
+    /**
+     * Scales every frame in [ranges] of the 16-bit PCM in [raf], counted from
+     * [dataStart], by [gainOf] its index. Only [ranges] are read back and
+     * rewritten, and a frame at a gain of 1 or more keeps its samples.
+     */
+    private inline fun scaleFrames(
+        raf: RandomAccessFile,
+        dataStart: Long,
+        ranges: List<LongRange>,
+        bytesPerFrame: Int,
+        gainOf: (Long) -> Double
+    ) {
         val chunkFrames = (1 shl 16) / bytesPerFrame
         val buffer = ByteArray(chunkFrames * bytesPerFrame)
-        for (lowered in curve.loweredRangesUs()) {
-            val from = maxOf(frames.first, framesFromUs(lowered.first, sampleRate, ceil = true))
-            val to = minOf(frames.last, framesFromUs(lowered.last, sampleRate, ceil = false))
-            var frame = from
-            while (frame <= to) {
-                val count = minOf(chunkFrames.toLong(), to - frame + 1).toInt()
-                val length = count * bytesPerFrame
+        for (range in ranges) {
+            var frame = range.first
+            while (frame <= range.last) {
+                val frames = minOf(chunkFrames.toLong(), range.last - frame + 1).toInt()
+                val length = frames * bytesPerFrame
                 val offset = dataStart + frame * bytesPerFrame
                 raf.seek(offset)
                 raf.readFully(buffer, 0, length)
-                for (i in 0 until count) {
-                    val gain = curve.volumeAt((frame + i) * usPerFrame)
+                for (i in 0 until frames) {
+                    val gain = gainOf(frame + i)
                     if (gain >= 1.0) continue
                     var p = i * bytesPerFrame
                     val frameEnd = p + bytesPerFrame
@@ -678,7 +670,7 @@ object AudioPreRenderer {
                 }
                 raf.seek(offset)
                 raf.write(buffer, 0, length)
-                frame += count
+                frame += frames
             }
         }
         raf.seek(raf.length())

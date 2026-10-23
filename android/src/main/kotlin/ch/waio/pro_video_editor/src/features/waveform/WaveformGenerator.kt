@@ -99,9 +99,22 @@ class WaveformGenerator(private val context: Context) {
                     ((actualDurationUs / 1_000_000.0) * config.samplesPerSecond).toInt()
                         .coerceAtLeast(1)
 
-                // Samples per waveform point (PCM samples to average)
-                val samplesPerBlock = (sampleRate.toDouble() / config.samplesPerSecond).toInt()
-                    .coerceAtLeast(1)
+                // What the decoder puts out, which can differ from the
+                // container (an HE-AAC stream decodes at twice its core rate,
+                // a decoder may downmix); set on INFO_OUTPUT_FORMAT_CHANGED.
+                var outputRate = sampleRate
+                var outputChannels = channelCount
+
+                // Frames per waveform point: block k covers frames
+                // [k, k + 1) × rate / samplesPerSecond, so the points keep time
+                // with the audio when the rate does not divide evenly (220.5
+                // frames a point at 44.1 kHz and 200 points a second).
+                fun blockSize(index: Int): Int {
+                    val perSecond = config.samplesPerSecond.toLong()
+                    val start = index * outputRate.toLong() / perSecond
+                    val end = (index + 1) * outputRate.toLong() / perSecond
+                    return (end - start).toInt().coerceAtLeast(1)
+                }
 
                 // Prepare output arrays
                 val leftPeaks = FloatArray(totalSamples)
@@ -184,12 +197,12 @@ class WaveformGenerator(private val context: Context) {
                                     accumulatedLeftPeak = max(accumulatedLeftPeak, leftSample)
 
                                     // Read right channel if stereo
-                                    if (channelCount >= 2 && i + 1 < pcmData.size) {
+                                    if (outputChannels >= 2 && i + 1 < pcmData.size) {
                                         val rightSample =
                                             abs(pcmData[i + 1].toFloat() / Short.MAX_VALUE)
                                         accumulatedRightPeak =
                                             max(accumulatedRightPeak, rightSample)
-                                        i += 2
+                                        i += outputChannels
                                     } else {
                                         i += 1
                                     }
@@ -198,7 +211,7 @@ class WaveformGenerator(private val context: Context) {
                                     totalDecodedSamples++
 
                                     // Emit peak when block is complete
-                                    if (samplesInCurrentBlock >= samplesPerBlock) {
+                                    if (samplesInCurrentBlock >= blockSize(currentSampleIndex)) {
                                         if (currentSampleIndex < totalSamples) {
                                             leftPeaks[currentSampleIndex] = accumulatedLeftPeak
                                             rightPeaks?.set(
@@ -273,8 +286,14 @@ class WaveformGenerator(private val context: Context) {
                         }
 
                         outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                            // Format changed, continue processing
-                            Log.d(TAG, "Output format changed")
+                            val outputFormat = decoder.outputFormat
+                            outputRate = outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                            outputChannels =
+                                outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                            Log.d(
+                                TAG,
+                                "Output format changed: ${outputRate}Hz x $outputChannels"
+                            )
                         }
                     }
                 }

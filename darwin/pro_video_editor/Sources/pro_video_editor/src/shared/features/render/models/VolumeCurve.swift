@@ -40,6 +40,8 @@ struct VolumeCurve: Equatable {
   func loweredRangesUs() -> [ClosedRange<Int64>] {
     var ranges: [ClosedRange<Int64>] = []
     func add(_ from: Int64, _ to: Int64) {
+      // Dart sorts the points; this only keeps others from trapping.
+      guard from <= to else { return }
       if let last = ranges.last, from <= last.upperBound {
         ranges[ranges.count - 1] = last.lowerBound...max(last.upperBound, to)
       } else {
@@ -56,7 +58,9 @@ struct VolumeCurve: Equatable {
 
   /// Parses the `volumeCurve` entry of an audio track: interleaved
   /// `[time in µs, volume, …]` from a Dart `Float64List`, or a plain list of
-  /// numbers. Nil when there is no curve or no complete point.
+  /// numbers. Nil when there is no curve or no complete point. A point whose
+  /// time does not fit in microseconds is dropped, and a volume that is not a
+  /// number leaves the audio unchanged.
   static func from(_ value: Any?) -> VolumeCurve? {
     let raw: [Double]
     if let typed = value as? FlutterStandardTypedData {
@@ -66,10 +70,15 @@ struct VolumeCurve: Equatable {
     } else {
       return nil
     }
-    let count = raw.count / 2
-    if count == 0 { return nil }
-    return VolumeCurve(
-      timesUs: (0..<count).map { Int64(raw[$0 * 2]) },
-      volumes: (0..<count).map { min(max(raw[$0 * 2 + 1], 0), 1) })
+    var timesUs: [Int64] = []
+    var volumes: [Double] = []
+    for point in 0..<(raw.count / 2) {
+      guard let time = Int64(exactly: raw[point * 2].rounded()) else { continue }
+      let volume = raw[point * 2 + 1]
+      timesUs.append(time)
+      volumes.append(volume.isNaN ? 1 : min(max(volume, 0), 1))
+    }
+    if timesUs.isEmpty { return nil }
+    return VolumeCurve(timesUs: timesUs, volumes: volumes)
   }
 }

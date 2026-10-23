@@ -122,4 +122,21 @@ void main() {
     },
     skip: !isSupported,
   );
+
+  testWidgets(
+    'a long 44.1 kHz voice-over is measured on time',
+    (_) async {
+      // 220.5 frames per waveform point: rounded down to 220, the points
+      // ran 65 ms late by 30 s.
+      final voicePath = await writeTemp(
+        'long_voice',
+        Pcm.toneWav(seconds: 32, frequency: 1000, bursts: [(30, 31)]),
+      );
+
+      final curve = await ducking.analyze([VideoAudioTrack(path: voicePath)]);
+      expect(curve.volumeAt(const Duration(milliseconds: 29740)), 1);
+      expect(curve.volumeAt(const Duration(seconds: 30)), 0.25);
+    },
+    skip: !isSupported,
+  );
 }

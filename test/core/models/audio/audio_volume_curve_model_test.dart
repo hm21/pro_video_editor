@@ -50,14 +50,14 @@ void main() {
       ]);
     });
 
-    test('rejects unsorted points', () {
-      expect(
-        () => AudioVolumeCurve(const [
-          AudioVolumePoint(time: Duration(seconds: 2), volume: 1),
-          AudioVolumePoint(time: Duration(seconds: 1), volume: 1),
-        ]),
-        throwsAssertionError,
-      );
+    test('sorts its points, keeping the order of a shared time', () {
+      final unsorted = AudioVolumeCurve(const [
+        AudioVolumePoint(time: Duration(seconds: 3), volume: 0.2),
+        AudioVolumePoint(time: Duration(seconds: 3), volume: 0.6),
+        AudioVolumePoint(time: Duration(seconds: 2), volume: 0.2),
+        AudioVolumePoint(time: Duration(seconds: 1), volume: 1),
+      ]);
+      expect(unsorted, curve);
     });
   });
 

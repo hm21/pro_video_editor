@@ -108,7 +108,16 @@ class WaveformGenerator {
         // Calculate samples needed
         let totalSamples = max(
           1, Int(actualDurationSeconds * Double(config.samplesPerSecond)))
-        let samplesPerBlock = max(1, sampleRate / config.samplesPerSecond)
+        // Frames per waveform point: block k covers frames
+        // [k, k + 1) × sampleRate / samplesPerSecond, so the points keep time
+        // with the audio when the rate does not divide evenly (220.5 frames a
+        // point at 44.1 kHz and 200 points a second).
+        let samplesPerSecond = config.samplesPerSecond
+        func blockSize(_ index: Int) -> Int {
+          max(
+            1,
+            (index + 1) * sampleRate / samplesPerSecond - index * sampleRate / samplesPerSecond)
+        }
 
         // Configure output settings for Linear PCM
         let outputSettings: [String: Any] = [
@@ -203,7 +212,7 @@ class WaveformGenerator {
             samplesInCurrentBlock += 1
 
             // Emit peak when block is complete
-            if samplesInCurrentBlock >= samplesPerBlock {
+            if samplesInCurrentBlock >= blockSize(currentSampleIndex) {
               if currentSampleIndex < totalSamples {
                 leftPeaks[currentSampleIndex] = accumulatedLeftPeak
                 rightPeaks?[currentSampleIndex] = accumulatedRightPeak
@@ -371,7 +380,16 @@ class WaveformGenerator {
         // Calculate samples needed
         let totalSamples = max(
           1, Int(actualDurationSeconds * Double(config.samplesPerSecond)))
-        let samplesPerBlock = max(1, sampleRate / config.samplesPerSecond)
+        // Frames per waveform point: block k covers frames
+        // [k, k + 1) × sampleRate / samplesPerSecond, so the points keep time
+        // with the audio when the rate does not divide evenly (220.5 frames a
+        // point at 44.1 kHz and 200 points a second).
+        let samplesPerSecond = config.samplesPerSecond
+        func blockSize(_ index: Int) -> Int {
+          max(
+            1,
+            (index + 1) * sampleRate / samplesPerSecond - index * sampleRate / samplesPerSecond)
+        }
 
         // Configure output settings for Linear PCM
         let outputSettings: [String: Any] = [
@@ -465,7 +483,7 @@ class WaveformGenerator {
             samplesInCurrentBlock += 1
 
             // Emit peak when block is complete
-            if samplesInCurrentBlock >= samplesPerBlock {
+            if samplesInCurrentBlock >= blockSize(currentSampleIndex) {
               if currentSampleIndex < totalSamples {
                 leftPeaks[currentSampleIndex] = accumulatedLeftPeak
                 rightPeaks?[currentSampleIndex] = accumulatedRightPeak

@@ -109,6 +109,16 @@ final class AudioFadeTests: XCTestCase {
     XCTAssertNil(VolumeCurve.from([1] as [NSNumber]))
   }
 
+  /// A volume that is not a number leaves the audio as it is, and a time that
+  /// does not fit in microseconds drops its point instead of trapping.
+  func testAVolumeCurveSurvivesValuesThatAreNotNumbers() {
+    let curve = VolumeCurve.from(
+      [0, Double.nan, Double.infinity, 0.2, 1000, 0.5] as [NSNumber])!
+    XCTAssertEqual(curve.timesUs, [0, 1000])
+    XCTAssertEqual(curve.volumes, [1, 0.5])
+    XCTAssertNil(VolumeCurve.from([Double.nan, 0.5] as [NSNumber]))
+  }
+
   // MARK: - Helpers
 
   /// Frames of `level` on both channels, faded, read back as the left channel.

@@ -125,8 +125,9 @@ class VideoAudioTrack with TimeRangeMixin {
   /// [equalizer] and [volume], so a track that [volume] amplifies is still
   /// limited rather than clipped.
   ///
-  /// If null, the volume stays at [volume]. Supported on Android, iOS and
-  /// macOS.
+  /// If null, the volume stays at [volume]. To remove a curve with
+  /// [copyWith], pass an empty `AudioVolumeCurve(const [])`. Supported on
+  /// Android, iOS and macOS.
   final AudioVolumeCurve? volumeCurve;
 
   VideoAudioTrack copyWith({

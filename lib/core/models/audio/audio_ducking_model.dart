@@ -75,15 +75,16 @@ class AudioDucking {
   final Duration hold;
 
   /// How loud a voice has to be to count as talking, as a peak level from 0
-  /// to 1 of the voice as it plays on the exported video (after its volume
-  /// and fades).
+  /// to 1 of the voice as it plays on the exported video (after its volume,
+  /// fades and volume curve).
   ///
   /// **Default**: `0.02` (about -34 dBFS), above the background noise of a
   /// typical phone recording and below quiet speech.
   final double threshold;
 
   /// Talking shorter than this, like a click or a tap on the microphone,
-  /// does not lower the track.
+  /// does not lower the track, and a quieter stretch shorter than this does
+  /// not interrupt talking.
   static const Duration minimumTalk = Duration(milliseconds: 50);
 
   /// Measures [voices] and returns the curve a track follows to duck under
@@ -160,40 +161,47 @@ class AudioDucking {
   }
 
   /// The ranges, in µs on the exported video, where [voices] talk, with
-  /// pauses up to [hold] bridged and blips shorter than [minimumTalk]
-  /// dropped.
+  /// blips shorter than [minimumTalk] dropped and pauses up to [hold]
+  /// bridged.
+  ///
+  /// Blips are dropped first, so a click just before a sentence does not
+  /// start the dip early. Dips shorter than [minimumTalk] are bridged before
+  /// that, so a word that flickers around [threshold] is not taken apart
+  /// into blips.
   List<(int, int)> _talkRanges(AudioLevelEnvelope voices) {
     final levels = voices.levels;
     final stepUs = 1e6 / voices.levelsPerSecond;
+    final minimumUs = minimumTalk.inMicroseconds;
     final holdUs = math.max(hold.inMicroseconds, 0);
 
-    final ranges = <(int, int)>[];
+    final loud = <(int, int)>[];
     int? start;
-    void close(int end) {
-      final from = (start! * stepUs).round();
-      final to = (end * stepUs).round();
+    for (var i = 0; i <= levels.length; i++) {
+      final talking = i < levels.length && levels[i] >= threshold;
+      if (talking && start == null) {
+        start = i;
+      } else if (!talking && start != null) {
+        final from = (start * stepUs).round();
+        final to = (i * stepUs).round();
+        if (loud.isNotEmpty && from - loud.last.$2 < minimumUs) {
+          loud.last = (loud.last.$1, to);
+        } else {
+          loud.add((from, to));
+        }
+        start = null;
+      }
+    }
+
+    final ranges = <(int, int)>[];
+    for (final (from, to) in loud) {
+      if (to - from < minimumUs) continue;
       if (ranges.isNotEmpty && from - ranges.last.$2 <= holdUs) {
         ranges.last = (ranges.last.$1, to);
       } else {
         ranges.add((from, to));
       }
-      start = null;
     }
-
-    for (var i = 0; i < levels.length; i++) {
-      final talking = levels[i] >= threshold;
-      if (talking && start == null) {
-        start = i;
-      } else if (!talking && start != null) {
-        close(i);
-      }
-    }
-    if (start != null) close(levels.length);
-
-    return [
-      for (final range in ranges)
-        if (range.$2 - range.$1 >= minimumTalk.inMicroseconds) range,
-    ];
+    return ranges;
   }
 
   /// [points] cut at the start of the video: a fall that would begin before

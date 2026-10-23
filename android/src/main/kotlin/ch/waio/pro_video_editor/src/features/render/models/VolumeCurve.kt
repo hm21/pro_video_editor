@@ -62,7 +62,8 @@ class VolumeCurve(
         /**
          * Parses the `volumeCurve` entry of an audio track: interleaved
          * `[time in µs, volume, …]` from a Dart `Float64List`, or a plain list
-         * of numbers. Null when there is no curve or no complete point.
+         * of numbers. Null when there is no curve or no complete point. A
+         * volume that is not a number leaves the audio unchanged.
          */
         fun fromChannel(value: Any?): VolumeCurve? {
             val raw = when (value) {
@@ -77,7 +78,10 @@ class VolumeCurve(
             if (count == 0) return null
             return VolumeCurve(
                 timesUs = LongArray(count) { raw[it * 2].toLong() },
-                volumes = DoubleArray(count) { raw[it * 2 + 1].coerceIn(0.0, 1.0) }
+                volumes = DoubleArray(count) {
+                    val volume = raw[it * 2 + 1]
+                    if (volume.isNaN()) 1.0 else volume.coerceIn(0.0, 1.0)
+                }
             )
         }
     }

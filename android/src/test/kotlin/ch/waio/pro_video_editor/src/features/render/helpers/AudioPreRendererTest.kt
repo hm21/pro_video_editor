@@ -311,6 +311,14 @@ internal class AudioPreRendererTest {
         assertEquals(null, VolumeCurve.fromChannel(doubleArrayOf(1.0)))
     }
 
+    /** A volume that is not a number leaves the audio as it is. */
+    @Test
+    fun aVolumeCurveLeavesNaNVolumesUnchanged() {
+        val curve = VolumeCurve.fromChannel(doubleArrayOf(0.0, Double.NaN, 1000.0, 0.5))!!
+        assertEquals(1.0, curve.volumeAt(0.0), 1e-9)
+        assertEquals(listOf(0L..Long.MAX_VALUE), curve.loweredRangesUs())
+    }
+
     /**
      * Frames of [level] on both channels, faded, read back as the left
      * channel. Both channels get the same gain, which is asserted here too.

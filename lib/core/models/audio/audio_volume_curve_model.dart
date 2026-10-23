@@ -53,13 +53,13 @@ class AudioVolumePoint {
 /// voice-over talks. Play the same curve in a preview through [volumeAt].
 @immutable
 class AudioVolumeCurve {
-  /// Creates a curve through [points], sorted by [AudioVolumePoint.time].
+  /// Creates a curve through [points], which it sorts by
+  /// [AudioVolumePoint.time].
   ///
-  /// Two points may share a time; the volume then jumps there from the
-  /// first to the second.
+  /// Two points may share a time; the volume then jumps there from the one
+  /// given first to the one given second.
   AudioVolumeCurve(List<AudioVolumePoint> points)
-    : points = List.unmodifiable(points),
-      assert(_isSorted(points), '[points] must be sorted by time');
+    : points = List.unmodifiable(_sorted(points));
 
   /// Creates a curve from a map written by [toMap].
   factory AudioVolumeCurve.fromMap(Map<String, dynamic> map) {
@@ -129,10 +129,19 @@ class AudioVolumeCurve {
   @override
   String toString() => 'AudioVolumeCurve(points: $points)';
 
-  static bool _isSorted(List<AudioVolumePoint> points) {
-    for (var i = 1; i < points.length; i++) {
-      if (points[i].time < points[i - 1].time) return false;
+  /// [points] by time; points that share a time keep their order.
+  static List<AudioVolumePoint> _sorted(List<AudioVolumePoint> points) {
+    var isSorted = true;
+    for (var i = 1; i < points.length && isSorted; i++) {
+      isSorted = points[i].time >= points[i - 1].time;
     }
-    return true;
+    if (isSorted) return points;
+    // List.sort is not stable, so the index breaks ties.
+    final indexed = [for (var i = 0; i < points.length; i++) (i, points[i])]
+      ..sort((a, b) {
+        final byTime = a.$2.time.compareTo(b.$2.time);
+        return byTime != 0 ? byTime : a.$1.compareTo(b.$1);
+      });
+    return [for (final (_, point) in indexed) point];
   }
 }

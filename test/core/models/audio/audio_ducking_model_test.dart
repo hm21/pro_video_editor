@@ -82,6 +82,33 @@ void main() {
         );
       });
 
+      test('does not start or keep the dip for a blip near talking', () {
+        // A click 200 ms before and one 200 ms after, both within hold.
+        final curve = ducking.curve(
+          _talking([(800, 820), (1000, 2000), (2200, 2220)]),
+        );
+        expect(_points(curve), [
+          (800, 1.0),
+          (1000, 0.2),
+          (2300, 0.2),
+          (2700, 1.0),
+        ]);
+      });
+
+      test('keeps a word whose level flickers below the threshold', () {
+        // Loud in 30 ms pieces with 20 ms gaps: no piece is long enough on
+        // its own, the word is.
+        final curve = ducking.curve(
+          _talking([(1000, 1030), (1050, 1080), (1100, 1130)]),
+        );
+        expect(_points(curve), [
+          (800, 1.0),
+          (1000, 0.2),
+          (1430, 0.2),
+          (1830, 1.0),
+        ]);
+      });
+
       test('has no points when it would not lower anything', () {
         final envelope = _talking([(1000, 2000)]);
         expect(ducking.copyWith(volume: 1).curve(envelope).points, isEmpty);
@@ -176,6 +203,19 @@ void main() {
         envelope.levelAt(const Duration(milliseconds: 1995)),
         closeTo(0.25, 0.01),
       );
+    });
+
+    test('follows the track\'s own volume curve', () {
+      final envelope = place(
+        VideoAudioTrack(
+          path: '/voice.m4a',
+          volumeCurve: AudioVolumeCurve(const [
+            AudioVolumePoint(time: Duration(milliseconds: 1500), volume: 1),
+            AudioVolumePoint(time: Duration(milliseconds: 1500), volume: 0),
+          ]),
+        ),
+      );
+      expect(loud(envelope), [(1000, 1500)]);
     });
 
     test('stops at the end of the video', () {
