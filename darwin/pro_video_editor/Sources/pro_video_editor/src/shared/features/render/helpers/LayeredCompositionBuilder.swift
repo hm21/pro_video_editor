@@ -54,6 +54,8 @@ internal class LayeredCompositionBuilder {
     var matte: LayerMatte? = nil
     /// How the layer combines with the layers below it.
     var blendMode: LayerBlendMode = .normal
+    /// The layer's shape mask, shared by its clips.
+    var shapeMask: ShapeMaskRenderer? = nil
   }
 
   private struct AudioWindow {
@@ -192,6 +194,12 @@ internal class LayeredCompositionBuilder {
       if let mask = layer.mask {
         try attachMatte(mask, toLayer: layerIndex, of: &placed)
       }
+      if let shapeMask = layer.shapeMask {
+        let renderer = ShapeMaskRenderer(config: shapeMask)
+        for index in placed.indices where placed[index].layerIndex == layerIndex {
+          placed[index].shapeMask = renderer
+        }
+      }
     }
 
     guard !placed.isEmpty else {
@@ -302,7 +310,8 @@ internal class LayeredCompositionBuilder {
           matte: clip.matte,
           keyframes: clip.keyframes,
           keyframeClock: clip.keyframeClock,
-          blendMode: clip.blendMode)
+          blendMode: clip.blendMode,
+          shapeMask: clip.shapeMask)
       }
 
       let timeRange = CMTimeRange(

@@ -658,6 +658,9 @@ internal struct LayerPlacement: Sendable {
   /// How the layer's frame combines with the canvas composed below it; see
   /// `blendLayer`.
   var blendMode: LayerBlendMode = .normal
+  /// The layer's shape mask, drawn for each frame where `matte` is applied;
+  /// `nil` shows the frame whole.
+  var shapeMask: ShapeMaskRenderer? = nil
 }
 
 extension LayerPlacement {

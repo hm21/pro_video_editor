@@ -4579,3 +4579,238 @@ final class BitrateCappedAACTests: XCTestCase {
     return stream.pointee
   }
 }
+
+/// Pins the shape mask on the Apple renderer: how its keyframes change it and
+/// how it is drawn, against the `LayerMask` of pro_image_editor, which draws
+/// the editor preview, and Android's `ShapeMaskPainter`.
+final class ShapeMaskTests: XCTestCase {
+
+  private let context = CIContext(options: [.workingColorSpace: NSNull()])
+
+  private func state(
+    _ shape: ShapeMaskShape, x: Double = 0.5, y: Double = 0.5, width: Double = 0.5,
+    height: Double = 0.5, rotation: Double = 0, feather: Double = 0, invert: Bool = false,
+    mirrored: Bool = false
+  ) -> ShapeMaskState {
+    ShapeMaskState(
+      shape: shape, centerX: x, centerY: y, width: width, height: height, rotation: rotation,
+      feather: feather, cornerRadius: 0, invert: invert, mirrored: mirrored)
+  }
+
+  /// The alpha of [image] at (x, y), counted from its top-left corner.
+  private func alpha(_ image: CIImage, _ x: Int, _ y: Int) -> Int {
+    let extent = image.extent
+    let width = Int(extent.width)
+    let height = Int(extent.height)
+    var bytes = [UInt8](repeating: 0, count: width * height)
+    context.render(
+      image, toBitmap: &bytes, rowBytes: width, bounds: extent, format: .A8, colorSpace: nil)
+    return Int(bytes[y * width + x])
+  }
+
+  private let wire: [String: Any] = [
+    "shape": "speechBubble", "x": 0.25, "y": 0.75, "width": 0.4, "height": 0.2,
+    "rotation": 0.5, "feather": 0.1, "cornerRadius": 0.3, "invert": true, "mirrored": true,
+    "keyframes": [
+      [
+        "timeUs": 3_000_000, "x": 0.8, "y": 0.6, "width": 1.0, "height": 0.6, "rotation": 2.0,
+        "feather": 0.4, "curve": "linear",
+      ],
+      [
+        "timeUs": 1_000_000, "x": 0.2, "y": 0.4, "width": 0.2, "height": 0.2, "rotation": 0.0,
+        "feather": 0.0, "curve": "easeIn",
+      ],
+    ],
+  ]
+
+  // MARK: Keyframes
+
+  func testItReadsEveryFieldAndSortsTheKeyframes() throws {
+    let mask = try XCTUnwrap(ShapeMaskConfig.from(wire))
+
+    XCTAssertEqual(mask.shape, .speechBubble)
+    XCTAssertEqual(mask.cornerRadius, 0.3)
+    XCTAssertTrue(mask.invert)
+    XCTAssertTrue(mask.mirrored)
+    XCTAssertEqual(mask.keyframes.map(\.timeUs), [1_000_000, 3_000_000])
+    XCTAssertNil(ShapeMaskConfig.from(nil))
+    XCTAssertEqual(ShapeMaskConfig.from(["shape": "spiral"])?.shape, .ellipse)
+  }
+
+  func testItHoldsTheFirstKeyframeBeforeItAndTheLastAfterIt() throws {
+    let mask = try XCTUnwrap(ShapeMaskConfig.from(wire))
+
+    XCTAssertEqual(mask.state(atUs: 0).centerX, 0.2, accuracy: 1e-9)
+    XCTAssertEqual(mask.state(atUs: 9_000_000).feather, 0.4, accuracy: 1e-9)
+  }
+
+  func testItEasesAlongTheEarlierKeyframesCurve() throws {
+    let mask = try XCTUnwrap(ShapeMaskConfig.from(wire))
+
+    // Halfway in time, an ease in has come a quarter of the way.
+    let state = mask.state(atUs: 2_000_000)
+
+    XCTAssertEqual(state.centerX, 0.2 + 0.6 * 0.25, accuracy: 1e-9)
+    XCTAssertEqual(state.rotation, 0.5, accuracy: 1e-9)
+    XCTAssertEqual(state.feather, 0.1, accuracy: 1e-9)
+  }
+
+  func testItKeepsTheSizeAndTheSoftnessAtZeroOrMore() {
+    let mask = ShapeMaskConfig(
+      shape: .ellipse,
+      keyframes: [
+        ShapeMaskKeyframeConfig(
+          timeUs: 0, width: 1, height: 1, feather: 0.3, curve: "elasticOut"),
+        ShapeMaskKeyframeConfig(timeUs: 1_000_000, width: 0, height: 0, feather: 0),
+      ])
+
+    for us in stride(from: Int64(0), through: 1_000_000, by: 20_000) {
+      let state = mask.state(atUs: us)
+      XCTAssertGreaterThanOrEqual(state.width, 0)
+      XCTAssertGreaterThanOrEqual(state.height, 0)
+      XCTAssertGreaterThanOrEqual(state.feather, 0)
+    }
+  }
+
+  // MARK: Drawing
+
+  func testAnEllipseShowsInsideItAndAnInvertedOneOutside() {
+    let ellipse = drawShapeMask(state(.ellipse, width: 1, height: 1), width: 40, height: 20)
+    let inverted = drawShapeMask(
+      state(.ellipse, width: 1, height: 1, invert: true), width: 40, height: 20)
+
+    XCTAssertEqual(ellipse.extent, CGRect(x: 0, y: 0, width: 40, height: 20))
+    XCTAssertEqual(alpha(ellipse, 20, 10), 255)
+    XCTAssertEqual(alpha(ellipse, 0, 0), 0)
+    XCTAssertEqual(alpha(inverted, 20, 10), 0)
+    XCTAssertEqual(alpha(inverted, 0, 0), 255)
+  }
+
+  func testAShapeIsPlacedFromTheTopLeftCorner() {
+    // A small circle in the top-left quarter.
+    let mask = drawShapeMask(
+      state(.ellipse, x: 0.25, y: 0.25, width: 0.3, height: 0.3), width: 40, height: 40)
+
+    XCTAssertEqual(alpha(mask, 10, 10), 255)
+    XCTAssertEqual(alpha(mask, 30, 30), 0)
+    XCTAssertEqual(alpha(mask, 10, 30), 0)
+  }
+
+  func testAnUnturnedLinearEdgeShowsAboveItAndATurnedOneOnItsSide() {
+    let upright = drawShapeMask(state(.linear), width: 20, height: 20)
+    // A quarter turn clockwise brings the shown side round to the right.
+    let turned = drawShapeMask(state(.linear, rotation: .pi / 2), width: 20, height: 20)
+
+    XCTAssertEqual(alpha(upright, 10, 2), 255)
+    XCTAssertEqual(alpha(upright, 10, 17), 0)
+    XCTAssertEqual(alpha(turned, 17, 10), 255)
+    XCTAssertEqual(alpha(turned, 2, 10), 0)
+  }
+
+  func testAFeatheredLinearEdgeFadesOverItsWidth() {
+    let mask = drawShapeMask(state(.linear, feather: 0.5), width: 40, height: 40)
+
+    // 20 px wide, centred on the middle row.
+    XCTAssertEqual(alpha(mask, 20, 5), 255)
+    XCTAssertEqual(alpha(mask, 20, 20), 128, accuracy: 8)
+    XCTAssertEqual(alpha(mask, 20, 35), 0)
+  }
+
+  func testASoftEdgeFadesAsAGaussianOfAFeatherBy256() {
+    // A box over the left half of the image and far beyond it at the top
+    // and the bottom, so only its right edge, at x = 100, shows.
+    let mask = drawShapeMask(
+      state(.rectangle, x: 0, width: 1, height: 4, feather: 0.2), width: 200, height: 100)
+
+    // A 20 px feather: sigma = 20 / 2.56, and 10 % to 90 % over 2.56 sigma.
+    XCTAssertEqual(alpha(mask, 90, 50), 230, accuracy: 10)
+    XCTAssertEqual(alpha(mask, 100, 50), 128, accuracy: 10)
+    XCTAssertEqual(alpha(mask, 110, 50), 25, accuracy: 10)
+    // The part of the box outside the image still blurs into it, so the
+    // edge of the image is not darkened.
+    XCTAssertEqual(alpha(mask, 50, 0), 255, accuracy: 2)
+  }
+
+  func testAMirroredSpeechBubbleTurnsItsTailToTheOtherSide() {
+    // The tail hangs from the bottom left of an upright bubble.
+    let bubble = drawShapeMask(state(.speechBubble, width: 1, height: 1), width: 100, height: 100)
+    let mirrored = drawShapeMask(
+      state(.speechBubble, width: 1, height: 1, mirrored: true), width: 100, height: 100)
+
+    XCTAssertEqual(alpha(bubble, 20, 88), 255)
+    XCTAssertEqual(alpha(bubble, 80, 88), 0)
+    XCTAssertEqual(alpha(mirrored, 80, 88), 255)
+    XCTAssertEqual(alpha(mirrored, 20, 88), 0)
+  }
+
+  func testTheRendererDrawsAStillMaskOnce() {
+    let renderer = ShapeMaskRenderer(
+      config: ShapeMaskConfig(
+        shape: .heart,
+        keyframes: [
+          ShapeMaskKeyframeConfig(timeUs: 0, width: 0.2, height: 0.2),
+          ShapeMaskKeyframeConfig(timeUs: 1_000_000, width: 0.8, height: 0.8),
+        ]))
+    let size = CGSize(width: 32, height: 32)
+
+    let first = renderer.matte(atKeyframeUs: 2_000_000, size: size)
+    let held = renderer.matte(atKeyframeUs: 3_000_000, size: size)
+    let moving = renderer.matte(atKeyframeUs: 500_000, size: size)
+
+    XCTAssertTrue(first === held)
+    XCTAssertFalse(first === moving)
+  }
+
+  func testAnImageLayerShowsThroughItsShapeMaskAsItMoves() throws {
+    var bytes = [UInt8](repeating: 255, count: 8 * 8 * 4)
+    for i in stride(from: 0, to: bytes.count, by: 4) { bytes[i + 1] = 0; bytes[i + 2] = 0 }
+    let provider = try XCTUnwrap(CGDataProvider(data: Data(bytes) as CFData))
+    let red = try XCTUnwrap(
+      CGImage(
+        width: 8, height: 8, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 32,
+        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+        provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+    let data = NSMutableData()
+    let destination = try XCTUnwrap(
+      CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
+    CGImageDestinationAddImage(destination, red, nil)
+    XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+    // A box over the left half at 0 that moves to the right half at 1 s.
+    let mask = ShapeMaskConfig(
+      shape: .rectangle,
+      keyframes: [
+        ShapeMaskKeyframeConfig(timeUs: 0, centerX: 0.25, centerY: 0.5, width: 0.5, height: 1),
+        ShapeMaskKeyframeConfig(
+          timeUs: 1_000_000, centerX: 0.75, centerY: 0.5, width: 0.5, height: 1),
+      ])
+    let compositor = VideoCompositor()
+    compositor.setOverlayImageLayers(from: [
+      ImageLayerConfig(
+        image: .bytes(data as Data), startUs: -1, endUs: -1, x: 0, y: 0, width: 80,
+        height: 40, rotation: 0, loop: true, animationOffsetUs: 0, animations: [],
+        shapeMask: mask)
+    ])
+    XCTAssertNil(compositor.overlayImageLayers[0].flattened)
+    let rect = CGRect(x: 0, y: 0, width: 80, height: 40)
+    let backdrop = CIImage(color: CIColor(red: 0, green: 0, blue: 1)).cropped(to: rect)
+
+    func redAt(_ timeUs: Int64, _ x: Int) -> Bool {
+      let drawn = compositor.drawImageLayer(
+        compositor.overlayImageLayers[0], over: backdrop, imageRect: rect,
+        currentTimeUs: timeUs)
+      var pixel = [UInt8](repeating: 0, count: 4)
+      context.render(
+        drawn, toBitmap: &pixel, rowBytes: 4,
+        bounds: CGRect(x: CGFloat(x), y: 20, width: 1, height: 1), format: .RGBA8,
+        colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
+      return pixel[0] > 200 && pixel[2] < 50
+    }
+
+    XCTAssertTrue(redAt(0, 20))
+    XCTAssertFalse(redAt(0, 60))
+    XCTAssertFalse(redAt(1_000_000, 20))
+    XCTAssertTrue(redAt(1_000_000, 60))
+  }
+}

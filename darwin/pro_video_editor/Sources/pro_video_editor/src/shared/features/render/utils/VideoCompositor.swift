@@ -47,6 +47,9 @@ struct ImageLayer {
   var flattened: FlattenedLayers? = nil
   /// How the layer combines with the picture beneath it; see `blendLayer`.
   var blendMode: LayerBlendMode = .normal
+  /// A shape the frames show through, drawn in their own box for each frame
+  /// at its time on `keyframeClock`.
+  var shapeMask: ShapeMaskRenderer? = nil
 
   /// The frame to display at composition time [currentTimeUs].
   ///
@@ -487,7 +490,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       animationEndUs: layer.animationEndUs,
       keyframes: layer.keyframes,
       keyframeClock: layer.keyframeClock,
-      blendMode: layer.blendMode
+      blendMode: layer.blendMode,
+      // A censor area has no image to shape.
+      shapeMask: layer.censor == nil ? layer.shapeMask.map(ShapeMaskRenderer.init) : nil
     )
   }
 
@@ -564,6 +569,14 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       let sx = CGFloat(w) / img.extent.width
       let sy = CGFloat(h) / img.extent.height
       img = img.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+    }
+
+    // The shape mask in the layer's own upright box, before the layer is
+    // placed, turned and animated, so it moves with the layer as well.
+    if let shapeMask = layer.shapeMask {
+      let matte = shapeMask.matte(
+        atKeyframeUs: layer.keyframeClock.keyframeTimeUs(currentTimeUs), size: img.extent.size)
+      img = applyLayerMatte(matte, to: img)
     }
 
     // A keyframed layer is placed and turned by its keyframes instead of its
@@ -962,6 +975,13 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       //     rotation metadata.
       if let matte = placement.matte {
         img = applyLayerMatte(matte.image, to: img)
+      }
+      // The shape mask in the same place, drawn for this frame.
+      if let shapeMask = placement.shapeMask {
+        let matte = shapeMask.matte(
+          atKeyframeUs: placement.keyframeClock.keyframeTimeUs(currentTimeUs),
+          size: img.extent.size)
+        img = applyLayerMatte(matte, to: img)
       }
 
       let srcSize = img.extent.size

@@ -329,6 +329,10 @@ public struct ImageLayerConfig: Sendable {
   /// How the layer combines with the picture beneath it; see `blendLayer`.
   /// A censor layer draws nothing and ignores it.
   var blendMode: LayerBlendMode = .normal
+  /// A shape the image shows through, drawn on every frame in the image's own
+  /// box before the layer is placed; `nil` draws the whole image. A censor or
+  /// an audio visualizer layer ignores it.
+  var shapeMask: ShapeMaskConfig? = nil
 
   static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
     guard let args = args,
@@ -369,7 +373,8 @@ public struct ImageLayerConfig: Sendable {
       keyframeClock: KeyframeClock.from(args["keyframeClock"]),
       audioVisualizer: LayerAudioVisualizerConfig.fromArguments(
         args["audioVisualizer"] as? [String: Any]),
-      blendMode: LayerBlendMode.from(args["blendMode"])
+      blendMode: LayerBlendMode.from(args["blendMode"]),
+      shapeMask: ShapeMaskConfig.from(args["shapeMask"])
     )
   }
 }
@@ -688,6 +693,9 @@ struct LayerConfig: Sendable {
   /// How the layer's clips combine with the layers below them; see
   /// `blendLayer`.
   var blendMode: LayerBlendMode = .normal
+  /// A shape every clip shows through, drawn on each frame where `mask` is
+  /// applied; `nil` shows every clip whole. See `ShapeMaskRenderer`.
+  var shapeMask: ShapeMaskConfig? = nil
 
   static func fromArguments(_ args: [String: Any]?) -> LayerConfig? {
     guard let args = args,
@@ -703,7 +711,8 @@ struct LayerConfig: Sendable {
       mask: EncodedImage.from(args, pathKey: "maskPath", dataKey: "maskData"),
       keyframes: KeyframeConfig.list(from: args["keyframes"]),
       keyframeClock: KeyframeClock.from(args["keyframeClock"]),
-      blendMode: LayerBlendMode.from(args["blendMode"])
+      blendMode: LayerBlendMode.from(args["blendMode"]),
+      shapeMask: ShapeMaskConfig.from(args["shapeMask"])
     )
   }
 }
