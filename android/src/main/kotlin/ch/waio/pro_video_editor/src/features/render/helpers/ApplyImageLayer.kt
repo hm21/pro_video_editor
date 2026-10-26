@@ -183,8 +183,19 @@ private fun addImageLayer(
     try {
         val startTimeUs = layer.startUs
         val endTimeUs = layer.endUs
-        // Keyframes move the layer as animations do, frame by frame.
-        val isAnimated = layer.animations.isNotEmpty() || layer.keyframes.isNotEmpty()
+        // Keyframes move the layer as animations do, frame by frame, and a
+        // shape mask is drawn on every frame. A censor area has no image to
+        // shape.
+        val shapeMask = layer.shapeMask.takeIf { layer.censor == null }
+        val isAnimated = layer.animations.isNotEmpty() || layer.keyframes.isNotEmpty() ||
+                shapeMask != null
+        // A masked layer is masked upright, in its own box, and turned
+        // afterwards: by its keyframes, or else by its own rotation.
+        val restRotation = if (shapeMask != null && layer.keyframes.isEmpty()) {
+            layer.rotation
+        } else {
+            0.0
+        }
 
         Log.d(
             RENDER_TAG,
@@ -259,7 +270,9 @@ private fun addImageLayer(
                 rasterScaleX = first.rasterScaleX,
                 rasterScaleY = first.rasterScaleY,
                 keyframes = layer.keyframes,
-                keyframeClock = layer.keyframeClock
+                keyframeClock = layer.keyframeClock,
+                shapeMask = shapeMask,
+                restRotation = restRotation
             )
             Log.d(
                 RENDER_TAG,
@@ -325,7 +338,9 @@ private fun addImageLayer(
                     animationStartUs = layer.animationStartUs,
                     animationEndUs = layer.animationEndUs,
                     keyframes = layer.keyframes,
-                    keyframeClock = layer.keyframeClock
+                    keyframeClock = layer.keyframeClock,
+                    shapeMask = shapeMask,
+                    restRotation = restRotation
                 )
             } else {
                 BitmapOverlay.createStaticBitmapOverlay(
@@ -498,6 +513,8 @@ internal fun isStaticImageLayer(layer: VideoSequenceBuilder.ImageLayerConfig): B
     if (layer.audioVisualizer != null || layer.censor != null) return false
     if (layer.blendMode != LayerBlendMode.NORMAL) return false
     if (layer.animations.isNotEmpty() || layer.keyframes.isNotEmpty()) return false
+    // A shape mask is drawn frame by frame, in the layer's own box.
+    if (layer.shapeMask != null) return false
     val header = image.readHeader(GifDecoder.MAGIC_LENGTH) ?: return false
     return !GifDecoder.isGif(header)
 }
@@ -980,8 +997,11 @@ private fun prepareOverlay(
     // (unrotated) layout center; rotating about the bitmap center keeps that
     // point fixed, so the anchor stays correct while the bounding box grows
     // symmetrically. A keyframed layer is turned by its keyframes instead,
-    // frame by frame (see [AnimatedBitmapOverlay]), so its box stays upright.
-    val rotatedOverlay = if (layer.keyframes.isNotEmpty()) {
+    // frame by frame (see [AnimatedBitmapOverlay]), so its box stays upright,
+    // and so does a layer with a shape mask, which is drawn in that box.
+    val keepsUpright = layer.keyframes.isNotEmpty() ||
+        (layer.shapeMask != null && layer.censor == null)
+    val rotatedOverlay = if (keepsUpright) {
         finalOverlay
     } else {
         rotateBitmap(finalOverlay, Math.toDegrees(layer.rotation).toFloat())

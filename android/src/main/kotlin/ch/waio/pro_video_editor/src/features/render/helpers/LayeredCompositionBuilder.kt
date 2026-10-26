@@ -272,7 +272,13 @@ class LayeredCompositionBuilder(
                         clip, srcStartUs, srcEndUs, effectivePath, placement,
                         displayW, displayH, layer.opacity, canvasW, canvasH,
                         layer.chromaKey, maskEffect, keyframeAnimator,
-                        captureSlot?.let { captured!!.captureEffect(it) }
+                        captureSlot?.let { captured!!.captureEffect(it) },
+                        // One per clip: Media3 times each clip's effects on a
+                        // timeline of its own, which the effect measures from
+                        // the clip's own start.
+                        layer.shapeMask?.let {
+                            ShapeMaskEffect(it, layer.keyframeClock, clipStartUs = visibleStart)
+                        }
                     )
                 )
                 val volume = clip.volume ?: 1.0f
@@ -305,6 +311,7 @@ class LayeredCompositionBuilder(
                 RENDER_TAG,
                 "  Layer $layerIndex: items=$itemCount duration=${outputCursorUs / 1000}ms " +
                     "opacity=${layer.opacity} masked=${maskEffect != null} " +
+                    "shapeMasked=${layer.shapeMask != null} " +
                     "blend=${layer.blendMode.wireName} captured=${captureSlot != null}"
             )
         }
@@ -423,7 +430,8 @@ class LayeredCompositionBuilder(
         layerChromaKey: ChromaKeyConfig?,
         maskEffect: MaskEffect?,
         keyframeAnimator: SegmentKeyframeAnimator? = null,
-        captureEffect: Effect? = null
+        captureEffect: Effect? = null,
+        shapeMaskEffect: ShapeMaskEffect? = null
     ): EditedMediaItem {
         val mediaItemBuilder = MediaItem.Builder().contentUri(inputPath)
         if (srcStartUs != null || srcEndUs != null) {
@@ -457,6 +465,9 @@ class LayeredCompositionBuilder(
         // moves, scales and turns with the clip. A pixel the key removed stays
         // removed, since the mask only ever scales the alpha down.
         if (maskEffect != null) effects += maskEffect
+        // The shape mask goes in the same place, multiplying in after the
+        // still one.
+        if (shapeMaskEffect != null) effects += shapeMaskEffect
 
         val draw = placement.draw
         val clipBox = placement.clip

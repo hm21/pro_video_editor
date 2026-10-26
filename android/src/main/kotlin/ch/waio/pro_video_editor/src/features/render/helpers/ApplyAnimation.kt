@@ -8,6 +8,7 @@ import androidx.media3.effect.BitmapOverlay
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeClock
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
+import ch.waio.pro_video_editor.src.features.render.models.ShapeMaskConfig
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
@@ -515,6 +516,10 @@ internal class CenteredOverlaySettings(
  * starts from the edge nearest the keyframed place, and a slide and a bounce
  * measure the layer at its keyframed size. [imageWidth] x [imageHeight] is
  * the layer's unscaled box in frame pixels.
+ *
+ * [restRotation] turns a layer whose image is drawn upright although it has
+ * no keyframes, clockwise in radians: a layer with a shape mask, which is
+ * masked in its own box before it is turned. A keyframe's turn replaces it.
  */
 internal fun overlayFrame(
     keyframes: List<KeyframeConfig>,
@@ -531,6 +536,7 @@ internal fun overlayFrame(
     videoHeight: Int,
     layerX: Float,
     layerY: Float,
+    restRotation: Double = 0.0,
 ): OverlayFrame {
     val keyframe = keyframePlacementAt(keyframes, keyframeClock.keyframeTimeUs(timeUs))
     val keyframeScale = keyframe?.scale?.toFloat() ?: 1f
@@ -572,7 +578,7 @@ internal fun overlayFrame(
     val centerNormY = placedNormY + state.offsetY
     // Flutter turns clockwise, Media3 counter-clockwise.
     val rotationDegrees = state.rotationDegrees -
-        Math.toDegrees(keyframe?.rotation ?: 0.0).toFloat()
+        Math.toDegrees(keyframe?.rotation ?: restRotation).toFloat()
     val scale = state.scale * keyframeScale
 
     // A layer wholly off the frame draws nothing; skipping it spares the
@@ -677,7 +683,18 @@ internal class AnimatedBitmapOverlay(
      */
     private val keyframes: List<KeyframeConfig> = emptyList(),
     /** The clock [keyframes] are timed on; see [KeyframeClock]. */
-    private val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT
+    private val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT,
+    /**
+     * A shape the frames show through, drawn in their own box for each frame
+     * at its time on [keyframeClock]; see [ShapeMaskedImage]. A masked layer's
+     * frames carry no rotation of their own, as a keyframed one's do not.
+     */
+    private val shapeMask: ShapeMaskConfig? = null,
+    /**
+     * The turn of a layer whose frames are upright without keyframes, a
+     * masked one; see [overlayFrame].
+     */
+    private val restRotation: Double = 0.0
 ) : BitmapOverlay() {
 
     /** Convenience constructor for a single static frame. */
@@ -699,7 +716,9 @@ internal class AnimatedBitmapOverlay(
         animationStartUs: Long = -1L,
         animationEndUs: Long = -1L,
         keyframes: List<KeyframeConfig> = emptyList(),
-        keyframeClock: KeyframeClock = KeyframeClock.OUTPUT
+        keyframeClock: KeyframeClock = KeyframeClock.OUTPUT,
+        shapeMask: ShapeMaskConfig? = null,
+        restRotation: Double = 0.0
     ) : this(
         frames = listOf(bitmap),
         frameDurationsUs = listOf(0L),
@@ -720,7 +739,9 @@ internal class AnimatedBitmapOverlay(
         rasterScaleX = rasterScaleX,
         rasterScaleY = rasterScaleY,
         keyframes = keyframes,
-        keyframeClock = keyframeClock
+        keyframeClock = keyframeClock,
+        shapeMask = shapeMask,
+        restRotation = restRotation
     )
 
     // Cumulative end time of each frame within one playthrough.
@@ -732,11 +753,24 @@ internal class AnimatedBitmapOverlay(
         }
     }
 
-    override fun getBitmap(presentationTimeUs: Long): Bitmap = frames[
-        animatedFrameIndex(
-            presentationTimeUs, layerStartUs, animationOffsetUs, frameEndsUs, loop
+    private val maskedImage = shapeMask?.let { ShapeMaskedImage() }
+
+    override fun getBitmap(presentationTimeUs: Long): Bitmap {
+        val frame = frames[
+            animatedFrameIndex(
+                presentationTimeUs, layerStartUs, animationOffsetUs, frameEndsUs, loop
+            )
+        ]
+        val mask = shapeMask ?: return frame
+        return maskedImage!!.masked(
+            frame, mask.stateAt(keyframeClock.keyframeTimeUs(presentationTimeUs))
         )
-    ]
+    }
+
+    override fun release() {
+        super.release()
+        maskedImage?.recycle()
+    }
 
     override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
         val frame = overlayFrame(
@@ -754,6 +788,7 @@ internal class AnimatedBitmapOverlay(
             videoHeight = videoHeight,
             layerX = layerX,
             layerY = layerY,
+            restRotation = restRotation,
         )
         // Media3 turns the overlay around its own center, in pixels rather
         // than in the stretched [-1, 1] square, so the tilt keeps its shape.

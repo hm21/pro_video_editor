@@ -537,6 +537,7 @@ class VideoRenderData {
                 'keyframeClock': layer.keyframeClock
                     .map((p) => p.toMap())
                     .toList(),
+                'shapeMask': layer.shapeMask?.toMap(),
               },
             ),
           );

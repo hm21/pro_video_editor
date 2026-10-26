@@ -20,9 +20,9 @@ import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 /// [VideoComposition.layers], so a later layer is drawn on top of an earlier
 /// one (its z-order). The whole layer is rendered with [opacity] and, unless a
 /// clip provides its own [VideoSegment.transform], placed using [transform]. A
-/// [mask] shows its clips only within a shape, or fades them out through a soft
-/// edge, and [blendMode] combines them with the layers below, such as a double
-/// exposure of two clips.
+/// [mask] or a [shapeMask] shows its clips only within a shape, or fades them
+/// out through a soft edge, and [blendMode] combines them with the layers
+/// below, such as a double exposure of two clips.
 class VideoLayer {
   /// Creates a [VideoLayer] from a list of [clips].
   const VideoLayer({
@@ -31,6 +31,7 @@ class VideoLayer {
     this.transform,
     this.chromaKey,
     this.mask,
+    this.shapeMask,
     this.keyframes = const [],
     this.keyframeClock = const [],
     this.blendMode = LayerBlendMode.normal,
@@ -98,6 +99,22 @@ class VideoLayer {
   /// **Note:** Ignored on Web, Windows and Linux, which have no render
   /// pipeline.
   final EditorLayerImage? mask;
+
+  /// A shape every clip of this layer shows through, drawn on each frame, so
+  /// it can change over time on its own; see [LayerShapeMask].
+  ///
+  /// It is measured in fractions of each clip's own upright source frame and
+  /// applied where [mask] is, after the chroma key and before the clip is
+  /// placed, so it moves, scales and turns with the clip as well. Its
+  /// [LayerShapeMask.keyframes] are timed like [keyframes], on [keyframeClock]
+  /// when the layer has one. With [mask] as well, a pixel keeps the alpha of
+  /// both.
+  ///
+  /// **Default**: `null`, which shows every clip whole.
+  ///
+  /// **Note:** Ignored on Web, Windows and Linux, which have no render
+  /// pipeline.
+  final LayerShapeMask? shapeMask;
 
   /// The layer's placement over time; see [TimelineKeyframe].
   ///
@@ -183,6 +200,7 @@ class VideoLayer {
       'transform': transform?.toMap(),
       'chromaKey': await chromaKey?.toAsyncMap(),
       ...?maskSource,
+      'shapeMask': shapeMask?.toMap(),
       'keyframes': sortTimelineKeyframes(
         keyframes,
       ).map((k) => k.toMap()).toList(),
@@ -198,6 +216,7 @@ class VideoLayer {
     SegmentTransform? transform,
     ChromaKey? chromaKey,
     EditorLayerImage? mask,
+    LayerShapeMask? shapeMask,
     List<TimelineKeyframe>? keyframes,
     List<KeyframeClockPoint>? keyframeClock,
     LayerBlendMode? blendMode,
@@ -208,6 +227,7 @@ class VideoLayer {
       transform: transform ?? this.transform,
       chromaKey: chromaKey ?? this.chromaKey,
       mask: mask ?? this.mask,
+      shapeMask: shapeMask ?? this.shapeMask,
       keyframes: keyframes ?? this.keyframes,
       keyframeClock: keyframeClock ?? this.keyframeClock,
       blendMode: blendMode ?? this.blendMode,
@@ -221,6 +241,7 @@ class VideoLayer {
       'transform': transform?.toMap(),
       'chromaKey': chromaKey?.toMap(),
       'mask': mask?.toMap(),
+      'shapeMask': shapeMask?.toMap(),
       'keyframes': keyframes.map((k) => k.toMap()).toList(),
       'keyframeClock': keyframeClock.map((p) => p.toMap()).toList(),
       'blendMode': blendMode.name,
@@ -244,6 +265,11 @@ class VideoLayer {
       mask: map['mask'] != null
           ? EditorLayerImage.fromMap(map['mask'] as Map<String, dynamic>)
           : null,
+      shapeMask: map['shapeMask'] is Map
+          ? LayerShapeMask.fromMap(
+              Map<String, dynamic>.from(map['shapeMask'] as Map),
+            )
+          : null,
       keyframes:
           (map['keyframes'] as List<dynamic>?)
               ?.map(
@@ -266,7 +292,8 @@ class VideoLayer {
   @override
   String toString() =>
       'VideoLayer(clips: $clips, opacity: $opacity, transform: $transform, '
-      'chromaKey: $chromaKey, mask: $mask, keyframes: $keyframes, '
+      'chromaKey: $chromaKey, mask: $mask, shapeMask: $shapeMask, '
+      'keyframes: $keyframes, '
       'keyframeClock: $keyframeClock, blendMode: $blendMode)';
 
   @override
@@ -278,6 +305,7 @@ class VideoLayer {
         other.transform == transform &&
         other.chromaKey == chromaKey &&
         other.mask == mask &&
+        other.shapeMask == shapeMask &&
         listEquals(other.keyframes, keyframes) &&
         listEquals(other.keyframeClock, keyframeClock) &&
         other.blendMode == blendMode;
@@ -290,6 +318,7 @@ class VideoLayer {
       transform.hashCode ^
       chromaKey.hashCode ^
       mask.hashCode ^
+      shapeMask.hashCode ^
       Object.hashAll(keyframes) ^
       Object.hashAll(keyframeClock) ^
       blendMode.hashCode;

@@ -14,6 +14,7 @@ import 'layer_animation_model.dart';
 import 'layer_audio_visualizer_model.dart';
 import 'layer_blend_mode_model.dart';
 import 'layer_censor_model.dart';
+import 'layer_shape_mask_model.dart';
 import 'timeline_keyframe_model.dart';
 
 /// A model representing a video overlay layer with timing information.
@@ -37,6 +38,7 @@ class ImageLayer with TimeRangeMixin {
     this.keyframeClock = const [],
     this.audioVisualizer,
     this.blendMode = LayerBlendMode.normal,
+    this.shapeMask,
   }) : assert(
          startTime == null || endTime == null || startTime < endTime,
          'startTime must be before endTime',
@@ -67,6 +69,10 @@ class ImageLayer with TimeRangeMixin {
          censor == null || blendMode == LayerBlendMode.normal,
          'A censor layer hides the picture beneath it and draws nothing to '
          'blend',
+       ),
+       assert(
+         shapeMask == null || (censor == null && audioVisualizer == null),
+         'A shape mask shapes the image of a layer that draws one',
        );
 
   /// Creates a layer that draws [visualizer] instead of an image; see
@@ -273,6 +279,23 @@ class ImageLayer with TimeRangeMixin {
   /// pipeline.
   final LayerBlendMode blendMode;
 
+  /// A shape the layer's image shows through, drawn on every frame, so it can
+  /// change over time on its own; see [LayerShapeMask].
+  ///
+  /// It is measured in fractions of the image as it is drawn — sized to
+  /// [size], or stretched over the frame without an [offset] — before
+  /// [rotation], [keyframes] and [animations] place it, so it moves, scales
+  /// and turns with the layer as well. Its [LayerShapeMask.keyframes] are
+  /// timed like [keyframes], on [keyframeClock] when the layer has one.
+  ///
+  /// Not for a [censor] or an [audioVisualizer] layer.
+  ///
+  /// **Default**: `null`, which draws the whole image.
+  ///
+  /// **Note:** Ignored on Web, Windows and Linux, which have no render
+  /// pipeline.
+  final LayerShapeMask? shapeMask;
+
   ImageLayer copyWith({
     EditorLayerImage? image,
     Duration? startTime,
@@ -290,6 +313,7 @@ class ImageLayer with TimeRangeMixin {
     List<KeyframeClockPoint>? keyframeClock,
     LayerAudioVisualizer? audioVisualizer,
     LayerBlendMode? blendMode,
+    LayerShapeMask? shapeMask,
   }) {
     return ImageLayer(
       image: image ?? this.image,
@@ -308,6 +332,7 @@ class ImageLayer with TimeRangeMixin {
       keyframeClock: keyframeClock ?? this.keyframeClock,
       audioVisualizer: audioVisualizer ?? this.audioVisualizer,
       blendMode: blendMode ?? this.blendMode,
+      shapeMask: shapeMask ?? this.shapeMask,
     );
   }
 
@@ -331,6 +356,7 @@ class ImageLayer with TimeRangeMixin {
       'keyframeClock': keyframeClock.map((p) => p.toMap()).toList(),
       'audioVisualizer': audioVisualizer?.toMap(),
       'blendMode': blendMode.name,
+      'shapeMask': shapeMask?.toMap(),
     };
   }
 
@@ -389,6 +415,11 @@ class ImageLayer with TimeRangeMixin {
             )
           : null,
       blendMode: LayerBlendMode.fromName(map['blendMode']),
+      shapeMask: map['shapeMask'] is Map
+          ? LayerShapeMask.fromMap(
+              Map<String, dynamic>.from(map['shapeMask'] as Map),
+            )
+          : null,
     );
   }
 
@@ -415,7 +446,8 @@ class ImageLayer with TimeRangeMixin {
         'keyframes: $keyframes, '
         'keyframeClock: $keyframeClock, '
         'audioVisualizer: $audioVisualizer, '
-        'blendMode: $blendMode'
+        'blendMode: $blendMode, '
+        'shapeMask: $shapeMask'
         ')';
   }
 
@@ -438,7 +470,8 @@ class ImageLayer with TimeRangeMixin {
         listEquals(other.keyframes, keyframes) &&
         listEquals(other.keyframeClock, keyframeClock) &&
         other.audioVisualizer == audioVisualizer &&
-        other.blendMode == blendMode;
+        other.blendMode == blendMode &&
+        other.shapeMask == shapeMask;
   }
 
   @override
@@ -458,7 +491,8 @@ class ImageLayer with TimeRangeMixin {
         Object.hashAll(keyframes) ^
         Object.hashAll(keyframeClock) ^
         audioVisualizer.hashCode ^
-        blendMode.hashCode;
+        blendMode.hashCode ^
+        shapeMask.hashCode;
   }
 }
 

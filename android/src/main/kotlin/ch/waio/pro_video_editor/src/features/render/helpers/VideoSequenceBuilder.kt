@@ -23,6 +23,7 @@ import ch.waio.pro_video_editor.src.features.render.models.KeyframeClock
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAudioVisualizerConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerCensorConfig
+import ch.waio.pro_video_editor.src.features.render.models.ShapeMaskConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.features.render.models.changesSpeed
 import ch.waio.pro_video_editor.src.features.thumbnail.SequentialFrameDecoder
@@ -135,7 +136,13 @@ class VideoSequenceBuilder(
          * How the layer combines with the picture beneath it; see
          * [LayerBlendEffect]. A censor layer ignores it.
          */
-        val blendMode: LayerBlendMode = LayerBlendMode.NORMAL
+        val blendMode: LayerBlendMode = LayerBlendMode.NORMAL,
+        /**
+         * A shape the image shows through, drawn on every frame in the image's
+         * own box; see [AnimatedBitmapOverlay]. A censor or an audio
+         * visualizer layer ignores it.
+         */
+        val shapeMask: ShapeMaskConfig? = null
     )
 
     /**

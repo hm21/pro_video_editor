@@ -102,7 +102,8 @@ class CompositionBuilder(
                     keyframes = imageLayer.keyframes,
                     keyframeClock = imageLayer.keyframeClock,
                     audioVisualizer = imageLayer.audioVisualizer,
-                    blendMode = imageLayer.blendMode
+                    blendMode = imageLayer.blendMode,
+                    shapeMask = imageLayer.shapeMask
                 )
             })
             .setEnableAudio(config.enableAudio)

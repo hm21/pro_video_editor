@@ -113,8 +113,10 @@ class RenderVideo(private val context: Context) {
         // effect's history and pass-through.
         val hasEffects = config.effects.isNotEmpty() || config.customEffects.isNotEmpty()
 
-        // So is a layer mask's shader; it only exists on the layered path.
-        val hasLayerMask = config.composition?.layers?.any { it.mask != null } == true
+        // So are a layer mask's shaders; they only exist on the layered path.
+        val hasLayerMask = config.composition?.layers?.any {
+            it.mask != null || it.shapeMask != null
+        } == true
 
         // And the shaders that capture and blend the layers from the lowest
         // blended one up (see CapturedVideoLayers).

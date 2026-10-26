@@ -9,6 +9,8 @@ import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAudioVisualizerConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerBlendMode
 import ch.waio.pro_video_editor.src.features.render.models.LayerCensorConfig
+import ch.waio.pro_video_editor.src.features.render.models.ShapeMaskConfig
+import ch.waio.pro_video_editor.src.features.render.models.ShapeMaskShape
 import ch.waio.pro_video_editor.src.shared.media.EncodedImage
 import org.mockito.Mockito.mock
 import kotlin.test.Test
@@ -105,6 +107,15 @@ internal class StaticLayerRunTest {
         assertEquals(1, staticLayerRunLength(listOf(layer(), blended, layer()), 0))
         assertEquals(0, staticLayerRunLength(listOf(blended, layer()), 0))
         assertFalse(isStaticImageLayer(blended))
+    }
+
+    @Test
+    fun aRunEndsAtAShapeMaskedLayer() {
+        // Its mask is drawn on every frame, in its own box.
+        val masked = layer().copy(shapeMask = ShapeMaskConfig(shape = ShapeMaskShape.HEART))
+
+        assertEquals(1, staticLayerRunLength(listOf(layer(), masked, layer()), 0))
+        assertFalse(isStaticImageLayer(masked))
     }
 
     @Test

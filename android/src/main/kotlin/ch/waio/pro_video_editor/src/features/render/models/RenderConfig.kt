@@ -185,7 +185,12 @@ data class LayerConfig(
     val keyframes: List<KeyframeConfig> = emptyList(),
     /** The clock [keyframes] are timed on; see [KeyframeClock]. */
     val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT,
-    val blendMode: LayerBlendMode = LayerBlendMode.NORMAL
+    val blendMode: LayerBlendMode = LayerBlendMode.NORMAL,
+    /**
+     * A shape every clip shows through, drawn on each of its frames where
+     * [mask] is applied; see `ShapeMaskEffect`. Null = no shape.
+     */
+    val shapeMask: ShapeMaskConfig? = null
 ) {
     companion object {
         fun fromMap(map: Map<String, Any?>): LayerConfig? {
@@ -205,7 +210,8 @@ data class LayerConfig(
                 mask = EncodedImage.fromMap(map, "maskPath", "maskData"),
                 keyframes = KeyframeConfig.listFrom(map["keyframes"]),
                 keyframeClock = KeyframeClock.from(map["keyframeClock"]),
-                blendMode = LayerBlendMode.from(map["blendMode"])
+                blendMode = LayerBlendMode.from(map["blendMode"]),
+                shapeMask = ShapeMaskConfig.from(map["shapeMask"])
             )
         }
     }
@@ -694,6 +700,8 @@ data class KeyframeConfig(
  *   the image)
  * @property blendMode How the layer combines with the picture beneath it; see
  *   `LayerBlendEffect`. A censor layer draws nothing and ignores it
+ * @property shapeMask A shape the image shows through, drawn on every frame in
+ *   the image's own box before the layer is placed (null = the whole image)
  */
 data class ImageLayer(
     val image: EncodedImage,
@@ -714,7 +722,8 @@ data class ImageLayer(
     /** The clock [keyframes] are timed on; see [KeyframeClock]. */
     val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT,
     val audioVisualizer: LayerAudioVisualizerConfig? = null,
-    val blendMode: LayerBlendMode = LayerBlendMode.NORMAL
+    val blendMode: LayerBlendMode = LayerBlendMode.NORMAL,
+    val shapeMask: ShapeMaskConfig? = null
 )
 
 data class RenderConfig(
@@ -850,7 +859,8 @@ data class RenderConfig(
                         LayerAudioVisualizerConfig.fromMap(
                             layerMap["audioVisualizer"] as? Map<*, *>
                         ),
-                        LayerBlendMode.from(layerMap["blendMode"])
+                        LayerBlendMode.from(layerMap["blendMode"]),
+                        ShapeMaskConfig.from(layerMap["shapeMask"])
                     )
                 }
             } ?: emptyList()
