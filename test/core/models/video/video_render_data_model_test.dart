@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/core/models/audio/audio_equalizer_model.dart';
 import 'package:pro_video_editor/core/models/audio/audio_track_model.dart';
 import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart';
+import 'package:pro_video_editor/core/models/image/image_layer_frame_model.dart';
 import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
 import 'package:pro_video_editor/core/models/image/keyframe_clock_point_model.dart';
 import 'package:pro_video_editor/core/models/image/layer_blend_mode_model.dart';
@@ -438,6 +439,36 @@ void main() {
 
       expect(maps.single['imageData'], bytes);
       expect(maps.single.containsKey('imagePath'), isFalse);
+    });
+
+    test('sends a frame sequence with each frame\'s duration', () async {
+      final file = File('${tempDir.path}/frame.png')
+        ..writeAsBytesSync([1, 2, 3, 4]);
+      final bytes = Uint8List.fromList([7, 7, 7]);
+
+      final maps = await layerMaps([
+        ImageLayer.sequence(
+          frames: [
+            ImageLayerFrame(
+              image: EditorLayerImage.memory(bytes),
+              duration: const Duration(milliseconds: 40),
+            ),
+            ImageLayerFrame(
+              image: EditorLayerImage.file(file.path),
+              duration: const Duration(milliseconds: 60),
+            ),
+          ],
+        ),
+        ImageLayer(image: EditorLayerImage.memory(bytes)),
+      ]);
+
+      final frames = (maps[0]['frames'] as List).cast<Map<String, dynamic>>();
+      expect(frames.map((f) => f['durationUs']), [40000, 60000]);
+      expect(frames[0]['imageData'], bytes);
+      // A file-backed frame travels as a path, like a layer image does.
+      expect(frames[1]['imagePath'], file.path);
+      expect(frames[1].containsKey('imageData'), isFalse);
+      expect(maps[1]['frames'], isEmpty);
     });
 
     test('sends animationOffset in microseconds', () async {

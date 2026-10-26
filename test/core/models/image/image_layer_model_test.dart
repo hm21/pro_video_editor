@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/core/models/image/editor_layer_image_model.dart';
+import 'package:pro_video_editor/core/models/image/image_layer_frame_model.dart';
 import 'package:pro_video_editor/core/models/image/image_layer_model.dart';
 import 'package:pro_video_editor/core/models/image/keyframe_clock_point_model.dart';
 import 'package:pro_video_editor/core/models/image/layer_audio_visualizer_model.dart';
@@ -375,6 +376,65 @@ void main() {
         final layer = ImageLayer.audioVisualizer(visualizer: visualizer);
 
         expect(layer.copyWith(loop: false).audioVisualizer, visualizer);
+        expect(layer == ImageLayer(image: layer.image), isFalse);
+      });
+    });
+
+    group('frames', () {
+      final frames = [
+        ImageLayerFrame(
+          image: EditorLayerImage.memory(Uint8List.fromList([4])),
+          duration: const Duration(milliseconds: 40),
+        ),
+        ImageLayerFrame(
+          image: EditorLayerImage.memory(Uint8List.fromList([5])),
+          duration: const Duration(milliseconds: 60),
+        ),
+      ];
+
+      test('draws the image by default', () {
+        final layer = ImageLayer(image: image);
+
+        expect(layer.frames, isEmpty);
+        expect(ImageLayer.fromMap(layer.toMap()).frames, isEmpty);
+      });
+
+      test('the named constructor shows them from the first frame on', () {
+        final layer = ImageLayer.sequence(
+          frames: frames,
+          offset: const Offset(10, 20),
+          size: const Size(300, 100),
+          startTime: const Duration(seconds: 1),
+          loop: false,
+        );
+
+        expect(layer.frames, frames);
+        expect(layer.image, frames.first.image);
+        expect(layer.offset, const Offset(10, 20));
+        expect(layer.size, const Size(300, 100));
+        expect(layer.startTime, const Duration(seconds: 1));
+        expect(layer.loop, isFalse);
+      });
+
+      test('roundtrip through toMap / fromMap', () {
+        final read = ImageLayer.fromMap(
+          ImageLayer.sequence(frames: frames).toMap(),
+        );
+
+        expect(read.frames.map((f) => f.duration), [
+          const Duration(milliseconds: 40),
+          const Duration(milliseconds: 60),
+        ]);
+        expect(read.frames.map((f) => f.image.byteArray), [
+          [4],
+          [5],
+        ]);
+      });
+
+      test('are kept by copyWith and tell layers apart', () {
+        final layer = ImageLayer.sequence(frames: frames);
+
+        expect(layer.copyWith(loop: false).frames, frames);
         expect(layer == ImageLayer(image: layer.image), isFalse);
       });
     });

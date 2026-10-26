@@ -1,3 +1,6 @@
+## 2.45.0
+- **FEAT**(android, iOS, macOS): Frame sequences. `ImageLayer.sequence` shows a list of `ImageLayerFrame`s one after the other, each for its own duration, like the frames of an animated GIF and with the same `loop` and `animationOffset`, from a single layer. A picture that changes over time, such as a running timer, no longer needs a layer per image: on Android every timed layer was its own GL effect, so a 6 s video with 60 such layers rendered in 16 s on an emulator and one with 180 stalled, where one sequence takes about 2 s. On iOS and macOS the frames stay encoded until they are drawn.
+
 ## 2.44.0
 - **FEAT**(android, iOS, macOS): Shape masks that change over time. `VideoLayer.shapeMask` and `ImageLayer.shapeMask` take a `LayerShapeMask` with the shapes of pro_image_editor's `LayerMask`, and its keyframes move, resize, turn and soften it, so a mask can reveal a clip or wipe across it.
 

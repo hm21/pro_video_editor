@@ -702,6 +702,8 @@ data class KeyframeConfig(
  *   `LayerBlendEffect`. A censor layer draws nothing and ignores it
  * @property shapeMask A shape the image shows through, drawn on every frame in
  *   the image's own box before the layer is placed (null = the whole image)
+ * @property frames Images shown one after the other instead of [image], like
+ *   the frames of an animated GIF (empty = draw [image])
  */
 data class ImageLayer(
     val image: EncodedImage,
@@ -723,8 +725,33 @@ data class ImageLayer(
     val keyframeClock: KeyframeClock = KeyframeClock.OUTPUT,
     val audioVisualizer: LayerAudioVisualizerConfig? = null,
     val blendMode: LayerBlendMode = LayerBlendMode.NORMAL,
-    val shapeMask: ShapeMaskConfig? = null
+    val shapeMask: ShapeMaskConfig? = null,
+    val frames: List<ImageLayerFrameConfig> = emptyList()
 )
+
+/**
+ * One image of an image layer's frame sequence and how long it shows.
+ *
+ * @property image The encoded image to show
+ * @property durationUs How long it shows before the next frame, in µs
+ */
+data class ImageLayerFrameConfig(val image: EncodedImage, val durationUs: Long) {
+    companion object {
+        /**
+         * The frames in a layer map's `frames` list, in order. A frame whose
+         * image is missing or that shows for no time is left out.
+         */
+        fun listFrom(raw: Any?): List<ImageLayerFrameConfig> =
+            (raw as? List<*>)?.mapNotNull { entry ->
+                @Suppress("UNCHECKED_CAST")
+                val map = entry as? Map<String, Any?> ?: return@mapNotNull null
+                val image = EncodedImage.fromMap(map, "imagePath", "imageData")
+                    ?: return@mapNotNull null
+                val durationUs = (map["durationUs"] as? Number)?.toLong() ?: 0L
+                if (durationUs <= 0L) null else ImageLayerFrameConfig(image, durationUs)
+            } ?: emptyList()
+    }
+}
 
 data class RenderConfig(
     val videoClips: List<VideoClip>,
@@ -860,7 +887,8 @@ data class RenderConfig(
                             layerMap["audioVisualizer"] as? Map<*, *>
                         ),
                         LayerBlendMode.from(layerMap["blendMode"]),
-                        ShapeMaskConfig.from(layerMap["shapeMask"])
+                        ShapeMaskConfig.from(layerMap["shapeMask"]),
+                        ImageLayerFrameConfig.listFrom(layerMap["frames"])
                     )
                 }
             } ?: emptyList()

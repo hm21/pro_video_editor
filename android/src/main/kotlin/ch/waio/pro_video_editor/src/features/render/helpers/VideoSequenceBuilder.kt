@@ -20,6 +20,7 @@ import androidx.media3.transformer.Effects
 import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeClock
+import ch.waio.pro_video_editor.src.features.render.models.ImageLayerFrameConfig
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAudioVisualizerConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerCensorConfig
@@ -142,7 +143,12 @@ class VideoSequenceBuilder(
          * own box; see [AnimatedBitmapOverlay]. A censor or an audio
          * visualizer layer ignores it.
          */
-        val shapeMask: ShapeMaskConfig? = null
+        val shapeMask: ShapeMaskConfig? = null,
+        /**
+         * Images shown one after the other instead of [image], each for its
+         * duration, the way an animated GIF's frames are; empty draws [image].
+         */
+        val frames: List<ImageLayerFrameConfig> = emptyList()
     )
 
     /**

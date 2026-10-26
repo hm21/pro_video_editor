@@ -9,6 +9,7 @@ import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 import 'package:pro_video_editor/shared/utils/parser/offset_parser.dart';
 
 import 'editor_layer_image_model.dart';
+import 'image_layer_frame_model.dart';
 import 'keyframe_clock_point_model.dart';
 import 'layer_animation_model.dart';
 import 'layer_audio_visualizer_model.dart';
@@ -39,6 +40,7 @@ class ImageLayer with TimeRangeMixin {
     this.audioVisualizer,
     this.blendMode = LayerBlendMode.normal,
     this.shapeMask,
+    this.frames = const [],
   }) : assert(
          startTime == null || endTime == null || startTime < endTime,
          'startTime must be before endTime',
@@ -73,6 +75,49 @@ class ImageLayer with TimeRangeMixin {
        assert(
          shapeMask == null || (censor == null && audioVisualizer == null),
          'A shape mask shapes the image of a layer that draws one',
+       ),
+       assert(
+         frames.length == 0 || (censor == null && audioVisualizer == null),
+         'A frame sequence is drawn, so it is not for a censor or an audio '
+         'visualizer layer',
+       );
+
+  /// Creates a layer that shows [frames] one after the other, each for its
+  /// [ImageLayerFrame.duration], like the frames of an animated GIF; see
+  /// [ImageLayer.frames]. [frames] must not be empty.
+  ImageLayer.sequence({
+    required List<ImageLayerFrame> frames,
+    Duration? startTime,
+    Duration? endTime,
+    Offset? offset,
+    Size? size,
+    double rotation = 0.0,
+    bool loop = true,
+    Duration animationOffset = Duration.zero,
+    List<LayerAnimation> animations = const [],
+    Duration? animationStartTime,
+    Duration? animationEndTime,
+    List<TimelineKeyframe> keyframes = const [],
+    List<KeyframeClockPoint> keyframeClock = const [],
+    LayerBlendMode blendMode = LayerBlendMode.normal,
+    LayerShapeMask? shapeMask,
+  }) : this(
+         image: frames.first.image,
+         frames: frames,
+         startTime: startTime,
+         endTime: endTime,
+         offset: offset,
+         size: size,
+         rotation: rotation,
+         loop: loop,
+         animationOffset: animationOffset,
+         animations: animations,
+         animationStartTime: animationStartTime,
+         animationEndTime: animationEndTime,
+         keyframes: keyframes,
+         keyframeClock: keyframeClock,
+         blendMode: blendMode,
+         shapeMask: shapeMask,
        );
 
   /// Creates a layer that draws [visualizer] instead of an image; see
@@ -114,6 +159,8 @@ class ImageLayer with TimeRangeMixin {
   /// Animated formats (e.g. GIF) are detected automatically and played back
   /// frame by frame for the time the layer is visible — see [loop]. Static
   /// images are drawn unchanged.
+  ///
+  /// Not drawn when [frames] is not empty.
   final EditorLayerImage image;
 
   @override
@@ -158,7 +205,8 @@ class ImageLayer with TimeRangeMixin {
   /// **Default**: `0.0` (no rotation).
   final double rotation;
 
-  /// Whether an animated [image] (e.g. GIF) repeats while the layer is visible.
+  /// Whether an animated [image] (e.g. GIF) or the [frames] repeat while the
+  /// layer is visible.
   ///
   /// - `true` (default): the animation loops for the layer's whole time range.
   /// - `false`: the animation plays once and then holds its last frame until
@@ -167,8 +215,8 @@ class ImageLayer with TimeRangeMixin {
   /// Has no effect on static images.
   final bool loop;
 
-  /// How far into an animated [image] (e.g. GIF) playback begins when the
-  /// layer appears at [startTime].
+  /// How far into an animated [image] (e.g. GIF) or the [frames] playback
+  /// begins when the layer appears at [startTime].
   ///
   /// By default an animated layer starts on its first frame. Set this to
   /// continue one animation across several layers: a layer that picks up
@@ -296,6 +344,27 @@ class ImageLayer with TimeRangeMixin {
   /// pipeline.
   final LayerShapeMask? shapeMask;
 
+  /// Images to show one after the other instead of [image], each for its
+  /// [ImageLayerFrame.duration], from [startTime] on — like the frames of an
+  /// animated GIF, so [loop] and [animationOffset] apply to them alike.
+  ///
+  /// One layer draws the whole sequence with one overlay that swaps its
+  /// image, where a layer per image costs the renderer a pass over the frame
+  /// for every one of them. Use it for a picture that changes over time,
+  /// such as a running timer or text that types itself out: frames that end
+  /// where the next one starts, and one that holds until [endTime] when
+  /// [loop] is `false`.
+  ///
+  /// Every frame is drawn into the layer's box like [image] would be, so
+  /// give them the same pixel size. Not for a [censor] or an
+  /// [audioVisualizer] layer.
+  ///
+  /// **Default**: empty, which draws [image].
+  ///
+  /// **Note:** Ignored on Web, Windows and Linux, which have no render
+  /// pipeline.
+  final List<ImageLayerFrame> frames;
+
   ImageLayer copyWith({
     EditorLayerImage? image,
     Duration? startTime,
@@ -314,6 +383,7 @@ class ImageLayer with TimeRangeMixin {
     LayerAudioVisualizer? audioVisualizer,
     LayerBlendMode? blendMode,
     LayerShapeMask? shapeMask,
+    List<ImageLayerFrame>? frames,
   }) {
     return ImageLayer(
       image: image ?? this.image,
@@ -333,6 +403,7 @@ class ImageLayer with TimeRangeMixin {
       audioVisualizer: audioVisualizer ?? this.audioVisualizer,
       blendMode: blendMode ?? this.blendMode,
       shapeMask: shapeMask ?? this.shapeMask,
+      frames: frames ?? this.frames,
     );
   }
 
@@ -357,6 +428,7 @@ class ImageLayer with TimeRangeMixin {
       'audioVisualizer': audioVisualizer?.toMap(),
       'blendMode': blendMode.name,
       'shapeMask': shapeMask?.toMap(),
+      'frames': frames.map((f) => f.toMap()).toList(),
     };
   }
 
@@ -420,6 +492,15 @@ class ImageLayer with TimeRangeMixin {
               Map<String, dynamic>.from(map['shapeMask'] as Map),
             )
           : null,
+      frames:
+          (map['frames'] as List<dynamic>?)
+              ?.map(
+                (f) => ImageLayerFrame.fromMap(
+                  Map<String, dynamic>.from(f as Map),
+                ),
+              )
+              .toList() ??
+          const [],
     );
   }
 
@@ -447,7 +528,8 @@ class ImageLayer with TimeRangeMixin {
         'keyframeClock: $keyframeClock, '
         'audioVisualizer: $audioVisualizer, '
         'blendMode: $blendMode, '
-        'shapeMask: $shapeMask'
+        'shapeMask: $shapeMask, '
+        'frames: $frames'
         ')';
   }
 
@@ -471,7 +553,8 @@ class ImageLayer with TimeRangeMixin {
         listEquals(other.keyframeClock, keyframeClock) &&
         other.audioVisualizer == audioVisualizer &&
         other.blendMode == blendMode &&
-        other.shapeMask == shapeMask;
+        other.shapeMask == shapeMask &&
+        listEquals(other.frames, frames);
   }
 
   @override
@@ -492,7 +575,8 @@ class ImageLayer with TimeRangeMixin {
         Object.hashAll(keyframeClock) ^
         audioVisualizer.hashCode ^
         blendMode.hashCode ^
-        shapeMask.hashCode;
+        shapeMask.hashCode ^
+        Object.hashAll(frames);
   }
 }
 

@@ -117,6 +117,26 @@ private func decodeGifFrames(_ image: EncodedImage) -> (
   return (frames, frameEndsUs)
 }
 
+/// A layer's frame sequence as frames and a timeline like a GIF's, or nil when
+/// a frame does not decode: a sequence with a hole would jump past it.
+///
+/// The frames stay encoded until they are drawn, so a long sequence holds its
+/// encoded bytes rather than a decoded image for every frame.
+private func decodeFrameSequence(_ sequence: [ImageLayerFrameConfig]) -> (
+  frames: [CIImage], frameEndsUs: [Int64]
+)? {
+  var frames: [CIImage] = []
+  var frameEndsUs: [Int64] = []
+  var accUs: Int64 = 0
+  for frame in sequence {
+    guard let image = decodeOrientedImage(frame.image, cache: false) else { return nil }
+    accUs += frame.durationUs
+    frames.append(image)
+    frameEndsUs.append(accUs)
+  }
+  return (frames, frameEndsUs)
+}
+
 /// Reads the on-screen delay (seconds) of GIF frame [index], clamping very
 /// small/zero values to 0.1s as browsers do.
 private func gifFrameDelaySeconds(_ source: CGImageSource, _ index: Int) -> Double {
@@ -450,7 +470,12 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     let frames: [CIImage]
     let frameEndsUs: [Int64]
 
-    if let gif = decodeGifFrames(layer.image) {
+    if !layer.frames.isEmpty {
+      // A frame sequence plays like the frames of a GIF, from this one layer.
+      guard let sequence = decodeFrameSequence(layer.frames) else { return }
+      frames = sequence.frames
+      frameEndsUs = sequence.frameEndsUs
+    } else if let gif = decodeGifFrames(layer.image) {
       // Animated GIF: keep every frame and its timeline.
       frames = gif.frames
       frameEndsUs = gif.frameEndsUs

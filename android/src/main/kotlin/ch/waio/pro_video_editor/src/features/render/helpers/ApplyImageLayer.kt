@@ -227,31 +227,45 @@ private fun addImageLayer(
         }
         val image = layer.image ?: return
 
-        // Animated GIFs decode to several frames; everything else (PNG/JPEG
-        // and static GIFs) decodes to a single bitmap.
+        // An animated layer draws one of several frames at a time: the frame
+        // sequence the caller handed over, or the frames of an animated GIF.
+        // Everything else (PNG/JPEG and static GIFs) decodes to one bitmap.
         //
         // Only the GIF path needs the whole encoded image in memory, so the
         // magic is sniffed off the first few bytes first — a file-backed
         // photo would otherwise be read in full just to learn it is a JPEG,
         // which is exactly the copy a path is meant to avoid.
-        val gifFrames = image.readHeader(GifDecoder.MAGIC_LENGTH)
-            ?.takeIf { GifDecoder.isGif(it) }
-            ?.let { image.readBytes() }
-            ?.let { GifDecoder.decode(it) }
+        val animatedFrames: AnimatedFrames? = if (layer.frames.isNotEmpty()) {
+            prepareFrameSequence(
+                layer, videoWidth, videoHeight, rasterScale, rasterBudget
+            ) ?: return
+        } else {
+            image.readHeader(GifDecoder.MAGIC_LENGTH)
+                ?.takeIf { GifDecoder.isGif(it) }
+                ?.let { image.readBytes() }
+                ?.let { GifDecoder.decode(it) }
+                ?.let { gifFrames ->
+                    // Prepare every frame identically so they share
+                    // dimensions and anchor; the overlay swaps frames over
+                    // time.
+                    AnimatedFrames(
+                        prepared = gifFrames.map {
+                            prepareOverlay(
+                                it.bitmap, layer, videoWidth, videoHeight,
+                                rasterScale, rasterBudget
+                            )
+                        },
+                        durationsUs = gifFrames.map { it.durationUs },
+                    )
+                }
+        }
 
         val bitmapOverlay: BitmapOverlay
-        if (gifFrames != null) {
-            // Prepare every frame identically so they share dimensions and
-            // anchor; the overlay swaps frames over time.
-            val prepared = gifFrames.map {
-                prepareOverlay(
-                    it.bitmap, layer, videoWidth, videoHeight, rasterScale, rasterBudget
-                )
-            }
-            val first = prepared.first()
+        if (animatedFrames != null) {
+            val first = animatedFrames.prepared.first()
             bitmapOverlay = AnimatedBitmapOverlay(
-                frames = prepared.map { it.bitmap },
-                frameDurationsUs = gifFrames.map { it.durationUs },
+                frames = animatedFrames.prepared.map { it.bitmap },
+                frameDurationsUs = animatedFrames.durationsUs,
                 baseNormX = first.baseNormX,
                 baseNormY = first.baseNormY,
                 imageWidth = first.displayWidth,
@@ -276,7 +290,8 @@ private fun addImageLayer(
             )
             Log.d(
                 RENDER_TAG,
-                "Layer: animated GIF with ${gifFrames.size} frame(s), loop=${layer.loop}, " +
+                "Layer: ${if (layer.frames.isNotEmpty()) "frame sequence" else "animated GIF"} " +
+                        "with ${animatedFrames.prepared.size} frame(s), loop=${layer.loop}, " +
                         "animationOffset=${layer.animationOffsetUs}us"
             )
         } else {
@@ -499,10 +514,55 @@ internal class OverlayBatch(private val videoEffects: MutableList<Effect>) {
     }
 }
 
+/** The frames of an animated layer, prepared alike, and how long each shows. */
+private class AnimatedFrames(
+    val prepared: List<PreparedOverlay>,
+    val durationsUs: List<Long>,
+)
+
+/**
+ * [layer]'s frame sequence, decoded and prepared one frame at a time so no more
+ * than one raw decode is held next to the prepared frames, or null when a frame
+ * does not decode: a sequence with a hole would jump past it.
+ */
+private fun prepareFrameSequence(
+    layer: VideoSequenceBuilder.ImageLayerConfig,
+    videoWidth: Int,
+    videoHeight: Int,
+    rasterScale: Float,
+    rasterBudget: Long,
+): AnimatedFrames? {
+    val (reqWidth, reqHeight) = overlayDecodeSize(
+        layer, videoWidth, videoHeight, rasterScale, rasterBudget
+    )
+    val prepared = ArrayList<PreparedOverlay>(layer.frames.size)
+    for ((index, frame) in layer.frames.withIndex()) {
+        val bitmap = ImageOrientation.decode(
+            frame.image,
+            reqWidth = reqWidth,
+            reqHeight = reqHeight,
+            config = Bitmap.Config.ARGB_8888,
+        )
+        if (bitmap == null) {
+            prepared.forEach { it.bitmap.recycle() }
+            Log.e(
+                RENDER_TAG,
+                "Layer: frame $index of ${layer.frames.size} did not decode " +
+                        "(${frame.image.describe()}); skipping layer"
+            )
+            return null
+        }
+        prepared += prepareOverlay(
+            bitmap, layer, videoWidth, videoHeight, rasterScale, rasterBudget
+        )
+    }
+    return AnimatedFrames(prepared, layer.frames.map { it.durationUs })
+}
+
 /**
  * Whether [layer] is a still image that looks the same on every frame it shows:
- * no animation, keyframe, censor or audio visualizer, and not a GIF, which may
- * animate.
+ * no animation, keyframe, censor, audio visualizer or frame sequence, and not a
+ * GIF, which may animate.
  *
  * A blended layer is drawn on its own as well: it combines with the frame
  * beneath it, which an image of static layers drawn over transparency does not
@@ -510,6 +570,7 @@ internal class OverlayBatch(private val videoEffects: MutableList<Effect>) {
  */
 internal fun isStaticImageLayer(layer: VideoSequenceBuilder.ImageLayerConfig): Boolean {
     val image = layer.image ?: return false
+    if (layer.frames.isNotEmpty()) return false
     if (layer.audioVisualizer != null || layer.censor != null) return false
     if (layer.blendMode != LayerBlendMode.NORMAL) return false
     if (layer.animations.isNotEmpty() || layer.keyframes.isNotEmpty()) return false

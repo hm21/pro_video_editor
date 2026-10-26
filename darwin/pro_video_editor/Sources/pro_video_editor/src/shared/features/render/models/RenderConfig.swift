@@ -333,6 +333,9 @@ public struct ImageLayerConfig: Sendable {
   /// box before the layer is placed; `nil` draws the whole image. A censor or
   /// an audio visualizer layer ignores it.
   var shapeMask: ShapeMaskConfig? = nil
+  /// Images shown one after the other instead of `image`, each for its
+  /// duration, the way an animated GIF's frames are; empty draws `image`.
+  var frames: [ImageLayerFrameConfig] = []
 
   static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
     guard let args = args,
@@ -374,8 +377,28 @@ public struct ImageLayerConfig: Sendable {
       audioVisualizer: LayerAudioVisualizerConfig.fromArguments(
         args["audioVisualizer"] as? [String: Any]),
       blendMode: LayerBlendMode.from(args["blendMode"]),
-      shapeMask: ShapeMaskConfig.from(args["shapeMask"])
+      shapeMask: ShapeMaskConfig.from(args["shapeMask"]),
+      frames: ImageLayerFrameConfig.list(from: args["frames"])
     )
+  }
+}
+
+/// One image of an image layer's frame sequence and how long it shows.
+struct ImageLayerFrameConfig: Sendable {
+  let image: EncodedImage
+  /// How long the frame shows before the next one, in µs.
+  let durationUs: Int64
+
+  /// The frames in a layer's `frames` list, in order. A frame whose image is
+  /// missing or that shows for no time is left out.
+  static func list(from raw: Any?) -> [ImageLayerFrameConfig] {
+    guard let entries = raw as? [[String: Any]] else { return [] }
+    return entries.compactMap { entry in
+      guard let image = EncodedImage.from(entry, pathKey: "imagePath", dataKey: "imageData"),
+        let durationUs = (entry["durationUs"] as? NSNumber)?.int64Value, durationUs > 0
+      else { return nil }
+      return ImageLayerFrameConfig(image: image, durationUs: durationUs)
+    }
   }
 }
 

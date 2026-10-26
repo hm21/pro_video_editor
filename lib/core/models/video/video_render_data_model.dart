@@ -538,6 +538,9 @@ class VideoRenderData {
                     .map((p) => p.toMap())
                     .toList(),
                 'shapeMask': layer.shapeMask?.toMap(),
+                'frames': await Future.wait(
+                  layer.frames.map((frame) => frame.toChannelMap()),
+                ),
               },
             ),
           );

@@ -4,6 +4,7 @@ import androidx.media3.common.Effect
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.TextureOverlay
 import androidx.media3.effect.TimestampWrapper
+import ch.waio.pro_video_editor.src.features.render.models.ImageLayerFrameConfig
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import ch.waio.pro_video_editor.src.features.render.models.LayerAudioVisualizerConfig
@@ -116,6 +117,20 @@ internal class StaticLayerRunTest {
 
         assertEquals(1, staticLayerRunLength(listOf(layer(), masked, layer()), 0))
         assertFalse(isStaticImageLayer(masked))
+    }
+
+    @Test
+    fun aRunEndsAtAFrameSequence() {
+        // It swaps its image over time, like a GIF.
+        val sequence = layer().copy(
+            frames = listOf(
+                ImageLayerFrameConfig(png, durationUs = 40_000L),
+                ImageLayerFrameConfig(png, durationUs = 40_000L),
+            )
+        )
+
+        assertEquals(1, staticLayerRunLength(listOf(layer(), sequence, layer()), 0))
+        assertFalse(isStaticImageLayer(sequence))
     }
 
     @Test

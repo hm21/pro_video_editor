@@ -19,6 +19,7 @@ export 'features/audio/models/waveform_style.dart';
 export 'features/video_effects/widgets/video_effect_preview.dart';
 export 'features/audio_visualizer/audio_visualizer_painter.dart';
 export 'core/models/image/editor_layer_image_model.dart';
+export 'core/models/image/image_layer_frame_model.dart';
 export 'core/models/image/image_layer_model.dart';
 export 'core/models/image/keyframe_clock_point_model.dart'
     hide keyframeClockFromMap;

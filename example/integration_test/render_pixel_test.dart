@@ -648,6 +648,61 @@ void main() {
     }, skip: kIsWeb);
   });
 
+  group('Frame sequence', () {
+    testWidgets('shows each frame for its duration from one layer', (
+      tester,
+    ) async {
+      const step = Duration(milliseconds: 500);
+      final frames = [
+        for (final color in const [
+          Color(0xFFFF0000),
+          Color(0xFF00FF00),
+          Color(0xFF0000FF),
+        ])
+          ImageLayerFrame(
+            image: EditorLayerImage.memory(await _solidPng(color)),
+            duration: step,
+          ),
+      ];
+
+      final bytes = await pve.renderVideo(
+        VideoRenderData(
+          videoSegments: [
+            VideoSegment(video: h264Video, endTime: const Duration(seconds: 3)),
+          ],
+          outputFormat: VideoOutputFormat.mp4,
+          imageLayers: [
+            // Left half: plays once from 0.5 s, then holds its last frame.
+            ImageLayer.sequence(
+              frames: frames,
+              offset: Offset.zero,
+              size: const Size(640, 720),
+              startTime: const Duration(milliseconds: 500),
+              loop: false,
+            ),
+            // Right half: loops from the start of the video.
+            ImageLayer.sequence(
+              frames: frames,
+              offset: const Offset(640, 0),
+              size: const Size(640, 720),
+            ),
+          ],
+        ),
+      );
+      final out = EditorVideo.memory(bytes);
+
+      Future<List<String>> halvesAt(int ms) async {
+        final f = await frameOf(out, at: Duration(milliseconds: ms));
+        return [_colorName(f.at(0.25, 0.5)), _colorName(f.at(0.75, 0.5))];
+      }
+
+      expect(await halvesAt(750), ['red', 'green']);
+      expect(await halvesAt(1250), ['green', 'blue']);
+      expect(await halvesAt(1750), ['blue', 'red']);
+      expect(await halvesAt(2250), ['blue', 'green']);
+    }, skip: kIsWeb);
+  });
+
   group('Wiggle, bounce and animation ranges', () {
     // The 1280x720 source, read back at 200 px high; a point is given in
     // source pixels.
