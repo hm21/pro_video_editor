@@ -27,12 +27,17 @@ import java.nio.ByteBuffer
  * gradient, and an inverted mask everything but the shape.
  *
  * Keeps the last mask it drew, so a mask that holds still between keyframes is
- * drawn once.
+ * drawn once. [config] is the bitmap's: ARGB_8888 to upload it as a texture,
+ * ALPHA_8 to read its alpha a quarter of the size.
  */
-internal class ShapeMaskPainter(val width: Int, val height: Int) {
+internal class ShapeMaskPainter(
+    val width: Int,
+    val height: Int,
+    config: Bitmap.Config = Bitmap.Config.ARGB_8888,
+) {
 
-    /** The drawn mask, ARGB_8888 and premultiplied. */
-    val bitmap: Bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    /** The drawn mask, in [config], premultiplied. */
+    val bitmap: Bitmap = Bitmap.createBitmap(width, height, config)
 
     private val canvas = Canvas(bitmap)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -51,10 +56,10 @@ internal class ShapeMaskPainter(val width: Int, val height: Int) {
     }
 
     /**
-     * Copies the mask last drawn into [bytes], RGBA row by row: the alpha of
-     * pixel `i` is at `4 * i + 3`.
+     * Copies the mask last drawn into [bytes], at least [Bitmap.getByteCount]
+     * long, row by row [Bitmap.getRowBytes] apart.
      */
-    fun copyRgba(bytes: ByteArray) {
+    fun copyPixels(bytes: ByteArray) {
         bitmap.copyPixelsToBuffer(ByteBuffer.wrap(bytes))
     }
 

@@ -571,6 +571,21 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       img = img.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
     }
 
+    // A keyframed layer is placed and turned by its keyframes instead of its
+    // own x, y and rotation; computeAnimation applies the turn and the scale.
+    let keyframe = keyframePlacement(
+      layer.keyframes, atUs: layer.keyframeClock.keyframeTimeUs(currentTimeUs))
+
+    // A stretched layer is stretched over the frame before its shape mask, so
+    // the shape keeps its own proportions there, as on Android.
+    let stretched = keyframe == nil && layer.x == nil && layer.y == nil
+    if stretched {
+      img = img.transformed(
+        by: CGAffineTransform(
+          scaleX: imageRect.width / img.extent.width,
+          y: imageRect.height / img.extent.height))
+    }
+
     // The shape mask in the layer's own upright box, before the layer is
     // placed, turned and animated, so it moves with the layer as well.
     if let shapeMask = layer.shapeMask {
@@ -579,21 +594,13 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       img = applyLayerMatte(matte, to: img)
     }
 
-    // A keyframed layer is placed and turned by its keyframes instead of its
-    // own x, y and rotation; computeAnimation applies the turn and the scale.
-    let keyframe = keyframePlacement(
-      layer.keyframes, atUs: layer.keyframeClock.keyframeTimeUs(currentTimeUs))
-
     let overlay: CIImage
     if let keyframe {
       let cgY = imageRect.height - CGFloat(keyframe.y) - img.extent.height
       overlay = img.transformed(
         by: CGAffineTransform(translationX: CGFloat(keyframe.x), y: cgY))
-    } else if layer.x == nil && layer.y == nil {
-      overlay = img.transformed(
-        by: CGAffineTransform(
-          scaleX: imageRect.width / img.extent.width,
-          y: imageRect.height / img.extent.height))
+    } else if stretched {
+      overlay = img
     } else {
       let posX = CGFloat(layer.x ?? 0)
       let posY = CGFloat(layer.y ?? 0)

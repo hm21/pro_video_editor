@@ -2,7 +2,6 @@ package ch.waio.pro_video_editor.src.features.render.models
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -51,17 +50,26 @@ internal class ShapeMaskConfigTest {
         assertTrue(mask.mirrored)
         assertEquals(listOf(1_000_000L, 3_000_000L), mask.keyframes.map { it.timeUs })
         assertEquals("easeIn", mask.keyframes.first().curve)
-        assertTrue(mask.changesOverTime)
     }
 
     @Test
     fun `is null without a map and falls back to an ellipse for an unknown shape`() {
         assertNull(ShapeMaskConfig.from(null))
-        val mask = ShapeMaskConfig.from(mapOf("shape" to "spiral", "feather" to -1, "cornerRadius" to 3))!!
+        val mask = ShapeMaskConfig.from(
+            mapOf(
+                "shape" to "spiral", "width" to -1, "height" to -0.5, "feather" to -1,
+                "cornerRadius" to 3,
+                "keyframes" to listOf(mapOf("timeUs" to 0, "width" to -2, "height" to -1)),
+            )
+        )!!
         assertEquals(ShapeMaskShape.ELLIPSE, mask.shape)
+        assertEquals(0.0, mask.width, tol)
+        assertEquals(0.0, mask.height, tol)
         assertEquals(0.0, mask.feather, tol)
         assertEquals(1.0, mask.cornerRadius, tol)
-        assertFalse(mask.changesOverTime)
+        // Held before and after the only keyframe, its size is kept at 0 too.
+        assertEquals(0.0, mask.stateAt(0L).width, tol)
+        assertEquals(0.0, mask.stateAt(0L).height, tol)
     }
 
     @Test

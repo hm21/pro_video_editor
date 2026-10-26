@@ -2,6 +2,8 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pro_video_editor/core/models/image/layer_shape_mask_model.dart'
+    show sortLayerShapeMaskKeyframes;
 import 'package:pro_video_editor/pro_video_editor.dart';
 
 void main() {

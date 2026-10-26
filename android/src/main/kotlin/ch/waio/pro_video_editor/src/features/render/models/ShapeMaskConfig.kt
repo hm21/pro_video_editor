@@ -72,8 +72,8 @@ data class ShapeMaskKeyframeConfig(
             timeUs = (map["timeUs"] as? Number)?.toLong() ?: 0L,
             centerX = (map["x"] as? Number)?.toDouble() ?: 0.5,
             centerY = (map["y"] as? Number)?.toDouble() ?: 0.5,
-            width = (map["width"] as? Number)?.toDouble() ?: 0.5,
-            height = (map["height"] as? Number)?.toDouble() ?: 0.5,
+            width = max(0.0, (map["width"] as? Number)?.toDouble() ?: 0.5),
+            height = max(0.0, (map["height"] as? Number)?.toDouble() ?: 0.5),
             rotation = (map["rotation"] as? Number)?.toDouble() ?: 0.0,
             feather = max(0.0, (map["feather"] as? Number)?.toDouble() ?: 0.0),
             curve = map["curve"] as? String ?: "linear",
@@ -143,9 +143,6 @@ data class ShapeMaskConfig(
         )
     }
 
-    /** Whether the mask changes over time, and so has to be drawn per frame. */
-    val changesOverTime: Boolean get() = keyframes.size > 1
-
     private fun state(keyframe: ShapeMaskKeyframeConfig) = state(
         keyframe.centerX, keyframe.centerY, keyframe.width, keyframe.height,
         keyframe.rotation, keyframe.feather
@@ -170,8 +167,8 @@ data class ShapeMaskConfig(
                 shape = ShapeMaskShape.from(map["shape"]),
                 centerX = (map["x"] as? Number)?.toDouble() ?: 0.5,
                 centerY = (map["y"] as? Number)?.toDouble() ?: 0.5,
-                width = (map["width"] as? Number)?.toDouble() ?: 0.5,
-                height = (map["height"] as? Number)?.toDouble() ?: 0.5,
+                width = max(0.0, (map["width"] as? Number)?.toDouble() ?: 0.5),
+                height = max(0.0, (map["height"] as? Number)?.toDouble() ?: 0.5),
                 rotation = (map["rotation"] as? Number)?.toDouble() ?: 0.0,
                 feather = max(0.0, (map["feather"] as? Number)?.toDouble() ?: 0.0),
                 cornerRadius = ((map["cornerRadius"] as? Number)?.toDouble() ?: 0.0)

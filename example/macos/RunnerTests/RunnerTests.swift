@@ -4761,7 +4761,8 @@ final class ShapeMaskTests: XCTestCase {
     XCTAssertFalse(first === moving)
   }
 
-  func testAnImageLayerShowsThroughItsShapeMaskAsItMoves() throws {
+  /// An opaque red 8 x 8 PNG.
+  private func redPng() throws -> Data {
     var bytes = [UInt8](repeating: 255, count: 8 * 8 * 4)
     for i in stride(from: 0, to: bytes.count, by: 4) { bytes[i + 1] = 0; bytes[i + 2] = 0 }
     let provider = try XCTUnwrap(CGDataProvider(data: Data(bytes) as CFData))
@@ -4776,6 +4777,58 @@ final class ShapeMaskTests: XCTestCase {
       CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
     CGImageDestinationAddImage(destination, red, nil)
     XCTAssertTrue(CGImageDestinationFinalize(destination))
+    return data as Data
+  }
+
+  /// Whether [compositor]'s only image layer, drawn over blue on an 80 x 40
+  /// frame at [timeUs], is red at (x, y) counted from the top-left corner.
+  private func redAt(
+    _ compositor: VideoCompositor, _ timeUs: Int64, _ x: Int, _ y: Int
+  ) -> Bool {
+    let rect = CGRect(x: 0, y: 0, width: 80, height: 40)
+    let backdrop = CIImage(color: CIColor(red: 0, green: 0, blue: 1)).cropped(to: rect)
+    let drawn = compositor.drawImageLayer(
+      compositor.overlayImageLayers[0], over: backdrop, imageRect: rect, currentTimeUs: timeUs)
+    var pixel = [UInt8](repeating: 0, count: 4)
+    context.render(
+      drawn, toBitmap: &pixel, rowBytes: 4,
+      bounds: CGRect(x: CGFloat(x), y: CGFloat(39 - y), width: 1, height: 1), format: .RGBA8,
+      colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
+    return pixel[0] > 200 && pixel[2] < 50
+  }
+
+  func testItKeepsANegativeSizeAtZero() throws {
+    let mask = try XCTUnwrap(
+      ShapeMaskConfig.from([
+        "shape": "heart", "width": -1, "height": -0.5,
+        "keyframes": [["timeUs": 0, "width": -2, "height": -1]],
+      ]))
+
+    XCTAssertEqual(mask.width, 0)
+    XCTAssertEqual(mask.height, 0)
+    XCTAssertEqual(mask.state(atUs: 0).width, 0)
+    XCTAssertEqual(mask.state(atUs: 0).height, 0)
+  }
+
+  func testAStretchedImageLayerIsMaskedOverTheFrame() throws {
+    // An edge turned 45° through the middle of the 80 x 40 frame shows the
+    // layer where x - y > 20. Drawn on the square image and then stretched,
+    // it would show it where x > 2y instead, at (25, 10) as well.
+    let compositor = VideoCompositor()
+    compositor.setOverlayImageLayers(from: [
+      ImageLayerConfig(
+        image: .bytes(try redPng()), startUs: -1, endUs: -1, x: nil, y: nil, width: nil,
+        height: nil, rotation: 0, loop: true, animationOffsetUs: 0, animations: [],
+        shapeMask: ShapeMaskConfig(shape: .linear, rotation: .pi / 4))
+    ])
+
+    XCTAssertTrue(redAt(compositor, 0, 70, 5))
+    XCTAssertFalse(redAt(compositor, 0, 25, 10))
+    XCTAssertFalse(redAt(compositor, 0, 10, 35))
+  }
+
+  func testAnImageLayerShowsThroughItsShapeMaskAsItMoves() throws {
+    let data = try redPng()
 
     // A box over the left half at 0 that moves to the right half at 1 s.
     let mask = ShapeMaskConfig(
@@ -4788,29 +4841,15 @@ final class ShapeMaskTests: XCTestCase {
     let compositor = VideoCompositor()
     compositor.setOverlayImageLayers(from: [
       ImageLayerConfig(
-        image: .bytes(data as Data), startUs: -1, endUs: -1, x: 0, y: 0, width: 80,
+        image: .bytes(data), startUs: -1, endUs: -1, x: 0, y: 0, width: 80,
         height: 40, rotation: 0, loop: true, animationOffsetUs: 0, animations: [],
         shapeMask: mask)
     ])
     XCTAssertNil(compositor.overlayImageLayers[0].flattened)
-    let rect = CGRect(x: 0, y: 0, width: 80, height: 40)
-    let backdrop = CIImage(color: CIColor(red: 0, green: 0, blue: 1)).cropped(to: rect)
 
-    func redAt(_ timeUs: Int64, _ x: Int) -> Bool {
-      let drawn = compositor.drawImageLayer(
-        compositor.overlayImageLayers[0], over: backdrop, imageRect: rect,
-        currentTimeUs: timeUs)
-      var pixel = [UInt8](repeating: 0, count: 4)
-      context.render(
-        drawn, toBitmap: &pixel, rowBytes: 4,
-        bounds: CGRect(x: CGFloat(x), y: 20, width: 1, height: 1), format: .RGBA8,
-        colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
-      return pixel[0] > 200 && pixel[2] < 50
-    }
-
-    XCTAssertTrue(redAt(0, 20))
-    XCTAssertFalse(redAt(0, 60))
-    XCTAssertFalse(redAt(1_000_000, 20))
-    XCTAssertTrue(redAt(1_000_000, 60))
+    XCTAssertTrue(redAt(compositor, 0, 20, 19))
+    XCTAssertFalse(redAt(compositor, 0, 60, 19))
+    XCTAssertFalse(redAt(compositor, 1_000_000, 20, 19))
+    XCTAssertTrue(redAt(compositor, 1_000_000, 60, 19))
   }
 }

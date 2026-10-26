@@ -553,9 +553,12 @@ internal fun overlayFrame(
     }
 
     // Layer half-size in [-1, 1] units (canvas spans [-1, 1]), as the
-    // keyframes size it.
-    val halfNormW = imageWidth.toFloat() / videoWidth * keyframeScale
-    val halfNormH = imageHeight.toFloat() / videoHeight * keyframeScale
+    // keyframes size it. A layer turned at rest is measured by the box around
+    // it, as one whose image is turned before it is drawn is.
+    val (boxWidth, boxHeight) = if (keyframe != null) imageWidth to imageHeight
+        else rotatedBoxSize(imageWidth, imageHeight, Math.toDegrees(restRotation).toFloat())
+    val halfNormW = boxWidth.toFloat() / videoWidth * keyframeScale
+    val halfNormH = boxHeight.toFloat() / videoHeight * keyframeScale
 
     val state = overlayAnimationState(
         animations = animations,

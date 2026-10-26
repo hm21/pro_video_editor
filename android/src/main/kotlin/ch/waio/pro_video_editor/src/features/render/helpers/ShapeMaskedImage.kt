@@ -14,16 +14,19 @@ import java.nio.ByteBuffer
  * colors pass through. The result is written into one bitmap that is reused,
  * which Media3 uploads again whenever its generation changes, and is only
  * redone when the image or the mask changed since the last frame.
+ *
+ * Holds one image-sized buffer on the Java heap, which the image is copied
+ * into and masked in place, and the mask as alpha only: a full-frame overlay
+ * is tens of megabytes, and the overlay path is where a render runs out of
+ * memory.
  */
 internal class ShapeMaskedImage {
 
     private var painter: ShapeMaskPainter? = null
     private var output: Bitmap? = null
 
-    private var source: Bitmap? = null
-    private var sourceBytes: ByteArray? = null
-    private var outputBytes: ByteArray? = null
-    private var maskBytes: ByteArray? = null
+    private var pixels: ByteArray? = null
+    private var matte: ByteArray? = null
 
     private var shownSource: Bitmap? = null
     private var shownState: ShapeMaskState? = null
@@ -36,34 +39,31 @@ internal class ShapeMaskedImage {
         val width = image.width
         val height = image.height
         val painter = painter?.takeIf { it.width == width && it.height == height }
-            ?: ShapeMaskPainter(width, height).also {
+            ?: ShapeMaskPainter(width, height, Bitmap.Config.ALPHA_8).also {
                 painter?.recycle()
                 painter = it
+                matte = null
             }
-        painter.paint(state)
+        val matteBytes = painter.bitmap.byteCount
+        val matte = matte?.takeIf { it.size == matteBytes }
+        if (painter.paint(state) || matte == null) {
+            val bytes = matte ?: ByteArray(matteBytes)
+            painter.copyPixels(bytes)
+            this.matte = bytes
+        }
 
         val byteCount = width * height * 4
-        if (image !== source) {
-            val bytes = sourceBytes?.takeIf { it.size == byteCount } ?: ByteArray(byteCount)
-            val buffer = ByteBuffer.wrap(bytes)
-            image.copyPixelsToBuffer(buffer)
-            sourceBytes = bytes
-            source = image
-        }
-        val mask = maskBytes?.takeIf { it.size == byteCount } ?: ByteArray(byteCount)
-        painter.copyRgba(mask)
-        maskBytes = mask
-
-        val out = outputBytes?.takeIf { it.size == byteCount } ?: ByteArray(byteCount)
-        maskStraightAlpha(sourceBytes!!, mask, out, byteCount)
-        outputBytes = out
+        val pixels = pixels?.takeIf { it.size == byteCount } ?: ByteArray(byteCount)
+        image.copyPixelsToBuffer(ByteBuffer.wrap(pixels))
+        maskStraightAlpha(pixels, this.matte!!, width, height, painter.bitmap.rowBytes)
+        this.pixels = pixels
 
         val target = current?.takeIf { it.width == width && it.height == height }
             ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
                 current?.recycle()
                 output = it
             }
-        target.copyPixelsFromBuffer(ByteBuffer.wrap(out))
+        target.copyPixelsFromBuffer(ByteBuffer.wrap(pixels))
 
         shownSource = image
         shownState = state
@@ -75,26 +75,35 @@ internal class ShapeMaskedImage {
         painter = null
         output?.recycle()
         output = null
-        source = null
+        pixels = null
+        matte = null
         shownSource = null
     }
 }
 
 /**
- * Writes [image], RGBA bytes with straight alpha, into [out] with each pixel's
- * alpha scaled by the alpha of the same pixel of [mask], RGBA bytes too.
- * Colors pass through untouched, as straight alpha keeps them.
+ * Scales the alpha of every pixel of [pixels], [width] x [height] RGBA bytes
+ * with straight alpha, by the alpha of the same pixel of [matte], one byte per
+ * pixel and its rows [matteRowBytes] apart. Colors pass through untouched, as
+ * straight alpha keeps them.
  */
-internal fun maskStraightAlpha(image: ByteArray, mask: ByteArray, out: ByteArray, byteCount: Int) {
-    var i = 0
-    while (i < byteCount) {
-        out[i] = image[i]
-        out[i + 1] = image[i + 1]
-        out[i + 2] = image[i + 2]
-        val alpha = image[i + 3].toInt() and 0xFF
-        val matte = mask[i + 3].toInt() and 0xFF
-        // Rounded, so a fully shown pixel keeps its alpha exactly.
-        out[i + 3] = ((alpha * matte + 127) / 255).toByte()
-        i += 4
+internal fun maskStraightAlpha(
+    pixels: ByteArray,
+    matte: ByteArray,
+    width: Int,
+    height: Int,
+    matteRowBytes: Int,
+) {
+    for (y in 0 until height) {
+        var i = y * width * 4 + 3
+        var m = y * matteRowBytes
+        repeat(width) {
+            val alpha = pixels[i].toInt() and 0xFF
+            val shown = matte[m].toInt() and 0xFF
+            // Rounded, so a fully shown pixel keeps its alpha exactly.
+            pixels[i] = ((alpha * shown + 127) / 255).toByte()
+            i += 4
+            m++
+        }
     }
 }

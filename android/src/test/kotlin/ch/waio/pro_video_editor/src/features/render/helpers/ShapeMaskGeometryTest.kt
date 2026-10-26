@@ -136,14 +136,14 @@ internal class ShapeMaskGeometryTest {
 
     @Test
     fun `masking scales a straight alpha and keeps the colors`() {
-        val image = byteArrayOf(10, 20, 30, 200.toByte(), 1, 2, 3, 255.toByte())
-        val mask = byteArrayOf(0, 0, 0, 128.toByte(), 0, 0, 0, 255.toByte())
-        val out = ByteArray(8)
+        // Two rows of one pixel, the matte's rows padded to 4 bytes.
+        val pixels = byteArrayOf(10, 20, 30, 200.toByte(), 1, 2, 3, 255.toByte())
+        val matte = byteArrayOf(128.toByte(), 0, 0, 0, 255.toByte(), 0, 0, 0)
 
-        maskStraightAlpha(image, mask, out, 8)
+        maskStraightAlpha(pixels, matte, width = 1, height = 2, matteRowBytes = 4)
 
-        assertEquals(listOf<Byte>(10, 20, 30), out.slice(0..2))
-        assertEquals((200 * 128 + 127) / 255, out[3].toInt() and 0xFF)
-        assertEquals(listOf<Byte>(1, 2, 3, 255.toByte()), out.slice(4..7))
+        assertEquals(listOf<Byte>(10, 20, 30), pixels.slice(0..2))
+        assertEquals((200 * 128 + 127) / 255, pixels[3].toInt() and 0xFF)
+        assertEquals(listOf<Byte>(1, 2, 3, 255.toByte()), pixels.slice(4..7))
     }
 }

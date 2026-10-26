@@ -222,6 +222,35 @@ internal class KeyframePlacementTest {
     }
 
     @Test
+    fun `a layer turned at rest slides as far as one turned before it is drawn`() {
+        // A 200 x 100 layer turned a quarter: its box is 100 x 200, so a slide
+        // in from the left starts with its centre half of 100 px past the left
+        // edge (-1.1), not half of 200 px (-1.2).
+        val slide = LayerAnimationConfig(
+            type = "slide", phase = "animateIn", durationUs = 1_000_000L, slideDirection = "left"
+        )
+        val turned = overlayFrame(
+            keyframes = emptyList(),
+            keyframeClock = KeyframeClock.OUTPUT,
+            animations = listOf(slide),
+            timeUs = 0L,
+            animationStartUs = 0L,
+            animationEndUs = 10_000_000L,
+            baseNormX = 0f,
+            baseNormY = 0f,
+            imageWidth = 200,
+            imageHeight = 100,
+            videoWidth = 1000,
+            videoHeight = 1000,
+            layerX = 400f,
+            layerY = 450f,
+            restRotation = PI / 2,
+        )
+        assertEquals(-1.1f, turned.centerNormX, 1e-6f)
+        assertEquals(-90f, turned.rotationDegrees, 1e-6f)
+    }
+
+    @Test
     fun `liesOffFrame measures a turned layer by the box around it`() {
         // A 100 x 200 layer on a 1000 x 1000 frame, centered 80 px right of
         // it: upright its left edge is 30 px out, a quarter turn brings it 20 px
