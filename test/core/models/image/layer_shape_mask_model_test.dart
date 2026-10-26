@@ -77,7 +77,7 @@ void main() {
       });
 
       test('falls back to an ellipse and keeps values in range', () {
-        final read = LayerShapeMask.fromMap({
+        final read = LayerShapeMask.fromMap(const {
           'shape': 'spiral',
           'feather': -1,
           'cornerRadius': 4,
