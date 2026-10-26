@@ -1,3 +1,6 @@
+## 2.44.0
+- **FEAT**(android, iOS, macOS): Shape masks that change over time. `VideoLayer.shapeMask` and `ImageLayer.shapeMask` take a `LayerShapeMask`, the shapes of pro_image_editor's `LayerMask`, which the renderer draws on every frame; its `LayerShapeMaskKeyframe`s move, resize, turn and soften it with the 13 animation curves, timed like the layer's own keyframes, so a mask can reveal a clip or wipe across it.
+
 ## 2.43.2
 - **FIX**: Tasks created in one go no longer share an id. Every config's default task id was the current time, so two `getWaveform` calls started together, like `AudioDucking.analyze` measuring two voice-overs, often got the same one, and the platforms refused the second with `TASK_ALREADY_RUNNING`; with several voice-overs nothing ducked. Default ids now never repeat within an isolate.
 
