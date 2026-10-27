@@ -111,6 +111,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - ⏩ **Playback Speed**: Adjust the playback speed of the video.
 - 🎢 **Speed Ramps**: Let a clip speed up and slow down while it plays, eased between the speeds you set.
 - ⏪ **Reverse Video**: Play a video segment backwards.
+- 🎥 **Clip Keyframes**: Pan, zoom into and turn a clip's picture between keyframes, for a slow push-in, a punch-in on a reaction or a pan across a wide shot.
 - 🔇 **Mute Audio**: Remove or mute the audio track from the video.
 - ⏩ **Audio Track Speed**: Speed up or slow down custom audio tracks with `VideoAudioTrack.playbackSpeed`, preserving pitch and stereo on Android, iOS and macOS. Source trims stay in source time; placement and fades stay in output time.
 - 🎚️ **Equalizer**: Raise or lower parts of the audio of a clip or a custom audio track with an `AudioEqualizer` of any number of bands, each a low shelf, a peak or a high shelf.
@@ -1002,6 +1003,7 @@ VideoSegment({
   VideoSpeedRamp? speedRamp,     // Optional: Speed that changes while it plays
   bool reverseVideo = false,     // Optional: Play this clip backwards
   ClipTransition? transition,    // Optional: Transition into the NEXT clip
+  List<SegmentKeyframe> keyframes = const [], // Optional: Pan, zoom and turn
 })
 ```
 
@@ -1015,6 +1017,7 @@ VideoSegment({
 - `speedRamp` (optional): A `VideoSpeedRamp` whose points put speeds along the clip, from `0` at its first frame to `1` at its last; the speed eases from one point to the next. Replaces `playbackSpeed`. `outputDuration`, `sourceToOutput` and `outputToSource` give the same timing the render uses, for laying out a timeline. The clip's sound follows the speed like a tape, so its pitch rises and falls with it.
 - `reverseVideo` (optional): Renders this clip backwards when `true`.
 - `transition` (optional): A `ClipTransition` describing how this clip transitions into the **next** clip (dissolve, fade-to-black, slide, etc.). Ignored on the last segment.
+- `keyframes` (optional): `SegmentKeyframe`s that pan, zoom and turn the clip's picture. Each keyframe belongs to the frame at its source timestamp: the picture is scaled by `scale` and turned by `rotation` around the frame's center, then shifted by `offset` (shares of the frame's width and height), and it eases from one keyframe to the next along the earlier one's `curve`. Every frame takes the placement of its own timestamp, so the motion stays on its frames however the clip is trimmed, sped up, ramped, reversed or blended into a transition. What the picture no longer covers is black. Only for `videoSegments`.
 
 **Usage Example:**
 ```dart
@@ -1046,6 +1049,18 @@ VideoSegment(
       ),
     ],
   ),
+)
+
+// A slow push-in on the middle of the shot, easing to a stop
+VideoSegment(
+  video: EditorVideo.asset('video.mp4'),
+  keyframes: const [
+    SegmentKeyframe(
+      time: Duration(seconds: 1),
+      curve: AnimationCurve.easeInOutCubic,
+    ),
+    SegmentKeyframe(time: Duration(seconds: 4), scale: 1.4),
+  ],
 )
 
 // Fast run-up, slow motion on the peak, fast landing

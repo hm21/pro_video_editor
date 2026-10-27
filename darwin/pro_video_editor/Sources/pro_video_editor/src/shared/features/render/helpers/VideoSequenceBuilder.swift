@@ -620,6 +620,8 @@ internal struct VideoCompositionData {
   var renderSize: CGSize
   /// One window per stabilized clip; single-track path only.
   var stabilizationWindows: [StabilizationWindow] = []
+  /// One window per clip with keyframes; single-track path only.
+  var motionWindows: [MotionWindow] = []
 }
 
 /// Placement of one video layer inside a layered composition window.

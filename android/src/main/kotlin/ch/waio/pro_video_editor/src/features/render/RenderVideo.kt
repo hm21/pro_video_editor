@@ -24,6 +24,7 @@ import ch.waio.pro_video_editor.src.features.render.helpers.applyComposition
 import ch.waio.pro_video_editor.src.features.render.helpers.ConfigurableInAppMp4Muxer
 import ch.waio.pro_video_editor.src.features.render.helpers.VideoTranscoder
 import ch.waio.pro_video_editor.src.features.render.helpers.VideoReverser
+import ch.waio.pro_video_editor.src.features.render.helpers.reversedSegmentKeyframes
 import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionGeometry
 import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionRenderer
 import ch.waio.pro_video_editor.src.features.render.helpers.MediaInfoExtractor
@@ -449,6 +450,9 @@ class RenderVideo(private val context: Context) {
                     reverseVideo = false,
                     // Its keyframes belong to the forward source's timestamps.
                     stabilization = null,
+                    keyframes = reversedSegmentKeyframes(
+                        clip.keyframes, reversed.firstSourcePtsUs
+                    ),
                 )
             } catch (e: Exception) {
                 Log.e(
@@ -654,6 +658,8 @@ class RenderVideo(private val context: Context) {
                 outgoingEqualizer = current.equalizer,
                 incomingVolume = next.volume,
                 incomingEqualizer = next.equalizer,
+                outgoingKeyframes = current.keyframes,
+                incomingKeyframes = next.keyframes,
                 onProgress = { f ->
                     onProgress(((doneCount + f) / total).coerceIn(0f, 1f))
                 },
@@ -799,6 +805,8 @@ class RenderVideo(private val context: Context) {
                     outgoingEqualizer = last.equalizer,
                     incomingVolume = first.volume,
                     incomingEqualizer = first.equalizer,
+                    outgoingKeyframes = last.keyframes,
+                    incomingKeyframes = first.keyframes,
                     onProgress = { f ->
                         onProgress(((doneCount + f) / total).coerceIn(0f, 1f))
                     },

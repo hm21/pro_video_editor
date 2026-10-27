@@ -1,6 +1,10 @@
 // ignore_for_file: public_member_api_docs, sort_constructors_first
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
+import 'package:pro_video_editor/core/models/video/segment_keyframe_model.dart'
+    show sortSegmentKeyframes;
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
@@ -25,6 +29,7 @@ class VideoSegment {
     this.transform,
     this.chromaKey,
     this.stabilization,
+    this.keyframes = const [],
   }) : assert(
          stabilization == null ||
              (!reverseVideo &&
@@ -193,6 +198,24 @@ class VideoSegment {
   /// [transition].
   final VideoStabilization? stabilization;
 
+  /// Pans, zooms and turns this clip's picture over time, e.g. for a slow
+  /// push-in, a punch-in on a reaction or a pan across a wide shot.
+  ///
+  /// Each frame takes the placement of its own source timestamp (see
+  /// [SegmentKeyframe]), so the motion stays on the frames it was set on
+  /// whatever [startTime] the clip is trimmed to, at any [playbackSpeed] or
+  /// [speedRamp], played backwards by [reverseVideo], and inside an overlap
+  /// [transition], where both clips are moved before they are blended. The
+  /// picture is moved after [stabilization] and before the render's crop,
+  /// rotation and layers; what it no longer covers is black.
+  ///
+  /// Empty keeps the picture still.
+  ///
+  /// Currently supported on Android and iOS/macOS for [videoSegments] only;
+  /// ignored inside a [VideoComposition], where `VideoLayer.keyframes` moves
+  /// a layer's clips.
+  final List<SegmentKeyframe> keyframes;
+
   /// Converts this clip to a map for platform channel communication.
   ///
   /// Resolves the input path and any chroma-key background image, so this is
@@ -214,6 +237,10 @@ class VideoSegment {
       'transform': transform?.toMap(),
       'chromaKey': await chromaKey?.toAsyncMap(),
       'stabilization': stabilization?.toMap(),
+      'keyframes': [
+        for (final keyframe in sortSegmentKeyframes(keyframes))
+          keyframe.toMap(),
+      ],
     };
   }
 
@@ -235,6 +262,7 @@ class VideoSegment {
     SegmentTransform? transform,
     ChromaKey? chromaKey,
     VideoStabilization? stabilization,
+    List<SegmentKeyframe>? keyframes,
   }) {
     return VideoSegment(
       video: video ?? this.video,
@@ -251,6 +279,7 @@ class VideoSegment {
       transform: transform ?? this.transform,
       chromaKey: chromaKey ?? this.chromaKey,
       stabilization: stabilization ?? this.stabilization,
+      keyframes: keyframes ?? this.keyframes,
     );
   }
 
@@ -270,7 +299,8 @@ class VideoSegment {
         other.timelineStart == timelineStart &&
         other.transform == transform &&
         other.chromaKey == chromaKey &&
-        other.stabilization == stabilization;
+        other.stabilization == stabilization &&
+        listEquals(other.keyframes, keyframes);
   }
 
   @override
@@ -287,7 +317,8 @@ class VideoSegment {
         timelineStart.hashCode ^
         transform.hashCode ^
         chromaKey.hashCode ^
-        stabilization.hashCode;
+        stabilization.hashCode ^
+        Object.hashAll(keyframes);
   }
 
   @override
@@ -304,7 +335,8 @@ class VideoSegment {
         'timelineStart: $timelineStart, '
         'transform: $transform, '
         'chromaKey: $chromaKey, '
-        'stabilization: $stabilization)';
+        'stabilization: $stabilization, '
+        'keyframes: $keyframes)';
   }
 
   Map<String, dynamic> toMap() {
@@ -322,6 +354,7 @@ class VideoSegment {
       'transform': transform?.toMap(),
       'chromaKey': chromaKey?.toMap(),
       'stabilization': stabilization?.toMap(),
+      'keyframes': [for (final keyframe in keyframes) keyframe.toMap()],
     };
   }
 
@@ -360,6 +393,10 @@ class VideoSegment {
               map['stabilization'] as Map<String, dynamic>,
             )
           : null,
+      keyframes: [
+        for (final keyframe in (map['keyframes'] as List?) ?? const [])
+          SegmentKeyframe.fromMap(Map<String, dynamic>.from(keyframe as Map)),
+      ],
     );
   }
 

@@ -27,6 +27,9 @@ internal final class ClipTransitionInstruction: NSObject, AVVideoCompositionInst
   /// The composition's frame duration, so the last frame lands on progress 1
   /// as Android's last frame does.
   let frameDuration: CMTime
+  /// Each side's keyframed motion, or nil when it stays where it is.
+  let outgoingMotion: TransitionSideMotion?
+  let incomingMotion: TransitionSideMotion?
 
   var requiredSourceTrackIDs: [NSValue]? {
     [NSNumber(value: outgoingTrackID), NSNumber(value: incomingTrackID)]
@@ -36,7 +39,8 @@ internal final class ClipTransitionInstruction: NSObject, AVVideoCompositionInst
     timeRange: CMTimeRange,
     outgoingTrackID: CMPersistentTrackID, incomingTrackID: CMPersistentTrackID,
     outgoingTransform: CGAffineTransform, incomingTransform: CGAffineTransform,
-    type: String, direction: String, curve: String, frameDuration: CMTime
+    type: String, direction: String, curve: String, frameDuration: CMTime,
+    outgoingMotion: TransitionSideMotion? = nil, incomingMotion: TransitionSideMotion? = nil
   ) {
     self.timeRange = timeRange
     self.outgoingTrackID = outgoingTrackID
@@ -47,6 +51,8 @@ internal final class ClipTransitionInstruction: NSObject, AVVideoCompositionInst
     self.direction = direction
     self.curve = curve
     self.frameDuration = frameDuration
+    self.outgoingMotion = outgoingMotion
+    self.incomingMotion = incomingMotion
     super.init()
   }
 
@@ -58,6 +64,36 @@ internal final class ClipTransitionInstruction: NSObject, AVVideoCompositionInst
       CMTimeGetSeconds(timeRange.duration) - CMTimeGetSeconds(frameDuration)
     guard span > 0, elapsed.isFinite else { return 1 }
     return min(max(elapsed / span, 0), 1)
+  }
+}
+
+/// One side's keyframed motion inside a pre-rendered blend.
+///
+/// The side's `sourceRange` of its file is stretched over the blend's
+/// duration, so a moment of the blend maps linearly onto the source frame it
+/// shows, which takes the motion of its own timestamp.
+internal struct TransitionSideMotion: Sendable {
+  let keyframes: [KeyframeConfig]
+  let sourceStartUs: Int64
+  let sourceDurationUs: Int64
+  let blendDurationUs: Int64
+
+  /// nil when there are no keyframes.
+  init?(keyframes: [KeyframeConfig], sourceRange: CMTimeRange, blendDuration: CMTime) {
+    guard !keyframes.isEmpty else { return nil }
+    self.keyframes = keyframes
+    sourceStartUs = Int64((CMTimeGetSeconds(sourceRange.start) * 1_000_000).rounded())
+    sourceDurationUs = Int64((CMTimeGetSeconds(sourceRange.duration) * 1_000_000).rounded())
+    blendDurationUs = Int64((CMTimeGetSeconds(blendDuration) * 1_000_000).rounded())
+  }
+
+  /// The motion of the frame shown `time` into the blend.
+  func motion(at time: CMTime) -> FrameMotion? {
+    let elapsedUs = CMTimeGetSeconds(time) * 1_000_000
+    guard elapsedUs.isFinite, blendDurationUs > 0 else { return nil }
+    let share = min(max(elapsedUs / Double(blendDurationUs), 0), 1)
+    let sourceUs = sourceStartUs + Int64((share * Double(sourceDurationUs)).rounded())
+    return segmentMotion(keyframes, atSourceUs: sourceUs)
   }
 }
 
@@ -91,11 +127,16 @@ internal final class ClipTransitionCompositor: NSObject, AVVideoCompositing {
     // A track with a gap leaves the other clip to draw from, as a layer
     // instruction draws only the clips it has, rather than failing the
     // whole blend into a hard cut.
+    let blendTime = instruction.map {
+      CMTimeSubtract(request.compositionTime, $0.timeRange.start)
+    }
     let outgoingFrame = instruction.flatMap {
       source(request, $0.outgoingTrackID, $0.outgoingTransform, size: size)
+        .map { moved($0, by: instruction?.outgoingMotion, at: blendTime) }
     }
     let incomingFrame = instruction.flatMap {
       source(request, $0.incomingTrackID, $0.incomingTransform, size: size)
+        .map { moved($0, by: instruction?.incomingMotion, at: blendTime) }
     }
     guard let instruction,
       let outgoing = outgoingFrame ?? incomingFrame,
@@ -122,6 +163,17 @@ internal final class ClipTransitionCompositor: NSObject, AVVideoCompositing {
       linearProgress: linear, durationUs: durationUs)
     context.render(image, to: target)
     request.finish(withComposedVideoFrame: target)
+  }
+
+  /// `frame`, upright, moved by `motion` as it applies at `time` into the
+  /// blend.
+  private func moved(_ frame: CIImage, by motion: TransitionSideMotion?, at time: CMTime?)
+    -> CIImage
+  {
+    guard let motion, let time, let placement = motion.motion(at: time),
+      !placement.isIdentity
+    else { return frame }
+    return applyFrameMotion(placement, to: frame)
   }
 
   /// The frame of track `trackID` at the request's time, upright, or nil when

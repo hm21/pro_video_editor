@@ -83,6 +83,13 @@ data class VideoClip(
      */
     val stabilization: StabilizationConfig? = null,
     /**
+     * Pans, zooms and turns the clip's picture, each frame by the keyframes
+     * around its source timestamp; sorted by time. `x` and `y` are the shift
+     * as fractions of the frame (see [segmentMotionAt]). Single-track renders
+     * only; empty leaves the frames where they are.
+     */
+    val keyframes: List<KeyframeConfig> = emptyList(),
+    /**
      * Opts this clip out of the layer/global key entirely.
      *
      * Internal, never parsed from the platform channel. `chromaKey = null`
@@ -114,7 +121,8 @@ data class VideoClip(
                 timelineStartUs = (clipMap["timelineStartUs"] as? Number)?.toLong(),
                 transform = transformRaw?.let { SegmentTransformConfig.fromMap(it) },
                 chromaKey = ChromaKeyConfig.fromMap(chromaKeyRaw),
-                stabilization = StabilizationConfig.fromMap(clipMap["stabilization"] as? Map<*, *>)
+                stabilization = StabilizationConfig.fromMap(clipMap["stabilization"] as? Map<*, *>),
+                keyframes = KeyframeConfig.listFrom(clipMap["keyframes"])
             )
         }
     }

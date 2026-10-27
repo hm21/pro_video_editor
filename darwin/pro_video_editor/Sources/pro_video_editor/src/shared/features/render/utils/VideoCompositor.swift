@@ -243,6 +243,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// Per-clip chroma-key windows (single-track path).
   private var chromaKeyWindows: [ChromaKeyWindow] = []
   private var stabilizationWindows: [StabilizationWindow] = []
+  private var motionWindows: [MotionWindow] = []
+  private var motionTimeScale: Double = 1
 
   /// Decoded chroma-key background images, keyed by config, so a background is
   /// decoded once per render rather than once per frame.
@@ -328,6 +330,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     self.fadeWindows = config.fadeWindows
     self.chromaKeyWindows = config.chromaKeyWindows
     self.stabilizationWindows = config.stabilizationWindows
+    self.motionWindows = config.motionWindows
+    self.motionTimeScale = config.motionTimeScale
   }
 
   /// Steadies the upright source frame shown at composition time `tUs` with
@@ -337,6 +341,21 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       let window = stabilizationWindows.first(where: { tUs >= $0.startUs && tUs < $0.endUs })
     else { return image }
     return applyStabilization(window.transform(atCompositionUs: tUs), to: image)
+  }
+
+  /// Steadies the upright source frame shown at composition time `tUs`, then
+  /// moves it by its clip's keyframes, if any.
+  private func applySourceFrameStages(to image: CIImage, atUs tUs: Int64) -> CIImage {
+    let steadied = applyStabilizationStage(to: image, atUs: tUs)
+    guard !motionWindows.isEmpty else { return steadied }
+    let compositionUs = Int64((Double(tUs) * motionTimeScale).rounded())
+    guard
+      let window = motionWindows.first(where: {
+        compositionUs >= $0.startUs && compositionUs < $0.endUs
+      }),
+      let motion = window.motion(atCompositionUs: compositionUs), !motion.isIdentity
+    else { return steadied }
+    return applyFrameMotion(motion, to: steadied)
   }
 
   /// The chroma key active at the given composition time, if any.
@@ -752,8 +771,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         if let orientation {
           frame = applyingAVFoundationTransform(orientation, to: frame)
         }
-        // The earlier frame steadied as it was when it was on screen.
-        frame = applyStabilizationStage(
+        // The earlier frame steadied and moved as it was when it was on
+        // screen.
+        frame = applySourceFrameStages(
           to: frame,
           atUs: Int64((CMTimeGetSeconds(request.compositionTime) * 1_000_000).rounded())
             - offsetUs)
@@ -1229,9 +1249,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         }
       }
 
-      // On the upright frame, whose size the stabilization's shifts are
-      // fractions of.
-      outputImage = applyStabilizationStage(
+      // On the upright frame, whose size the stabilization's and the
+      // keyframes' shifts are fractions of.
+      outputImage = applySourceFrameStages(
         to: outputImage,
         atUs: Int64((CMTimeGetSeconds(request.compositionTime) * 1_000_000).rounded()))
 

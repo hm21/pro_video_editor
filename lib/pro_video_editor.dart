@@ -50,6 +50,8 @@ export 'core/models/video/video_segment_model.dart';
 export 'core/models/video/video_speed_ramp_model.dart';
 export 'core/models/video/video_object_track_model.dart';
 export 'core/models/video/video_stabilization_model.dart';
+export 'core/models/video/segment_keyframe_model.dart'
+    hide sortSegmentKeyframes;
 export 'core/models/video/segment_transform_model.dart';
 export 'core/models/video/video_layer_model.dart';
 export 'core/models/video/video_composition_model.dart';

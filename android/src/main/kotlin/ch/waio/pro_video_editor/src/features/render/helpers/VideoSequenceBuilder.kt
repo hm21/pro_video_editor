@@ -565,12 +565,12 @@ class VideoSequenceBuilder(
     }
 
     /**
-     * Where a clip trimmed to [startUs] anchors its stabilization keyframes:
-     * the presentation time of the first frame of [inputPath] at or after
-     * [startUs], the frame the clip starts with, and the source's median frame
-     * duration.
+     * Where a clip trimmed to [startUs] anchors its stabilization and motion
+     * keyframes: the presentation time of the first frame of [inputPath] at or
+     * after [startUs], the frame the clip starts with, and the source's median
+     * frame duration.
      */
-    private fun stabilizationAnchor(inputPath: String, startUs: Long): Pair<Long, Long> {
+    private fun sourceAnchor(inputPath: String, startUs: Long): Pair<Long, Long> {
         val samples = SequentialFrameDecoder(context).scan(inputPath).samplePts
         val index = samples.binarySearch(startUs).let { if (it >= 0) it else -it - 1 }
         val frameUs = (1 until samples.size)
@@ -640,7 +640,38 @@ class VideoSequenceBuilder(
         // Build video effects
         val clipVideoEffects = mutableListOf<Effect>()
 
-        // The clip's speed change goes first, so every effect after it sees
+        // Stabilization and the keyframed motion first: both are keyed by
+        // source frame, so they must see the frames as decoded, before
+        // anything moves or crops them, and ahead of the speed change, which
+        // retimes every frame after it. Stabilization steadies the shot the
+        // motion then moves.
+        val anchor by lazy { sourceAnchor(clip.inputPath, clip.startUs ?: 0L) }
+        clip.stabilization?.let { stabilization ->
+            if (clip.changesSpeed || clip.reverseVideo) {
+                Log.w(
+                    RENDER_TAG,
+                    "Clip $index: stabilization is not supported with a playback " +
+                            "speed or reverse yet and is skipped"
+                )
+            } else {
+                val (firstPts, frameUs) = anchor
+                Log.d(
+                    RENDER_TAG,
+                    "Clip $index stabilization from source $firstPts us, frames $frameUs us apart"
+                )
+                clipVideoEffects += StabilizationTransformation(stabilization, firstPts, frameUs)
+            }
+        }
+        if (clip.keyframes.isNotEmpty()) {
+            val firstPts = anchor.first
+            Log.d(
+                RENDER_TAG,
+                "Clip $index: ${clip.keyframes.size} keyframe(s) from source $firstPts us"
+            )
+            clipVideoEffects += SegmentMotionTransformation(clip.keyframes, firstPts)
+        }
+
+        // The clip's speed change goes next, so every effect after it sees
         // the frame on the output timeline: image layers, their animations and
         // keyframes, timed color filters, the video effects and the frame
         // rate cap all time themselves on it, as on iOS and in the preview.
@@ -653,26 +684,6 @@ class VideoSequenceBuilder(
         } else if (clipSpeed != null) {
             Log.d(RENDER_TAG, "Clip $index playback speed: ${clipSpeed}x")
             clipVideoEffects += SpeedChangeEffect(clipSpeed)
-        }
-
-        // Stabilization first: its keyframes are keyed by source frame, so it
-        // must see the frames as decoded, before anything moves or crops them.
-        clip.stabilization?.let { stabilization ->
-            if (clip.changesSpeed || clip.reverseVideo) {
-                Log.w(
-                    RENDER_TAG,
-                    "Clip $index: stabilization is not supported with a playback " +
-                            "speed or reverse yet and is skipped"
-                )
-            } else {
-                val (firstPts, frameUs) =
-                    stabilizationAnchor(clip.inputPath, clip.startUs ?: 0L)
-                Log.d(
-                    RENDER_TAG,
-                    "Clip $index stabilization from source $firstPts us, frames $frameUs us apart"
-                )
-                clipVideoEffects += StabilizationTransformation(stabilization, firstPts, frameUs)
-            }
         }
 
         // Chroma key next, so it sees the original decoded colors — before
@@ -983,7 +994,10 @@ class VideoSequenceBuilder(
                         endUs = reversed.durationUs.takeIf { it > 0 },
                         reverseVideo = false,
                         // Its keyframes belong to the forward source's timestamps.
-                        stabilization = null
+                        stabilization = null,
+                        keyframes = reversedSegmentKeyframes(
+                            clip.keyframes, reversed.firstSourcePtsUs
+                        ),
                     )
                 )
             } catch (e: Exception) {

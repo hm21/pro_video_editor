@@ -79,7 +79,9 @@ internal enum ClipTransitionRenderer {
     outgoingFrameRate: Float? = nil,
     incomingFrameRate: Float? = nil,
     outgoingAudio: SideAudio = SideAudio(),
-    incomingAudio: SideAudio = SideAudio()
+    incomingAudio: SideAudio = SideAudio(),
+    outgoingKeyframes: [KeyframeConfig] = [],
+    incomingKeyframes: [KeyframeConfig] = []
   ) async throws -> RenderResult? {
     // Only a *successful* blend reaches the caller, so only a successful blend
     // can be cleaned up by it. An export that fails, stalls or is cancelled
@@ -191,7 +193,14 @@ internal enum ClipTransitionRenderer {
       videoComposition.renderSize = renderSize
       videoComposition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(targetFps))
 
-      if ClipTransitionEffects.handles(type) {
+      // A side with keyframes is moved on each frame before the blend, with
+      // black where its picture no longer reaches, which layer instructions
+      // cannot do: the compositor then draws every type.
+      let outgoingMotion = TransitionSideMotion(
+        keyframes: outgoingKeyframes, sourceRange: outVideoRange, blendDuration: d)
+      let incomingMotion = TransitionSideMotion(
+        keyframes: incomingKeyframes, sourceRange: inVideoRange, blendDuration: d)
+      if ClipTransitionEffects.handles(type) || outgoingMotion != nil || incomingMotion != nil {
         // Zooms, turns, blurs and flashes need both frames at once, which
         // layer instructions cannot give; a compositor draws each frame.
         videoComposition.customVideoCompositorClass = ClipTransitionCompositor.self
@@ -201,7 +210,8 @@ internal enum ClipTransitionRenderer {
             outgoingTrackID: trackA.trackID, incomingTrackID: trackB.trackID,
             outgoingTransform: transformA, incomingTransform: transformB,
             type: type, direction: direction, curve: curve,
-            frameDuration: videoComposition.frameDuration)
+            frameDuration: videoComposition.frameDuration,
+            outgoingMotion: outgoingMotion, incomingMotion: incomingMotion)
         ]
       } else {
         // Build the layer instructions with eased ramps.

@@ -62,7 +62,11 @@ internal enum ClipTransitionEffects {
     "zoomIn", "zoomOut", "spin", "whipPan", "blur", "glitch", "flash", "iris", "stretch",
   ]
 
-  /// Whether ``compose`` draws `type`.
+  /// Whether ``compose`` draws `type` for every blend.
+  ///
+  /// It draws `dissolve`, `slide`, `push` and `wipe` too, as the layer
+  /// instructions `ClipTransitionRenderer` uses for them do, for a blend whose
+  /// sides move by their keyframes and so need to be drawn frame by frame.
   static func handles(_ type: String) -> Bool { types.contains(type) }
 
   /// One frame of the transition from `outgoing` into `incoming`, both upright
@@ -129,6 +133,15 @@ internal enum ClipTransitionEffects {
       result = irised(a, b, size: size, p: p)
     case "stretch":
       result = stretched(a, b, size: size, p: p, direction: direction)
+    case "dissolve":
+      // The outgoing frame on top, fading out to reveal the incoming one.
+      result = layered(bottom: b, top: a, topOpacity: 1 - c)
+    case "slide":
+      result = slid(b, over: a, size: size, p: p, direction: direction)
+    case "push":
+      result = pushed(a, b, size: size, p: p, direction: direction)
+    case "wipe":
+      result = wiped(b, over: a, size: size, p: c, direction: direction)
     default:
       result = a
     }
@@ -271,6 +284,43 @@ internal enum ClipTransitionEffects {
       by: CGAffineTransform(translationX: outgoing.x, y: -outgoing.y))
     let movedB = b.transformed(by: CGAffineTransform(translationX: incoming.x, y: -incoming.y))
     return movedB.composited(over: movedA)
+  }
+
+  /// `incoming` sliding in over the still `outgoing` frame from the side
+  /// opposite `direction`, `p` of the way.
+  private static func slid(
+    _ incoming: CIImage, over outgoing: CIImage, size: CGSize, p: Double, direction: String
+  ) -> CIImage {
+    let rest = CGFloat(1 - p)
+    // Moves in top-origin terms; Core Image's y axis points up.
+    let move: CGPoint =
+      switch direction {
+      case "right": CGPoint(x: -size.width * rest, y: 0)
+      case "up": CGPoint(x: 0, y: size.height * rest)
+      case "down": CGPoint(x: 0, y: -size.height * rest)
+      default: CGPoint(x: size.width * rest, y: 0)
+      }
+    return incoming.transformed(by: CGAffineTransform(translationX: move.x, y: -move.y))
+      .composited(over: outgoing)
+  }
+
+  /// `incoming` revealed over `outgoing` by an edge moving toward
+  /// `direction`, `p` of the way across.
+  private static func wiped(
+    _ incoming: CIImage, over outgoing: CIImage, size: CGSize, p: Double, direction: String
+  ) -> CIImage {
+    let w = size.width
+    let h = size.height
+    let shown = CGFloat(p)
+    // Core Image's y axis points up: a wipe down reveals the top band.
+    let rect: CGRect =
+      switch direction {
+      case "left": CGRect(x: w * (1 - shown), y: 0, width: w * shown, height: h)
+      case "down": CGRect(x: 0, y: h * (1 - shown), width: w, height: h * shown)
+      case "up": CGRect(x: 0, y: 0, width: w, height: h * shown)
+      default: CGRect(x: 0, y: 0, width: w * shown, height: h)
+      }
+    return incoming.cropped(to: rect).composited(over: outgoing)
   }
 
   /// `image` averaged along one axis over a box `length` pixels long: the
