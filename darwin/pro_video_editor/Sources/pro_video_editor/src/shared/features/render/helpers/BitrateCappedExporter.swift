@@ -1,5 +1,6 @@
 import AVFoundation
 import AudioToolbox
+import CoreImage
 import Foundation
 
 /// Renders a composition through AVAssetReader → AVAssetWriter so the
@@ -128,6 +129,104 @@ internal enum BitrateCappedExporter {
     }
   }
 
+  /// Converts composed frames tagged with other primaries or another transfer
+  /// function than BT.709 to BT.709, so the BT.709 tag of the output describes
+  /// them.
+  ///
+  /// The custom compositor works without color management, so the frames of a
+  /// BT.601 source reach the writer still in its SMPTE-C or EBU primaries. The
+  /// export-session path converts those to BT.709, but `AVAssetWriter` (like
+  /// VideoToolbox's pixel transfer) treats them as BT.709 and only relabels
+  /// them, which oversaturates reds and greens. Untagged and BT.709 frames, all
+  /// others in practice, pass through untouched.
+  ///
+  /// Used from the video pump's queue only.
+  private final class BT709Conformer {
+    private static let attachments: [CFString: CFString] = [
+      kCVImageBufferColorPrimariesKey: kCVImageBufferColorPrimaries_ITU_R_709_2,
+      kCVImageBufferTransferFunctionKey: kCVImageBufferTransferFunction_ITU_R_709_2,
+    ]
+
+    /// The space CoreMedia reads a BT.709-tagged frame in, so a BT.709 frame
+    /// would come out of the conversion unchanged.
+    private let colorSpace = CVImageBufferCreateColorSpaceFromAttachments(
+      attachments as CFDictionary)?.takeRetainedValue()
+    private lazy var context = CIContext(options: [.cacheIntermediates: false])
+    private var pool: CVPixelBufferPool?
+
+    /// [sample] converted to BT.709 when its frame is tagged otherwise, else
+    /// [sample] itself; also [sample] itself if the conversion fails, which
+    /// leaves the writer to relabel it.
+    func conform(_ sample: CMSampleBuffer) -> CMSampleBuffer {
+      guard let source = CMSampleBufferGetImageBuffer(sample),
+        Self.needsConversion(source),
+        let colorSpace,
+        let target = makeBuffer(like: source)
+      else { return sample }
+
+      let image = CIImage(cvImageBuffer: source)
+      context.render(image, to: target, bounds: image.extent, colorSpace: colorSpace)
+      for (key, value) in Self.attachments {
+        CVBufferSetAttachment(target, key, value, .shouldPropagate)
+      }
+
+      var timing = CMSampleTimingInfo()
+      var format: CMVideoFormatDescription?
+      var converted: CMSampleBuffer?
+      guard
+        CMSampleBufferGetSampleTimingInfo(sample, at: 0, timingInfoOut: &timing) == noErr,
+        CMVideoFormatDescriptionCreateForImageBuffer(
+          allocator: kCFAllocatorDefault, imageBuffer: target,
+          formatDescriptionOut: &format) == noErr,
+        let format,
+        CMSampleBufferCreateReadyWithImageBuffer(
+          allocator: kCFAllocatorDefault, imageBuffer: target, formatDescription: format,
+          sampleTiming: &timing, sampleBufferOut: &converted) == noErr,
+        let converted
+      else { return sample }
+      return converted
+    }
+
+    private static func needsConversion(_ buffer: CVImageBuffer) -> Bool {
+      attachments.contains { key, bt709 in
+        attachment(key, of: buffer).map { $0 != bt709 as String } ?? false
+      }
+    }
+
+    private static func attachment(_ key: CFString, of buffer: CVImageBuffer) -> String? {
+      if #available(iOS 15.0, macOS 12.0, *) {
+        return CVBufferCopyAttachment(buffer, key, nil) as? String
+      }
+      #if os(iOS)
+        return CVBufferGetAttachment(buffer, key, nil)?.takeUnretainedValue() as? String
+      #else
+        return nil
+      #endif
+    }
+
+    /// A BGRA buffer the size of [source], from a pool made on first use.
+    private func makeBuffer(like source: CVImageBuffer) -> CVPixelBuffer? {
+      let width = CVPixelBufferGetWidth(source)
+      let height = CVPixelBufferGetHeight(source)
+      if pool == nil {
+        let attributes: [String: Any] = [
+          kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+          kCVPixelBufferWidthKey as String: width,
+          kCVPixelBufferHeightKey as String: height,
+          kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+        ]
+        CVPixelBufferPoolCreate(kCFAllocatorDefault, nil, attributes as CFDictionary, &pool)
+      }
+      guard let pool else { return nil }
+      var buffer: CVPixelBuffer?
+      CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &buffer)
+      guard let buffer, CVPixelBufferGetWidth(buffer) == width,
+        CVPixelBufferGetHeight(buffer) == height
+      else { return nil }
+      return buffer
+    }
+  }
+
   /// Exports [asset] to [outputURL], encoding video as H.264 with
   /// `AVVideoAverageBitRateKey` set to [videoBitrate] and audio as AAC.
   ///
@@ -192,6 +291,10 @@ internal enum BitrateCappedExporter {
       AVVideoCodecKey: AVVideoCodecType.h264,
       AVVideoWidthKey: width,
       AVVideoHeightKey: height,
+      // Tag the color space, as the export-session path does. Frames in other
+      // primaries are converted first (`BT709Conformer`): the writer would only
+      // relabel them.
+      AVVideoColorPropertiesKey: VideoColorProperties.bt709,
       AVVideoCompressionPropertiesKey: [
         AVVideoAverageBitRateKey: videoBitrate,
         // Disable B-frames. Frame reordering forces a composition-time offset
@@ -265,11 +368,13 @@ internal enum BitrateCappedExporter {
       try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
         terminator.attach(cont)
         let group = DispatchGroup()
+        let conformer = BT709Conformer()
 
         pump(
           input: videoInput, output: videoOutput, group: group,
           queue: DispatchQueue(label: "ch.waio.pro_video_editor.bitrate_export.video"),
-          session: session
+          session: session,
+          prepare: conformer.conform
         ) { sample in
           guard totalSeconds > 0 else { return }
           let pts = CMSampleBufferGetPresentationTimeStamp(sample)
@@ -346,8 +451,9 @@ internal enum BitrateCappedExporter {
   // MARK: - Sample pumping
 
   /// Copies samples from [output] into [input] on [queue] until the source is
-  /// drained, an append fails, or [session] ends. Calls `group.leave()` exactly
-  /// once when this track is done.
+  /// drained, an append fails, or [session] ends, passing each through
+  /// [prepare] first when given. Calls `group.leave()` exactly once when this
+  /// track is done.
   ///
   /// Every reader/writer call goes through [session], so a cancel racing this
   /// pump can only land between whole operations — see ``SessionGate``.
@@ -357,6 +463,7 @@ internal enum BitrateCappedExporter {
     group: DispatchGroup,
     queue: DispatchQueue,
     session: SessionGate,
+    prepare: ((CMSampleBuffer) -> CMSampleBuffer)? = nil,
     onSample: ((CMSampleBuffer) -> Void)?
   ) {
     group.enter()
@@ -373,9 +480,11 @@ internal enum BitrateCappedExporter {
           // us"; `false` from the append covers both "writer moved to .failed"
           // (surfaced after both pumps stop) and the same lost race. Every one
           // of them means this track is done.
+          // Prepared outside the gate: that touches neither the reader nor the
+          // writer, so a cancel need not wait for it.
           let sample: CMSampleBuffer? = session.whileLive(or: nil) {
             output.copyNextSampleBuffer()
-          }
+          }.map { prepare?($0) ?? $0 }
           if let sample, session.whileLive(or: false, { input.append(sample) }) {
             onSample?(sample)
             continue

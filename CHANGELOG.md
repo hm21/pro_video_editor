@@ -1,3 +1,7 @@
+## 2.45.1
+- **FIX**(iOS, macOS): Videos re-encoded for a `bitrate` and stop-motion videos are tagged BT.709, so FFmpeg-based players no longer shift their colors.
+- **FIX**(iOS, macOS): A render with a `bitrate` shows a BT.601 source in the same colors as one without.
+
 ## 2.45.0
 - **FEAT**(android, iOS, macOS): Frame sequences. `ImageLayer.sequence` plays a list of `ImageLayerFrame`s, each for its own duration, from one layer, like the frames of an animated GIF. A picture that changes over time, such as a running timer, no longer needs a layer per image, which made Android exports slow or stall.
 

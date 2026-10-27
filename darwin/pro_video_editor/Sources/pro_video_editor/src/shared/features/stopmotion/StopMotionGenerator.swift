@@ -93,6 +93,8 @@ internal enum StopMotionGenerator {
       AVVideoCodecKey: AVVideoCodecType.h264,
       AVVideoWidthKey: targetWidth,
       AVVideoHeightKey: targetHeight,
+      // The frames are drawn untagged, so this only tags them.
+      AVVideoColorPropertiesKey: VideoColorProperties.bt709,
       AVVideoCompressionPropertiesKey: [
         AVVideoAverageBitRateKey: bitrate,
         // Disable B-frames: stop-motion stills gain almost nothing from frame
