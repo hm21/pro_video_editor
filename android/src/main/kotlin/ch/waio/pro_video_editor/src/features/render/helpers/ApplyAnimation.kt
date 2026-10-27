@@ -747,11 +747,14 @@ internal class AnimatedBitmapOverlay(
         restRotation = restRotation
     )
 
-    // Cumulative end time of each frame within one playthrough.
+    // Cumulative end time of each frame within one playthrough. A frame
+    // sequence's durations are the caller's, so the sum stops at Long.MAX_VALUE
+    // rather than wrapping negative.
     private val frameEndsUs: LongArray = LongArray(frames.size).also { ends ->
         var acc = 0L
         for (i in frames.indices) {
-            acc += frameDurationsUs[i]
+            val durationUs = frameDurationsUs[i]
+            acc = if (acc > Long.MAX_VALUE - durationUs) Long.MAX_VALUE else acc + durationUs
             ends[i] = acc
         }
     }

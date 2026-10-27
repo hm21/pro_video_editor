@@ -235,7 +235,11 @@ private fun addImageLayer(
         // magic is sniffed off the first few bytes first — a file-backed
         // photo would otherwise be read in full just to learn it is a JPEG,
         // which is exactly the copy a path is meant to avoid.
-        val animatedFrames: AnimatedFrames? = if (layer.frames.isNotEmpty()) {
+        //
+        // A censor layer keeps to its one mask image, whose failure to decode
+        // fails the render rather than skipping the layer.
+        val isSequence = layer.frames.isNotEmpty() && layer.censor == null
+        val animatedFrames: AnimatedFrames? = if (isSequence) {
             prepareFrameSequence(
                 layer, videoWidth, videoHeight, rasterScale, rasterBudget
             ) ?: return
@@ -290,7 +294,7 @@ private fun addImageLayer(
             )
             Log.d(
                 RENDER_TAG,
-                "Layer: ${if (layer.frames.isNotEmpty()) "frame sequence" else "animated GIF"} " +
+                "Layer: ${if (isSequence) "frame sequence" else "animated GIF"} " +
                         "with ${animatedFrames.prepared.size} frame(s), loop=${layer.loop}, " +
                         "animationOffset=${layer.animationOffsetUs}us"
             )

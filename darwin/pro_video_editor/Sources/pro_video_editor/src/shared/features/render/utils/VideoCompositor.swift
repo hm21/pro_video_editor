@@ -4,7 +4,8 @@ import Foundation
 import ImageIO
 
 struct ImageLayer {
-  /// Decoded frames: one for a static image, several for an animated GIF.
+  /// Decoded frames: one for a static image, several for an animated GIF or
+  /// a frame sequence.
   let frames: [CIImage]
   /// Cumulative end time (µs) of each frame within one playthrough; the last
   /// entry is one playthrough's length, 0 for a static image.
@@ -130,7 +131,9 @@ private func decodeFrameSequence(_ sequence: [ImageLayerFrameConfig]) -> (
   var accUs: Int64 = 0
   for frame in sequence {
     guard let image = decodeOrientedImage(frame.image, cache: false) else { return nil }
-    accUs += frame.durationUs
+    // The caller picks the durations, and an overflowing sum would trap.
+    let (sum, overflow) = accUs.addingReportingOverflow(frame.durationUs)
+    accUs = overflow ? .max : sum
     frames.append(image)
     frameEndsUs.append(accUs)
   }
@@ -470,8 +473,10 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     let frames: [CIImage]
     let frameEndsUs: [Int64]
 
-    if !layer.frames.isEmpty {
+    if !layer.frames.isEmpty, layer.censor == nil {
       // A frame sequence plays like the frames of a GIF, from this one layer.
+      // A censor layer keeps to its one mask image, whose failure to decode
+      // fails the render rather than skipping the layer.
       guard let sequence = decodeFrameSequence(layer.frames) else { return }
       frames = sequence.frames
       frameEndsUs = sequence.frameEndsUs

@@ -147,6 +147,7 @@ class VideoSequenceBuilder(
         /**
          * Images shown one after the other instead of [image], each for its
          * duration, the way an animated GIF's frames are; empty draws [image].
+         * A censor or an audio visualizer layer ignores them.
          */
         val frames: List<ImageLayerFrameConfig> = emptyList()
     )

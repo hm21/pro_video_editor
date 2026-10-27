@@ -334,7 +334,8 @@ public struct ImageLayerConfig: Sendable {
   /// an audio visualizer layer ignores it.
   var shapeMask: ShapeMaskConfig? = nil
   /// Images shown one after the other instead of `image`, each for its
-  /// duration, the way an animated GIF's frames are; empty draws `image`.
+  /// duration, the way an animated GIF's frames are; empty draws `image`. A
+  /// censor or an audio visualizer layer ignores them.
   var frames: [ImageLayerFrameConfig] = []
 
   static func fromArguments(_ args: [String: Any]?) -> ImageLayerConfig? {
