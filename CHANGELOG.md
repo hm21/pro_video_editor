@@ -1,3 +1,6 @@
+## 2.46.0
+- **FEAT**(android, iOS, macOS): Clip keyframes. `VideoSegment.keyframes` pans, zooms and turns a clip's picture between `SegmentKeyframe`s, e.g. for a push-in or a pan across a wide shot. The motion is keyed to the clip's source frames, so it stays on them through trims, speed changes, reverse and overlap transitions.
+
 ## 2.45.1
 - **FIX**(iOS, macOS): Videos re-encoded for a `bitrate` and stop-motion videos are tagged BT.709, so FFmpeg-based players no longer shift their colors.
 - **FIX**(iOS, macOS): A render with a `bitrate` shows a BT.601 source in the same colors as one without.

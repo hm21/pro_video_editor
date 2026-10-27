@@ -34,8 +34,16 @@ import java.nio.ByteBuffer
 @UnstableApi
 object VideoReverser {
 
-    /** Result of [reverseSync]. */
-    data class ReverseResult(val outputPath: String, val durationUs: Long)
+    /**
+     * Result of [reverseSync]: the reversed file, how long it plays, and the
+     * source timestamp of the frame it opens on, the last one of the segment
+     * the decode delivered; its later frames step back from there.
+     */
+    data class ReverseResult(
+        val outputPath: String,
+        val durationUs: Long,
+        val firstSourcePtsUs: Long,
+    )
 
     private const val DECODER_TIMEOUT_US = 10_000L
     private const val ENCODER_TIMEOUT_US = 10_000L
@@ -143,7 +151,9 @@ object VideoReverser {
                 }
             }
 
-            return ReverseResult(outputFile.absolutePath, videoResult.durationUs)
+            return ReverseResult(
+                outputFile.absolutePath, videoResult.durationUs, videoResult.firstSourcePtsUs
+            )
         } catch (e: Exception) {
             outputFile.delete()
             throw e
@@ -169,7 +179,7 @@ object VideoReverser {
     // VIDEO
     // ---------------------------------------------------------------------
 
-    private data class VideoReverseResult(val durationUs: Long)
+    private data class VideoReverseResult(val durationUs: Long, val firstSourcePtsUs: Long)
 
     /**
      * Two-phase "All-Intra" approach:
@@ -218,7 +228,7 @@ object VideoReverser {
         }
 
         // Phase A: single forward decode + re-encode (70 % of progress).
-        transcodeSegmentToAllIntra(
+        val firstEncodedPtsUs = transcodeSegmentToAllIntra(
             context = context,
             inputPath = inputPath,
             segmentStartUs = segmentStartUs,
@@ -229,7 +239,7 @@ object VideoReverser {
 
         // Phase B: byte-level reverse + remux into the shared output muxer
         //          (remaining 30 % of progress).
-        val durationUs = remuxReversed(
+        val (durationUs, encodedSpanUs) = remuxReversed(
             allIntraFile = allIntraFile,
             muxer = muxer,
             onVideoFormatReady = { fmt ->
@@ -240,7 +250,10 @@ object VideoReverser {
             onProgress = { f -> onProgress(0.7f + f * 0.3f) },
         )
 
-        return VideoReverseResult(durationUs = durationUs)
+        return VideoReverseResult(
+            durationUs = durationUs,
+            firstSourcePtsUs = firstEncodedPtsUs + encodedSpanUs,
+        )
     }
 
     /**
@@ -256,7 +269,7 @@ object VideoReverser {
         segmentEndUs: Long,
         outFile: File,
         onProgress: (Float) -> Unit,
-    ) {
+    ): Long {
         val extractor = openMediaExtractor(context, inputPath)
         val videoTrackIndex = findTrack(extractor, "video/")
             ?: throw IllegalStateException("No video track found in $inputPath")
@@ -318,6 +331,9 @@ object VideoReverser {
         extractor.seekTo(segmentStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
         val decInfo = MediaCodec.BufferInfo()
         var inputDone = false
+        // The muxer counts the file's timestamps from its first frame, so the
+        // source timestamp of that frame is kept here.
+        var firstEncodedPtsUs = -1L
         var outputDone = false
 
         try {
@@ -414,6 +430,7 @@ object VideoReverser {
                                         val encImage = encoder.getInputImage(encInIdx)
                                         if (encImage != null) {
                                             copyImageDirect(decImage, encImage)
+                                            if (firstEncodedPtsUs < 0) firstEncodedPtsUs = pts
                                             encoder.queueInputBuffer(
                                                 encInIdx, 0, width * height * 3 / 2, pts, 0
                                             )
@@ -467,6 +484,7 @@ object VideoReverser {
         }
 
         Log.d(RENDER_TAG, "All-intra transcode done: ${outFile.length()} bytes")
+        return if (firstEncodedPtsUs < 0) segmentStartUs else firstEncodedPtsUs
     }
 
     /**
@@ -557,7 +575,7 @@ object VideoReverser {
         muxer: MediaMuxer,
         onVideoFormatReady: (MediaFormat) -> Int,
         onProgress: (Float) -> Unit,
-    ): Long {
+    ): Pair<Long, Long> {
         data class Sample(val ptsUs: Long, val data: ByteArray)
 
         // Guard against OutOfMemoryError: this remux loads every compressed
@@ -642,7 +660,9 @@ object VideoReverser {
             onProgress((i + 1).toFloat() / total)
         }
 
-        return newPts
+        // How far the latest frame, which the reversed file opens on, lies
+        // after the first one, in source time.
+        return newPts to (maxPts - minPts)
     }
 
     /**

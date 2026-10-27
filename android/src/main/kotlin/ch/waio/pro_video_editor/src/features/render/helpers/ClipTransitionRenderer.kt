@@ -11,6 +11,7 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import androidx.media3.common.util.UnstableApi
 import ch.waio.pro_video_editor.src.features.render.models.EqualizerConfig
+import ch.waio.pro_video_editor.src.features.render.models.KeyframeConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.openMediaExtractor
 import java.io.DataInputStream
@@ -66,6 +67,9 @@ object ClipTransitionRenderer {
      * @param outgoingEqualizer Equalizer of the outgoing clip, likewise.
      * @param incomingVolume Volume of the incoming clip, likewise.
      * @param incomingEqualizer Equalizer of the incoming clip, likewise.
+     * @param outgoingKeyframes The outgoing clip's motion, by source timestamp
+     *  (see [segmentMotionAt]); each of its frames is moved before the blend.
+     * @param incomingKeyframes The incoming clip's motion, likewise.
      * @return The rendered transition clip, or `null` if it could not be
      *  produced (caller should fall back to a hard cut).
      */
@@ -86,6 +90,8 @@ object ClipTransitionRenderer {
         outgoingEqualizer: EqualizerConfig? = null,
         incomingVolume: Float? = null,
         incomingEqualizer: EqualizerConfig? = null,
+        outgoingKeyframes: List<KeyframeConfig> = emptyList(),
+        incomingKeyframes: List<KeyframeConfig> = emptyList(),
         onProgress: (Float) -> Unit = {},
     ): TransitionResult? {
         val outputFile = File(context.cacheDir, "transition_${System.currentTimeMillis()}.mp4")
@@ -182,6 +188,10 @@ object ClipTransitionRenderer {
                 val inRaf = RandomAccessFile(inSeg.framesFile, "r").also { inFramesRaf = it }
                 val outFrameBuf = ByteArray(outSeg.frameBytes)
                 val inFrameBuf = ByteArray(inSeg.frameBytes)
+                // A side with keyframes is moved into a buffer of its own, so
+                // the decoded frame it reads from stays intact.
+                val outMoved = Motion(outgoingKeyframes, outSeg)
+                val inMoved = Motion(incomingKeyframes, inSeg)
                 var nextEncoderFrame = 0
                 var outputDone = false
 
@@ -204,16 +214,20 @@ object ClipTransitionRenderer {
                             val bIdx = if (frameCount > 1) {
                                 (progress * (inSeg.frameCount - 1)).roundToInt()
                             } else inSeg.frameCount - 1
-                            readFrame(outRaf, aIdx.coerceIn(0, outSeg.frameCount - 1), outFrameBuf)
-                            readFrame(inRaf, bIdx.coerceIn(0, inSeg.frameCount - 1), inFrameBuf)
+                            val aFrame = aIdx.coerceIn(0, outSeg.frameCount - 1)
+                            val bFrame = bIdx.coerceIn(0, inSeg.frameCount - 1)
+                            readFrame(outRaf, aFrame, outFrameBuf)
+                            readFrame(inRaf, bFrame, inFrameBuf)
+                            val outFrame = outMoved.apply(outFrameBuf, aFrame)
+                            val inFrame = inMoved.apply(inFrameBuf, bFrame)
                             val blended = if (ClipTransitionEffects.handles(type)) {
                                 ClipTransitionEffects.compose(
-                                    type, direction, outFrameBuf, inFrameBuf,
+                                    type, direction, outFrame, inFrame,
                                     width, height, eased, progress, effectiveDurationUs,
                                 )
                             } else {
                                 blendFrame(
-                                    outFrameBuf, inFrameBuf,
+                                    outFrame, inFrame,
                                     width, height, eased, type, direction
                                 )
                             }
@@ -342,7 +356,29 @@ object ClipTransitionRenderer {
         val frameBytes: Int,
         val width: Int,
         val height: Int,
+        /** The source timestamp of each frame, in the order they were written. */
+        val ptsUs: LongArray,
     )
+
+    /**
+     * Moves the frames of [segment] by [keyframes], each by its own source
+     * timestamp; a side without keyframes passes its frames through.
+     */
+    private class Motion(
+        private val keyframes: List<KeyframeConfig>,
+        private val segment: DecodedSegment,
+    ) {
+        private val moved = if (keyframes.isEmpty()) null else ByteArray(segment.frameBytes)
+
+        /** [frame], decoded frame [index] of the segment, as it is to be blended. */
+        fun apply(frame: ByteArray, index: Int): ByteArray {
+            val out = moved ?: return frame
+            val motion = segmentMotionAt(keyframes, segment.ptsUs[index])
+            if (motion == null || motion.isIdentity) return frame
+            I420Motion.warp(frame, segment.width, segment.height, motion, out)
+            return out
+        }
+    }
 
     /**
      * Decodes [path] within [[startUs]..[endUs]] into packed I420 frames,
@@ -397,6 +433,7 @@ object ClipTransitionRenderer {
         val coded = ByteArray(frameBytes)
         val upright = if (quarterTurns == 0) coded else ByteArray(frameBytes)
         var frameCount = 0
+        val ptsUs = ArrayList<Long>()
         val info = MediaCodec.BufferInfo()
         var inputDone = false
         var outputDone = false
@@ -446,6 +483,7 @@ object ClipTransitionRenderer {
                                     )
                                 }
                                 framesOut.write(upright)
+                                ptsUs.add(info.presentationTimeUs)
                                 frameCount++
                             }
                         }
@@ -467,7 +505,9 @@ object ClipTransitionRenderer {
             framesFile.delete()
             return null
         }
-        return DecodedSegment(framesFile, frameCount, frameBytes, width, height)
+        return DecodedSegment(
+            framesFile, frameCount, frameBytes, width, height, ptsUs.toLongArray()
+        )
     }
 
     /**

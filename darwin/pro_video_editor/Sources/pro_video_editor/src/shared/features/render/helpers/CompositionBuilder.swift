@@ -163,6 +163,8 @@ internal class CompositionBuilder {
       frameDuration: frameDuration,
       renderSize: compositionRenderSize,
       stabilizationWindows: computeStabilizationWindows(
+        videoClips: videoClips, clipInstructions: videoResult.clipInstructions),
+      motionWindows: computeMotionWindows(
         videoClips: videoClips, clipInstructions: videoResult.clipInstructions)
     )
 

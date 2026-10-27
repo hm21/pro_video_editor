@@ -47,6 +47,12 @@ internal struct VideoClip: Sendable {
   /// `nil` leaves the frames where they are.
   let stabilization: StabilizationConfig?
 
+  /// Pans, zooms and turns the clip's picture, each frame by the keyframes
+  /// around its source timestamp in `inputPath`; sorted by time. `x` and `y`
+  /// are the shift as fractions of the frame (see `segmentMotion`).
+  /// Single-track path only; empty leaves the frames where they are.
+  let keyframes: [KeyframeConfig]
+
   init(
     inputPath: String,
     startUs: Int64? = nil,
@@ -62,7 +68,8 @@ internal struct VideoClip: Sendable {
     chromaKey: ChromaKeyConfig? = nil,
     suppressChromaKey: Bool = false,
     frameRateOverride: Float? = nil,
-    stabilization: StabilizationConfig? = nil
+    stabilization: StabilizationConfig? = nil,
+    keyframes: [KeyframeConfig] = []
   ) {
     self.inputPath = inputPath
     self.startUs = startUs
@@ -79,6 +86,7 @@ internal struct VideoClip: Sendable {
     self.suppressChromaKey = suppressChromaKey
     self.frameRateOverride = frameRateOverride
     self.stabilization = stabilization
+    self.keyframes = keyframes
   }
 
   /// This clip playing `startUs..<endUs` of `inputPath` instead of its own
@@ -110,7 +118,8 @@ internal struct VideoClip: Sendable {
       chromaKey: chromaKey,
       suppressChromaKey: suppressChromaKey,
       frameRateOverride: frameRateOverride,
-      stabilization: stabilization?.shifted(by: sourceShiftUs)
+      stabilization: stabilization?.shifted(by: sourceShiftUs),
+      keyframes: keyframes.map { $0.shifted(by: -sourceShiftUs) }
     )
   }
 
@@ -139,7 +148,8 @@ internal struct VideoClip: Sendable {
       ),
       stabilization: StabilizationConfig.fromArguments(
         clipMap["stabilization"] as? [String: Any]
-      )
+      ),
+      keyframes: KeyframeConfig.list(from: clipMap["keyframes"])
     )
   }
 }

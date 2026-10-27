@@ -68,6 +68,15 @@ public struct VideoCompositorConfig {
   /// clip.
   var stabilizationWindows: [StabilizationWindow] = []
 
+  /// Keyframed motion windows for the **single-track** path, one per clip
+  /// with keyframes, on the composition timeline before any render-wide
+  /// speed.
+  var motionWindows: [MotionWindow] = []
+
+  /// How much composition time a microsecond of the render covers: the
+  /// render-wide playback speed, which `motionWindows` are measured before.
+  var motionTimeScale: Double = 1
+
   var videoRotationDegrees: Double = 0.0
   var shouldApplyOrientationCorrection: Bool = false
 

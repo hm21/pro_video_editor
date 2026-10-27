@@ -270,6 +270,14 @@ class RenderVideo {
             }
           }
 
+          // The keyframed motion keys each frame by its source time too; a
+          // render-wide speed scales the whole composition from 0, so the
+          // compositor maps its time back before looking the frame up.
+          effectsConfig.motionWindows = videoCompData.motionWindows
+          if let speed = workingConfig.playbackSpeed, speed > 0 {
+            effectsConfig.motionTimeScale = Double(speed)
+          }
+
           // Apply playback speed to the entire composition
           videoCompConfig.instructions = applyPlaybackSpeed(
             composition: composition, instructions: videoCompConfig.instructions,
@@ -889,7 +897,8 @@ class RenderVideo {
           outgoingFrameRate: current.frameRateOverride,
           incomingFrameRate: next!.frameRateOverride,
           outgoingAudio: .init(volume: current.volume, equalizer: current.equalizer),
-          incomingAudio: .init(volume: next!.volume, equalizer: next!.equalizer))
+          incomingAudio: .init(volume: next!.volume, equalizer: next!.equalizer),
+          outgoingKeyframes: current.keyframes, incomingKeyframes: next!.keyframes)
       } catch {
         return TransitionPreRender(clips: result, urls: urls, stall: error)
       }
@@ -907,7 +916,8 @@ class RenderVideo {
               fromUs: 0, toUs: curDur - tailSrc, ofSourceUs: curDur),
             reverseVideo: false, transition: nil, chromaKey: current.chromaKey,
             frameRateOverride: current.frameRateOverride,
-            stabilization: current.stabilization))
+            stabilization: current.stabilization,
+            keyframes: current.keyframes))
         let blend = blendChromaKey(
           current, next!, global: globalChromaKey, boundary: "\(i)")
         result.append(
@@ -922,7 +932,8 @@ class RenderVideo {
           speedRamp: next!.croppedSpeedRamp(fromUs: headSrc, toUs: nextDur, ofSourceUs: nextDur),
           reverseVideo: next!.reverseVideo, transition: next!.transition,
           chromaKey: next!.chromaKey, frameRateOverride: next!.frameRateOverride,
-          stabilization: next!.stabilization)
+          stabilization: next!.stabilization,
+          keyframes: next!.keyframes)
       } else {
         PluginLog.print("⚠️ Transition render failed at boundary \(i); hard cut")
         appendClip(clearedOverlap(current))
@@ -1023,7 +1034,8 @@ class RenderVideo {
             outgoingFrameRate: last.frameRateOverride,
             incomingFrameRate: first.frameRateOverride,
             outgoingAudio: .init(volume: last.volume, equalizer: last.equalizer),
-            incomingAudio: .init(volume: first.volume, equalizer: first.equalizer))
+            incomingAudio: .init(volume: first.volume, equalizer: first.equalizer),
+            outgoingKeyframes: last.keyframes, incomingKeyframes: first.keyframes)
         } catch {
           return TransitionPreRender(clips: result, urls: urls, stall: error)
         }
@@ -1041,7 +1053,8 @@ class RenderVideo {
                 fromUs: headSrc, toUs: lastDur - tailSrc, ofSourceUs: lastDur),
               reverseVideo: false, transition: nil,
               chromaKey: first.chromaKey, frameRateOverride: first.frameRateOverride,
-              stabilization: first.stabilization)
+              stabilization: first.stabilization,
+              keyframes: first.keyframes)
           } else {
             result[0] = VideoClip(
               inputPath: first.inputPath, startUs: firstStart + headSrc,
@@ -1051,7 +1064,8 @@ class RenderVideo {
                 fromUs: headSrc, toUs: firstDur, ofSourceUs: firstDur),
               reverseVideo: false,
               transition: first.transition, chromaKey: first.chromaKey,
-              frameRateOverride: first.frameRateOverride, stabilization: first.stabilization)
+              frameRateOverride: first.frameRateOverride, stabilization: first.stabilization,
+              keyframes: first.keyframes)
             result[lastIdx] = VideoClip(
               inputPath: last.inputPath, startUs: last.startUs, endUs: lastEnd - tailSrc,
               volume: last.volume, equalizer: last.equalizer,
@@ -1059,7 +1073,8 @@ class RenderVideo {
               speedRamp: last.croppedSpeedRamp(
                 fromUs: 0, toUs: lastDur - tailSrc, ofSourceUs: lastDur),
               reverseVideo: false, transition: nil, chromaKey: last.chromaKey,
-              frameRateOverride: last.frameRateOverride, stabilization: last.stabilization)
+              frameRateOverride: last.frameRateOverride, stabilization: last.stabilization,
+              keyframes: last.keyframes)
           }
           let wrapBlend = blendChromaKey(
             last, first, global: globalChromaKey, boundary: "loop wrap")
@@ -1096,7 +1111,8 @@ class RenderVideo {
       volume: clip.volume, equalizer: clip.equalizer, playbackSpeed: clip.playbackSpeed,
       speedRamp: clip.speedRamp,
       reverseVideo: clip.reverseVideo, transition: nil, chromaKey: clip.chromaKey,
-      frameRateOverride: clip.frameRateOverride, stabilization: clip.stabilization)
+      frameRateOverride: clip.frameRateOverride, stabilization: clip.stabilization,
+      keyframes: clip.keyframes)
   }
 
   /// The chroma key to apply to a pre-rendered overlap blend.

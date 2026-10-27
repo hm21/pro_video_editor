@@ -77,5 +77,6 @@ internal enum BitrateCapPolicy {
       && !clip.reverseVideo
       && clip.chromaKey == nil
       && clip.stabilization == nil
+      && clip.keyframes.isEmpty
   }
 }
