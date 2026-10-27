@@ -933,7 +933,7 @@ class RenderVideo {
           reverseVideo: next!.reverseVideo, transition: next!.transition,
           chromaKey: next!.chromaKey, frameRateOverride: next!.frameRateOverride,
           stabilization: next!.stabilization,
-            keyframes: next!.keyframes)
+          keyframes: next!.keyframes)
       } else {
         PluginLog.print("⚠️ Transition render failed at boundary \(i); hard cut")
         appendClip(clearedOverlap(current))
@@ -1054,7 +1054,7 @@ class RenderVideo {
               reverseVideo: false, transition: nil,
               chromaKey: first.chromaKey, frameRateOverride: first.frameRateOverride,
               stabilization: first.stabilization,
-            keyframes: first.keyframes)
+              keyframes: first.keyframes)
           } else {
             result[0] = VideoClip(
               inputPath: first.inputPath, startUs: firstStart + headSrc,
@@ -1065,7 +1065,7 @@ class RenderVideo {
               reverseVideo: false,
               transition: first.transition, chromaKey: first.chromaKey,
               frameRateOverride: first.frameRateOverride, stabilization: first.stabilization,
-            keyframes: first.keyframes)
+              keyframes: first.keyframes)
             result[lastIdx] = VideoClip(
               inputPath: last.inputPath, startUs: last.startUs, endUs: lastEnd - tailSrc,
               volume: last.volume, equalizer: last.equalizer,
@@ -1074,7 +1074,7 @@ class RenderVideo {
                 fromUs: 0, toUs: lastDur - tailSrc, ofSourceUs: lastDur),
               reverseVideo: false, transition: nil, chromaKey: last.chromaKey,
               frameRateOverride: last.frameRateOverride, stabilization: last.stabilization,
-            keyframes: last.keyframes)
+              keyframes: last.keyframes)
           }
           let wrapBlend = blendChromaKey(
             last, first, global: globalChromaKey, boundary: "loop wrap")
@@ -1112,7 +1112,7 @@ class RenderVideo {
       speedRamp: clip.speedRamp,
       reverseVideo: clip.reverseVideo, transition: nil, chromaKey: clip.chromaKey,
       frameRateOverride: clip.frameRateOverride, stabilization: clip.stabilization,
-            keyframes: clip.keyframes)
+      keyframes: clip.keyframes)
   }
 
   /// The chroma key to apply to a pre-rendered overlap blend.

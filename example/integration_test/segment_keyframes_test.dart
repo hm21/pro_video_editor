@@ -102,7 +102,7 @@ void main() {
 
     final moved = await rendered(segment);
     final still = await rendered(segment.copyWith(keyframes: const []));
-    final source = await frames(clip);
+    final source = await frames(segment.video);
     expect(moved, hasLength(still.length));
 
     /// The source frame [frame] shows, unmoved: the one it differs least
@@ -205,6 +205,17 @@ void main() {
         ),
         // About the last frame before the end.
         (elapsed) => const Duration(microseconds: 2966667) - elapsed,
+      );
+    });
+
+    testWidgets('moves a clip stored with a rotation flag upright', (_) async {
+      await expectMovedByKeyframes(
+        VideoSegment(
+          // 640x360 stored, flagged -90°: shown as 360x640, 30 fps, 2 s.
+          video: EditorVideo.asset('assets/tests/test_g.mp4'),
+          keyframes: keyframes,
+        ),
+        (elapsed) => elapsed,
       );
     });
 
