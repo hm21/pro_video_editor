@@ -2,8 +2,8 @@ import CoreImage
 import Foundation
 
 /// Core Image drawing for the overlap transitions that move, blur or flash the
-/// picture — zoom in and out, spin, whip pan, blur, glitch, flash, iris and
-/// stretch.
+/// picture — zoom in and out, spin, whip pan, blur, glitch, flash, iris,
+/// stretch, light leak, clock and diagonal wipes, flip and cube.
 ///
 /// `ClipTransitionRenderer` drives dissolve, slide, push and wipe with layer
 /// instruction ramps and hands every type ``handles(_:)`` reports to
@@ -54,12 +54,55 @@ internal enum ClipTransitionEffects {
   static let flashPower = 4.0
   /// Width of iris's soft circle edge, in frame pixels.
   static let irisEdge = 2.0
+  /// Progress window in which lightLeak changes clip, hidden under its light.
+  static let leakSwapStart = 0.35
+  static let leakSwapEnd = 0.65
+  /// How bright lightLeak's lights are at mid-transition, as a multiple of
+  /// their colors.
+  static let leakGain = 2.2
+  /// Width of the soft edge of clockWipe and diagonalWipe, in frame pixels.
+  static let wipeEdge = 2.0
+  /// How far the camera is from flip and cube, as a multiple of the side
+  /// that turns.
+  static let turnDistance = 2.0
+  /// How much flip and cube darken a face turned edge-on.
+  static let turnShade = 0.4
+
+  /// One of lightLeak's warm lights: its color, where its centre starts and
+  /// ends as fractions of the frame from the top left, and its reach as
+  /// fractions of the frame's longer side. The colors are the light leak
+  /// video effect's.
+  struct LeakLight {
+    let red: Double
+    let green: Double
+    let blue: Double
+    let startX: Double
+    let startY: Double
+    let endX: Double
+    let endY: Double
+    let reachX: Double
+    let reachY: Double
+  }
+
+  /// lightLeak's lights, drifting from the left edge across the frame.
+  static let leakLights = [
+    LeakLight(
+      red: 0.95, green: 0.49, blue: 0.17, startX: -0.2, startY: 0.3, endX: 0.85, endY: 0.5,
+      reachX: 0.55, reachY: 0.8),
+    LeakLight(
+      red: 0.75, green: 0.21, blue: 0.24, startX: -0.1, startY: -0.05, endX: 1.1, endY: 0.1,
+      reachX: 0.6, reachY: 0.3),
+    LeakLight(
+      red: 0.55, green: 0.45, blue: 0.28, startX: -0.3, startY: 0.85, endX: 0.7, endY: 0.7,
+      reachX: 0.4, reachY: 0.4),
+  ]
 
   /// Offsets ``glitchHash`` so slice 0 of pattern 0 does not hash to 0.
   private static let glitchSeed: UInt32 = 0x9E37_79B9
 
   private static let types: Set<String> = [
     "zoomIn", "zoomOut", "spin", "whipPan", "blur", "glitch", "flash", "iris", "stretch",
+    "lightLeak", "clockWipe", "diagonalWipe", "flip", "cube",
   ]
 
   /// Whether ``compose`` draws `type` for every blend.
@@ -133,6 +176,17 @@ internal enum ClipTransitionEffects {
       result = irised(a, b, size: size, p: p)
     case "stretch":
       result = stretched(a, b, size: size, p: p, direction: direction)
+    case "lightLeak":
+      result = lightLeaked(
+        layered(bottom: a, top: b, topOpacity: smoothstep(leakSwapStart, leakSwapEnd, c)),
+        size: size, c: c)
+    case "clockWipe":
+      result = clockWiped(a, b, size: size, c: c)
+    case "diagonalWipe":
+      result = diagonalWiped(a, b, size: size, c: c, direction: direction)
+    case "flip", "cube":
+      result = turned(
+        a, b, size: size, faces: turnedFaces(type: type, direction: direction, size: size, p: p))
     case "dissolve":
       // The outgoing frame on top, fading out to reveal the incoming one.
       result = layered(bottom: b, top: a, topOpacity: 1 - c)
@@ -219,6 +273,121 @@ internal enum ClipTransitionEffects {
   /// How far the glitch splits red and blue apart at clamped progress `c`.
   static func glitchSplitPixels(c: Double, width: Int) -> Int {
     Int((glitchSplit * sin(Double.pi * c) * Double(width)).rounded())
+  }
+
+  /// How strong lightLeak's lights are at clamped progress `c`: 0 at either
+  /// end, 1 at the midpoint.
+  static func leakStrength(_ c: Double) -> Double {
+    let s = sin(Double.pi * c)
+    return s * s
+  }
+
+  /// The corner diagonalWipe's edge travels toward, an eighth of a turn
+  /// clockwise from `direction`: left → top left, up → top right, right →
+  /// bottom right, down → bottom left. Its `x` and `y` are 0 for the left or
+  /// top edge and 1 for the right or bottom one.
+  static func diagonalCorner(_ direction: String) -> (x: Double, y: Double) {
+    switch direction {
+    case "right": (1, 1)
+    case "up": (1, 0)
+    case "down": (0, 1)
+    default: (0, 0)
+    }
+  }
+
+  /// One face of flip or cube on screen.
+  struct TurnedFace: Equatable {
+    /// Whether the face shows the outgoing clip.
+    let outgoing: Bool
+    /// Its corners in top-origin frame pixels: top left, top right, bottom
+    /// right and bottom left of its picture.
+    let corners: [CGPoint]
+    /// How much of its picture's brightness it keeps.
+    let shade: Double
+  }
+
+  /// The faces flip or cube shows at progress `p` in a frame of `size`,
+  /// farthest first; a face turned away or edge-on is left out.
+  ///
+  /// Flip turns a card about the frame's middle: the outgoing clip on its
+  /// front until it stands edge-on halfway through, the incoming clip on its
+  /// back after. Cube turns the outgoing clip away as one side of a cube and
+  /// brings the incoming clip in as the next side. Both turn about a vertical
+  /// axis for left and right and a horizontal one for up and down, the edge
+  /// opposite the direction swinging toward the viewer. They move back just far
+  /// enough that no edge comes closer than the frame, are seen from
+  /// ``turnDistance`` times the turning side away, and darken by up to
+  /// ``turnShade`` as they turn.
+  static func turnedFaces(type: String, direction: String, size: CGSize, p: Double)
+    -> [TurnedFace]
+  {
+    let width = Double(size.width)
+    let height = Double(size.height)
+    let horizontal = direction != "up" && direction != "down"
+    // Left and up turn the far end (right or bottom edge) toward the viewer.
+    let sign = direction == "right" || direction == "down" ? -1.0 : 1.0
+    let side = horizontal ? width : height
+    let across = horizontal ? height : width
+    let cube = type == "cube"
+    // The faces turn about an axis this far behind the frame.
+    let pivot = cube ? side / 2 : 0
+    let angles: [(outgoing: Bool, angle: Double)] =
+      cube
+      ? [(true, Double.pi / 2 * p), (false, Double.pi / 2 * (p - 1))]
+      : (p < 0.5 ? [(true, Double.pi * p)] : [(false, Double.pi * (p - 1))])
+    // Each corner along the turning side and across it, as offsets from the
+    // middle: top left, top right, bottom right, bottom left.
+    let offsets: [(along: Double, across: Double)] =
+      horizontal
+      ? [(-side / 2, -across / 2), (side / 2, -across / 2), (side / 2, across / 2),
+        (-side / 2, across / 2)]
+      : [(-side / 2, -across / 2), (-side / 2, across / 2), (side / 2, across / 2),
+        (side / 2, -across / 2)]
+    let turned = angles.map { face in
+      offsets.map { offset -> (along: Double, across: Double, depth: Double) in
+        let cosine = cos(face.angle)
+        let sine = sin(face.angle)
+        return (
+          offset.along * cosine - sign * pivot * sine, offset.across,
+          sign * offset.along * sine + pivot * cosine - pivot
+        )
+      }
+    }
+    let nearest = max(turned.flatMap { $0.map(\.depth) }.max() ?? 0, 0)
+    let distance = turnDistance * side
+    var faces: [(face: TurnedFace, depth: Double)] = []
+    for (face, corners) in zip(angles, turned) {
+      let points = corners.map { corner -> CGPoint in
+        let scale = distance / (distance - (corner.depth - nearest))
+        let along = side / 2 + corner.along * scale
+        let crossed = across / 2 + corner.across * scale
+        return horizontal ? CGPoint(x: along, y: crossed) : CGPoint(x: crossed, y: along)
+      }
+      guard shoelaceArea(points) > 1 else { continue }
+      let depth = corners.map(\.depth).reduce(0, +) / Double(corners.count)
+      faces.append(
+        (
+          TurnedFace(
+            outgoing: face.outgoing, corners: points,
+            shade: 1 - turnShade * abs(sin(face.angle))),
+          depth
+        ))
+    }
+    // Equally far, the outgoing face goes first, as on Android.
+    return faces.sorted {
+      $0.depth != $1.depth ? $0.depth < $1.depth : $0.face.outgoing && !$1.face.outgoing
+    }.map(\.face)
+  }
+
+  /// The area of the quad `points`, positive when they run clockwise on
+  /// screen as a face seen from the front does.
+  private static func shoelaceArea(_ points: [CGPoint]) -> Double {
+    var sum = 0.0
+    for (index, point) in points.enumerated() {
+      let next = points[(index + 1) % points.count]
+      sum += Double(point.x * next.y - next.x * point.y)
+    }
+    return sum / 2
   }
 
   // MARK: - Layers
@@ -439,6 +608,178 @@ internal enum ClipTransitionEffects {
     case let (nil, incoming?): return incoming
     default: return a
     }
+  }
+
+  /// `picture` brightened by lightLeak's lights at clamped progress `c`, each
+  /// screened over it in turn.
+  private static func lightLeaked(_ picture: CIImage, size: CGSize, c: Double) -> CIImage {
+    let strength = leakGain * leakStrength(c)
+    // sin(π) is not quite 0; a light this faint changes nothing.
+    guard strength >= 1e-6 else { return picture }
+    let width = Double(size.width)
+    let height = Double(size.height)
+    let longer = max(width, height)
+    var result = picture
+    for light in leakLights {
+      let x = (light.startX + (light.endX - light.startX) * c) * width
+      // Core Image's y axis points up.
+      let y = height - (light.startY + (light.endY - light.startY) * c) * height
+      let reachX = light.reachX * longer
+      let reachY = light.reachY * longer
+      // CIGaussianGradient falls off as smoothstep(1 - r / radius). Placing
+      // it by its own centre and radius rather than by a transform keeps
+      // every light a distinct generator: Core Image draws two equal
+      // generators moved apart as one.
+      guard
+        let gradient = CIFilter(
+          name: "CIGaussianGradient",
+          parameters: [
+            "inputCenter": CIVector(x: CGFloat(x), y: CGFloat(y)),
+            "inputRadius": reachX,
+            "inputColor0": CIColor(red: 1, green: 1, blue: 1),
+            "inputColor1": CIColor(red: 0, green: 0, blue: 0),
+          ])?.outputImage
+      else { continue }
+      let glow = gradient.transformed(
+        by: CGAffineTransform(translationX: 0, y: CGFloat(-y))
+          .concatenating(CGAffineTransform(scaleX: 1, y: CGFloat(reachY / reachX)))
+          .concatenating(CGAffineTransform(translationX: 0, y: CGFloat(y)))
+      )
+      .applyingFilter(
+        "CIColorMatrix",
+        parameters: [
+          "inputRVector": CIVector(x: CGFloat(light.red * strength), y: 0, z: 0, w: 0),
+          "inputGVector": CIVector(x: 0, y: CGFloat(light.green * strength), z: 0, w: 0),
+          "inputBVector": CIVector(x: 0, y: 0, z: CGFloat(light.blue * strength), w: 0),
+          "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+          "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+        ]
+      )
+      .applyingFilter(
+        "CIColorClamp",
+        parameters: [
+          "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 0),
+          "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1),
+        ])
+      result = glow.applyingFilter(
+        "CIScreenBlendMode", parameters: [kCIInputBackgroundImageKey: result])
+    }
+    return result
+  }
+
+  /// A mask that is 0 behind the line through `point` (top-origin pixels)
+  /// across `normal` and 1 ahead of it, ramping over ``wipeEdge`` centred on
+  /// the line.
+  private static func halfPlane(through point: CGPoint, normal: CGPoint, height: CGFloat)
+    -> CIImage
+  {
+    let half = CGFloat(wipeEdge / 2)
+    // Core Image's y axis points up.
+    let from = CIVector(x: point.x - normal.x * half, y: height - (point.y - normal.y * half))
+    let to = CIVector(x: point.x + normal.x * half, y: height - (point.y + normal.y * half))
+    return CIFilter(
+      name: "CILinearGradient",
+      parameters: [
+        "inputPoint0": from, "inputPoint1": to,
+        "inputColor0": CIColor(red: 0, green: 0, blue: 0),
+        "inputColor1": CIColor(red: 1, green: 1, blue: 1),
+      ])?.outputImage ?? CIImage(color: .black)
+  }
+
+  /// The incoming clip revealed behind a hand sweeping clockwise from twelve
+  /// o'clock, a full turn at clamped progress 1.
+  ///
+  /// The swept part is the right half and the half-plane behind the hand,
+  /// both soft-edged: both at once up to half a turn, either beyond it.
+  /// Beyond half a turn their sum, kept to 1, leaves no seam where their
+  /// edges run side by side below the centre.
+  private static func clockWiped(_ a: CIImage, _ b: CIImage, size: CGSize, c: Double) -> CIImage {
+    guard c > 0 else { return a }
+    guard c < 1 else { return b }
+    let angle = 2 * Double.pi * c
+    let center = CGPoint(x: size.width / 2, y: size.height / 2)
+    let right = halfPlane(through: center, normal: CGPoint(x: 1, y: 0), height: size.height)
+    let hand = halfPlane(
+      through: center, normal: CGPoint(x: -cos(angle), y: -sin(angle)), height: size.height)
+    let mask = hand.applyingFilter(
+      angle <= Double.pi ? "CIMinimumCompositing" : "CILinearDodgeBlendMode",
+      parameters: [kCIInputBackgroundImageKey: right])
+    return b.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [kCIInputBackgroundImageKey: a, kCIInputMaskImageKey: mask])
+  }
+
+  /// The incoming clip revealed by an edge, parallel to the frame's other
+  /// diagonal, travelling from the corner opposite ``diagonalCorner`` to it.
+  ///
+  /// Like iris, the soft edge runs behind the edge, so nothing shows at 0
+  /// and the far corner is covered at 1.
+  private static func diagonalWiped(
+    _ a: CIImage, _ b: CIImage, size: CGSize, c: Double, direction: String
+  ) -> CIImage {
+    guard c > 0 else { return a }
+    guard c < 1 else { return b }
+    let width = Double(size.width)
+    let height = Double(size.height)
+    let target = diagonalCorner(direction)
+    let start = CGPoint(x: (1 - target.x) * width, y: (1 - target.y) * height)
+    // Toward the target, across the lines x / width + y / height = constant.
+    let toward = (x: (2 * target.x - 1) / width, y: (2 * target.y - 1) / height)
+    let length = hypot(toward.x, toward.y)
+    let normal = CGPoint(x: toward.x / length, y: toward.y / length)
+    let travel = 2 / length
+    let edge = c * (travel + wipeEdge)
+    func along(_ distance: Double) -> CIVector {
+      // Core Image's y axis points up.
+      CIVector(
+        x: start.x + normal.x * CGFloat(distance),
+        y: size.height - (start.y + normal.y * CGFloat(distance)))
+    }
+    guard
+      let mask = CIFilter(
+        name: "CILinearGradient",
+        parameters: [
+          "inputPoint0": along(edge - wipeEdge), "inputPoint1": along(edge),
+          "inputColor0": CIColor(red: 1, green: 1, blue: 1),
+          "inputColor1": CIColor(red: 0, green: 0, blue: 0),
+        ])?.outputImage
+    else { return c >= 0.5 ? b : a }
+    return b.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [kCIInputBackgroundImageKey: a, kCIInputMaskImageKey: mask])
+  }
+
+  /// `faces` drawn over black, each picture darkened by its shade and moved
+  /// onto its corners.
+  private static func turned(_ a: CIImage, _ b: CIImage, size: CGSize, faces: [TurnedFace])
+    -> CIImage
+  {
+    var result = CIImage(color: .black)
+    for face in faces {
+      let source = face.outgoing ? a : b
+      let shade = CGFloat(face.shade)
+      // Core Image's y axis points up.
+      func corner(_ index: Int) -> CIVector {
+        CIVector(x: face.corners[index].x, y: size.height - face.corners[index].y)
+      }
+      let moved = source.applyingFilter(
+        "CIColorMatrix",
+        parameters: [
+          "inputRVector": CIVector(x: shade, y: 0, z: 0, w: 0),
+          "inputGVector": CIVector(x: 0, y: shade, z: 0, w: 0),
+          "inputBVector": CIVector(x: 0, y: 0, z: shade, w: 0),
+          "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+          "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+        ]
+      ).applyingFilter(
+        "CIPerspectiveTransform",
+        parameters: [
+          "inputTopLeft": corner(0), "inputTopRight": corner(1),
+          "inputBottomRight": corner(2), "inputBottomLeft": corner(3),
+        ])
+      result = moved.composited(over: result)
+    }
+    return result
   }
 
   // MARK: - Glitch

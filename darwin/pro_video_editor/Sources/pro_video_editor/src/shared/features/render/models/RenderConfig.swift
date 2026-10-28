@@ -83,7 +83,7 @@ struct ClipTransitionConfig {
   /// Transition kind: "dissolve", "fadeToBlack", "fadeToWhite", "slide",
   /// "push", "wipe", or one ``ClipTransitionEffects`` draws ("zoomIn",
   /// "zoomOut", "spin", "whipPan", "blur", "glitch", "flash", "iris",
-  /// "stretch").
+  /// "stretch", "lightLeak", "clockWipe", "diagonalWipe", "flip", "cube").
   let type: String
   /// Transition duration in microseconds.
   let durationUs: Int64

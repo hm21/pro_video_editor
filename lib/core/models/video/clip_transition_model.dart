@@ -19,7 +19,7 @@ import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 /// Below, *progress* is the transition's progress after its
 /// [ClipTransition.curve], from 0 (only the outgoing clip) to 1 (only the
 /// incoming clip). An elastic curve overshoots that range; movement follows
-/// the overshoot, while opacity, blur and flash stay within it.
+/// the overshoot, while opacity, blur, light, flash and wipes stay within it.
 enum ClipTransitionType {
   /// A true cross-dissolve: the two clips overlap and the outgoing clip fades
   /// out while the incoming clip fades in (blend). Overlap transition.
@@ -99,7 +99,50 @@ enum ClipTransitionType {
   /// [ClipTransition.direction] while the outgoing clip is squeezed toward
   /// it; together they always fill the frame. The incoming clip's share of
   /// the frame is the progress. Overlap transition.
-  stretch;
+  stretch,
+
+  /// A light leak: warm light, in the colors of a film burn, washes in from
+  /// the left edge, drifts across the picture and fades again. Its strength
+  /// is sin²(π·progress), so it is brightest at mid-transition, and the
+  /// picture changes clip under it between 35 % and 65 % progress.
+  ///
+  /// It brightens most of the frame once, so it counts as a flash like
+  /// [flash]; see [flashes]. Overlap transition.
+  lightLeak,
+
+  /// A clock wipe: the incoming clip is revealed behind a hand sweeping
+  /// clockwise around the center from twelve o'clock, a full turn at full
+  /// progress. Overlap transition.
+  clockWipe,
+
+  /// A diagonal wipe: the incoming clip is revealed by an edge parallel to a
+  /// diagonal of the frame, travelling from one corner to the opposite one.
+  /// It runs between the other two corners halfway through.
+  ///
+  /// The edge travels toward the corner an eighth of a turn clockwise from
+  /// the configured [ClipTransition.direction]: [ClipTransitionDirection.left]
+  /// toward the top left, [ClipTransitionDirection.up] toward the top right,
+  /// [ClipTransitionDirection.right] toward the bottom right and
+  /// [ClipTransitionDirection.down] toward the bottom left. Overlap
+  /// transition.
+  diagonalWipe,
+
+  /// A card flip: the picture turns in 3D about the frame's middle like a
+  /// card, showing the outgoing clip on its front until it stands edge-on
+  /// halfway through, and the incoming clip on its back after.
+  ///
+  /// It turns about a vertical axis for [ClipTransitionDirection.left] and
+  /// [ClipTransitionDirection.right] and a horizontal one for up and down,
+  /// the edge opposite the configured [ClipTransition.direction] swinging
+  /// toward the viewer. Black shows around the card while it turns. Overlap
+  /// transition.
+  flip,
+
+  /// A cube turn: the outgoing clip turns away as one side of a cube while
+  /// the incoming clip turns in as the next side, entering from the edge
+  /// opposite the configured [ClipTransition.direction]. Black shows around
+  /// the cube while it turns. Overlap transition.
+  cube;
 
   /// Whether the transition dips through a color within the clips' own time
   /// ([fadeToBlack], [fadeToWhite]), leaving the output duration unchanged.
@@ -115,25 +158,32 @@ enum ClipTransitionType {
       this == push ||
       this == wipe ||
       this == whipPan ||
-      this == stretch;
+      this == stretch ||
+      this == diagonalWipe ||
+      this == flip ||
+      this == cube;
 
-  /// Whether the transition flashes: [flash] flashes once, at its midpoint.
+  /// Whether the transition flashes: [flash] flashes once, at its midpoint,
+  /// and [lightLeak] brightens the picture once, most at its midpoint.
   ///
   /// More than three flashes in any second can trigger seizures (WCAG 2.3.1),
   /// so space flashing transitions, and the flashing video effects near them,
   /// accordingly.
-  bool get flashes => this == flash;
+  bool get flashes => this == flash || this == lightLeak;
 }
 
 /// Direction for directional transitions ([ClipTransitionType.slide],
 /// [ClipTransitionType.push], [ClipTransitionType.wipe],
-/// [ClipTransitionType.whipPan], [ClipTransitionType.stretch]); see
-/// [ClipTransitionType.usesDirection].
+/// [ClipTransitionType.whipPan], [ClipTransitionType.stretch],
+/// [ClipTransitionType.diagonalWipe], [ClipTransitionType.flip],
+/// [ClipTransitionType.cube]); see [ClipTransitionType.usesDirection].
 ///
 /// The direction describes where the incoming content travels **toward** as
 /// the transition progresses. For example [left] means the incoming clip
 /// enters from the right edge and moves left; for a [ClipTransitionType.wipe]
-/// it means the reveal edge sweeps toward the left.
+/// it means the reveal edge sweeps toward the left. A
+/// [ClipTransitionType.diagonalWipe] travels toward the corner an eighth of a
+/// turn clockwise from the direction.
 enum ClipTransitionDirection {
   /// Motion toward the left edge (incoming enters from the right).
   left,

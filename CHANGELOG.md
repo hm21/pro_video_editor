@@ -1,3 +1,6 @@
+## 2.47.0
+- **FEAT**(android, iOS, macOS): Five more clip transitions. `lightLeak` washes warm light across the cut, `clockWipe` reveals the next clip behind a hand sweeping around the centre, `diagonalWipe` reveals it along a diagonal edge, `flip` turns the picture over like a card and `cube` turns it like the side of a cube. `diagonalWipe`, `flip` and `cube` take a `direction`. `lightLeak` counts as a flash (`ClipTransitionType.flashes`).
+
 ## 2.46.0
 - **FEAT**(android, iOS, macOS): Clip keyframes. `VideoSegment.keyframes` pans, zooms and turns a clip's picture between `SegmentKeyframe`s, e.g. for a push-in or a pan across a wide shot. The motion is keyed to the clip's source frames, so it stays on them through trims, speed changes, reverse and overlap transitions.
 

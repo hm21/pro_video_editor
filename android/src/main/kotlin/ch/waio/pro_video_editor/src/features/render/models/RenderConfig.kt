@@ -12,7 +12,8 @@ import io.flutter.plugin.common.MethodCall
  *
  * @property type Transition kind: "dissolve", "fadeToBlack", "fadeToWhite",
  *  "slide", "push", "wipe", "zoomIn", "zoomOut", "spin", "whipPan", "blur",
- *  "glitch", "flash", "iris" or "stretch"
+ *  "glitch", "flash", "iris", "stretch", "lightLeak", "clockWipe", "diagonalWipe",
+ *  "flip" or "cube"
  * @property durationUs Transition duration in microseconds
  * @property curve Easing curve name (e.g. "linear", "easeInOut")
  * @property direction Direction for directional transitions: "left", "right",
