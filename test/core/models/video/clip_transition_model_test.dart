@@ -126,12 +126,16 @@ void main() {
         ClipTransitionType.wipe,
         ClipTransitionType.whipPan,
         ClipTransitionType.stretch,
+        ClipTransitionType.diagonalWipe,
+        ClipTransitionType.flip,
+        ClipTransitionType.cube,
       ]);
     });
 
-    test('only the flash flashes', () {
+    test('the flash and the light leak flash', () {
       expect(ClipTransitionType.values.where((type) => type.flashes), [
         ClipTransitionType.flash,
+        ClipTransitionType.lightLeak,
       ]);
     });
   });

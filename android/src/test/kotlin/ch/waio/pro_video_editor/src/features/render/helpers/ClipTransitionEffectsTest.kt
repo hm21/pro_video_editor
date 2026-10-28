@@ -13,6 +13,7 @@ internal class ClipTransitionEffectsTest {
     private val height = 64
     private val types = listOf(
         "zoomIn", "zoomOut", "spin", "whipPan", "blur", "glitch", "flash", "iris", "stretch",
+        "lightLeak", "clockWipe", "diagonalWipe", "flip", "cube",
     )
 
     /** A packed I420 frame whose luma is [luma] at each pixel and whose chroma is flat. */
@@ -34,6 +35,9 @@ internal class ClipTransitionEffectsTest {
 
     private fun uAt(frame: ByteArray, x: Int, y: Int) =
         frame[width * height + (y / 2) * (width / 2) + x / 2].toInt() and 0xFF
+
+    private fun vAt(frame: ByteArray, x: Int, y: Int) =
+        frame[width * height + (width / 2) * (height / 2) + (y / 2) * (width / 2) + x / 2].toInt() and 0xFF
 
     private fun compose(type: String, a: ByteArray, b: ByteArray, p: Double, direction: String = "left") =
         ClipTransitionEffects.compose(type, direction, a, b, width, height, p, p, 500_000L)
@@ -242,5 +246,170 @@ internal class ClipTransitionEffectsTest {
         assertEquals(7, ClipTransitionEffects.glitchPhase(0.5, 1_000_000L))
         assertEquals(15, ClipTransitionEffects.glitchPhase(1.0, 1_000_000L))
         assertEquals(3, ClipTransitionEffects.glitchPhase(1.0, 250_000L))
+    }
+
+    @Test
+    fun lightLeakWashesWarmLightOverTheCut() {
+        val black = frame { _, _ -> 16 }
+
+        val out = compose("lightLeak", black, black, 0.5)
+
+        // The orange light sits left of the middle at its peak: bright, with
+        // more red than blue.
+        assertTrue(lumaAt(out, width / 2, height / 2) > 150)
+        assertTrue(vAt(out, width / 2, height / 2) > 140)
+        assertTrue(uAt(out, width / 2, height / 2) < 116)
+    }
+
+    @Test
+    fun lightLeakChangesClipUnderItsLight() {
+        val black = frame { _, _ -> 16 }
+        val white = frame { _, _ -> 235 }
+
+        val before = compose("lightLeak", black, white, ClipTransitionEffects.LEAK_SWAP_START)
+        val after = compose("lightLeak", black, white, ClipTransitionEffects.LEAK_SWAP_END)
+
+        // Far from every light the picture is still the outgoing clip at the
+        // window's start and the incoming one at its end.
+        assertEquals(16, lumaAt(before, width - 1, height - 1))
+        assertEquals(235, lumaAt(after, width - 1, height - 1))
+    }
+
+    @Test
+    fun leakStrengthPeaksAtTheMidpoint() {
+        assertEquals(0.0, ClipTransitionEffects.leakStrength(0.0), 1e-12)
+        assertEquals(1.0, ClipTransitionEffects.leakStrength(0.5), 1e-12)
+        assertEquals(0.25, ClipTransitionEffects.leakStrength(1.0 / 6), 1e-12)
+        assertEquals(0.0, ClipTransitionEffects.leakStrength(1.0), 1e-12)
+    }
+
+    @Test
+    fun clockWipeSweepsClockwiseFromTwelve() {
+        val black = frame { _, _ -> 16 }
+        val white = frame { _, _ -> 235 }
+
+        val quarter = compose("clockWipe", black, white, 0.25)
+        val threeQuarters = compose("clockWipe", black, white, 0.75)
+
+        // A quarter turn uncovers the top right quarter only.
+        assertEquals(235, lumaAt(quarter, width * 3 / 4, height / 4))
+        assertEquals(16, lumaAt(quarter, width * 3 / 4, height * 3 / 4))
+        assertEquals(16, lumaAt(quarter, width / 4, height * 3 / 4))
+        assertEquals(16, lumaAt(quarter, width / 4, height / 4))
+        // Three quarters leave only the top left quarter.
+        assertEquals(235, lumaAt(threeQuarters, width * 3 / 4, height * 3 / 4))
+        assertEquals(235, lumaAt(threeQuarters, width / 4, height * 3 / 4))
+        assertEquals(16, lumaAt(threeQuarters, width / 4, height / 4))
+    }
+
+    @Test
+    fun clockWipeLeavesNoSeamBelowTheCentreNearTheEnd() {
+        val black = frame { _, _ -> 16 }
+        val white = frame { _, _ -> 235 }
+
+        val out = compose("clockWipe", black, white, 0.999)
+
+        for (y in height / 2 + 2 until height) {
+            for (x in width / 2 - 2..width / 2 + 1) {
+                assertEquals(235, lumaAt(out, x, y), "$x,$y")
+            }
+        }
+    }
+
+    @Test
+    fun diagonalWipeTravelsTowardTheCornerAQuarterTurnFromItsDirection() {
+        assertEquals(0 to 0, ClipTransitionEffects.diagonalCorner("left"))
+        assertEquals(1 to 0, ClipTransitionEffects.diagonalCorner("up"))
+        assertEquals(1 to 1, ClipTransitionEffects.diagonalCorner("right"))
+        assertEquals(0 to 1, ClipTransitionEffects.diagonalCorner("down"))
+
+        val black = frame { _, _ -> 16 }
+        val white = frame { _, _ -> 235 }
+        val out = compose("diagonalWipe", black, white, 0.5, "left")
+
+        // Halfway, the edge runs between the top right and bottom left
+        // corners: the incoming clip below it, the outgoing one above.
+        assertEquals(235, lumaAt(out, width - 1, height - 1))
+        assertEquals(235, lumaAt(out, width * 3 / 4, height * 3 / 4))
+        assertEquals(16, lumaAt(out, width / 4, height / 4))
+        assertEquals(16, lumaAt(out, 0, 0))
+    }
+
+    @Test
+    fun flipShowsTheCardBetweenBlackSidesAndNothingEdgeOn() {
+        val gray = frame { _, _ -> 200 }
+
+        val turning = compose("flip", gray, gray, 0.25)
+        val edgeOn = compose("flip", gray, gray, 0.5)
+
+        // Turned 45°, darkened by the shade, with black either side.
+        val shaded = 16 + (200 - 16) * (1 - ClipTransitionEffects.TURN_SHADE * kotlin.math.sqrt(0.5))
+        assertTrue(abs(lumaAt(turning, width / 2, height / 2) - shaded) <= 1)
+        assertEquals(16, lumaAt(turning, 2, height / 2))
+        assertEquals(16, lumaAt(turning, width - 2, height / 2))
+        for (y in 0 until height) for (x in 0 until width) {
+            assertEquals(16, lumaAt(edgeOn, x, y), "$x,$y")
+        }
+    }
+
+    @Test
+    fun flipTurnsTheEdgeAheadOfItsMotionTowardTheViewer() {
+        val left = ClipTransitionEffects.turnedFaces("flip", "left", 1080, 1920, 0.25).single()
+        val up = ClipTransitionEffects.turnedFaces("flip", "up", 1080, 1920, 0.25).single()
+
+        // The nearer edge keeps the frame's full height (or width).
+        assertEquals(0.0, left.corners[1].second, 1e-9)
+        assertEquals(1920.0, left.corners[2].second, 1e-9)
+        assertTrue(left.corners[0].second > 0)
+        assertEquals(0.0, up.corners[3].first, 1e-9)
+        assertEquals(1080.0, up.corners[2].first, 1e-9)
+        assertTrue(up.corners[0].first > 0)
+    }
+
+    @Test
+    fun cubeShowsBothClipsAsSidesMeetingInTheMiddle() {
+        val faces = ClipTransitionEffects.turnedFaces("cube", "left", 1080, 1920, 0.5)
+        val outgoingFace = faces.single { it.outgoing }
+        val incomingFace = faces.single { !it.outgoing }
+
+        // The shared edge comes forward to the frame, in the middle.
+        assertEquals(540.0, outgoingFace.corners[1].first, 1e-9)
+        assertEquals(540.0, incomingFace.corners[0].first, 1e-9)
+        assertEquals(0.0, outgoingFace.corners[1].second, 1e-9)
+        assertEquals(outgoingFace.shade, incomingFace.shade, 1e-12)
+
+        val black = frame { _, _ -> 16 }
+        val white = frame { _, _ -> 235 }
+        val out = compose("cube", black, white, 0.5)
+        assertEquals(16, lumaAt(out, width / 4, height / 2))
+        assertTrue(lumaAt(out, width * 3 / 4, height / 2) > 150)
+    }
+
+    @Test
+    fun turnedFacesMatchTheDarwinPin() {
+        // ClipTransitionEffectsTests.swift pins the same corners.
+        val faces = ClipTransitionEffects.turnedFaces("cube", "up", 1080, 1920, 0.3)
+        assertEquals(listOf(false, true), faces.map { it.outgoing })
+        assertEquals(0.6435973903246528, faces[0].shade, 1e-12)
+        val pinned = listOf(
+            0.0 to 1379.535383471, 1080.0 to 1379.535383471,
+            913.572315027 to 1853.250936771, 166.427684973 to 1853.250936771,
+        )
+        faces[0].corners.zip(pinned).forEach { (actual, expected) ->
+            assertEquals(expected.first, actual.first, 1e-6)
+            assertEquals(expected.second, actual.second, 1e-6)
+        }
+    }
+
+    @Test
+    fun turnedFacesLeaveOutAFaceTurnedAway() {
+        assertEquals(
+            listOf(true),
+            ClipTransitionEffects.turnedFaces("cube", "right", 1080, 1920, 0.0).map { it.outgoing },
+        )
+        assertEquals(
+            listOf(false),
+            ClipTransitionEffects.turnedFaces("cube", "right", 1080, 1920, 1.0).map { it.outgoing },
+        )
     }
 }

@@ -15,6 +15,7 @@ final class ClipTransitionEffectsTests: XCTestCase {
   private let size = CGSize(width: 48, height: 64)
   private let types = [
     "zoomIn", "zoomOut", "spin", "whipPan", "blur", "glitch", "flash", "iris", "stretch",
+    "lightLeak", "clockWipe", "diagonalWipe", "flip", "cube",
   ]
   private let context = CIContext(options: [
     .workingColorSpace: NSNull(),
@@ -263,5 +264,144 @@ final class ClipTransitionEffectsTests: XCTestCase {
     XCTAssertEqual(instruction.linearProgress(at: .zero), 0)
     XCTAssertEqual(instruction.linearProgress(at: CMTime(value: 14, timescale: 30)), 1, accuracy: 1e-9)
     XCTAssertEqual(instruction.linearProgress(at: CMTime(value: 7, timescale: 30)), 0.5, accuracy: 1e-9)
+  }
+
+  func testLightLeakWashesWarmLightOverTheCut() {
+    let out = compose("lightLeak", flat(0), flat(0), 0.5)
+
+    // The orange light sits left of the middle at its peak: bright, with
+    // more red than blue.
+    let middle = rgb(out, 24, 32)
+    XCTAssertGreaterThan(middle[0], 200)
+    XCTAssertGreaterThan(middle[0], middle[2] + 60)
+  }
+
+  func testLightLeakChangesClipUnderItsLight() {
+    let before = compose("lightLeak", flat(0), flat(255), Effects.leakSwapStart)
+    let after = compose("lightLeak", flat(0), flat(255), Effects.leakSwapEnd)
+
+    // Far from every light the picture is still the outgoing clip at the
+    // window's start and the incoming one at its end.
+    XCTAssertEqual(rgb(before, 47, 63), [0, 0, 0])
+    XCTAssertEqual(rgb(after, 47, 63), [255, 255, 255])
+  }
+
+  func testLeakStrengthPeaksAtTheMidpoint() {
+    XCTAssertEqual(Effects.leakStrength(0), 0, accuracy: 1e-12)
+    XCTAssertEqual(Effects.leakStrength(0.5), 1, accuracy: 1e-12)
+    XCTAssertEqual(Effects.leakStrength(1.0 / 6), 0.25, accuracy: 1e-12)
+    XCTAssertEqual(Effects.leakStrength(1), 0, accuracy: 1e-12)
+  }
+
+  func testClockWipeSweepsClockwiseFromTwelve() {
+    let quarter = compose("clockWipe", flat(0), flat(255), 0.25)
+    let threeQuarters = compose("clockWipe", flat(0), flat(255), 0.75)
+
+    // A quarter turn uncovers the top right quarter only.
+    XCTAssertEqual(rgb(quarter, 36, 16), [255, 255, 255])
+    XCTAssertEqual(rgb(quarter, 36, 48), [0, 0, 0])
+    XCTAssertEqual(rgb(quarter, 12, 48), [0, 0, 0])
+    XCTAssertEqual(rgb(quarter, 12, 16), [0, 0, 0])
+    // Three quarters leave only the top left quarter.
+    XCTAssertEqual(rgb(threeQuarters, 36, 48), [255, 255, 255])
+    XCTAssertEqual(rgb(threeQuarters, 12, 48), [255, 255, 255])
+    XCTAssertEqual(rgb(threeQuarters, 12, 16), [0, 0, 0])
+  }
+
+  func testClockWipeLeavesNoSeamBelowTheCentreNearTheEnd() {
+    let out = compose("clockWipe", flat(0), flat(255), 0.999)
+
+    for y in 34..<64 {
+      for x in 22...25 {
+        XCTAssertEqual(rgb(out, x, y), [255, 255, 255], "\(x),\(y)")
+      }
+    }
+  }
+
+  func testDiagonalWipeTravelsTowardTheCornerAQuarterTurnFromItsDirection() {
+    XCTAssertTrue(Effects.diagonalCorner("left") == (0, 0))
+    XCTAssertTrue(Effects.diagonalCorner("up") == (1, 0))
+    XCTAssertTrue(Effects.diagonalCorner("right") == (1, 1))
+    XCTAssertTrue(Effects.diagonalCorner("down") == (0, 1))
+
+    let out = compose("diagonalWipe", flat(0), flat(255), 0.5, direction: "left")
+
+    // Halfway, the edge runs between the top right and bottom left corners:
+    // the incoming clip below it, the outgoing one above.
+    XCTAssertEqual(rgb(out, 47, 63), [255, 255, 255])
+    XCTAssertEqual(rgb(out, 36, 48), [255, 255, 255])
+    XCTAssertEqual(rgb(out, 12, 16), [0, 0, 0])
+    XCTAssertEqual(rgb(out, 0, 0), [0, 0, 0])
+  }
+
+  func testFlipShowsTheCardBetweenBlackSidesAndNothingEdgeOn() {
+    let turning = compose("flip", flat(200), flat(200), 0.25)
+    let edgeOn = compose("flip", flat(200), flat(200), 0.5)
+
+    // Turned 45°, darkened by the shade, with black either side.
+    let shaded = 200 * (1 - Effects.turnShade * 0.5.squareRoot())
+    XCTAssertEqual(Double(rgb(turning, 24, 32)[0]), shaded, accuracy: 1)
+    XCTAssertEqual(rgb(turning, 2, 32), [0, 0, 0])
+    XCTAssertEqual(rgb(turning, 45, 32), [0, 0, 0])
+    XCTAssertEqual(Set(stride(from: 0, to: edgeOn.count, by: 4).map { edgeOn[$0] }), [0])
+  }
+
+  func testFlipTurnsTheEdgeAheadOfItsMotionTowardTheViewer() {
+    let portrait = CGSize(width: 1080, height: 1920)
+    let left = Effects.turnedFaces(type: "flip", direction: "left", size: portrait, p: 0.25)
+    let up = Effects.turnedFaces(type: "flip", direction: "up", size: portrait, p: 0.25)
+
+    // The nearer edge keeps the frame's full height (or width).
+    XCTAssertEqual(left.count, 1)
+    XCTAssertEqual(left[0].corners[1].y, 0, accuracy: 1e-9)
+    XCTAssertEqual(left[0].corners[2].y, 1920, accuracy: 1e-9)
+    XCTAssertGreaterThan(left[0].corners[0].y, 0)
+    XCTAssertEqual(up.count, 1)
+    XCTAssertEqual(up[0].corners[3].x, 0, accuracy: 1e-9)
+    XCTAssertEqual(up[0].corners[2].x, 1080, accuracy: 1e-9)
+    XCTAssertGreaterThan(up[0].corners[0].x, 0)
+  }
+
+  func testCubeShowsBothClipsAsSidesMeetingInTheMiddle() {
+    let faces = Effects.turnedFaces(
+      type: "cube", direction: "left", size: CGSize(width: 1080, height: 1920), p: 0.5)
+    let outgoingFace = faces.first { $0.outgoing }!
+    let incomingFace = faces.first { !$0.outgoing }!
+
+    // The shared edge comes forward to the frame, in the middle.
+    XCTAssertEqual(outgoingFace.corners[1].x, 540, accuracy: 1e-9)
+    XCTAssertEqual(incomingFace.corners[0].x, 540, accuracy: 1e-9)
+    XCTAssertEqual(outgoingFace.corners[1].y, 0, accuracy: 1e-9)
+    XCTAssertEqual(outgoingFace.shade, incomingFace.shade, accuracy: 1e-12)
+
+    let out = compose("cube", flat(0), flat(255), 0.5)
+    XCTAssertEqual(rgb(out, 12, 32), [0, 0, 0])
+    XCTAssertGreaterThan(rgb(out, 36, 32)[0], 150)
+  }
+
+  func testTurnedFacesMatchTheAndroidPin() {
+    // ClipTransitionEffectsTest.kt pins the same corners.
+    let faces = Effects.turnedFaces(
+      type: "cube", direction: "up", size: CGSize(width: 1080, height: 1920), p: 0.3)
+    XCTAssertEqual(faces.map(\.outgoing), [false, true])
+    XCTAssertEqual(faces[0].shade, 0.6435973903246528, accuracy: 1e-12)
+    let pinned: [(Double, Double)] = [
+      (0, 1379.535383471), (1080, 1379.535383471),
+      (913.572315027, 1853.250936771), (166.427684973, 1853.250936771),
+    ]
+    for (actual, expected) in zip(faces[0].corners, pinned) {
+      XCTAssertEqual(Double(actual.x), expected.0, accuracy: 1e-6)
+      XCTAssertEqual(Double(actual.y), expected.1, accuracy: 1e-6)
+    }
+  }
+
+  func testTurnedFacesLeaveOutAFaceTurnedAway() {
+    let size = CGSize(width: 1080, height: 1920)
+    XCTAssertEqual(
+      Effects.turnedFaces(type: "cube", direction: "right", size: size, p: 0).map(\.outgoing),
+      [true])
+    XCTAssertEqual(
+      Effects.turnedFaces(type: "cube", direction: "right", size: size, p: 1).map(\.outgoing),
+      [false])
   }
 }
