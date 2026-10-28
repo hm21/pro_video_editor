@@ -287,7 +287,7 @@ internal object ClipTransitionEffects {
     }
 
     /**
-     * The corner diagonalWipe's edge travels toward, a quarter of the way
+     * The corner diagonalWipe's edge travels toward, an eighth of a turn
      * clockwise from [direction]: left → top left, up → top right, right →
      * bottom right, down → bottom left. Each coordinate is 0 for the left or
      * top edge and 1 for the right or bottom one.
@@ -316,7 +316,7 @@ internal object ClipTransitionEffects {
      * back after. Cube turns the outgoing clip away as one side of a cube and
      * brings the incoming clip in as the next side. Both turn about a vertical
      * axis for left and right and a horizontal one for up and down, the edge
-     * ahead of the motion coming toward the viewer. They move back just far
+     * opposite the direction swinging toward the viewer. They move back just far
      * enough that no edge comes closer than the frame, are seen from
      * [TURN_DISTANCE] times the turning side away, and darken by up to
      * [TURN_SHADE] as they turn.
@@ -752,7 +752,9 @@ internal object ClipTransitionEffects {
      * falloff clamped to 1, screened over the picture in turn, in BT.709
      * video-range RGB.
      *
-     * A 2×2 block's chroma is the average of its four lit pixels'.
+     * A 2×2 block's chroma is the average of its four lit pixels'. Pixels and
+     * blocks no light reaches are left as they are: the trip through RGB
+     * would round them and clip colors outside RGB.
      */
     private fun lightLeak(frame: ByteArray, width: Int, height: Int, c: Double) {
         val strength = LEAK_GAIN * leakStrength(c)
@@ -772,25 +774,30 @@ internal object ClipTransitionEffects {
         val ch = height / 2
         val uOffset = width * height
         val vOffset = uOffset + cw * ch
-        forEachRow((height + 1) / 2) { pair ->
+        forEachRow(ch) { pair ->
             val pixel = DoubleArray(3)
-            val sums = DoubleArray(2 * (cw + 1))
-            val counts = IntArray(cw + 1)
-            val chromaRow = min(pair, ch - 1)
-            for (y in 2 * pair until min(2 * pair + 2, height)) {
+            val sums = DoubleArray(2 * cw)
+            val lit = BooleanArray(cw)
+            // An odd last row reads the last chroma row, so the task that
+            // relights that row draws it too.
+            val rowEnd = if (pair == ch - 1) height else 2 * pair + 2
+            for (y in 2 * pair until rowEnd) {
                 for (x in 0 until width) {
-                    val ci = chromaRow * cw + min(x / 2, cw - 1)
+                    val block = min(x / 2, cw - 1)
+                    val ci = pair * cw + block
                     val luma = 1.164 * (value(frame, y * width + x) - 16)
                     val u = value(frame, uOffset + ci) - 128.0
                     val v = value(frame, vOffset + ci) - 128.0
                     pixel[0] = ((luma + 1.793 * v) / 255).coerceIn(0.0, 1.0)
                     pixel[1] = ((luma - 0.213 * u - 0.533 * v) / 255).coerceIn(0.0, 1.0)
                     pixel[2] = ((luma + 2.112 * u) / 255).coerceIn(0.0, 1.0)
+                    var shone = false
                     for (light in lights) {
                         val dx = (x + 0.5 - light[0]) / light[2]
                         val dy = (y + 0.5 - light[1]) / light[3]
                         val falloff = smoothstep(0.0, 1.0, 1 - sqrt(dx * dx + dy * dy))
                         if (falloff <= 0) continue
+                        shone = true
                         for (k in 0..2) {
                             val glow = min(light[4 + k] * falloff, 1.0)
                             pixel[k] = 1 - (1 - pixel[k]) * (1 - glow)
@@ -799,21 +806,20 @@ internal object ClipTransitionEffects {
                     val red = pixel[0] * 255
                     val green = pixel[1] * 255
                     val blue = pixel[2] * 255
-                    frame[y * width + x] = toByte(16 + 0.1826 * red + 0.6142 * green + 0.0620 * blue)
-                    val block = x / 2
-                    if (block < cw && pair < ch) {
+                    if (shone) {
+                        frame[y * width + x] = toByte(16 + 0.1826 * red + 0.6142 * green + 0.0620 * blue)
+                        lit[block] = true
+                    }
+                    if (x < 2 * cw && y < 2 * ch) {
                         sums[2 * block] += 128 - 0.1006 * red - 0.3386 * green + 0.4392 * blue
                         sums[2 * block + 1] += 128 + 0.4392 * red - 0.3989 * green - 0.0403 * blue
-                        counts[block]++
                     }
                 }
             }
-            if (pair < ch) {
-                for (block in 0 until cw) {
-                    if (counts[block] == 0) continue
-                    frame[uOffset + pair * cw + block] = toByte(sums[2 * block] / counts[block])
-                    frame[vOffset + pair * cw + block] = toByte(sums[2 * block + 1] / counts[block])
-                }
+            for (block in 0 until cw) {
+                if (!lit[block]) continue
+                frame[uOffset + pair * cw + block] = toByte(sums[2 * block] / 4)
+                frame[vOffset + pair * cw + block] = toByte(sums[2 * block + 1] / 4)
             }
         }
     }
@@ -843,6 +849,9 @@ internal object ClipTransitionEffects {
                     for ((index, face) in faces.withIndex()) {
                         val m = inverses[index]
                         val w = m[6] * fx + m[7] * fy + m[8]
+                        // Points on the face have w > 0; on its horizon w is 0
+                        // and u and v could be NaN, which toByte cannot round.
+                        if (w <= 0) continue
                         val u = (m[0] * fx + m[1] * fy + m[2]) / w
                         val v = (m[3] * fx + m[4] * fy + m[5]) / w
                         val (premultiplied, alpha) = sampleOver(

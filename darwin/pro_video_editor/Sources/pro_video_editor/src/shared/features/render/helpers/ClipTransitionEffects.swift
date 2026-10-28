@@ -282,7 +282,7 @@ internal enum ClipTransitionEffects {
     return s * s
   }
 
-  /// The corner diagonalWipe's edge travels toward, a quarter of the way
+  /// The corner diagonalWipe's edge travels toward, an eighth of a turn
   /// clockwise from `direction`: left → top left, up → top right, right →
   /// bottom right, down → bottom left. Its `x` and `y` are 0 for the left or
   /// top edge and 1 for the right or bottom one.
@@ -314,7 +314,7 @@ internal enum ClipTransitionEffects {
   /// back after. Cube turns the outgoing clip away as one side of a cube and
   /// brings the incoming clip in as the next side. Both turn about a vertical
   /// axis for left and right and a horizontal one for up and down, the edge
-  /// ahead of the motion coming toward the viewer. They move back just far
+  /// opposite the direction swinging toward the viewer. They move back just far
   /// enough that no edge comes closer than the frame, are seen from
   /// ``turnDistance`` times the turning side away, and darken by up to
   /// ``turnShade`` as they turn.

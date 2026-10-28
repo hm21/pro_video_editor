@@ -318,7 +318,7 @@ final class ClipTransitionEffectsTests: XCTestCase {
     }
   }
 
-  func testDiagonalWipeTravelsTowardTheCornerAQuarterTurnFromItsDirection() {
+  func testDiagonalWipeTravelsTowardTheCornerAnEighthTurnFromItsDirection() {
     XCTAssertTrue(Effects.diagonalCorner("left") == (0, 0))
     XCTAssertTrue(Effects.diagonalCorner("up") == (1, 0))
     XCTAssertTrue(Effects.diagonalCorner("right") == (1, 1))
@@ -346,7 +346,7 @@ final class ClipTransitionEffectsTests: XCTestCase {
     XCTAssertEqual(Set(stride(from: 0, to: edgeOn.count, by: 4).map { edgeOn[$0] }), [0])
   }
 
-  func testFlipTurnsTheEdgeAheadOfItsMotionTowardTheViewer() {
+  func testFlipTurnsTheEdgeOppositeItsDirectionTowardTheViewer() {
     let portrait = CGSize(width: 1080, height: 1920)
     let left = Effects.turnedFaces(type: "flip", direction: "left", size: portrait, p: 0.25)
     let up = Effects.turnedFaces(type: "flip", direction: "up", size: portrait, p: 0.25)

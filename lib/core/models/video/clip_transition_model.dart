@@ -119,8 +119,8 @@ enum ClipTransitionType {
   /// diagonal of the frame, travelling from one corner to the opposite one.
   /// It runs between the other two corners halfway through.
   ///
-  /// The edge travels toward the corner a quarter turn clockwise from the
-  /// configured [ClipTransition.direction]: [ClipTransitionDirection.left]
+  /// The edge travels toward the corner an eighth of a turn clockwise from
+  /// the configured [ClipTransition.direction]: [ClipTransitionDirection.left]
   /// toward the top left, [ClipTransitionDirection.up] toward the top right,
   /// [ClipTransitionDirection.right] toward the bottom right and
   /// [ClipTransitionDirection.down] toward the bottom left. Overlap
@@ -133,8 +133,9 @@ enum ClipTransitionType {
   ///
   /// It turns about a vertical axis for [ClipTransitionDirection.left] and
   /// [ClipTransitionDirection.right] and a horizontal one for up and down,
-  /// the edge ahead of the motion coming toward the viewer. Black shows
-  /// around the card while it turns. Overlap transition.
+  /// the edge opposite the configured [ClipTransition.direction] swinging
+  /// toward the viewer. Black shows around the card while it turns. Overlap
+  /// transition.
   flip,
 
   /// A cube turn: the outgoing clip turns away as one side of a cube while
@@ -181,8 +182,8 @@ enum ClipTransitionType {
 /// the transition progresses. For example [left] means the incoming clip
 /// enters from the right edge and moves left; for a [ClipTransitionType.wipe]
 /// it means the reveal edge sweeps toward the left. A
-/// [ClipTransitionType.diagonalWipe] travels toward the corner a quarter turn
-/// clockwise from the direction.
+/// [ClipTransitionType.diagonalWipe] travels toward the corner an eighth of a
+/// turn clockwise from the direction.
 enum ClipTransitionDirection {
   /// Motion toward the left edge (incoming enters from the right).
   left,

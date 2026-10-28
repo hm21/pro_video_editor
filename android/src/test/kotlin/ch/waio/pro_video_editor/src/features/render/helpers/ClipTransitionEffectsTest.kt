@@ -276,6 +276,41 @@ internal class ClipTransitionEffectsTest {
     }
 
     @Test
+    fun lightLeakLeavesWhatItsLightDoesNotReachAsItIs() {
+        // A saturated red outside RGB, which a trip through RGB would clip.
+        val red = frame(u = 90, v = 200) { _, _ -> 60 }
+
+        val out = compose("lightLeak", red, red, 0.1)
+
+        // Early on the lights are still near the left edge.
+        assertTrue(lumaAt(out, 0, height / 2) > 60)
+        assertEquals(60, lumaAt(out, width - 1, height - 1))
+        assertEquals(90, uAt(out, width - 1, height - 1))
+        assertEquals(200, vAt(out, width - 1, height - 1))
+    }
+
+    @Test
+    fun lightLeakLightsAnOddLastRowOnce() {
+        val oddHeight = height - 1
+        val chroma = 2 * (width / 2) * (oddHeight / 2)
+        val black = ByteArray(width * oddHeight + chroma) { (if (it < width * oddHeight) 16 else 128).toByte() }
+
+        val out = ClipTransitionEffects.compose(
+            "lightLeak", "left", black, black, width, oddHeight, 0.5, 0.5, 500_000L,
+        )
+
+        // The last row shares the chroma row above it. Drawn from that row's
+        // light rather than its own, it would jump out of the smooth falloff.
+        fun luma(x: Int, y: Int) = out[y * width + x].toInt() and 0xFF
+        val last = oddHeight - 1
+        for (x in 0 until width) {
+            val step = luma(x, last) - luma(x, last - 1)
+            val stepBefore = luma(x, last - 1) - luma(x, last - 2)
+            assertTrue(abs(step - stepBefore) <= 2, "$x: $stepBefore then $step")
+        }
+    }
+
+    @Test
     fun leakStrengthPeaksAtTheMidpoint() {
         assertEquals(0.0, ClipTransitionEffects.leakStrength(0.0), 1e-12)
         assertEquals(1.0, ClipTransitionEffects.leakStrength(0.5), 1e-12)
@@ -317,7 +352,7 @@ internal class ClipTransitionEffectsTest {
     }
 
     @Test
-    fun diagonalWipeTravelsTowardTheCornerAQuarterTurnFromItsDirection() {
+    fun diagonalWipeTravelsTowardTheCornerAnEighthTurnFromItsDirection() {
         assertEquals(0 to 0, ClipTransitionEffects.diagonalCorner("left"))
         assertEquals(1 to 0, ClipTransitionEffects.diagonalCorner("up"))
         assertEquals(1 to 1, ClipTransitionEffects.diagonalCorner("right"))
@@ -353,7 +388,7 @@ internal class ClipTransitionEffectsTest {
     }
 
     @Test
-    fun flipTurnsTheEdgeAheadOfItsMotionTowardTheViewer() {
+    fun flipTurnsTheEdgeOppositeItsDirectionTowardTheViewer() {
         val left = ClipTransitionEffects.turnedFaces("flip", "left", 1080, 1920, 0.25).single()
         val up = ClipTransitionEffects.turnedFaces("flip", "up", 1080, 1920, 0.25).single()
 
