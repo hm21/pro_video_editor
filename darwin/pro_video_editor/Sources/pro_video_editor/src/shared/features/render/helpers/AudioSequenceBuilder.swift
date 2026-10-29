@@ -25,6 +25,7 @@ internal class AudioSequenceBuilder {
   private let window: CMTimeRange
   private var loopAudio: Bool = true
   private var playbackSpeed: Double = 1
+  private var speedRamp: SpeedRamp?
   private var audioStartTime: CMTime = .zero
   private var audioEndTime: CMTime?
   /// Where on the output timeline (from `window.start`) this track starts.
@@ -56,6 +57,14 @@ internal class AudioSequenceBuilder {
   @discardableResult
   func setPlaybackSpeed(_ speed: Double) -> AudioSequenceBuilder {
     self.playbackSpeed = speed
+    return self
+  }
+
+  /// Sets a speed that changes along the source, instead of the playback
+  /// speed, before looping, padding and fades; nil plays at that speed.
+  @discardableResult
+  func setSpeedRamp(_ ramp: SpeedRamp?) -> AudioSequenceBuilder {
+    self.speedRamp = ramp
     return self
   }
 
@@ -137,6 +146,7 @@ internal class AudioSequenceBuilder {
         loop: loopAudio,
         targetBodyDuration: effectivePlayDuration,
         playbackSpeed: playbackSpeed,
+        speedRamp: speedRamp,
         fadeIn: fadeIn,
         fadeOut: fadeOut,
         volumeCurve: volumeCurve,

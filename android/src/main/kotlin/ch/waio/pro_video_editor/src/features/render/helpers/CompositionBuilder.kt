@@ -149,6 +149,7 @@ class CompositionBuilder(
                 val result = AudioSequenceBuilder(context, track.path, totalVideoDuration)
                     .setLoop(track.loop)
                     .setPlaybackSpeed(track.playbackSpeed)
+                    .setSpeedRamp(track.speedRamp)
                     .setStartTime(track.audioStartUs)
                     .setAudioEndTime(track.audioEndUs)
                     .setCompositionStartTime(track.startUs)

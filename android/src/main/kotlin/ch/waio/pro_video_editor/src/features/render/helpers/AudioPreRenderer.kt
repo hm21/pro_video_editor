@@ -5,6 +5,7 @@ import android.content.Context
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import androidx.media3.common.util.UnstableApi
+import ch.waio.pro_video_editor.src.features.render.models.SpeedRamp
 import ch.waio.pro_video_editor.src.features.render.models.VolumeCurve
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.PcmRangeDecoder
@@ -87,6 +88,9 @@ object AudioPreRenderer {
      *   determine trailing silence).
      * @param playbackSpeed Speed of the trimmed source at unchanged pitch. A
      *   looped source is stretched as one sound, so its seams stay gap-less.
+     * @param speedRamp A speed that changes along the trimmed source, instead
+     *   of [playbackSpeed], also at unchanged pitch; each pass of a loop plays
+     *   the whole curve.
      * @param fadeInUs How long the body rises from silence to full level
      *   after it starts.
      * @param fadeOutUs How long the body falls to silence before its audio
@@ -109,6 +113,7 @@ object AudioPreRenderer {
         fadeInUs: Long = 0L,
         fadeOutUs: Long = 0L,
         playbackSpeed: Float = 1.0f,
+        speedRamp: SpeedRamp? = null,
         volumeCurve: VolumeCurve? = null
     ): Result? {
         if (!mediaSourceExists(context, audioPath)) {
@@ -133,7 +138,7 @@ object AudioPreRenderer {
 
         var stretchedFile: File? = null
         try {
-            val source = if (playbackSpeed != 1f) {
+            val source = if (playbackSpeed != 1f || speedRamp != null) {
                 // A looped source comes back as the whole body, seams included.
                 val file = try {
                     File.createTempFile("speed_audio_", ".raw", context.cacheDir).also {
@@ -142,7 +147,8 @@ object AudioPreRenderer {
                             decoded.pcmFile, it, decoded.sampleRate, decoded.channelCount,
                             playbackSpeed,
                             maxFrames = usToFrames(compositionDurationUs, decoded.sampleRate),
-                            loop = loop
+                            loop = loop,
+                            ramp = speedRamp
                         )
                     }
                 } catch (e: Exception) {

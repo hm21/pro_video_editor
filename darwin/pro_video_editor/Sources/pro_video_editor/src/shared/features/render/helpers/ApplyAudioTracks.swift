@@ -34,6 +34,7 @@ func applyAudioTracks(
       let audioBuilder = AudioSequenceBuilder(audioPath: trackConfig.path, window: window)
         .setLoop(trackConfig.loop)
         .setPlaybackSpeed(trackConfig.playbackSpeed)
+        .setSpeedRamp(trackConfig.speedRamp)
         .setAudioStartTime(trackConfig.audioStartUs)
         .setAudioEndTime(trackConfig.audioEndUs)
         .setCompositionStartTime(trackConfig.startUs == -1 ? nil : trackConfig.startUs)

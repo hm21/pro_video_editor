@@ -1,5 +1,6 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
+import ch.waio.pro_video_editor.src.features.render.models.SpeedRamp
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
@@ -7,6 +8,7 @@ import java.nio.ByteOrder
 import kotlin.math.PI
 import kotlin.math.ceil
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
@@ -20,16 +22,20 @@ internal object AudioSpeedProcessor {
      * sound starts at once. With [loop] the source repeats without end and
      * exactly [maxFrames] are written: each seam is stretched like the rest of
      * the sound, while looping a stretched copy would leave a gap at every seam.
+     *
+     * A [ramp] replaces [speed]: the source plays along its steps, with its
+     * positions running over the whole source, and each pass of a [loop] plays
+     * the whole curve. The pitch stays the same either way.
      */
     fun stretch(
         source: File, destination: File, sampleRate: Int, channels: Int, speed: Float,
-        maxFrames: Long = Long.MAX_VALUE, loop: Boolean = false
+        maxFrames: Long = Long.MAX_VALUE, loop: Boolean = false, ramp: SpeedRamp? = null
     ) {
         require(speed.isFinite() && speed > 0f)
         val bytesPerFrame = channels * 2
         require(channels > 0 && sampleRate > 0 && source.length() % bytesPerFrame == 0L)
         require(!loop || maxFrames < Long.MAX_VALUE)
-        if (speed == 1f) {
+        if (ramp == null && speed == 1f) {
             source.copyTo(destination, overwrite = true)
             return
         }
@@ -46,8 +52,9 @@ internal object AudioSpeedProcessor {
                     output.setLength(0)
                     val sourceFrames = input.length() / bytesPerFrame
                     if (sourceFrames == 0L) return
+                    val timing = Timing(speed, ramp, sourceFrames, loop)
                     val outputFrames = if (loop) maxFrames
-                        else minOf(ceil(sourceFrames / speed.toDouble()).toLong(), maxFrames)
+                        else minOf(timing.passFrames, maxFrames)
                     // Without a loop no frame reads past the end, where its
                     // silence would leave a dip just before the sound stops.
                     val end = if (loop) Long.MAX_VALUE else maxOf(0L, sourceFrames - frame)
@@ -60,7 +67,7 @@ internal object AudioSpeedProcessor {
                         if (outStart == 0L) {
                             samples = readFrames(input, 0L, frame, channels, sourceFrames, loop)
                         } else {
-                            val nominal = minOf((outStart * speed.toDouble()).roundToLong(), end)
+                            val nominal = minOf(timing.sourceFrameAt(outStart), end)
                             val lowest = maxOf(0L, nominal - tolerance)
                             val highest = minOf(nominal + tolerance, end)
                             samples = readFrames(
@@ -134,6 +141,30 @@ internal object AudioSpeedProcessor {
         } catch (error: Exception) {
             destination.delete()
             throw error
+        }
+    }
+
+    /**
+     * Where an output frame comes from in the source: [speed] frames on per
+     * frame, or along [ramp], whose positions run over the whole source.
+     */
+    private class Timing(
+        speed: Float, private val ramp: SpeedRamp?, private val sourceFrames: Long,
+        private val loop: Boolean
+    ) {
+        private val speed = speed.toDouble()
+        private val exactPassFrames =
+            if (ramp == null) sourceFrames / this.speed else sourceFrames * ramp.durationFactor
+
+        /** How many frames one pass through the source plays. */
+        val passFrames: Long = ceil(exactPassFrames).toLong()
+
+        /** The source frame [outFrame] plays, past the end once a loop starts over. */
+        fun sourceFrameAt(outFrame: Long): Long {
+            if (ramp == null) return (outFrame * speed).roundToLong()
+            val pass = if (loop) floor(outFrame / exactPassFrames).toLong() else 0L
+            val output = (outFrame - pass * exactPassFrames) / sourceFrames
+            return pass * sourceFrames + (ramp.positionAfterOutput(output) * sourceFrames).roundToLong()
         }
     }
 

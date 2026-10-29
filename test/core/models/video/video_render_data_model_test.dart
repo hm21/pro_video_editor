@@ -22,6 +22,7 @@ import 'package:pro_video_editor/core/models/video/video_quality_config.dart';
 import 'package:pro_video_editor/core/models/video/video_quality_preset.dart';
 import 'package:pro_video_editor/core/models/video/video_render_data_model.dart';
 import 'package:pro_video_editor/core/models/video/video_segment_model.dart';
+import 'package:pro_video_editor/core/models/video/video_speed_ramp_model.dart';
 import 'package:pro_video_editor/core/utils/video_effect_frames.dart';
 
 void main() {
@@ -189,6 +190,26 @@ void main() {
       final tracks = (await data.toAsyncMap())['audioTracks'] as List;
       expect(tracks[0]['playbackSpeed'], 0.5);
       expect(tracks[1]['playbackSpeed'], 1.0);
+    });
+
+    test('sends a speed ramp as the steps the renderer plays', () async {
+      const ramp = VideoSpeedRamp([
+        VideoSpeedRampPoint(position: 0, speed: 2),
+        VideoSpeedRampPoint(position: 0.5, speed: 2),
+        VideoSpeedRampPoint(position: 0.5001, speed: 0.5),
+        VideoSpeedRampPoint(position: 1, speed: 0.5),
+      ]);
+      final data = VideoRenderData(
+        videoSegments: [VideoSegment(video: EditorVideo.file('/video.mp4'))],
+        audioTracks: const [
+          VideoAudioTrack(path: '/audio.wav', speedRamp: ramp),
+          VideoAudioTrack(path: '/normal.wav'),
+        ],
+      );
+      final tracks = (await data.toAsyncMap())['audioTracks'] as List;
+      expect(tracks[0]['speedRamp'], ramp.toChannelSteps());
+      expect(tracks[0]['playbackSpeed'], 1.0);
+      expect(tracks[1]['speedRamp'], isNull);
     });
 
     test(

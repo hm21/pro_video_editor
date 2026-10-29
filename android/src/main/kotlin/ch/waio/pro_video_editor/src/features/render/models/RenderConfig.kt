@@ -473,6 +473,9 @@ data class EqualizerConfig(val bands: List<EqualizerBand> = emptyList()) {
  *
  * @property path Absolute path to the audio file
  * @property volume Volume multiplier (0.0=silent, 1.0=unchanged, >1.0=amplified)
+ * @property playbackSpeed Speed of the trimmed source at unchanged pitch
+ * @property speedRamp A speed that changes along the trimmed source, instead of
+ *  [playbackSpeed], at unchanged pitch (null = constant)
  * @property equalizer Equalizer of the track (null = unchanged)
  * @property loop Whether to loop the audio if shorter than the video
  * @property audioStartUs Start offset within the audio file in microseconds
@@ -487,6 +490,7 @@ data class AudioTrackConfig(
     val path: String,
     val volume: Float = 1.0f,
     val playbackSpeed: Float = 1.0f,
+    val speedRamp: SpeedRamp? = null,
     val equalizer: EqualizerConfig? = null,
     val loop: Boolean = false,
     val audioStartUs: Long? = null,
@@ -503,6 +507,7 @@ data class AudioTrackConfig(
                 path = map["path"] as String,
                 volume = (map["volume"] as? Number)?.toFloat() ?: 1.0f,
                 playbackSpeed = (map["playbackSpeed"] as? Number)?.toFloat() ?: 1.0f,
+                speedRamp = SpeedRamp.fromList(map["speedRamp"]),
                 equalizer = EqualizerConfig.fromMap(map["equalizer"] as? Map<*, *>),
                 loop = map["loop"] as? Boolean ?: false,
                 audioStartUs = (map["audioStartUs"] as? Number)?.toLong(),

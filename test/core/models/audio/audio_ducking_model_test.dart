@@ -174,6 +174,38 @@ void main() {
       expect(loud(envelope), [(500, 1000)]);
     });
 
+    test('follows a speed ramp over the source window', () {
+      // Loud from 1 s to 2 s and from 3 s to 3.5 s of a 4 s source, whose
+      // first half plays at 2x and second half at 0.5x.
+      final peaks = Float32List(400)
+        ..fillRange(100, 200, 0.5)
+        ..fillRange(300, 350, 0.5);
+      final envelope = AudioLevelEnvelope.fromWaveforms(
+        const [
+          VideoAudioTrack(
+            path: '/voice.m4a',
+            speedRamp: VideoSpeedRamp([
+              VideoSpeedRampPoint(position: 0, speed: 2),
+              VideoSpeedRampPoint(position: 0.5, speed: 2),
+              VideoSpeedRampPoint(position: 0.5 + 1e-9, speed: 0.5),
+              VideoSpeedRampPoint(position: 1, speed: 0.5),
+            ]),
+          ),
+        ],
+        [
+          WaveformData(
+            leftChannel: peaks,
+            sampleRate: 44100,
+            duration: const Duration(seconds: 4),
+            samplesPerSecond: 100,
+          ),
+        ],
+        levelsPerSecond: 100,
+      );
+      expect(loud(envelope), [(500, 1000), (3000, 4000)]);
+      expect(envelope.duration, const Duration(seconds: 5));
+    });
+
     test('repeats a looping track until its end', () {
       final envelope = place(
         const VideoAudioTrack(

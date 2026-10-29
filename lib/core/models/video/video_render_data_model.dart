@@ -487,6 +487,7 @@ class VideoRenderData {
             'path': t.path,
             'volume': t.volume,
             'playbackSpeed': t.playbackSpeed,
+            'speedRamp': t.speedRamp?.toChannelSteps(),
             'loop': t.loop,
             'audioStartUs': t.audioStartTime?.inMicroseconds,
             'audioEndUs': t.audioEndTime?.inMicroseconds,

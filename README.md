@@ -114,6 +114,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🎥 **Clip Keyframes**: Pan, zoom into and turn a clip's picture between keyframes, for a slow push-in, a punch-in on a reaction or a pan across a wide shot.
 - 🔇 **Mute Audio**: Remove or mute the audio track from the video.
 - ⏩ **Audio Track Speed**: Speed up or slow down custom audio tracks with `VideoAudioTrack.playbackSpeed`, preserving pitch and stereo on Android, iOS and macOS. Source trims stay in source time; placement and fades stay in output time.
+- 🎢 **Audio Track Speed Ramps**: Let a custom audio track speed up and slow down along a `VideoSpeedRamp` with `VideoAudioTrack.speedRamp`, at unchanged pitch, and preview the same stretch with `AudioMergeSegment.speedRamp`.
 - 🎚️ **Equalizer**: Raise or lower parts of the audio of a clip or a custom audio track with an `AudioEqualizer` of any number of bands, each a low shelf, a peak or a high shelf.
 - 🦆 **Audio Ducking**: Lower the music automatically while a voice-over talks and bring it back up when it stops. `AudioDucking.analyze` measures the voice tracks' loudness (no speech recognition) and returns an `AudioVolumeCurve` for `VideoAudioTrack.volumeCurve`; a preview that scales its volume by `AudioVolumeCurve.volumeAt` plays the same dips.
 - 📊 **Waveform**: Generate audio waveform data for visualization, with support for streaming mode.

@@ -48,6 +48,59 @@ void main() {
       }
     });
 
+    group('speedRamp', () {
+      const ramp = VideoSpeedRamp([
+        VideoSpeedRampPoint(position: 0, speed: 2),
+        VideoSpeedRampPoint(position: 1, speed: 0.5),
+      ]);
+
+      test('survives JSON without moving source trim or fades', () {
+        final ramped = track.copyWith(speedRamp: ramp);
+        final restored = VideoAudioTrack.fromJson(ramped.toJson());
+        expect(restored.speedRamp, ramp);
+        expect(restored.playbackSpeed, 1);
+        expect(restored.audioStartTime, const Duration(seconds: 5));
+        expect(restored.fadeInDuration, const Duration(milliseconds: 500));
+        expect(restored, ramped);
+        expect(restored.hashCode, ramped.hashCode);
+      });
+
+      test('keeps a cropped ramp through JSON', () {
+        final cropped = ramp.cropped(0.25, 0.75);
+        final restored = VideoAudioTrack.fromJson(
+          track.copyWith(speedRamp: cropped).toJson(),
+        );
+        expect(restored.speedRamp, cropped);
+        expect(restored.speedRamp!.steps, cropped.steps);
+      });
+
+      test('replaces the playback speed, and a speed replaces it', () {
+        final ramped = track.copyWith(speedRamp: ramp);
+        expect(ramped.playbackSpeed, 1);
+        expect(ramped, isNot(track));
+        final constant = ramped.copyWith(playbackSpeed: 2);
+        expect(constant.speedRamp, isNull);
+        expect(constant.playbackSpeed, 2);
+        expect(ramped.copyWith(volume: 0.5).speedRamp, ramp);
+      });
+
+      test('old saved tracks play without a ramp', () {
+        final oldMap = track.toMap()..remove('speedRamp');
+        expect(VideoAudioTrack.fromMap(oldMap).speedRamp, isNull);
+      });
+
+      test('rejects a ramp together with a playback speed', () {
+        expect(
+          () => VideoAudioTrack(
+            path: '/audio.wav',
+            playbackSpeed: 2,
+            speedRamp: ramp,
+          ),
+          throwsAssertionError,
+        );
+      });
+    });
+
     group('toMap', () {
       test('serializes all fields correctly', () {
         final map = track.toMap();

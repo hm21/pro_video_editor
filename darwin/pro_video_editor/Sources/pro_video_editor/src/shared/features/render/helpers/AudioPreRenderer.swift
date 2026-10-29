@@ -49,6 +49,9 @@ internal enum AudioPreRenderer {
   ///     remaining time is filled with silence.
   ///   - playbackSpeed: Speed of the trimmed source at unchanged pitch. A
   ///     looped source is stretched as one sound, so its seams stay gap-less.
+  ///   - speedRamp: A speed that changes along the trimmed source, instead of
+  ///     `playbackSpeed`, also at unchanged pitch; each pass of a loop plays
+  ///     the whole curve.
   ///   - targetBodyDuration: How long the output audio should sound.
   ///   - fadeIn: How long the audio rises from silence to full level
   ///     after it starts.
@@ -67,6 +70,7 @@ internal enum AudioPreRenderer {
     loop: Bool,
     targetBodyDuration: CMTime,
     playbackSpeed: Double = 1,
+    speedRamp: SpeedRamp? = nil,
     fadeIn: CMTime = .zero,
     fadeOut: CMTime = .zero,
     volumeCurve: VolumeCurve? = nil,
@@ -192,7 +196,8 @@ internal enum AudioPreRenderer {
     // A looped source comes back as the whole body, seams included.
     trimmedPcm = AudioTimeStretch.stretch(
       trimmedPcm, sampleRate: Int(sampleRate), channels: channelCount,
-      speed: playbackSpeed, maxFrames: targetBytes / bytesPerFrame, loop: loop)
+      speed: playbackSpeed, maxFrames: targetBytes / bytesPerFrame, loop: loop,
+      ramp: speedRamp)
 
     var outputBytes = Data(capacity: targetBytes)
 

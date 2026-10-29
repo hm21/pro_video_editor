@@ -343,6 +343,26 @@ final class AudioTrackSpeedTests: XCTestCase {
     }
   }
 
+  func testRampFollowsItsStepsAtUnchangedPitch() {
+    // The first half plays at 2x and the second at 0.5x: the switch from
+    // 400 Hz to 600 Hz at 2 s of source moves to 1 s, and 4 s last 5 s.
+    let output = AudioTimeStretch.stretch(
+      twoTones(), sampleRate: rate, channels: 2, speed: 1, maxFrames: rate * 12,
+      ramp: fastThenSlow)
+    XCTAssertEqual(Double(output.count / 4), Double(rate * 5), accuracy: 2)
+    XCTAssertEqual(frequency(output, channel: 0, from: 0.1, to: 0.9), 400, accuracy: 5)
+    XCTAssertEqual(frequency(output, channel: 0, from: 1.1, to: 4.9), 600, accuracy: 5)
+    XCTAssertEqual(frequency(output, channel: 1, from: 1.1, to: 4.9), 600, accuracy: 5)
+  }
+
+  func testLoopPlaysTheWholeRampOnEachPassWithoutAGap() {
+    let output = AudioTimeStretch.stretch(
+      periodicTone(seconds: 1), sampleRate: rate, channels: 2, speed: 1,
+      maxFrames: rate * 5, loop: true, ramp: fastThenSlow)
+    XCTAssertEqual(output.count, rate * 5 * 4)
+    assertQuietestPeriod(output, above: 0.95, "looped ramp")
+  }
+
   func testUnityIsExactAndRenderingStopsAtTheOutputSlot() {
     let source = tone(seconds: 2)
     XCTAssertEqual(AudioTimeStretch.stretch(
@@ -362,6 +382,22 @@ final class AudioTrackSpeedTests: XCTestCase {
         var value = sample.littleEndian
         withUnsafeBytes(of: &value) { pcm.append(contentsOf: $0) }
       }
+    }
+    return pcm
+  }
+
+  private let fastThenSlow = SpeedRamp(steps: [
+    .init(start: 0, end: 0.5, speed: 2), .init(start: 0.5, end: 1, speed: 0.5),
+  ])
+
+  /// Two seconds of 400 Hz, then two of 600 Hz, on both channels.
+  private func twoTones() -> Data {
+    var pcm = Data()
+    for frame in 0..<(rate * 4) {
+      let hz = frame < rate * 2 ? 400.0 : 600.0
+      var value = Int16((12000 * sin(2 * .pi * hz * Double(frame) / Double(rate))).rounded())
+        .littleEndian
+      for _ in 0..<2 { withUnsafeBytes(of: &value) { pcm.append(contentsOf: $0) } }
     }
     return pcm
   }
@@ -392,21 +428,24 @@ final class AudioTrackSpeedTests: XCTestCase {
     }
   }
 
-  private func frequency(_ pcm: Data, channel: Int) -> Double {
+  /// The tone's frequency between `from` and `to` seconds, by zero crossings.
+  private func frequency(
+    _ pcm: Data, channel: Int, from: Double = 0.25, to: Double = 0.75
+  ) -> Double {
     pcm.withUnsafeBytes { raw in
       let samples = raw.bindMemory(to: Int16.self)
-      let from = rate / 4
-      let to = from + rate / 2
+      let first = Int((Double(rate) * from).rounded())
+      let last = Int((Double(rate) * to).rounded())
       var crossings = 0
       var peak = 0
-      for frame in from..<to {
+      for frame in first..<last {
         if (samples[(frame - 1) * 2 + channel] < 0) != (samples[frame * 2 + channel] < 0) {
           crossings += 1
         }
         peak = max(peak, abs(Int(samples[frame * 2 + channel])))
       }
       XCTAssertGreaterThan(peak, 1000)
-      return Double(crossings)
+      return Double(crossings) / (2 * (to - from))
     }
   }
 }
