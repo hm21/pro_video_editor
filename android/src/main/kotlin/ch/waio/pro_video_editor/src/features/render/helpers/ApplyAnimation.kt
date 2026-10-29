@@ -273,10 +273,9 @@ internal data class OverlayAnimationState(
  * angles add up and flip squeezes multiply. A bounce lifts the layer by a
  * multiple of its own height ([halfNormH] is half of it), a wiggle tilts and a
  * spin turns it around its own center, and a flip squeezes it across the axis
- * it turns around. Text
- * reveals (`typewriter`, `wordByWord`) change what the image shows, which a
- * fixed image cannot do, so they are skipped here; the caller passes one layer
- * per step instead.
+ * it turns around. Text reveals (`typewriter`, `wordByWord`) change what the
+ * image shows, which a fixed image cannot do, so they are skipped here; the
+ * caller passes one layer per step instead.
  *
  * Values that an elastic or bounce curve can push out of range are clamped:
  * opacity to [0, 1] and scale to at least 0.
@@ -533,10 +532,10 @@ internal data class OverlayFrame(
  * anchor. Media3 scales and turns an overlay around its overlay-frame anchor,
  * so with that anchor on the overlay's center the placement stays exact
  * whatever the turn and scale. It scales the overlay along its own axes before
- * it turns it, so a flip squeezes the image as it is drawn. Splitting a position past the edge into a
- * clamped background anchor and an overlay anchor cannot: the overlay anchor
- * reaches at most one upright half-size, while a turned layer still shows
- * corners further out.
+ * it turns it, so a flip squeezes the image as it is drawn. Splitting a
+ * position past the edge into a clamped background anchor and an overlay
+ * anchor cannot: the overlay anchor reaches at most one upright half-size,
+ * while a turned layer still shows corners further out.
  */
 internal class CenteredOverlaySettings(
     private val alpha: Float,

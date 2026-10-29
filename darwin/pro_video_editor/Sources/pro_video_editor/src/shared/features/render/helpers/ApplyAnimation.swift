@@ -270,7 +270,8 @@ func animationProgress(
 
 /// Computes animation transforms and opacity for overlaying an image layer.
 /// Returns the opacity and the transform to apply to the overlay, and
-/// `untilted`, the same transform without a wiggle's tilt or a keyframe's turn.
+/// `untilted`, the same transform without a wiggle's tilt, a spin's turn or a
+/// keyframe's turn.
 ///
 /// The animations count from the layer's `animationStartUs` / `animationEndUs`
 /// where set, else from its own time range. Opacity and scale multiply, slide
@@ -278,9 +279,10 @@ func animationProgress(
 /// a spin turns and a scale grows the overlay around its own center before
 /// slides and bounces move it, as on Android and in the editor preview; a
 /// bounce lifts it by a multiple of its unscaled height. A flip squeezes the
-/// overlay across the axis it turns around, before anything turns it. Text reveals ("typewriter",
-/// "wordByWord") change what the image shows, which a fixed image cannot do,
-/// so they are skipped; the caller passes one layer per step instead.
+/// overlay across the axis it turns around, before anything turns it. Text
+/// reveals ("typewriter", "wordByWord") change what the image shows, which a
+/// fixed image cannot do, so they are skipped; the caller passes one layer per
+/// step instead.
 ///
 /// A [keyframe] places the layer first: [overlayExtent] is then its upright,
 /// unscaled box at the keyframed corner, which the keyframe's scale grows and

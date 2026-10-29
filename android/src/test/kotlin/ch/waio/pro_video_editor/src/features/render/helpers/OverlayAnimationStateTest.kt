@@ -245,6 +245,8 @@ internal class OverlayAnimationStateTest {
 
     @Test
     fun anOverlayFrameCarriesTheFlip() {
+        // Near the right edge, which a mirrored width counted as negative
+        // would push the layer past.
         val frame = overlayFrame(
             keyframes = emptyList(),
             keyframeClock = KeyframeClock.OUTPUT,
@@ -252,13 +254,13 @@ internal class OverlayAnimationStateTest {
             timeUs = 0L,
             animationStartUs = 0L,
             animationEndUs = 10_000_000L,
-            baseNormX = 0f,
+            baseNormX = 0.9f,
             baseNormY = 0f,
             imageWidth = 200,
             imageHeight = 100,
             videoWidth = 1000,
             videoHeight = 1000,
-            layerX = 400f,
+            layerX = 850f,
             layerY = 450f,
         )
         assertEquals(-1f, frame.flipX, 1e-6f)

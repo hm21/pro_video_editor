@@ -448,6 +448,11 @@ class RunnerTests: XCTestCase {
     let rightEdge = CGPoint(x: 200, y: 50).applying(transform)
     XCTAssertEqual(rightEdge.x, 0, accuracy: 1e-9)
     XCTAssertEqual(rightEdge.y, 50, accuracy: 1e-9)
+    // Mirrored, not turned half way round: the top right corner stays at the
+    // top.
+    let topRight = CGPoint(x: 200, y: 100).applying(transform)
+    XCTAssertEqual(topRight.x, 0, accuracy: 1e-9)
+    XCTAssertEqual(topRight.y, 100, accuracy: 1e-9)
   }
 
   func testBounceLiftsByAMultipleOfTheOverlayHeight() {
