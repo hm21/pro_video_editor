@@ -1,5 +1,6 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
+import ch.waio.pro_video_editor.src.features.render.models.KeyframeClock
 import ch.waio.pro_video_editor.src.features.render.models.LayerAnimationConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -7,7 +8,8 @@ import kotlin.test.assertNull
 
 /**
  * Pins [animationProgress] and [overlayAnimationState]: the loop phase, the
- * wiggle and bounce types and the animation range a layer can count from.
+ * wiggle, bounce, spin and flip types and the animation range a layer can
+ * count from.
  * The editor preview in `pro_image_editor` computes the same values.
  */
 internal class OverlayAnimationStateTest {
@@ -21,6 +23,8 @@ internal class OverlayAnimationStateTest {
         curve: String = "linear",
         wiggleAngle: Double? = null,
         bounceHeight: Double? = null,
+        turns: Double? = null,
+        flipAxis: String? = null,
     ) = LayerAnimationConfig(
         type = type,
         phase = phase,
@@ -28,6 +32,8 @@ internal class OverlayAnimationStateTest {
         curve = curve,
         wiggleAngle = wiggleAngle,
         bounceHeight = bounceHeight,
+        turns = turns,
+        flipAxis = flipAxis,
     )
 
     private fun state(
@@ -187,6 +193,80 @@ internal class OverlayAnimationStateTest {
         // 3/4 of the lift (1 - 0.25) of one layer height (0.2).
         assertEquals(0.15f, s.offsetY, 1e-6f)
         assertEquals(-15f, s.rotationDegrees, 1e-4f)
+    }
+
+    @Test
+    fun aSpinTurnsIntoPlaceTheWayItTurnsAway() {
+        val spin = anim("spin", "animateInOut", turns = 2.0)
+        fun turn(t: Long) = animationProgress(spin, t, 0L, 5_000_000L)!!.turn
+        // Two turns back at the start, up to rest, and on beyond it at the
+        // end: clockwise throughout.
+        assertEquals(-2.0, turn(0L), tol)
+        assertEquals(-0.5, turn(750_000L), tol)
+        assertEquals(0.5, turn(4_250_000L), tol)
+        assertEquals(2.0, turn(5_000_000L), tol)
+    }
+
+    @Test
+    fun aSpinLoopKeepsTurning() {
+        val spin = anim("spin", "loop", turns = 0.25)
+        fun turn(t: Long) = animationProgress(spin, t, 0L, -1L)!!.turn
+        assertEquals(0.0, turn(0L), tol)
+        assertEquals(0.125, turn(500_000L), tol)
+        // A quarter turn per cycle, picking up where the last cycle stopped.
+        assertEquals(0.375, turn(1_500_000L), tol)
+        // Whole turns are taken off.
+        assertEquals(0.125, turn(4_500_000L), tol)
+    }
+
+    @Test
+    fun aSpinTurnsTheOverlayClockwise() {
+        // A quarter of the way in, three quarters of a turn to go: a quarter
+        // clockwise from where it started, which Media3 counts the other way.
+        val s = state(listOf(anim("spin", "animateIn")), 250_000L)
+        assertEquals(270f, s.rotationDegrees, 1e-3f)
+        assertEquals(1f, s.flipX, 1e-6f)
+        assertEquals(1f, s.flipY, 1e-6f)
+    }
+
+    @Test
+    fun aFlipSqueezesTheOverlayAcrossItsAxis() {
+        val flip = anim("flip", "animateIn", turns = 0.5, flipAxis = "horizontal")
+        // Half a turn away, it shows its mirror image.
+        val mirrored = state(listOf(flip), 0L)
+        assertEquals(1f, mirrored.flipX, 1e-6f)
+        assertEquals(-1f, mirrored.flipY, 1e-6f)
+        // A quarter turn away, it is edge-on.
+        assertEquals(0f, state(listOf(flip), 500_000L).flipY, 1e-6f)
+        // Without an axis it turns sideways.
+        assertEquals(-1f, state(listOf(anim("flip", "animateIn", turns = 0.5)), 0L).flipX, 1e-6f)
+        assertEquals(0f, state(listOf(flip), 500_000L).rotationDegrees, 1e-6f)
+    }
+
+    @Test
+    fun anOverlayFrameCarriesTheFlip() {
+        // Near the right edge, which a mirrored width counted as negative
+        // would push the layer past.
+        val frame = overlayFrame(
+            keyframes = emptyList(),
+            keyframeClock = KeyframeClock.OUTPUT,
+            animations = listOf(anim("flip", "animateIn", turns = 0.5)),
+            timeUs = 0L,
+            animationStartUs = 0L,
+            animationEndUs = 10_000_000L,
+            baseNormX = 0.9f,
+            baseNormY = 0f,
+            imageWidth = 200,
+            imageHeight = 100,
+            videoWidth = 1000,
+            videoHeight = 1000,
+            layerX = 850f,
+            layerY = 450f,
+        )
+        assertEquals(-1f, frame.flipX, 1e-6f)
+        assertEquals(1f, frame.flipY, 1e-6f)
+        // A mirrored layer still shows.
+        assertEquals(1f, frame.alpha, 1e-6f)
     }
 
     @Test

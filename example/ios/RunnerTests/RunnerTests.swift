@@ -283,11 +283,13 @@ class RunnerTests: XCTestCase {
 
   private func animation(
     _ type: String, _ phase: String, durationUs: Int64 = 1_000_000, curve: String = "linear",
-    wiggleAngle: Double? = nil, bounceHeight: Double? = nil
+    wiggleAngle: Double? = nil, bounceHeight: Double? = nil, turns: Double? = nil,
+    flipAxis: String? = nil
   ) -> LayerAnimationConfig {
     LayerAnimationConfig(
       type: type, phase: phase, durationUs: durationUs, curve: curve, slideDirection: nil,
-      slideFrom: nil, scaleFrom: nil, wiggleAngle: wiggleAngle, bounceHeight: bounceHeight)
+      slideFrom: nil, scaleFrom: nil, wiggleAngle: wiggleAngle, bounceHeight: bounceHeight,
+      turns: turns, flipAxis: flipAxis)
   }
 
   private func animatedLayer(
@@ -380,6 +382,77 @@ class RunnerTests: XCTestCase {
     let center = CGPoint(x: 100, y: 50).applying(transform)
     XCTAssertEqual(center.x, 100, accuracy: 1e-9)
     XCTAssertEqual(center.y, 50, accuracy: 1e-9)
+  }
+
+  func testSpinTurnsIntoPlaceTheWayItTurnsAway() {
+    let spin = animation("spin", "animateInOut", turns: 2)
+    func turn(_ t: Int64) -> Double {
+      animationProgress(spin, currentTimeUs: t, startUs: 0, endUs: 5_000_000)!.turn
+    }
+    // Two turns back at the start, up to rest, and on beyond it at the end:
+    // clockwise throughout.
+    XCTAssertEqual(turn(0), -2, accuracy: 1e-9)
+    XCTAssertEqual(turn(750_000), -0.5, accuracy: 1e-9)
+    XCTAssertEqual(turn(4_250_000), 0.5, accuracy: 1e-9)
+    XCTAssertEqual(turn(5_000_000), 2, accuracy: 1e-9)
+  }
+
+  func testSpinLoopKeepsTurning() {
+    let spin = animation("spin", "loop", turns: 0.25)
+    func turn(_ t: Int64) -> Double {
+      animationProgress(spin, currentTimeUs: t, startUs: 0, endUs: -1)!.turn
+    }
+    XCTAssertEqual(turn(0), 0, accuracy: 1e-9)
+    XCTAssertEqual(turn(500_000), 0.125, accuracy: 1e-9)
+    // A quarter turn per cycle, picking up where the last cycle stopped.
+    XCTAssertEqual(turn(1_500_000), 0.375, accuracy: 1e-9)
+    // Whole turns are taken off.
+    XCTAssertEqual(turn(4_500_000), 0.125, accuracy: 1e-9)
+  }
+
+  func testSpinTurnsClockwiseAroundTheOverlayCenter() {
+    // A quarter of the way in, three quarters of a turn to go: a quarter
+    // clockwise from where it started, as the wiggle above.
+    let layer = animatedLayer([animation("spin", "animateIn")])
+    let (_, transform, _) = computeAnimation(
+      layer: layer, currentTimeUs: 250_000, overlayExtent: animatedOverlay,
+      frameExtent: animatedFrame)
+    let rightEdge = CGPoint(x: 200, y: 50).applying(transform)
+    XCTAssertEqual(rightEdge.x, 100, accuracy: 1e-9)
+    XCTAssertEqual(rightEdge.y, -50, accuracy: 1e-9)
+  }
+
+  func testFlipSqueezesTheOverlayBeforeItIsTurned() {
+    // A quarter spin and five sixths of a flip over: the overlay is squeezed
+    // to half its height and then turned a quarter clockwise, so its top
+    // edge's middle, 50 above the center, ends 25 to the right of it.
+    let layer = animatedLayer([
+      animation("spin", "loop", durationUs: 4_000_000),
+      animation("flip", "loop", durationUs: 1_200_000, flipAxis: "horizontal"),
+    ])
+    let (_, transform, _) = computeAnimation(
+      layer: layer, currentTimeUs: 1_000_000, overlayExtent: animatedOverlay,
+      frameExtent: animatedFrame)
+    let topEdge = CGPoint(x: 100, y: 100).applying(transform)
+    XCTAssertEqual(topEdge.x, 125, accuracy: 1e-9)
+    XCTAssertEqual(topEdge.y, 50, accuracy: 1e-9)
+  }
+
+  func testFlipShowsTheMirrorImageHalfATurnAway() {
+    let layer = animatedLayer([animation("flip", "animateIn", turns: 0.5)])
+    let (opacity, transform, _) = computeAnimation(
+      layer: layer, currentTimeUs: 0, overlayExtent: animatedOverlay,
+      frameExtent: animatedFrame)
+    XCTAssertEqual(opacity, 1, accuracy: 1e-9)
+    // Turned sideways: the right edge shows on the left.
+    let rightEdge = CGPoint(x: 200, y: 50).applying(transform)
+    XCTAssertEqual(rightEdge.x, 0, accuracy: 1e-9)
+    XCTAssertEqual(rightEdge.y, 50, accuracy: 1e-9)
+    // Mirrored, not turned half way round: the top right corner stays at the
+    // top.
+    let topRight = CGPoint(x: 200, y: 100).applying(transform)
+    XCTAssertEqual(topRight.x, 0, accuracy: 1e-9)
+    XCTAssertEqual(topRight.y, 100, accuracy: 1e-9)
   }
 
   func testBounceLiftsByAMultipleOfTheOverlayHeight() {

@@ -703,7 +703,7 @@ void main() {
     }, skip: kIsWeb);
   });
 
-  group('Wiggle, bounce and animation ranges', () {
+  group('Wiggle, bounce, spin, flip and animation ranges', () {
     // The 1280x720 source, read back at 200 px high; a point is given in
     // source pixels.
     bool magentaAt(_Frame f, double x, double y) =>
@@ -790,6 +790,78 @@ void main() {
       final left = await frameOf(out, at: const Duration(milliseconds: 1500));
       expect(magentaAt(left, 540, 360), isTrue, reason: 'points left');
       expect(magentaAt(left, 740, 360), isFalse, reason: 'points left');
+    }, skip: kIsWeb);
+
+    testWidgets('a spin loop keeps turning clockwise', (tester) async {
+      // The needle of the wiggle test, turned once around its centre every
+      // 2 s: a quarter clockwise at 0.5 s, upside down at 1 s, a quarter
+      // short of a full turn at 1.5 s.
+      final out = await render([
+        ImageLayer(
+          image: EditorLayerImage.memory(await _needlePng()),
+          offset: const Offset(620, 160),
+          size: const Size(40, 400),
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 3),
+          animations: const [
+            LayerAnimation(
+              type: LayerAnimationType.spin,
+              phase: AnimationPhase.loop,
+              duration: Duration(seconds: 2),
+            ),
+          ],
+        ),
+      ]);
+
+      final right = await frameOf(out, at: const Duration(milliseconds: 500));
+      expect(magentaAt(right, 740, 360), isTrue, reason: 'points right');
+      expect(magentaAt(right, 640, 260), isFalse, reason: 'points right');
+
+      final down = await frameOf(out, at: const Duration(milliseconds: 1000));
+      expect(magentaAt(down, 640, 460), isTrue, reason: 'points down');
+      expect(magentaAt(down, 640, 260), isFalse, reason: 'points down');
+
+      final left = await frameOf(out, at: const Duration(milliseconds: 1500));
+      expect(magentaAt(left, 540, 360), isTrue, reason: 'points left');
+      expect(magentaAt(left, 740, 360), isFalse, reason: 'points left');
+    }, skip: kIsWeb);
+
+    testWidgets('a flip turns the layer over from its mirror image', (
+      tester,
+    ) async {
+      // The needle turned half way over its horizontal axis and back over
+      // 2 s: mirrored, so pointing down, at first, edge-on at 1 s and
+      // pointing up again once it has turned into place.
+      final out = await render([
+        ImageLayer(
+          image: EditorLayerImage.memory(await _needlePng()),
+          offset: const Offset(620, 160),
+          size: const Size(40, 400),
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 3),
+          animations: const [
+            LayerAnimation(
+              type: LayerAnimationType.flip,
+              phase: AnimationPhase.animateIn,
+              duration: Duration(seconds: 2),
+              turns: 0.5,
+              flipAxis: FlipAxis.horizontal,
+            ),
+          ],
+        ),
+      ]);
+
+      final mirrored = await frameOf(out, at: Duration.zero);
+      expect(magentaAt(mirrored, 640, 460), isTrue, reason: 'mirrored');
+      expect(magentaAt(mirrored, 640, 260), isFalse, reason: 'mirrored');
+
+      final edgeOn = await frameOf(out, at: const Duration(milliseconds: 1000));
+      expect(magentaAt(edgeOn, 640, 300), isFalse, reason: 'edge-on');
+      expect(magentaAt(edgeOn, 640, 420), isFalse, reason: 'edge-on');
+
+      final rest = await frameOf(out, at: const Duration(milliseconds: 2500));
+      expect(magentaAt(rest, 640, 260), isTrue, reason: 'at rest');
+      expect(magentaAt(rest, 640, 460), isFalse, reason: 'at rest');
     }, skip: kIsWeb);
 
     testWidgets('layers sharing an animation range carry one animation on', (

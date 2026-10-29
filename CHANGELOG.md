@@ -1,3 +1,6 @@
+## 2.48.0
+- **FEAT**(android, iOS, macOS): Spin and flip layer animations. `LayerAnimationType.spin` turns a layer around its centre and `LayerAnimationType.flip` turns it around its vertical or horizontal axis like a card (`FlipAxis`), both by `LayerAnimation.turns` full turns. In a `loop` they keep turning instead of swinging back. A `switch` over `LayerAnimationType` has to handle the new values.
+
 ## 2.47.0
 - **FEAT**(android, iOS, macOS): Five more clip transitions. `lightLeak` washes warm light across the cut, `clockWipe` reveals the next clip behind a hand sweeping around the centre, `diagonalWipe` reveals it along a diagonal edge, `flip` turns the picture over like a card and `cube` turns it like the side of a cube. `diagonalWipe`, `flip` and `cube` take a `direction`. `lightLeak` counts as a flash (`ClipTransitionType.flashes`).
 

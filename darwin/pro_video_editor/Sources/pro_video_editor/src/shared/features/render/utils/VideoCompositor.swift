@@ -673,9 +673,9 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         over: outputImage, mode: layer.blendMode)
     }
     let mask = placedOverlay(rotated, opacity: opacity, transform: animTransform)
-    // A wiggle or a keyframe turn tilts the hidden area, but its pixelate
-    // blocks stay put where the upright area starts them, as on Android,
-    // instead of following the corner of the box around it.
+    // A wiggle, a spin or a keyframe turn tilts the hidden area, but its
+    // pixelate blocks stay put where the upright area starts them, as on
+    // Android, instead of following the corner of the box around it.
     return applyLayerCensor(
       censor, to: outputImage, mask: mask, frame: imageRect,
       blockArea: rotated.extent.applying(untilted))

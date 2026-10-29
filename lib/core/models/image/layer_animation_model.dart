@@ -11,7 +11,7 @@ import 'image_layer_model.dart';
 /// follows the animation's progress: fully away at the start of an
 /// [AnimationPhase.animateIn], at rest once it ends, and back again over an
 /// [AnimationPhase.animateOut]. [AnimationPhase.loop] swings between the two
-/// over and over.
+/// over and over; a [spin] and a [flip] keep turning instead.
 enum LayerAnimationType {
   /// Fade opacity from 0 to 1 (in) or 1 to 0 (out).
   fade,
@@ -54,6 +54,44 @@ enum LayerAnimationType {
   ///
   /// Skipped by the renderer for the same reason as [typewriter].
   wordByWord,
+
+  /// Turn the layer around its center by [LayerAnimation.turns] full turns.
+  ///
+  /// In, the layer turns into place, out it turns away from it, both
+  /// clockwise for a positive [LayerAnimation.turns]. In a
+  /// [AnimationPhase.loop] it keeps turning the same way, by
+  /// [LayerAnimation.turns] every cycle; with [AnimationCurve.linear] it
+  /// turns at an even pace without stopping.
+  spin,
+
+  /// Turn the layer around its vertical or horizontal axis like a card, by
+  /// [LayerAnimation.turns] full turns; see [LayerAnimation.flipAxis].
+  ///
+  /// The layer is drawn flat, so the turn shows as a squeeze across the axis:
+  /// to nothing at a quarter turn and to a mirror image at half a turn. A
+  /// quarter turn in starts edge-on, where nothing shows, and turns the layer
+  /// to face the viewer; full turns flip it over that often. In a
+  /// [AnimationPhase.loop] it keeps turning, by [LayerAnimation.turns] every
+  /// cycle, like a [spin].
+  ///
+  /// The squeeze follows the image the layer draws, before
+  /// [ImageLayer.keyframes], a [spin] and a [wiggle] turn it. A layer turned
+  /// by [ImageLayer.rotation] draws its image turned, so it is squeezed across
+  /// the frame's axis; one with keyframes is squeezed across its own, as the
+  /// keyframes turn it, and on Android so is one with an
+  /// [ImageLayer.shapeMask], which is drawn upright and turned afterwards.
+  flip,
+}
+
+/// The axis a [LayerAnimationType.flip] turns a layer around.
+enum FlipAxis {
+  /// Turn around the vertical axis: the layer turns sideways, its left and
+  /// right edges trading places.
+  vertical,
+
+  /// Turn around the horizontal axis: the layer turns over, its top and
+  /// bottom edges trading places.
+  horizontal,
 }
 
 /// Slide direction for slide animations.
@@ -139,6 +177,11 @@ enum AnimationPhase {
   /// the way back like an [animateIn]: with [AnimationCurve.easeIn] the layer
   /// moves fastest at rest and slowest at the turning point, like a pendulum
   /// or a hop.
+  ///
+  /// A [LayerAnimationType.spin] and a [LayerAnimationType.flip] do not turn
+  /// back: they turn on by [LayerAnimation.turns] every cycle, which the
+  /// [LayerAnimation.curve] eases from start to end, so each cycle picks up
+  /// where the last one stopped.
   loop,
 }
 
@@ -201,6 +244,17 @@ enum AnimationPhase {
 ///   wiggleAngle: 8 * math.pi / 180,
 /// )
 /// ```
+///
+/// A spinning loop keeps a sticker such as a record turning at an even pace,
+/// once every two seconds:
+///
+/// ```dart
+/// LayerAnimation(
+///   type: LayerAnimationType.spin,
+///   phase: AnimationPhase.loop,
+///   duration: const Duration(seconds: 2),
+/// )
+/// ```
 class LayerAnimation {
   /// Creates a [LayerAnimation].
   const LayerAnimation({
@@ -213,6 +267,8 @@ class LayerAnimation {
     this.scaleFrom,
     this.wiggleAngle,
     this.bounceHeight,
+    this.turns,
+    this.flipAxis,
     this.loopStart,
     this.loopEnd,
     this.loopPhase,
@@ -236,7 +292,11 @@ class LayerAnimation {
   /// [bounceHeight] is not set: half its own height.
   static const double defaultBounceHeight = 0.5;
 
-  /// The kind of animation (fade, slide, scale, wiggle, bounce, ...).
+  /// How far a [LayerAnimationType.spin] or [LayerAnimationType.flip] turns
+  /// the layer when [turns] is not set: once all the way round.
+  static const double defaultTurns = 1;
+
+  /// The kind of animation (fade, slide, scale, wiggle, bounce, spin, ...).
   final LayerAnimationType type;
 
   /// Whether this animation plays at the start or end of the layer, or
@@ -296,6 +356,21 @@ class LayerAnimation {
   /// Defaults to [defaultBounceHeight] when not set.
   final double? bounceHeight;
 
+  /// How far a [LayerAnimationType.spin] or [LayerAnimationType.flip] turns
+  /// the layer, in full turns: `1` once all the way round, `0.25` a quarter
+  /// of the way. In a [AnimationPhase.loop] this is how far it turns in one
+  /// cycle.
+  ///
+  /// A spin turns clockwise for a positive value, like [ImageLayer.rotation],
+  /// and counter-clockwise for a negative one; a flip looks the same either
+  /// way. Defaults to [defaultTurns] when not set.
+  final double? turns;
+
+  /// The axis a [LayerAnimationType.flip] turns the layer around.
+  ///
+  /// Defaults to [FlipAxis.vertical] when not set.
+  final FlipAxis? flipAxis;
+
   /// Where a [AnimationPhase.loop] starts repeating, on the output timeline
   /// like [ImageLayer.startTime]. It counts its cycles from here and does not
   /// play before it.
@@ -345,6 +420,8 @@ class LayerAnimation {
       'scaleFrom': scaleFrom,
       'wiggleAngle': wiggleAngle,
       'bounceHeight': bounceHeight,
+      'turns': turns,
+      'flipAxis': flipAxis?.name,
       'loopStartUs': loopStart?.inMicroseconds,
       'loopEndUs': loopEnd?.inMicroseconds,
       'loopPhaseUs': loopPhase?.inMicroseconds,
@@ -368,6 +445,10 @@ class LayerAnimation {
       scaleFrom: (map['scaleFrom'] as num?)?.toDouble(),
       wiggleAngle: (map['wiggleAngle'] as num?)?.toDouble(),
       bounceHeight: (map['bounceHeight'] as num?)?.toDouble(),
+      turns: (map['turns'] as num?)?.toDouble(),
+      flipAxis: map['flipAxis'] != null
+          ? FlipAxis.values.byName(map['flipAxis'] as String)
+          : null,
       loopStart: map['loopStartUs'] != null
           ? Duration(microseconds: (map['loopStartUs'] as num).toInt())
           : null,
@@ -389,6 +470,8 @@ class LayerAnimation {
         '${scaleFrom != null ? ', scaleFrom: $scaleFrom' : ''}'
         '${wiggleAngle != null ? ', wiggleAngle: $wiggleAngle' : ''}'
         '${bounceHeight != null ? ', bounceHeight: $bounceHeight' : ''}'
+        '${turns != null ? ', turns: $turns' : ''}'
+        '${flipAxis != null ? ', flipAxis: $flipAxis' : ''}'
         '${loopStart != null ? ', loopStart: $loopStart' : ''}'
         '${loopEnd != null ? ', loopEnd: $loopEnd' : ''}'
         '${loopPhase != null ? ', loopPhase: $loopPhase' : ''})';
@@ -406,6 +489,8 @@ class LayerAnimation {
         other.scaleFrom == scaleFrom &&
         other.wiggleAngle == wiggleAngle &&
         other.bounceHeight == bounceHeight &&
+        other.turns == turns &&
+        other.flipAxis == flipAxis &&
         other.loopStart == loopStart &&
         other.loopEnd == loopEnd &&
         other.loopPhase == loopPhase;
@@ -422,6 +507,8 @@ class LayerAnimation {
         scaleFrom.hashCode ^
         wiggleAngle.hashCode ^
         bounceHeight.hashCode ^
+        turns.hashCode ^
+        flipAxis.hashCode ^
         loopStart.hashCode ^
         loopEnd.hashCode ^
         loopPhase.hashCode;
