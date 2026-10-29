@@ -20,6 +20,7 @@ import androidx.media3.transformer.Transformer
 import ch.waio.pro_video_editor.src.features.audio.models.AudioExtractJobHandle
 import ch.waio.pro_video_editor.src.features.audio.models.AudioMergeConfig
 import ch.waio.pro_video_editor.src.features.audio.models.AudioMergeSegmentConfig
+import ch.waio.pro_video_editor.src.features.render.helpers.AudioSpeedProcessor
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.contentDataSource
 import java.io.File
@@ -38,7 +39,9 @@ import kotlin.math.roundToLong
  *
  * Every segment's `[startUs, endUs)` window is decoded to one uniform 16-bit PCM
  * format (`targetSampleRate` / `targetChannels`), speed-adjusted and resampled
- * as needed, and concatenated back-to-back with no gaps. Segments whose source
+ * as needed, and concatenated back-to-back with no gaps. A segment with a
+ * speed ramp is decoded whole and then stretched like a rendered audio track,
+ * so a merge previews what a render plays. Segments whose source
  * has no audio track contribute silence of their normal output length instead
  * of failing. WAV output is written directly; other formats are transcoded from
  * the concatenated PCM WAV through a Media3 [Transformer] (AAC).
@@ -93,8 +96,10 @@ class MergeAudio(private val context: Context) {
 
         // Fast path: a single default-format segment with a real audio track
         // delegates to ExtractAudio for byte-for-byte parity with
-        // extractAudioToFile.
-        if (config.segments.size == 1 && !config.hasExplicitFormat) {
+        // extractAudioToFile, which knows no speed ramp.
+        if (config.segments.size == 1 && !config.hasExplicitFormat &&
+            config.segments[0].speedRamp == null
+        ) {
             val segment = config.segments[0]
             if (hasAudioTrack(segment.inputPath)) {
                 if (shouldStop.get()) throw InterruptedException("Merge cancelled")
@@ -146,8 +151,8 @@ class MergeAudio(private val context: Context) {
                             index, count, onProgress, mainHandler
                         )
                     } else {
-                        val nominalUs = (segment.endUs - segment.startUs).toDouble() / segment.speed
-                        val frames = (nominalUs * targetRate / 1_000_000.0).roundToLong()
+                        val frames =
+                            (segment.outputDurationUs * targetRate / 1_000_000.0).roundToLong()
                         val silenceBytes = frames * bytesPerFrame
                         writeSilence(raf, silenceBytes, shouldStop)
                         mainHandler.post { onProgress(min((index + 1.0) / count, 0.99)) }
@@ -210,6 +215,11 @@ class MergeAudio(private val context: Context) {
         var decoder: MediaCodec? = null
         var speedProcessor: PcmSpeedProcessor? = null
         var bytesWritten = 0L
+        val ramp = segment.speedRamp
+        // A ramp stretches the window as one sound once it is decoded whole.
+        val rampSource = ramp?.let { File.createTempFile("merge_ramp_", ".raw", context.cacheDir) }
+        val rampOutput = ramp?.let { File.createTempFile("merge_ramp_out_", ".raw", context.cacheDir) }
+        val sink = rampSource?.let { RandomAccessFile(it, "rw") } ?: raf
 
         try {
             extractor.contentDataSource(context, segment.inputPath)
@@ -241,11 +251,13 @@ class MergeAudio(private val context: Context) {
             }
 
             // Sonic is only needed when the speed or the sample rate changes; it
-            // runs on `targetChannels` (channel conversion happens first).
-            val needsSonic = segment.speed != 1.0f || srcRate != targetRate
+            // runs on `targetChannels` (channel conversion happens first). A
+            // ramp leaves it the sample rate only.
+            val sonicSpeed = if (ramp == null) segment.speed else 1.0f
+            val needsSonic = sonicSpeed != 1.0f || srcRate != targetRate
             if (needsSonic) {
                 speedProcessor = PcmSpeedProcessor(
-                    speed = segment.speed,
+                    speed = sonicSpeed,
                     sampleRate = srcRate,
                     channelCount = targetChannels,
                     outputSampleRate = targetRate
@@ -259,7 +271,7 @@ class MergeAudio(private val context: Context) {
                     else pcm
                 val out = speedProcessor?.process(converted) ?: converted
                 if (out.isNotEmpty()) {
-                    raf.write(out)
+                    sink.write(out)
                     bytesWritten += out.size
                 }
             }
@@ -367,13 +379,37 @@ class MergeAudio(private val context: Context) {
 
             speedProcessor?.drain()?.let { tail ->
                 if (tail.isNotEmpty()) {
-                    raf.write(tail)
+                    sink.write(tail)
                     bytesWritten += tail.size
+                }
+            }
+
+            if (ramp != null && rampSource != null && rampOutput != null) {
+                sink.close()
+                AudioSpeedProcessor.stretch(
+                    rampSource, rampOutput, targetRate, targetChannels, 1.0f, ramp = ramp
+                )
+                bytesWritten = rampOutput.length()
+                rampOutput.inputStream().use { input ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        raf.write(buffer, 0, read)
+                    }
                 }
             }
 
             return bytesWritten
         } finally {
+            if (sink !== raf) {
+                try {
+                    sink.close()
+                } catch (_: Exception) {
+                }
+            }
+            rampSource?.delete()
+            rampOutput?.delete()
             try {
                 decoder?.stop()
             } catch (_: Exception) {

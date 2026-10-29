@@ -14,10 +14,14 @@ struct AudioMergeSegmentConfig {
   /// Playback speed multiplier applied after trimming (`> 0`, pitch preserved).
   let speed: Double
 
+  /// A speed that changes along the window, instead of `speed`, also with the
+  /// pitch preserved. `nil` = constant.
+  var speedRamp: SpeedRamp? = nil
+
   /// The played length this segment contributes to the output, in microseconds
-  /// (`(endUs - startUs) / speed`).
+  /// (`(endUs - startUs) / speed`, or played along `speedRamp`).
   var outputDurationUs: Double {
-    Double(endUs - startUs) / speed
+    Double(endUs - startUs) * (speedRamp?.durationFactor ?? 1 / speed)
   }
 }
 
@@ -78,7 +82,8 @@ struct AudioMergeConfig {
       }
       segments.append(
         AudioMergeSegmentConfig(
-          inputPath: inputPath, startUs: startUs, endUs: endUs, speed: speed))
+          inputPath: inputPath, startUs: startUs, endUs: endUs, speed: speed,
+          speedRamp: SpeedRamp.fromArguments(raw["speedRamp"])))
     }
 
     let sampleRate = (args["sampleRate"] as? NSNumber)?.intValue

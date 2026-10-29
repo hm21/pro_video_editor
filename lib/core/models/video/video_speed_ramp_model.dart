@@ -21,9 +21,14 @@ import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 /// timeline with [outputDuration], [sourceToOutput] and [outputToSource] puts
 /// every frame where the render puts it.
 ///
-/// Sound follows the speed like a tape running faster or slower: it sounds
-/// lower while the segment slows down and higher while it speeds up. A
-/// constant `VideoSegment.playbackSpeed` keeps the pitch instead.
+/// A segment's sound follows the speed like a tape running faster or slower:
+/// it sounds lower while the segment slows down and higher while it speeds up.
+/// A constant `VideoSegment.playbackSpeed` keeps the pitch instead.
+///
+/// A `VideoAudioTrack.speedRamp` and an `AudioMergeSegment.speedRamp` play
+/// their audio along the same steps at unchanged pitch: the tempo follows the
+/// curve while the sound stays in tune. There the positions run along the
+/// audio's source window instead of a segment.
 @immutable
 class VideoSpeedRamp {
   /// Creates a [VideoSpeedRamp] from [points] sorted by position.

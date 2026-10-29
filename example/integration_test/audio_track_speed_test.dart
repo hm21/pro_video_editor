@@ -120,6 +120,101 @@ void main() {
     );
   }
 
+  // The window's first half plays at 2x and its second half at 0.5x.
+  const ramp = VideoSpeedRamp([
+    VideoSpeedRampPoint(position: 0, speed: 2),
+    VideoSpeedRampPoint(position: 0.5, speed: 2),
+    VideoSpeedRampPoint(position: 0.5 + 1e-6, speed: 0.5),
+    VideoSpeedRampPoint(position: 1, speed: 0.5),
+  ]);
+
+  /// Two seconds of 440 Hz, then two of 660 Hz: a ramp over the window from
+  /// 1 s to 3 s plays the switch where the first half of the curve ends.
+  Future<File> twoTones() async {
+    final low = Pcm.toneWav(seconds: 2);
+    final high = Pcm.toneWav(seconds: 2, frequency: 660);
+    final dataBytes = low.length - 44 + high.length - 44;
+    final bytes = Uint8List(44 + dataBytes)
+      ..setRange(0, low.length, low)
+      ..setRange(low.length, 44 + dataBytes, high, 44);
+    ByteData.sublistView(bytes)
+      ..setUint32(4, 36 + dataBytes, Endian.little)
+      ..setUint32(40, dataBytes, Endian.little);
+    final file = await tempFile('_tones.wav');
+    await file.writeAsBytes(bytes);
+    return file;
+  }
+
+  testWidgets('a ramped track follows the curve at unchanged pitch', (_) async {
+    final audio = await twoTones();
+    final video = await tempFile('.mp4');
+    final wav = await tempFile('_result.wav');
+    await ProVideoEditor.instance.renderVideoToFile(
+      video.path,
+      VideoRenderData(
+        videoSegments: [
+          VideoSegment(
+            video: EditorVideo.asset(kVideoEditorExampleH264Path),
+            endTime: const Duration(seconds: 6),
+          ),
+        ],
+        enableAudio: false,
+        audioTracks: [
+          VideoAudioTrack(
+            path: audio.path,
+            speedRamp: ramp,
+            audioStartTime: const Duration(seconds: 1),
+            audioEndTime: const Duration(seconds: 3),
+            startTime: const Duration(seconds: 1),
+            endTime: const Duration(seconds: 6),
+          ),
+        ],
+      ),
+    );
+    await ProVideoEditor.instance.extractAudioToFile(
+      wav.path,
+      AudioExtractConfigs(
+        video: EditorVideo.file(video.path),
+        format: AudioFormat.wav,
+      ),
+    );
+    final pcm = Pcm.parseWav(await wav.readAsBytes(), channel: 0);
+    // One second of 440 Hz plays in 0.5 s from 1 s, then one second of
+    // 660 Hz in 2 s until 3.5 s.
+    expect(pcm.seconds, closeTo(6, 0.1));
+    expect(pcm.rms(0.2, 0.8), lessThan(0.01));
+    expect(pcm.toneFrequency(1.1, 1.4), closeTo(440, 8));
+    expect(pcm.toneFrequency(1.4, 1.47), closeTo(440, 15));
+    expect(pcm.toneFrequency(1.53, 1.6), closeTo(660, 15));
+    expect(pcm.toneFrequency(1.7, 3.3), closeTo(660, 8));
+    expect(pcm.rms(1.7, 3.3), greaterThan(0.2));
+    expect(pcm.rms(3.7, 5.8), lessThan(0.01));
+  }, skip: !supported);
+
+  testWidgets('a merged ramped window plays what the render plays', (_) async {
+    final audio = await twoTones();
+    final wav = await tempFile('_merged.wav');
+    final segment = AudioMergeSegment(
+      video: EditorVideo.file(audio.path),
+      startTime: const Duration(seconds: 1),
+      endTime: const Duration(seconds: 3),
+      speedRamp: ramp,
+    );
+    final result = await ProVideoEditor.instance.mergeAudioToFile(
+      wav.path,
+      AudioMergeConfigs(segments: [segment]),
+    );
+    final pcm = Pcm.parseWav(await wav.readAsBytes(), channel: 0);
+    expect(
+      result.totalDuration.inMilliseconds,
+      closeTo(segment.outputDuration.inMilliseconds, 5),
+    );
+    expect(pcm.seconds, closeTo(2.5, 0.01));
+    expect(pcm.toneFrequency(0.1, 0.4), closeTo(440, 8));
+    expect(pcm.toneFrequency(0.7, 2.3), closeTo(660, 8));
+    expect(pcm.rms(0.7, 2.3), greaterThan(0.2));
+  }, skip: !supported);
+
   for (final speed in [0.5, 2.0]) {
     testWidgets(
       'a ${speed}x source loops without a gap before the output fade',

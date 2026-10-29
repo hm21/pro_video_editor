@@ -1,5 +1,6 @@
 package ch.waio.pro_video_editor.src.features.render.helpers
 
+import ch.waio.pro_video_editor.src.features.render.models.SpeedRamp
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -58,6 +59,27 @@ internal class AudioSpeedProcessorTest {
     }
 
     @Test
+    fun rampFollowsItsStepsAtUnchangedPitch() {
+        // The first half plays at 2x and the second at 0.5x: the switch from
+        // 400 Hz to 600 Hz at 2 s of source moves to 1 s, and 4 s last 5 s.
+        val output = stretch(twoTones(), 1f, ramp = fastThenSlow)
+        assertTrue(abs(output.size / 4 - sampleRate * 5) <= 2, "duration")
+        assertTrue(abs(frequency(output, 0, from = 0.1, to = 0.9) - 400) < 5, "fast part")
+        assertTrue(abs(frequency(output, 0, from = 1.1, to = 4.9) - 600) < 5, "slow part")
+        assertTrue(abs(frequency(output, 1, from = 1.1, to = 4.9) - 600) < 5, "right channel")
+    }
+
+    @Test
+    fun loopPlaysTheWholeRampOnEachPassWithoutAGap() {
+        val output = stretch(
+            periodicTone(seconds = 1), 1f, maxFrames = sampleRate * 5L, loop = true,
+            ramp = fastThenSlow
+        )
+        assertEquals(sampleRate * 5 * 4, output.size, "body length")
+        assertQuietestPeriodAbove(output, 0.95, "looped ramp")
+    }
+
+    @Test
     fun normalSpeedCopiesTheExactPcm() {
         val input = tone(seconds = 1, oppositePhase = false)
         assertTrue(input.contentEquals(stretch(input, 1f)))
@@ -70,6 +92,21 @@ internal class AudioSpeedProcessorTest {
             val right = if (oppositePhase) (-left).toShort()
                 else (6000 * sin(2 * PI * 660 * frame / sampleRate)).toInt().toShort()
             pcm.putShort(left).putShort(right)
+        }
+        return pcm.array()
+    }
+
+    private val fastThenSlow = SpeedRamp(
+        listOf(SpeedRamp.Step(0.0, 0.5, 2.0), SpeedRamp.Step(0.5, 1.0, 0.5))
+    )
+
+    /** Two seconds of 400 Hz, then two of 600 Hz, on both channels. */
+    private fun twoTones(): ByteArray {
+        val pcm = ByteBuffer.allocate(sampleRate * 4 * 4).order(ByteOrder.LITTLE_ENDIAN)
+        for (frame in 0 until sampleRate * 4) {
+            val hz = if (frame < sampleRate * 2) 400 else 600
+            val value = (12000 * sin(2 * PI * hz * frame / sampleRate)).roundToInt().toShort()
+            pcm.putShort(value).putShort(value)
         }
         return pcm.array()
     }
@@ -95,13 +132,14 @@ internal class AudioSpeedProcessorTest {
     }
 
     private fun stretch(
-        pcm: ByteArray, speed: Float, maxFrames: Long = Long.MAX_VALUE, loop: Boolean = false
+        pcm: ByteArray, speed: Float, maxFrames: Long = Long.MAX_VALUE, loop: Boolean = false,
+        ramp: SpeedRamp? = null
     ): ByteArray {
         val source = File.createTempFile("speed_source", ".raw")
         val output = File.createTempFile("speed_output", ".raw")
         try {
             source.writeBytes(pcm)
-            AudioSpeedProcessor.stretch(source, output, sampleRate, 2, speed, maxFrames, loop)
+            AudioSpeedProcessor.stretch(source, output, sampleRate, 2, speed, maxFrames, loop, ramp)
             assertEquals(pcm.size.toLong(), source.length())
             return output.readBytes()
         } finally {
@@ -110,16 +148,19 @@ internal class AudioSpeedProcessorTest {
         }
     }
 
-    private fun frequency(pcm: ByteArray, channel: Int): Double {
+    /** The tone's frequency between [from] and [to] seconds, by zero crossings. */
+    private fun frequency(
+        pcm: ByteArray, channel: Int, from: Double = 0.25, to: Double = 0.75
+    ): Double {
         val samples = ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-        val from = sampleRate / 4
-        val to = from + sampleRate / 2
+        val first = (sampleRate * from).roundToInt()
+        val last = (sampleRate * to).roundToInt()
         var crossings = 0
-        for (frame in from until to) {
+        for (frame in first until last) {
             if ((samples.get((frame - 1) * 2 + channel) < 0) !=
                 (samples.get(frame * 2 + channel) < 0)) crossings++
         }
-        assertTrue((from until to).any { abs(samples.get(it * 2 + channel).toInt()) > 1000 })
-        return crossings.toDouble()
+        assertTrue((first until last).any { abs(samples.get(it * 2 + channel).toInt()) > 1000 })
+        return crossings / (2 * (to - from))
     }
 }

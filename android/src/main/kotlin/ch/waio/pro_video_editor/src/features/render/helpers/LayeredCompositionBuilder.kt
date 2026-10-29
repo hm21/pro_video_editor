@@ -371,6 +371,7 @@ class LayeredCompositionBuilder(
             AudioSequenceBuilder(context, track.path, globalDurationUs)
                 .setLoop(track.loop)
                 .setPlaybackSpeed(track.playbackSpeed)
+                .setSpeedRamp(track.speedRamp)
                 .setStartTime(track.audioStartUs)
                 .setAudioEndTime(track.audioEndUs)
                 .setCompositionStartTime(track.startUs)

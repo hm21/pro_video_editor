@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:pro_video_editor/core/models/audio/audio_equalizer_model.dart';
 import 'package:pro_video_editor/core/models/audio/audio_volume_curve_model.dart';
+import 'package:pro_video_editor/core/models/video/video_speed_ramp_model.dart';
 import 'package:pro_video_editor/shared/models/time_range_mixin.dart';
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
 import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
@@ -15,7 +16,8 @@ import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 /// [startTime] and [endTime] are measured on the exported video: zero is its
 /// first frame, after `VideoRenderData.startTime` has trimmed the front and
 /// each segment's `playbackSpeed` or `speedRamp` has been applied. The track
-/// plays at its own [playbackSpeed], independently of the video speed.
+/// plays at its own [playbackSpeed] or [speedRamp], independently of the video
+/// speed.
 ///
 /// If [startTime] and [endTime] are both `null`, the audio plays for the
 /// entire duration of the exported video.
@@ -26,6 +28,7 @@ class VideoAudioTrack with TimeRangeMixin {
     required this.path,
     this.volume = 1.0,
     this.playbackSpeed = 1.0,
+    this.speedRamp,
     this.equalizer,
     this.loop = false,
     this.audioStartTime,
@@ -39,6 +42,10 @@ class VideoAudioTrack with TimeRangeMixin {
        assert(
          playbackSpeed > 0 && playbackSpeed < double.infinity,
          '[playbackSpeed] must be finite and greater than 0',
+       ),
+       assert(
+         speedRamp == null || playbackSpeed == 1,
+         'Set either [playbackSpeed] or [speedRamp], not both',
        ),
        assert(
          startTime == null || endTime == null || startTime < endTime,
@@ -56,6 +63,27 @@ class VideoAudioTrack with TimeRangeMixin {
   /// fades. [startTime], [endTime] and fade durations stay in output time.
   /// Stereo channels stay together. Supported on Android, iOS and macOS.
   final double playbackSpeed;
+
+  /// A speed that changes while the track plays, instead of [playbackSpeed],
+  /// at unchanged pitch: the tempo follows the curve while the sound stays in
+  /// tune.
+  ///
+  /// The ramp's positions run along the source window, from `0` at
+  /// [audioStartTime] to `1` at [audioEndTime], or at the end of the file when
+  /// [audioEndTime] is null or lies past it. Like [playbackSpeed] it is
+  /// applied before looping, silence padding and fades, so each pass of a
+  /// [loop] plays the whole curve, while [startTime], [endTime] and the fades
+  /// stay in output time. The window plays for [VideoSpeedRamp.outputDuration]
+  /// of its source length, and [VideoSpeedRamp.sourceToOutput] and
+  /// [VideoSpeedRamp.outputToSource] place a moment of the sound on the
+  /// output.
+  ///
+  /// A `VideoSegment.speedRamp` follows the speed like a tape instead, so a
+  /// clip's own sound changes pitch where this track does not.
+  ///
+  /// If null, the track plays at [playbackSpeed]. Supported on Android, iOS
+  /// and macOS.
+  final VideoSpeedRamp? speedRamp;
 
   /// Volume multiplier for this audio track.
   ///
@@ -130,10 +158,13 @@ class VideoAudioTrack with TimeRangeMixin {
   /// Android, iOS and macOS.
   final AudioVolumeCurve? volumeCurve;
 
+  /// A track plays at either a [playbackSpeed] or a [speedRamp], so passing
+  /// one of them drops the other.
   VideoAudioTrack copyWith({
     String? path,
     double? volume,
     double? playbackSpeed,
+    VideoSpeedRamp? speedRamp,
     AudioEqualizer? equalizer,
     bool? loop,
     Duration? audioStartTime,
@@ -147,7 +178,9 @@ class VideoAudioTrack with TimeRangeMixin {
     return VideoAudioTrack(
       path: path ?? this.path,
       volume: volume ?? this.volume,
-      playbackSpeed: playbackSpeed ?? this.playbackSpeed,
+      playbackSpeed:
+          playbackSpeed ?? (speedRamp == null ? this.playbackSpeed : 1.0),
+      speedRamp: speedRamp ?? (playbackSpeed == null ? this.speedRamp : null),
       equalizer: equalizer ?? this.equalizer,
       loop: loop ?? this.loop,
       audioStartTime: audioStartTime ?? this.audioStartTime,
@@ -165,6 +198,7 @@ class VideoAudioTrack with TimeRangeMixin {
       'path': path,
       'volume': volume,
       'playbackSpeed': playbackSpeed,
+      'speedRamp': speedRamp?.toMap(),
       'equalizer': equalizer?.toMap(),
       'loop': loop,
       'audioStartTime': audioStartTime?.inMicroseconds,
@@ -182,6 +216,11 @@ class VideoAudioTrack with TimeRangeMixin {
       path: map['path'] as String,
       volume: safeParseDouble(map['volume'], fallback: 1.0),
       playbackSpeed: safeParseDouble(map['playbackSpeed'], fallback: 1.0),
+      speedRamp: map['speedRamp'] != null
+          ? VideoSpeedRamp.fromMap(
+              Map<String, dynamic>.from(map['speedRamp'] as Map),
+            )
+          : null,
       equalizer: map['equalizer'] != null
           ? AudioEqualizer.fromMap(map['equalizer'] as Map<String, dynamic>)
           : null,
@@ -220,7 +259,7 @@ class VideoAudioTrack with TimeRangeMixin {
   @override
   String toString() {
     return 'VideoAudioTrack(path: $path, volume: $volume, '
-        'playbackSpeed: $playbackSpeed, '
+        'playbackSpeed: $playbackSpeed, speedRamp: $speedRamp, '
         'equalizer: $equalizer, loop: $loop, '
         'audioStartTime: $audioStartTime, audioEndTime: $audioEndTime, '
         'startTime: $startTime, endTime: $endTime, '
@@ -235,6 +274,7 @@ class VideoAudioTrack with TimeRangeMixin {
     return other.path == path &&
         other.volume == volume &&
         other.playbackSpeed == playbackSpeed &&
+        other.speedRamp == speedRamp &&
         other.equalizer == equalizer &&
         other.loop == loop &&
         other.audioStartTime == audioStartTime &&
@@ -251,6 +291,7 @@ class VideoAudioTrack with TimeRangeMixin {
     return path.hashCode ^
         volume.hashCode ^
         playbackSpeed.hashCode ^
+        speedRamp.hashCode ^
         equalizer.hashCode ^
         loop.hashCode ^
         audioStartTime.hashCode ^

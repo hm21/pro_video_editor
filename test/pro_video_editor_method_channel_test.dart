@@ -688,6 +688,61 @@ void main() {
       expect(invoked, isFalse);
     });
 
+    test('sends a segment\'s speed ramp as steps', () async {
+      MethodCall? capturedCall;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (methodCall) async {
+            capturedCall = methodCall;
+            return {
+              'outputPath': '/tmp/out.wav',
+              'totalDurationUs': 2500000,
+              'segments': [
+                {'outputStartUs': 0, 'outputDurationUs': 2500000},
+              ],
+            };
+          });
+      const ramp = VideoSpeedRamp([
+        VideoSpeedRampPoint(position: 0, speed: 2),
+        VideoSpeedRampPoint(position: 1, speed: 0.5),
+      ]);
+      final segment = AudioMergeSegment(
+        video: mockVideo,
+        startTime: Duration.zero,
+        endTime: const Duration(seconds: 2),
+        speedRamp: ramp,
+      );
+
+      await platform.mergeAudioToFile(
+        '/tmp/out.wav',
+        AudioMergeConfigs(segments: [segment]),
+      );
+
+      final sent =
+          ((capturedCall?.arguments as Map)['segments'] as List).single as Map;
+      expect(sent['speedRamp'], ramp.toChannelSteps());
+      expect(sent['speed'], 1.0);
+      expect(
+        segment.outputDuration,
+        ramp.outputDuration(const Duration(seconds: 2)),
+      );
+      expect(segment.copyWith(speed: 2).speedRamp, isNull);
+    });
+
+    test('AudioMergeSegment rejects a ramp together with a speed', () {
+      expect(
+        () => AudioMergeSegment(
+          video: mockVideo,
+          startTime: Duration.zero,
+          endTime: const Duration(seconds: 1),
+          speed: 2,
+          speedRamp: const VideoSpeedRamp([
+            VideoSpeedRampPoint(position: 0, speed: 1),
+          ]),
+        ),
+        throwsA(isA<AssertionError>()),
+      );
+    });
+
     test('AudioMergeSegment rejects endTime <= startTime', () {
       expect(
         () => AudioMergeSegment(

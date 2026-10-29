@@ -1,5 +1,6 @@
 package ch.waio.pro_video_editor.src.features.audio.models
 
+import ch.waio.pro_video_editor.src.features.render.models.SpeedRamp
 import io.flutter.plugin.common.MethodCall
 
 /**
@@ -9,13 +10,21 @@ import io.flutter.plugin.common.MethodCall
  * @property startUs Window start in the source timeline, in microseconds.
  * @property endUs Window end in the source timeline, in microseconds (> startUs).
  * @property speed Playback speed multiplier applied after trimming (> 0).
+ * @property speedRamp A speed that changes along the window, instead of [speed],
+ *   at unchanged pitch (null = constant).
  */
 data class AudioMergeSegmentConfig(
     val inputPath: String,
     val startUs: Long,
     val endUs: Long,
-    val speed: Float
-)
+    val speed: Float,
+    val speedRamp: SpeedRamp? = null
+) {
+    /** How long the window plays in the merged output, in microseconds. */
+    val outputDurationUs: Double
+        get() = (endUs - startUs).toDouble() *
+            (speedRamp?.durationFactor ?: (1.0 / speed))
+}
 
 /**
  * Configuration for merging several trimmed audio windows into one file.
@@ -83,7 +92,8 @@ data class AudioMergeConfig(
                     inputPath = inputPath,
                     startUs = startUs,
                     endUs = endUs,
-                    speed = speed
+                    speed = speed,
+                    speedRamp = SpeedRamp.fromList(raw["speedRamp"])
                 )
             }
 

@@ -1,4 +1,5 @@
 import '/core/models/video/editor_video_model.dart';
+import '/core/models/video/video_speed_ramp_model.dart';
 import '/shared/utils/unique_task_id.dart';
 import 'audio_format_model.dart';
 
@@ -6,13 +7,13 @@ import 'audio_format_model.dart';
 ///
 /// Each segment references a source [video] and the `[startTime, endTime)`
 /// window (measured in the **source** timeline) whose audio should be taken.
-/// After trimming, [speed] is applied as a time-stretch (pitch preserved,
-/// matching the editor's rendering behavior).
+/// After trimming, [speed] or [speedRamp] is applied as a time-stretch (pitch
+/// preserved, matching the editor's rendering behavior).
 ///
 /// The segment's contribution to the merged output is exactly
-/// `(endTime - startTime) / speed`, regardless of whether the source actually
-/// has an audio track — a source without audio contributes silence of that
-/// same length (see [AudioMergeConfigs]).
+/// [outputDuration], regardless of whether the source actually has an audio
+/// track — a source without audio contributes silence of that same length
+/// (see [AudioMergeConfigs]).
 class AudioMergeSegment {
   /// Creates an [AudioMergeSegment].
   ///
@@ -22,12 +23,18 @@ class AudioMergeSegment {
   /// strictly greater than [startTime].
   /// [speed] Playback speed multiplier applied after trimming (default `1.0`).
   /// Must be greater than `0`.
+  /// [speedRamp] A speed that changes along the window, instead of [speed].
   AudioMergeSegment({
     required this.video,
     required this.startTime,
     required this.endTime,
     this.speed = 1.0,
+    this.speedRamp,
   }) : assert(speed > 0, '[speed] must be greater than 0'),
+       assert(
+         speedRamp == null || speed == 1,
+         'Set either [speed] or [speedRamp], not both',
+       ),
        assert(endTime > startTime, '[endTime] must be after [startTime]');
 
   /// The source video to take the audio window from.
@@ -47,12 +54,23 @@ class AudioMergeSegment {
   /// **Default**: `1.0` (original speed)
   final double speed;
 
+  /// A speed that changes while the window plays, instead of [speed], with
+  /// the pitch preserved like [speed].
+  ///
+  /// Its positions run from `0` at [startTime] to `1` at [endTime]. The window
+  /// is stretched exactly as a `VideoAudioTrack.speedRamp` stretches a track's
+  /// source window, so a merge can preview what a render plays.
+  ///
+  /// If null, the window plays at [speed].
+  final VideoSpeedRamp? speedRamp;
+
   /// The window length in the source timeline (`endTime - startTime`).
   Duration get trimmedDuration => endTime - startTime;
 
   /// The segment's contribution to the merged output — `trimmedDuration`
-  /// divided by [speed].
+  /// divided by [speed], or played along [speedRamp].
   Duration get outputDuration =>
+      speedRamp?.outputDuration(trimmedDuration) ??
       Duration(microseconds: (trimmedDuration.inMicroseconds / speed).round());
 
   /// Converts this segment to a map for platform channel communication.
@@ -65,21 +83,27 @@ class AudioMergeSegment {
       'startTime': startTime.inMicroseconds,
       'endTime': endTime.inMicroseconds,
       'speed': speed,
+      if (speedRamp case final ramp?) 'speedRamp': ramp.toChannelSteps(),
     };
   }
 
   /// Creates a copy of this segment with optional parameter overrides.
+  ///
+  /// A segment plays at either a [speed] or a [speedRamp], so passing one of
+  /// them drops the other.
   AudioMergeSegment copyWith({
     EditorVideo? video,
     Duration? startTime,
     Duration? endTime,
     double? speed,
+    VideoSpeedRamp? speedRamp,
   }) {
     return AudioMergeSegment(
       video: video ?? this.video,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
-      speed: speed ?? this.speed,
+      speed: speed ?? (speedRamp == null ? this.speed : 1.0),
+      speedRamp: speedRamp ?? (speed == null ? this.speedRamp : null),
     );
   }
 
@@ -91,7 +115,8 @@ class AudioMergeSegment {
         other.video == video &&
         other.startTime == startTime &&
         other.endTime == endTime &&
-        other.speed == speed;
+        other.speed == speed &&
+        other.speedRamp == speedRamp;
   }
 
   @override
@@ -99,13 +124,14 @@ class AudioMergeSegment {
     return video.hashCode ^
         startTime.hashCode ^
         endTime.hashCode ^
-        speed.hashCode;
+        speed.hashCode ^
+        speedRamp.hashCode;
   }
 
   @override
   String toString() {
     return 'AudioMergeSegment(video: $video, startTime: $startTime, '
-        'endTime: $endTime, speed: $speed)';
+        'endTime: $endTime, speed: $speed, speedRamp: $speedRamp)';
   }
 }
 

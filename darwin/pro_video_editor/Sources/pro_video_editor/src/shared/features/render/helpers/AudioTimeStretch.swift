@@ -13,16 +13,20 @@ internal enum AudioTimeStretch {
   /// of the sound, while looping a stretched copy would leave a gap at every
   /// seam. The sums run in vDSP, which keeps a long looped body fast in debug
   /// builds too.
+  ///
+  /// A `ramp` replaces `speed`: the source plays along its steps, with its
+  /// positions running over the whole source, and each pass of a `loop` plays
+  /// the whole curve. The pitch stays the same either way.
   static func stretch(
     _ pcm: Data, sampleRate: Int, channels: Int, speed: Double, maxFrames: Int,
-    loop: Bool = false
+    loop: Bool = false, ramp: SpeedRamp? = nil
   ) -> Data {
     precondition(speed.isFinite && speed > 0 && sampleRate > 0 && channels > 0)
-    if speed == 1 { return pcm }
+    if ramp == nil && speed == 1 { return pcm }
     let sourceFrames = pcm.count / (channels * 2)
     if sourceFrames == 0 { return Data() }
-    let outputFrames =
-      loop ? maxFrames : Int(min(ceil(Double(sourceFrames) / speed), Double(maxFrames)))
+    let timing = Timing(speed: speed, ramp: ramp, sourceFrames: sourceFrames, loop: loop)
+    let outputFrames = loop ? maxFrames : min(timing.passFrames, maxFrames)
     if outputFrames <= 0 { return Data() }
     let frame = max(4, Int((Double(sampleRate) * 0.03).rounded()) & ~1)
     let hop = frame / 2
@@ -79,7 +83,7 @@ internal enum AudioTimeStretch {
                 if outStart == 0 {
                   read(0, frame, into: found)
                 } else {
-                  let nominal = min(Int((Double(outStart) * speed).rounded()), end)
+                  let nominal = min(timing.sourceFrame(at: outStart), end)
                   lowest = max(0, nominal - tolerance)
                   let highest = min(nominal + tolerance, end)
                   read(lowest, highest - lowest + frame, into: found)
@@ -142,5 +146,36 @@ internal enum AudioTimeStretch {
       }
     }
     return output
+  }
+
+  /// Where an output frame comes from in the source: `speed` frames on per
+  /// frame, or along `ramp`, whose positions run over the whole source.
+  private struct Timing {
+    let speed: Double
+    let ramp: SpeedRamp?
+    let sourceFrames: Int
+    let loop: Bool
+    let exactPassFrames: Double
+
+    init(speed: Double, ramp: SpeedRamp?, sourceFrames: Int, loop: Bool) {
+      self.speed = speed
+      self.ramp = ramp
+      self.sourceFrames = sourceFrames
+      self.loop = loop
+      exactPassFrames =
+        ramp.map { Double(sourceFrames) * $0.durationFactor } ?? Double(sourceFrames) / speed
+    }
+
+    /// How many frames one pass through the source plays.
+    var passFrames: Int { Int(ceil(exactPassFrames)) }
+
+    /// The source frame `outFrame` plays, past the end once a loop starts over.
+    func sourceFrame(at outFrame: Int) -> Int {
+      guard let ramp else { return Int((Double(outFrame) * speed).rounded()) }
+      let pass = loop ? Int((Double(outFrame) / exactPassFrames).rounded(.down)) : 0
+      let output = (Double(outFrame) - Double(pass) * exactPassFrames) / Double(sourceFrames)
+      let position = ramp.position(afterOutput: output)
+      return pass * sourceFrames + Int((position * Double(sourceFrames)).rounded())
+    }
   }
 }

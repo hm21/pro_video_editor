@@ -10,6 +10,7 @@ import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import ch.waio.pro_video_editor.src.features.render.models.EqualizerConfig
+import ch.waio.pro_video_editor.src.features.render.models.SpeedRamp
 import ch.waio.pro_video_editor.src.features.render.models.VolumeCurve
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 import ch.waio.pro_video_editor.src.shared.media.mediaSourceExists
@@ -50,6 +51,7 @@ class AudioSequenceBuilder(
 
     private var loopAudio: Boolean = true
     private var playbackSpeed: Float = 1.0f
+    private var speedRamp: SpeedRamp? = null
     private var startTimeUs: Long = 0
     private var audioEndTimeUs: Long? = null
     private var compositionStartTimeUs: Long? = null
@@ -72,6 +74,15 @@ class AudioSequenceBuilder(
     fun setPlaybackSpeed(speed: Float): AudioSequenceBuilder {
         require(speed.isFinite() && speed > 0f) { "Audio speed must be finite and positive" }
         playbackSpeed = speed
+        return this
+    }
+
+    /**
+     * Sets a speed that changes along the source, instead of the playback
+     * speed, before looping, padding and fades; null plays at that speed.
+     */
+    fun setSpeedRamp(ramp: SpeedRamp?): AudioSequenceBuilder {
+        speedRamp = ramp
         return this
     }
 
@@ -180,6 +191,7 @@ class AudioSequenceBuilder(
             context = context,
             audioPath = audioPath,
             playbackSpeed = playbackSpeed,
+            speedRamp = speedRamp,
             audioStartUs = startTimeUs,
             audioEndUs = audioEndTimeUs,
             loop = loopAudio,

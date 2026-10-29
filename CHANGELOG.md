@@ -1,3 +1,6 @@
+## 2.49.0
+- **FEAT**(android, iOS, macOS): Speed ramps on audio tracks. `VideoAudioTrack.speedRamp` speeds a custom track up and down along a `VideoSpeedRamp` at unchanged pitch, and `AudioMergeSegment.speedRamp` bakes the same stretch into a merged file for an editor preview. Ducking and `AudioLevelEnvelope` follow the ramp.
+
 ## 2.48.0
 - **FEAT**(android, iOS, macOS): Spin and flip layer animations. `LayerAnimationType.spin` turns a layer around its centre and `LayerAnimationType.flip` turns it around its vertical or horizontal axis like a card (`FlipAxis`), both by `LayerAnimation.turns` full turns. In a `loop` they keep turning instead of swinging back. A `switch` over `LayerAnimationType` has to handle the new values.
 

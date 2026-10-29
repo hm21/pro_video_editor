@@ -441,10 +441,10 @@ abstract class ProVideoEditor extends PlatformInterface {
   ///
   /// Each [AudioMergeSegment] in [AudioMergeConfigs.segments] contributes only
   /// its `[startTime, endTime)` window (measured in the source timeline), after
-  /// which its [AudioMergeSegment.speed] is applied. Segments are concatenated
-  /// **in list order with no gaps and no silence between them**, and every
-  /// segment is decoded/encoded to one uniform format (see [AudioMergeConfigs])
-  /// so the concatenation is seamless.
+  /// which its [AudioMergeSegment.speed] or [AudioMergeSegment.speedRamp] is
+  /// applied. Segments are concatenated **in list order with no gaps and no
+  /// silence between them**, and every segment is decoded/encoded to one
+  /// uniform format (see [AudioMergeConfigs]) so the concatenation is seamless.
   ///
   /// Unlike [extractAudioToFile], a segment whose source has **no audio track**
   /// does not throw [AudioNoTrackException]; it contributes silence of its

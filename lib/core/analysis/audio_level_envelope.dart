@@ -11,9 +11,9 @@ import '../platform/platform_interface.dart';
 /// peak level among them, [levelsPerSecond] times a second from its start.
 ///
 /// Each track is placed the way the render places it: at its
-/// `startTime`, trimmed to its source window, sped up or slowed down,
-/// looped, faded and scaled by its volume and `volumeCurve`. Its equalizer
-/// is left out.
+/// `startTime`, trimmed to its source window, sped up or slowed down by its
+/// `playbackSpeed` or along its `speedRamp`, looped, faded and scaled by its
+/// volume and `volumeCurve`. Its equalizer is left out.
 ///
 /// [AudioDucking.curve] reads an envelope of the voice-over tracks to find
 /// where somebody talks.
@@ -157,9 +157,11 @@ class _Placement {
     if (windowUs <= 0) return null;
 
     final startUs = math.max(track.startTime?.inMicroseconds ?? 0, 0);
+    final outputFactor =
+        track.speedRamp?.durationFactor ?? 1 / track.playbackSpeed;
     final playedUs = track.loop
         ? null
-        : startUs + (windowUs / track.playbackSpeed).round();
+        : startUs + (windowUs * outputFactor).round();
     var endUs = track.endTime?.inMicroseconds;
     if (endUs == null) {
       if (playedUs != null) {
@@ -205,7 +207,6 @@ class _Placement {
     final stepUs = 1e6 / levelsPerSecond;
     final first = (startUs / stepUs).floor();
     final last = math.min((endUs / stepUs).ceil(), levels.length);
-    final speed = track.playbackSpeed;
     final fadeInUs = track.fadeInDuration.inMicroseconds;
     final fadeOutUs = track.fadeOutDuration.inMicroseconds;
 
@@ -214,8 +215,8 @@ class _Placement {
       final toUs = math.min((step + 1) * stepUs, endUs.toDouble());
       if (toUs <= fromUs) continue;
       final peak = _peakBetween(
-        (fromUs - startUs) * speed,
-        (toUs - startUs) * speed,
+        _sourceUsAt(fromUs - startUs),
+        _sourceUsAt(toUs - startUs),
       );
       if (peak == 0) continue;
 
@@ -229,6 +230,21 @@ class _Placement {
       final level = peak * track.volume * gain.clamp(0, 1) * curve;
       if (level > levels[step]) levels[step] = level;
     }
+  }
+
+  /// How far into its source window the track has played [outputUs] after it
+  /// starts, past the window's end once a looping track starts over.
+  double _sourceUsAt(double outputUs) {
+    final ramp = track.speedRamp;
+    if (ramp == null) return outputUs * track.playbackSpeed;
+    // Each pass of a loop plays the whole curve.
+    final passUs = windowUs * ramp.durationFactor;
+    final pass = track.loop ? (outputUs / passUs).floor() : 0;
+    final source = ramp.outputToSource(
+      Duration(microseconds: (outputUs - pass * passUs).round()),
+      sourceDuration: Duration(microseconds: windowUs),
+    );
+    return pass * windowUs + source.inMicroseconds.toDouble();
   }
 
   /// The highest peak the source plays between [fromUs] and [toUs] of its

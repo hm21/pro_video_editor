@@ -581,6 +581,9 @@ struct AudioTrackConfig {
   let volume: Float
   /// Pitch-preserving speed of the trimmed source, before looping and fades.
   let playbackSpeed: Double
+  /// A speed that changes along the trimmed source, instead of
+  /// `playbackSpeed`, at unchanged pitch. `nil` = constant.
+  let speedRamp: SpeedRamp?
   /// Equalizer of the track. `nil` = unchanged.
   let equalizer: AudioEqualizer?
   let loop: Bool
@@ -607,6 +610,7 @@ struct AudioTrackConfig {
       path: path,
       volume: (args["volume"] as? NSNumber)?.floatValue ?? 1.0,
       playbackSpeed: (args["playbackSpeed"] as? NSNumber)?.doubleValue ?? 1.0,
+      speedRamp: SpeedRamp.fromArguments(args["speedRamp"]),
       equalizer: AudioEqualizer.from(args["equalizer"]),
       loop: args["loop"] as? Bool ?? true,
       audioStartUs: (args["audioStartUs"] as? NSNumber)?.int64Value,

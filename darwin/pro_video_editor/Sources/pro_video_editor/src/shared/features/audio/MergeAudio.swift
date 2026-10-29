@@ -102,8 +102,10 @@ class MergeAudio {
 
     // Fast path: a single segment with the default (unpinned) output format and
     // a real audio track delegates to ExtractAudio for byte-for-byte parity
-    // with extractAudioToFile.
-    if config.segments.count == 1, !config.hasExplicitFormat {
+    // with extractAudioToFile, which knows no speed ramp.
+    if config.segments.count == 1, !config.hasExplicitFormat,
+      config.segments[0].speedRamp == nil
+    {
       let segment = config.segments[0]
       let asset = AVURLAsset(url: URL(fileURLWithPath: segment.inputPath))
       // `try?` on an optional-returning throwing call yields a double optional;
@@ -183,8 +185,8 @@ class MergeAudio {
           onProgress: onProgress)
       } else {
         // No audio track: contribute silence of the segment's output length.
-        let nominalUs = Double(segment.endUs - segment.startUs) / segment.speed
-        let frames = Int64((nominalUs * Double(targetRate) / 1_000_000.0).rounded())
+        let frames = Int64(
+          (segment.outputDurationUs * Double(targetRate) / 1_000_000.0).rounded())
         bytesWritten = try writeSilence(
           frames: frames, bytesPerFrame: bytesPerFrame, fileHandle: fileHandle,
           cancelState: cancelState)
@@ -259,7 +261,10 @@ class MergeAudio {
 
     try compositionAudioTrack.insertTimeRange(trimRange, of: audioTrack, at: .zero)
 
-    let applySpeed = segment.speed > 0 && segment.speed != 1.0
+    // A ramp is stretched like a rendered audio track once the window is
+    // decoded whole: a scaled edit per step would drop sound around each one.
+    let ramp = segment.speedRamp
+    let applySpeed = ramp == nil && segment.speed > 0 && segment.speed != 1.0
     if applySpeed {
       let scaled = CMTimeMultiplyByFloat64(trimRange.duration, multiplier: 1.0 / segment.speed)
       compositionAudioTrack.scaleTimeRange(
@@ -302,6 +307,7 @@ class MergeAudio {
     }
 
     var bytesWritten: Int64 = 0
+    var rampSource = Data()
     while let sampleBuffer = mixOutput.copyNextSampleBuffer() {
       if cancelState.isCancelled {
         reader.cancelReading()
@@ -314,8 +320,12 @@ class MergeAudio {
           CMBlockBufferCopyDataBytes(
             blockBuffer, atOffset: 0, dataLength: length, destination: ptr.baseAddress!)
         }
-        fileHandle.write(chunk)
-        bytesWritten += Int64(length)
+        if ramp == nil {
+          fileHandle.write(chunk)
+          bytesWritten += Int64(length)
+        } else {
+          rampSource.append(chunk)
+        }
       }
 
       let currentTime = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
@@ -329,6 +339,14 @@ class MergeAudio {
         ?? NSError(
           domain: "MergeAudio", code: -6,
           userInfo: [NSLocalizedDescriptionKey: "AVAssetReader failed during reading"])
+    }
+
+    if let ramp {
+      let stretched = AudioTimeStretch.stretch(
+        rampSource, sampleRate: targetRate, channels: targetChannels, speed: 1,
+        maxFrames: Int.max, ramp: ramp)
+      fileHandle.write(stretched)
+      bytesWritten = Int64(stretched.count)
     }
 
     return bytesWritten
