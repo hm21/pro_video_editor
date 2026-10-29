@@ -134,8 +134,21 @@ internal fun keyframePlacementAt(
  *
  * [swing] is the side a wiggle tilts to: `-1` in the second half of a loop
  * cycle, `1` otherwise.
+ *
+ * [turn] is how far a spin or flip has the layer turned, in full turns,
+ * clockwise for a positive value: from `-turns` to `0` over an in-animation,
+ * so it turns into place the same way it turns away over an out-animation,
+ * from `0` to `turns`. A loop counts on by `turns` every cycle; whole turns
+ * are taken off, as they look the same. `0` for any other type.
  */
-internal data class AnimationProgress(val value: Double, val swing: Float = 1f)
+internal data class AnimationProgress(
+    val value: Double,
+    val swing: Float = 1f,
+    val turn: Double = 0.0,
+)
+
+/** Whether [type] turns the layer by its turns: a spin or a flip. */
+private fun turnsLayer(type: String) = type == "spin" || type == "flip"
 
 /**
  * The progress of [anim] at [timeUs], or `null` when it does not play then.
@@ -150,9 +163,10 @@ internal data class AnimationProgress(val value: Double, val swing: Float = 1f)
  * [LayerAnimationConfig.loopEndUs] when it names them, counting from the
  * first and [LayerAnimationConfig.loopPhaseUs] into a cycle there: the eased
  * value runs from rest to fully away at half a cycle and back. A wiggle runs
- * that twice per cycle, once to each side (see [AnimationProgress.swing]).
- * The cycle position is taken from the remainder of whole microseconds, so a
- * long video does not lose precision.
+ * that twice per cycle, once to each side (see [AnimationProgress.swing]). A
+ * spin and a flip turn on instead, by their turns eased over each cycle (see
+ * [AnimationProgress.turn]). The cycle position is taken from the remainder of
+ * whole microseconds, so a long video does not lose precision.
  */
 internal fun animationProgress(
     anim: LayerAnimationConfig,
@@ -173,6 +187,16 @@ internal fun animationProgress(
         val elapsed = (timeUs - fromUs).coerceAtLeast(0L) + anim.loopPhaseUs
         // Floored, so a phase below zero still lands inside the cycle.
         val inCycle = elapsed.mod(durationUs)
+        if (turnsLayer(anim.type)) {
+            val turns = anim.turns ?: LayerAnimationConfig.DEFAULT_TURNS
+            // The cycles already done, without their whole turns, so a long
+            // video does not lose precision.
+            val done = (Math.floorDiv(elapsed, durationUs) * turns).mod(1.0)
+            return AnimationProgress(
+                1.0,
+                turn = done + turns * applyEasing(inCycle.toDouble() / durationUs, anim.curve)
+            )
+        }
         return if (anim.type == "wiggle") {
             // Each half of the cycle is one swing out and back.
             val inSwing = (2 * inCycle) % durationUs
@@ -210,21 +234,26 @@ internal fun animationProgress(
         }
     }
 
-    // Use the minimum progress (most visible animation effect)
-    val progress = when {
-        inProgress != null && outProgress != null -> min(inProgress, outProgress)
-        else -> inProgress ?: outProgress
-    } ?: return null
-    return AnimationProgress(progress)
+    // The part further from rest wins.
+    val entering = inProgress != null && (outProgress == null || inProgress < outProgress)
+    val progress = (if (entering) inProgress else outProgress) ?: return null
+    if (!turnsLayer(anim.type)) return AnimationProgress(progress)
+    val away = (1.0 - progress) * (anim.turns ?: LayerAnimationConfig.DEFAULT_TURNS)
+    return AnimationProgress(progress, turn = if (entering) -away else away)
 }
 
 /**
  * The composed look of an animated layer at one moment, before Media3 places
  * it: opacity, the slide and bounce offset in normalized device coordinates
- * ([-1, 1], +y up), the scale factor and the wiggle tilt.
+ * ([-1, 1], +y up), the scale factor, the wiggle and spin turn and the flip
+ * squeeze.
  *
  * [rotationDegrees] is counter-clockwise, as Media3 turns an overlay; a
  * clockwise wiggle, like Flutter's rotation, is negative here.
+ *
+ * [flipX] and [flipY] squeeze the image across its own vertical and
+ * horizontal axis, before it is turned: `1` as it is, `0` edge-on, `-1`
+ * mirrored.
  */
 internal data class OverlayAnimationState(
     val alpha: Float,
@@ -232,15 +261,19 @@ internal data class OverlayAnimationState(
     val offsetY: Float,
     val scale: Float,
     val rotationDegrees: Float,
+    val flipX: Float = 1f,
+    val flipY: Float = 1f,
 )
 
 /**
  * Composes every animation of a layer at [timeUs]; see [animationProgress]
  * for when each one plays.
  *
- * Opacity and scale multiply, slide and bounce offsets add up and wiggle
- * angles add up. A bounce lifts the layer by a multiple of its own height
- * ([halfNormH] is half of it), a wiggle tilts it around its own center. Text
+ * Opacity and scale multiply, slide and bounce offsets add up, wiggle and spin
+ * angles add up and flip squeezes multiply. A bounce lifts the layer by a
+ * multiple of its own height ([halfNormH] is half of it), a wiggle tilts and a
+ * spin turns it around its own center, and a flip squeezes it across the axis
+ * it turns around. Text
  * reveals (`typewriter`, `wordByWord`) change what the image shows, which a
  * fixed image cannot do, so they are skipped here; the caller passes one layer
  * per step instead.
@@ -267,6 +300,8 @@ internal fun overlayAnimationState(
     var offsetY = 0f
     var scale = 1f
     var rotation = 0.0
+    var flipX = 1.0
+    var flipY = 1.0
 
     for (anim in animations) {
         val progress = animationProgress(anim, timeUs, startUs, endUs) ?: continue
@@ -309,6 +344,13 @@ internal fun overlayAnimationState(
                 // Y counts upwards; the layer's height is twice halfNormH.
                 offsetY += (invP * height * 2.0 * halfNormH).toFloat()
             }
+            "spin" -> rotation += 2.0 * Math.PI * progress.turn
+            "flip" -> {
+                // A layer drawn flat shows a turn around an axis as its width
+                // across it.
+                val squeeze = cos(2.0 * Math.PI * progress.turn)
+                if (anim.flipAxis == "horizontal") flipY *= squeeze else flipX *= squeeze
+            }
             // "typewriter", "wordByWord": see the function's documentation.
         }
     }
@@ -320,6 +362,8 @@ internal fun overlayAnimationState(
         scale = scale.coerceAtLeast(0f),
         // Flutter turns clockwise, Media3 counter-clockwise.
         rotationDegrees = -Math.toDegrees(rotation).toFloat(),
+        flipX = flipX.toFloat(),
+        flipY = flipY.toFloat(),
     )
 }
 
@@ -466,8 +510,9 @@ internal fun animatedFrameIndex(
 /**
  * Where Media3 draws an overlay at one moment: [alpha], its center
  * [centerNormX] / [centerNormY] in [-1, 1] units (+y up, possibly beyond the
- * frame), the [scale] before any raster compensation and the
- * counter-clockwise [rotationDegrees].
+ * frame), the [scale] before any raster compensation, the counter-clockwise
+ * [rotationDegrees] and the flip squeeze [flipX] / [flipY] (see
+ * [OverlayAnimationState]).
  */
 internal data class OverlayFrame(
     val alpha: Float,
@@ -475,6 +520,8 @@ internal data class OverlayFrame(
     val centerNormY: Float,
     val scale: Float,
     val rotationDegrees: Float,
+    val flipX: Float = 1f,
+    val flipY: Float = 1f,
 )
 
 /**
@@ -485,7 +532,8 @@ internal data class OverlayFrame(
  * outside [-1, 1], but Media3's overlay matrix places an overlay at any
  * anchor. Media3 scales and turns an overlay around its overlay-frame anchor,
  * so with that anchor on the overlay's center the placement stays exact
- * whatever the turn and scale. Splitting a position past the edge into a
+ * whatever the turn and scale. It scales the overlay along its own axes before
+ * it turns it, so a flip squeezes the image as it is drawn. Splitting a position past the edge into a
  * clamped background anchor and an overlay anchor cannot: the overlay anchor
  * reaches at most one upright half-size, while a turned layer still shows
  * corners further out.
@@ -588,8 +636,8 @@ internal fun overlayFrame(
     // compositor a draw that cannot show.
     val offFrame = liesOffFrame(
         centerNormX, centerNormY,
-        halfWidthPx = imageWidth * scale / 2f,
-        halfHeightPx = imageHeight * scale / 2f,
+        halfWidthPx = imageWidth * scale * abs(state.flipX) / 2f,
+        halfHeightPx = imageHeight * scale * abs(state.flipY) / 2f,
         rotationDegrees = rotationDegrees,
         videoWidth = videoWidth,
         videoHeight = videoHeight,
@@ -601,6 +649,8 @@ internal fun overlayFrame(
         centerNormY = centerNormY,
         scale = scale,
         rotationDegrees = rotationDegrees,
+        flipX = state.flipX,
+        flipY = state.flipY,
     )
 }
 
@@ -802,8 +852,8 @@ internal class AnimatedBitmapOverlay(
             alpha = frame.alpha,
             centerNormX = frame.centerNormX,
             centerNormY = frame.centerNormY,
-            scaleX = rasterScaleX * frame.scale,
-            scaleY = rasterScaleY * frame.scale,
+            scaleX = rasterScaleX * frame.scale * frame.flipX,
+            scaleY = rasterScaleY * frame.scale * frame.flipY,
             rotation = frame.rotationDegrees,
         )
     }

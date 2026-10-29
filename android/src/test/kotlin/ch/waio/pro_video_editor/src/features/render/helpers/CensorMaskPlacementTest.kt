@@ -50,6 +50,47 @@ internal class CensorMaskPlacementTest {
     }
 
     @Test
+    fun aFlippedLayerCoversItsBoxMirrored() {
+        // The 200 x 100 layer at (100, 50) of aPositionedLayerCoversItsBox,
+        // flipped over sideways and turned a quarter.
+        val placement = CensorMaskPlacement.of(
+            backgroundAnchor = floatArrayOf(-0.6f, 0.6f),
+            overlayAnchor = floatArrayOf(0f, 0f),
+            scale = floatArrayOf(-1f, 1f),
+            maskWidth = 200,
+            maskHeight = 100,
+            frameWidth = frameWidth,
+            frameHeight = frameHeight,
+        )
+        assertTrue(placement.coversFrame())
+        // The left edge shows the mask's right edge.
+        val (x0, y0) = ndc(100f, 50f)
+        assertQuad(1f to 1f, placement.quadCoordinateOf(x0, y0))
+        val corner = placement.topLeftPixel(frameWidth, frameHeight)
+        assertEquals(100f, corner[0], 1e-3f)
+        assertEquals(50f, corner[1], 1e-3f)
+
+        val turned = CensorMaskPlacement.of(
+            backgroundAnchor = floatArrayOf(-0.6f, 0.6f),
+            overlayAnchor = floatArrayOf(0f, 0f),
+            scale = floatArrayOf(-1f, 1f),
+            maskWidth = 200,
+            maskHeight = 100,
+            frameWidth = frameWidth,
+            frameHeight = frameHeight,
+            rotationDegrees = 90f,
+        )
+        // Turned a quarter counter-clockwise about its center (200, 100),
+        // the mirrored box's top edge stands on the left: its point above the
+        // center is the frame point left of it.
+        val (x1, y1) = ndc(150f, 100f)
+        assertQuad(0f to 1f, turned.quadCoordinateOf(x1, y1))
+        // Its right edge, mirrored to the left, turns down.
+        val (x2, y2) = ndc(200f, 200f)
+        assertQuad(1f to 0f, turned.quadCoordinateOf(x2, y2))
+    }
+
+    @Test
     fun pixelateBlocksStartAtTheBoxCorner() {
         // The 200 x 100 layer at (100, 50) of aPositionedLayerCoversItsBox.
         val placement = CensorMaskPlacement.of(

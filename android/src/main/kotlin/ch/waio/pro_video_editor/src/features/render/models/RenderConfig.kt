@@ -521,8 +521,8 @@ data class AudioTrackConfig(
  * Represents a single animation configuration for an image layer.
  *
  * @property type The kind of animation: "fade", "slide", "scale", "wiggle",
- *   "bounce", or "typewriter" / "wordByWord", which the renderer skips because a
- *   layer is one fixed image
+ *   "bounce", "spin", "flip", or "typewriter" / "wordByWord", which the renderer
+ *   skips because a layer is one fixed image
  * @property phase When the animation plays: "animateIn", "animateOut",
  *   "animateInOut", or "loop" for as long as the layer is visible
  * @property durationUs Duration of the animation in microseconds, or of one
@@ -538,6 +538,10 @@ data class AudioTrackConfig(
  *   first (null = [DEFAULT_WIGGLE_ANGLE])
  * @property bounceHeight How high a bounce lifts the layer, as a multiple of its
  *   own height (null = [DEFAULT_BOUNCE_HEIGHT])
+ * @property turns How far a spin or flip turns the layer, in full turns,
+ *   clockwise for a positive value (null = [DEFAULT_TURNS])
+ * @property flipAxis The axis a flip turns the layer around: "vertical" or
+ *   "horizontal" (null = "vertical")
  */
 data class LayerAnimationConfig(
     val type: String,
@@ -550,6 +554,8 @@ data class LayerAnimationConfig(
     val scaleFrom: Double? = null,
     val wiggleAngle: Double? = null,
     val bounceHeight: Double? = null,
+    val turns: Double? = null,
+    val flipAxis: String? = null,
     /** Where a `loop` starts repeating, on the output timeline; `-1` = the layer's start. */
     val loopStartUs: Long = -1L,
     /** Where a `loop` stops, on the output timeline; `-1` = the layer's end. */
@@ -564,6 +570,9 @@ data class LayerAnimationConfig(
         /** Half the layer's height, the lift of a bounce without its own [bounceHeight]. */
         const val DEFAULT_BOUNCE_HEIGHT = 0.5
 
+        /** Once all the way round, the turn of a spin or flip without its own [turns]. */
+        const val DEFAULT_TURNS = 1.0
+
         fun fromMap(map: Map<String, Any?>): LayerAnimationConfig {
             val slideFrom = map["slideFrom"] as? Map<*, *>
             return LayerAnimationConfig(
@@ -577,6 +586,8 @@ data class LayerAnimationConfig(
                 scaleFrom = (map["scaleFrom"] as? Number)?.toDouble(),
                 wiggleAngle = (map["wiggleAngle"] as? Number)?.toDouble(),
                 bounceHeight = (map["bounceHeight"] as? Number)?.toDouble(),
+                turns = (map["turns"] as? Number)?.toDouble(),
+                flipAxis = map["flipAxis"] as? String,
                 loopStartUs = (map["loopStartUs"] as? Number)?.toLong() ?: -1L,
                 loopEndUs = (map["loopEndUs"] as? Number)?.toLong() ?: -1L,
                 loopPhaseUs = (map["loopPhaseUs"] as? Number)?.toLong() ?: 0L

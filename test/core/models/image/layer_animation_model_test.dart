@@ -474,6 +474,78 @@ void main() {
       });
     });
 
+    group('spin and flip', () {
+      test('leave turns and axis unset by default', () {
+        const anim = LayerAnimation(
+          type: LayerAnimationType.flip,
+          phase: AnimationPhase.animateIn,
+          duration: Duration(milliseconds: 500),
+        );
+        expect(anim.turns, isNull);
+        expect(anim.flipAxis, isNull);
+        expect(anim.toMap()['turns'], isNull);
+        expect(anim.toMap()['flipAxis'], isNull);
+        expect(LayerAnimation.defaultTurns, 1);
+      });
+
+      test('round-trip their turns and axis', () {
+        const flip = LayerAnimation(
+          type: LayerAnimationType.flip,
+          phase: AnimationPhase.animateOut,
+          duration: Duration(milliseconds: 600),
+          turns: 0.25,
+          flipAxis: FlipAxis.horizontal,
+        );
+        expect(LayerAnimation.fromMap(flip.toMap()), flip);
+
+        const spin = LayerAnimation(
+          type: LayerAnimationType.spin,
+          phase: AnimationPhase.loop,
+          duration: Duration(seconds: 2),
+          turns: -3,
+        );
+        expect(LayerAnimation.fromMap(spin.toMap()), spin);
+      });
+
+      test('read whole turns sent as an int', () {
+        final restored = LayerAnimation.fromMap(const {
+          'type': 'spin',
+          'phase': 'animateIn',
+          'durationUs': 1000,
+          'turns': 2,
+        });
+        expect(restored.turns, 2.0);
+      });
+
+      test('differ by turns and axis and name them in toString', () {
+        const a = LayerAnimation(
+          type: LayerAnimationType.flip,
+          phase: AnimationPhase.animateIn,
+          duration: Duration(milliseconds: 500),
+          turns: 1,
+          flipAxis: FlipAxis.vertical,
+        );
+        const b = LayerAnimation(
+          type: LayerAnimationType.flip,
+          phase: AnimationPhase.animateIn,
+          duration: Duration(milliseconds: 500),
+          turns: 2,
+          flipAxis: FlipAxis.vertical,
+        );
+        const c = LayerAnimation(
+          type: LayerAnimationType.flip,
+          phase: AnimationPhase.animateIn,
+          duration: Duration(milliseconds: 500),
+          turns: 1,
+          flipAxis: FlipAxis.horizontal,
+        );
+        expect(a, isNot(b));
+        expect(a, isNot(c));
+        expect(c.toString(), contains('turns: 1.0'));
+        expect(c.toString(), contains('flipAxis: FlipAxis.horizontal'));
+      });
+    });
+
     group('equality', () {
       test('identical animations are equal', () {
         const a = LayerAnimation(
@@ -671,7 +743,13 @@ void main() {
         LayerAnimationType.bounce,
         LayerAnimationType.typewriter,
         LayerAnimationType.wordByWord,
+        LayerAnimationType.spin,
+        LayerAnimationType.flip,
       ]);
+    });
+
+    test('FlipAxis has expected values', () {
+      expect(FlipAxis.values, [FlipAxis.vertical, FlipAxis.horizontal]);
     });
 
     test('SlideDirection has expected values', () {

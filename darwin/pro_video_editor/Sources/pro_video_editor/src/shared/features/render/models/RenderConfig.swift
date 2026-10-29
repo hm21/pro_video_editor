@@ -14,10 +14,13 @@ struct LayerAnimationConfig {
   /// Half the layer's height, the lift of a bounce without its own
   /// `bounceHeight`.
   static let defaultBounceHeight = 0.5
+  /// Once all the way round, the turn of a spin or flip without its own
+  /// `turns`.
+  static let defaultTurns = 1.0
 
-  /// The kind of animation: "fade", "slide", "scale", "wiggle", "bounce", or
-  /// "typewriter" / "wordByWord", which the renderer skips because a layer is
-  /// one fixed image.
+  /// The kind of animation: "fade", "slide", "scale", "wiggle", "bounce",
+  /// "spin", "flip", or "typewriter" / "wordByWord", which the renderer skips
+  /// because a layer is one fixed image.
   let type: String
   /// When the animation plays: "animateIn", "animateOut", "animateInOut", or
   /// "loop" for as long as the layer is visible.
@@ -38,6 +41,12 @@ struct LayerAnimationConfig {
   var wiggleAngle: Double? = nil
   /// How high a bounce lifts the layer, as a multiple of its own height.
   var bounceHeight: Double? = nil
+  /// How far a spin or flip turns the layer, in full turns, clockwise for a
+  /// positive value.
+  var turns: Double? = nil
+  /// The axis a flip turns the layer around: "vertical" (the default) or
+  /// "horizontal".
+  var flipAxis: String? = nil
   /// Where a loop starts repeating, on the output timeline; -1 = the layer's
   /// start.
   var loopStartUs: Int64 = -1
@@ -71,6 +80,8 @@ struct LayerAnimationConfig {
       scaleFrom: (args["scaleFrom"] as? NSNumber)?.doubleValue,
       wiggleAngle: (args["wiggleAngle"] as? NSNumber)?.doubleValue,
       bounceHeight: (args["bounceHeight"] as? NSNumber)?.doubleValue,
+      turns: (args["turns"] as? NSNumber)?.doubleValue,
+      flipAxis: args["flipAxis"] as? String,
       loopStartUs: (args["loopStartUs"] as? NSNumber)?.int64Value ?? -1,
       loopEndUs: (args["loopEndUs"] as? NSNumber)?.int64Value ?? -1,
       loopPhaseUs: (args["loopPhaseUs"] as? NSNumber)?.int64Value ?? 0

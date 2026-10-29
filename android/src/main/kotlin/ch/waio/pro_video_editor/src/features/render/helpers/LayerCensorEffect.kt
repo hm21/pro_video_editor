@@ -333,14 +333,16 @@ internal data class CensorMaskPlacement(
      * measured by the box around it.
      */
     fun coversFrame(): Boolean {
-        if (extent[0] <= 0f || extent[1] <= 0f) return false
-        var halfX = extent[0]
-        var halfY = extent[1]
+        // A flip mirrors the quad, which turns an extent negative.
+        var halfX = abs(extent[0])
+        var halfY = abs(extent[1])
+        if (halfX <= 0f || halfY <= 0f) return false
         if (rotation != 0f) {
             val c = abs(cos(rotation))
             val s = abs(sin(rotation))
-            halfX = extent[0] * (c + s / aspect)
-            halfY = extent[1] * (c + s * aspect)
+            val a = abs(aspect)
+            halfX = abs(extent[0]) * (c + s / a)
+            halfY = abs(extent[1]) * (c + s * a)
         }
         return origin[0] - halfX < 1f && origin[0] + halfX > -1f &&
             origin[1] - halfY < 1f && origin[1] + halfY > -1f
@@ -353,9 +355,10 @@ internal data class CensorMaskPlacement(
      * starting at the corner it has untilted.
      */
     fun topLeftPixel(frameWidth: Int, frameHeight: Int): FloatArray {
-        // The corner v = (-1, 1) of the quad, P = origin + extent * v.
-        val ndcX = origin[0] - extent[0]
-        val ndcY = origin[1] + extent[1]
+        // The corner v = (-1, 1) of the quad, P = origin + extent * v, or the
+        // one a flip mirrored onto it.
+        val ndcX = origin[0] - abs(extent[0])
+        val ndcY = origin[1] + abs(extent[1])
         return floatArrayOf(
             ((ndcX + 1f) / 2f * frameWidth).roundToInt().toFloat(),
             ((1f - ndcY) / 2f * frameHeight).roundToInt().toFloat(),
@@ -392,8 +395,10 @@ internal data class CensorMaskPlacement(
                 backgroundAnchor[0] - extent[0] * overlayAnchor[0],
                 backgroundAnchor[1] - extent[1] * overlayAnchor[1],
             )
+            // Signed, like the extent, so the shader undoes a flip's mirror
+            // along with it.
             val displayHeight = maskHeight * scale[1]
-            val aspect = if (displayHeight > 0f) maskWidth * scale[0] / displayHeight else 1f
+            val aspect = if (displayHeight != 0f) maskWidth * scale[0] / displayHeight else 1f
             return CensorMaskPlacement(
                 origin,
                 extent,

@@ -163,9 +163,21 @@ func keyframePlacement(_ keyframes: [KeyframeConfig], atUs timeUs: Int64) -> Key
 ///
 /// `swing` is the side a wiggle tilts to: -1 in the second half of a loop
 /// cycle, 1 otherwise.
+///
+/// `turn` is how far a spin or flip has the layer turned, in full turns,
+/// clockwise for a positive value: from `-turns` to 0 over an in-animation,
+/// so it turns into place the same way it turns away over an out-animation,
+/// from 0 to `turns`. A loop counts on by `turns` every cycle; whole turns are
+/// taken off, as they look the same. 0 for any other type.
 struct AnimationProgress: Equatable {
   let value: Double
   var swing: Double = 1
+  var turn: Double = 0
+}
+
+/// Whether [type] turns the layer by its `turns`: a spin or a flip.
+private func turnsLayer(_ type: String) -> Bool {
+  type == "spin" || type == "flip"
 }
 
 /// The progress of [anim] at [currentTimeUs], or `nil` when it does not play
@@ -180,7 +192,8 @@ struct AnimationProgress: Equatable {
 /// [startUs], or only from `loopStartUs` to `loopEndUs` when it names them,
 /// counting from the first and `loopPhaseUs` into a cycle there: the eased
 /// value runs from rest to fully away at half a cycle and back. A wiggle runs
-/// that twice per cycle, once to each side. The cycle position is taken from
+/// that twice per cycle, once to each side. A spin and a flip turn on instead,
+/// by their `turns` eased over each cycle. The cycle position is taken from
 /// the remainder of whole microseconds, so a long video does not lose
 /// precision. Mirrors `animationProgress` on Android.
 func animationProgress(
@@ -202,6 +215,16 @@ func animationProgress(
     let elapsed = max(0, currentTimeUs - fromUs) + anim.loopPhaseUs
     // Floored, so a phase below zero still lands inside the cycle.
     let inCycle = (elapsed % durationUs + durationUs) % durationUs
+    if turnsLayer(anim.type) {
+      let turns = anim.turns ?? LayerAnimationConfig.defaultTurns
+      // The cycles already done, without their whole turns, so a long video
+      // does not lose precision. Floored like the cycle position.
+      let cycles = Double((elapsed - inCycle) / durationUs) * turns
+      return AnimationProgress(
+        value: 1,
+        turn: cycles - cycles.rounded(.down)
+          + turns * applyEasing(Double(inCycle) / Double(durationUs), curve: anim.curve))
+    }
     if anim.type == "wiggle" {
       // Each half of the cycle is one swing out and back.
       let inSwing = (2 * inCycle) % durationUs
@@ -237,12 +260,12 @@ func animationProgress(
     }
   }
 
-  // Use the minimum progress (most visible animation effect)
-  if let inp = inProgress, let outp = outProgress {
-    return AnimationProgress(value: min(inp, outp))
-  }
-  guard let progress = inProgress ?? outProgress else { return nil }
-  return AnimationProgress(value: progress)
+  // The part further from rest wins.
+  let entering = inProgress.map { inp in outProgress.map { inp < $0 } ?? true } ?? false
+  guard let progress = entering ? inProgress : outProgress else { return nil }
+  guard turnsLayer(anim.type) else { return AnimationProgress(value: progress) }
+  let away = (1 - progress) * (anim.turns ?? LayerAnimationConfig.defaultTurns)
+  return AnimationProgress(value: progress, turn: entering ? -away : away)
 }
 
 /// Computes animation transforms and opacity for overlaying an image layer.
@@ -251,10 +274,11 @@ func animationProgress(
 ///
 /// The animations count from the layer's `animationStartUs` / `animationEndUs`
 /// where set, else from its own time range. Opacity and scale multiply, slide
-/// and bounce offsets add up. Whatever their order in the list, a wiggle tilts
-/// and a scale grows the overlay around its own center before slides and
-/// bounces move it, as on Android and in the editor preview; a bounce lifts it
-/// by a multiple of its unscaled height. Text reveals ("typewriter",
+/// and bounce offsets add up. Whatever their order in the list, a wiggle tilts,
+/// a spin turns and a scale grows the overlay around its own center before
+/// slides and bounces move it, as on Android and in the editor preview; a
+/// bounce lifts it by a multiple of its unscaled height. A flip squeezes the
+/// overlay across the axis it turns around, before anything turns it. Text reveals ("typewriter",
 /// "wordByWord") change what the image shows, which a fixed image cannot do,
 /// so they are skipped; the caller passes one layer per step instead.
 ///
@@ -277,8 +301,12 @@ func computeAnimation(
   var scale: CGFloat = keyframeScale
   // Core Graphics pixels, Y up.
   var offset = CGPoint.zero
-  // Clockwise, in radians, like Flutter's rotation.
+  // Clockwise, in radians, like Flutter's rotation: the wiggles and spins.
   var wiggle = 0.0
+  // Across the overlay's own vertical and horizontal axis: 1 as it is, 0
+  // edge-on, -1 mirrored.
+  var flipX: CGFloat = 1
+  var flipY: CGFloat = 1
   // The box as the keyframes size it, which the slides and bounces measure.
   let sizedExtent = overlayExtent.insetBy(
     dx: overlayExtent.width * (1 - keyframeScale) / 2,
@@ -338,6 +366,18 @@ func computeAnimation(
       let height = anim.bounceHeight ?? LayerAnimationConfig.defaultBounceHeight
       offset.y += CGFloat((1 - p) * height) * sizedExtent.height
 
+    case "spin":
+      wiggle += 2 * .pi * progress.turn
+
+    case "flip":
+      // A layer drawn flat shows a turn around an axis as its width across it.
+      let squeeze = CGFloat(cos(2 * .pi * progress.turn))
+      if anim.flipAxis == "horizontal" {
+        flipY *= squeeze
+      } else {
+        flipX *= squeeze
+      }
+
     default:
       break
     }
@@ -352,11 +392,12 @@ func computeAnimation(
   let cy = overlayExtent.midY
   let move = CGAffineTransform(translationX: offset.x, y: offset.y)
   func placed(tilt: Double) -> CGAffineTransform {
-    guard scale != 1 || tilt != 0 else { return move }
+    guard scale != 1 || flipX != 1 || flipY != 1 || tilt != 0 else { return move }
     // Core Graphics turns counter-clockwise, so the clockwise tilt is negated.
+    // The flip squeezes the overlay before it is turned, as Media3 does.
     return CGAffineTransform(translationX: cx, y: cy)
       .rotated(by: CGFloat(-tilt))
-      .scaledBy(x: scale, y: scale)
+      .scaledBy(x: scale * flipX, y: scale * flipY)
       .translatedBy(x: -cx, y: -cy)
       .concatenating(move)
   }
