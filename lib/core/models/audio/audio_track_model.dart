@@ -70,15 +70,15 @@ class VideoAudioTrack with TimeRangeMixin {
   ///
   /// The ramp's positions run along the source window, from `0` at
   /// [audioStartTime] to `1` at [audioEndTime], or at the end of the file when
-  /// [audioEndTime] is null. Like [playbackSpeed] it is applied before
-  /// looping, silence padding and fades, so each pass of a [loop] plays the
-  /// whole curve, while [startTime], [endTime] and the fades stay in output
-  /// time. The window plays for [VideoSpeedRamp.outputDuration] of its source
-  /// length, and [VideoSpeedRamp.sourceToOutput] and
+  /// [audioEndTime] is null or lies past it. Like [playbackSpeed] it is
+  /// applied before looping, silence padding and fades, so each pass of a
+  /// [loop] plays the whole curve, while [startTime], [endTime] and the fades
+  /// stay in output time. The window plays for [VideoSpeedRamp.outputDuration]
+  /// of its source length, and [VideoSpeedRamp.sourceToOutput] and
   /// [VideoSpeedRamp.outputToSource] place a moment of the sound on the
   /// output.
   ///
-  /// A [VideoSegment.speedRamp] follows the speed like a tape instead, so a
+  /// A `VideoSegment.speedRamp` follows the speed like a tape instead, so a
   /// clip's own sound changes pitch where this track does not.
   ///
   /// If null, the track plays at [playbackSpeed]. Supported on Android, iOS
