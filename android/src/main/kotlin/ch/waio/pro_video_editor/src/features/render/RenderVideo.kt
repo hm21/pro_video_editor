@@ -28,6 +28,7 @@ import ch.waio.pro_video_editor.src.features.render.helpers.reversedSegmentKeyfr
 import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionGeometry
 import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionRenderer
 import ch.waio.pro_video_editor.src.features.render.helpers.MediaInfoExtractor
+import ch.waio.pro_video_editor.src.features.render.helpers.PictureStartSnapping
 import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
 import ch.waio.pro_video_editor.src.features.render.models.CodecResourceExhaustedException
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
@@ -175,6 +176,17 @@ class RenderVideo(private val context: Context) {
      * @return RenderJobHandle that can be used to cancel the render job
      */
     fun render(
+        config: RenderConfig,
+        onProgress: (Double) -> Unit,
+        onComplete: (ByteArray?) -> Unit,
+        onError: (Throwable) -> Unit
+    ): RenderJobHandle = startRender(
+        // Every stage reads the clips' trims, so they move onto the pictures
+        // they name once, first.
+        PictureStartSnapping.snapped(context, config), onProgress, onComplete, onError
+    )
+
+    private fun startRender(
         config: RenderConfig,
         onProgress: (Double) -> Unit,
         onComplete: (ByteArray?) -> Unit,
