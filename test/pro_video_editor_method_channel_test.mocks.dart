@@ -408,6 +408,14 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
           as List<_i4.VideoAudioTrack>);
 
   @override
+  bool get preserveSourceFrameTiming =>
+      (super.noSuchMethod(
+            Invocation.getter(#preserveSourceFrameTiming),
+            returnValue: false,
+          )
+          as bool);
+
+  @override
   bool get shouldOptimizeForNetworkUse =>
       (super.noSuchMethod(
             Invocation.getter(#shouldOptimizeForNetworkUse),
@@ -462,6 +470,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
     _i4.ChromaKey? chromaKey,
     int? bitrate,
     int? maxFrameRate,
+    bool? preserveSourceFrameTiming,
     bool? shouldOptimizeForNetworkUse,
     bool? imageBytesWithCropping,
   }) =>
@@ -486,6 +495,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
               #chromaKey: chromaKey,
               #bitrate: bitrate,
               #maxFrameRate: maxFrameRate,
+              #preserveSourceFrameTiming: preserveSourceFrameTiming,
               #shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
               #imageBytesWithCropping: imageBytesWithCropping,
             }),
@@ -511,6 +521,7 @@ class MockVideoRenderData extends _i1.Mock implements _i4.VideoRenderData {
                 #chromaKey: chromaKey,
                 #bitrate: bitrate,
                 #maxFrameRate: maxFrameRate,
+                #preserveSourceFrameTiming: preserveSourceFrameTiming,
                 #shouldOptimizeForNetworkUse: shouldOptimizeForNetworkUse,
                 #imageBytesWithCropping: imageBytesWithCropping,
               }),

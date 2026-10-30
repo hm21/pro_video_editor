@@ -1,3 +1,7 @@
+## 2.50.0
+- **FEAT**(iOS, macOS): `VideoRenderData.preserveSourceFrameTiming` renders on the source track's own frame times, so a fractional- or variable-rate clip keeps every picture and timestamp. Needs one forward segment at original speed; Android already behaves this way.
+- **FIX**(android): A trimmed segment no longer loses the B-frames just before its end. Media3 is updated to 1.11.1; apps that force a Media3 version need 1.11.0 or later.
+
 ## 2.49.0
 - **FEAT**(android, iOS, macOS): Speed ramps on audio tracks. `VideoAudioTrack.speedRamp` speeds a custom track up and down along a `VideoSpeedRamp` at unchanged pitch, and `AudioMergeSegment.speedRamp` bakes the same stretch into a merged file for an editor preview. Ducking and `AudioLevelEnvelope` follow the ramp.
 

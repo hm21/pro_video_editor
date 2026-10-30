@@ -34,14 +34,14 @@ cd "$(dirname "$0")/.."
 
 case "${1:-}" in
   macos)
-    flutter build macos --debug --config-only
+    flutter build macos --debug --config-only --target tool/native_test_host.dart
     exec xcodebuild test \
       -workspace macos/Runner.xcworkspace \
       -scheme Runner \
       -destination 'platform=macOS'
     ;;
   ios)
-    flutter build ios --debug --simulator --config-only
+    flutter build ios --debug --simulator --config-only --target tool/native_test_host.dart
     exec xcodebuild test \
       -workspace ios/Runner.xcworkspace \
       -scheme Runner \

@@ -73,6 +73,30 @@ class RenderVideo {
           return
         }
 
+        // Source timing is an identity-preserving effects mode. Transitions
+        // and reverse preprocess on their own clocks; speed edits deliberately
+        // change the source timestamps. Reject them before touching media. The
+        // HEVC pre-transcode needs nothing extra: a filter composition built
+        // from a one-video-track asset already runs on that track's timing.
+        if config.preserveSourceFrameTiming {
+          let changesTiming = config.videoClips.contains {
+            $0.reverseVideo || $0.transition != nil || $0.changesSpeed
+          }
+          if config.composition != nil || config.videoClips.count != 1
+            || config.maxFrameRate != nil || changesTiming || (config.playbackSpeed ?? 1) != 1
+          {
+            onError(
+              NSError(
+                domain: "SourceFrameTiming", code: 1,
+                userInfo: [
+                  NSLocalizedDescriptionKey:
+                    "Source frame timing requires one forward video segment at original speed, "
+                    + "without transitions, a layered composition or a frame-rate cap"
+                ]))
+            return
+          }
+        }
+
         // Bitrate-cap fast path: a no-edit export whose source already fits
         // the cap (× tolerance) is remuxed losslessly (passthrough) instead
         // of re-encoded — the Darwin equivalent of Android's transmux fast
@@ -436,6 +460,11 @@ class RenderVideo {
           // Build the final AVMutableVideoComposition
           let videoComposition = AVMutableVideoComposition()
           videoComposition.frameDuration = outputFrameDuration
+          if workingConfig.preserveSourceFrameTiming {
+            // A fixed clock can repeat/drop source pictures even at nearly
+            // equal nominal rates. Schedule requests on the source track's PTS.
+            videoComposition.sourceTrackIDForFrameTiming = sourceTrackID
+          }
           videoComposition.renderSize = finalRenderSize
           // The compositor reads its configuration off the instruction it is
           // serving, so every concurrent render keeps its own — a type-level

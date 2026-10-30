@@ -851,6 +851,9 @@ struct RenderConfig: Sendable {
   /// Upper limit for the output frame rate in fps (nil = keep source fps)
   let maxFrameRate: Int?
 
+  /// Derive composition frame times from the single source track.
+  let preserveSourceFrameTiming: Bool
+
   /// Whether to include audio in output
   let enableAudio: Bool
 
@@ -924,6 +927,7 @@ struct RenderConfig: Sendable {
       outputHeight: self.outputHeight,
       bitrate: self.bitrate,
       maxFrameRate: self.maxFrameRate,
+      preserveSourceFrameTiming: self.preserveSourceFrameTiming,
       enableAudio: self.enableAudio,
       trimToCommonTrackEnd: self.trimToCommonTrackEnd,
       playbackSpeed: self.playbackSpeed,
@@ -1016,6 +1020,7 @@ struct RenderConfig: Sendable {
       outputHeight: (args["outputHeight"] as? NSNumber)?.intValue,
       bitrate: args["bitrate"] as? Int,
       maxFrameRate: (args["maxFrameRate"] as? NSNumber)?.intValue,
+      preserveSourceFrameTiming: args["preserveSourceFrameTiming"] as? Bool ?? false,
       enableAudio: args["enableAudio"] as? Bool ?? true,
       trimToCommonTrackEnd: args["trimToCommonTrackEnd"] as? Bool ?? false,
       playbackSpeed: (args["playbackSpeed"] as? NSNumber)?.floatValue,

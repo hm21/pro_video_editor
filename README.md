@@ -981,6 +981,19 @@ StreamBuilder<ProgressModel>(
 )
 ```
 
+#### Preserve source frame timing
+
+For an iOS/macOS effect that must retain every source picture and its timing,
+set `preserveSourceFrameTiming: true` on `VideoRenderData`. This uses the source
+track's presentation times instead of rounding the source onto the renderer's
+fixed frame clock, including for fractional and variable frame rates.
+
+Use one forward `videoSegments` entry at its original speed and leave
+`maxFrameRate` unset. Layered compositions, multiple segments, transitions,
+reverse playback, speed changes, speed ramps and frame-rate caps fail the render
+when this mode is enabled.
+The option defaults to false and is ignored on other platforms.
+
 #### Editor Example
 The video editor requires the use of the [pro_image_editor](https://github.com/hm21/pro_image_editor). You can find the basic video editor example [here](https://github.com/hm21/pro_video_editor/blob/stable/example/lib/features/editor/pages/video_editor_basic_example_page.dart) and the "grounded" design example [here](https://github.com/hm21/pro_video_editor/blob/stable/example/lib/features/editor/pages/video_editor_grounded_example_page.dart).
 
