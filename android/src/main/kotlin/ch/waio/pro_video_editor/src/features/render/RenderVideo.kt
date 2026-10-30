@@ -180,11 +180,40 @@ class RenderVideo(private val context: Context) {
         onProgress: (Double) -> Unit,
         onComplete: (ByteArray?) -> Unit,
         onError: (Throwable) -> Unit
-    ): RenderJobHandle = startRender(
+    ): RenderJobHandle {
+        if (!PictureStartSnapping.isNeeded(config)) {
+            return startRender(config, onProgress, onComplete, onError)
+        }
         // Every stage reads the clips' trims, so they move onto the pictures
-        // they name once, first.
-        PictureStartSnapping.snapped(context, config), onProgress, onComplete, onError
-    )
+        // they name once, first. That reads the samples around each trim,
+        // which is too slow for the main thread this is called on.
+        val lock = Any()
+        var canceled = false
+        var started: RenderJobHandle? = null
+        Thread {
+            val snapped = PictureStartSnapping.snapped(context, config)
+            Handler(Looper.getMainLooper()).post {
+                synchronized(lock) {
+                    if (!canceled) {
+                        started = startRender(snapped, onProgress, onComplete, onError)
+                    }
+                }
+            }
+        }.start()
+        return RenderJobHandle {
+            val handle = synchronized(lock) {
+                canceled = true
+                started
+            }
+            if (handle != null) {
+                handle.cancel()
+            } else {
+                // Cancelled before it started, the job has nothing to tear
+                // down but must still report its end, as a started one does.
+                onError(CancellationException("Render canceled"))
+            }
+        }
+    }
 
     private fun startRender(
         config: RenderConfig,

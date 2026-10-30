@@ -27,11 +27,16 @@ internal object PictureStartSnapping {
      */
     private const val MAX_REORDERED_PICTURES = 16
 
-    /** [config] with every video clip's trim on the pictures it names. */
+    /** Whether any video clip of [config] has a trim [snapped] could move. */
+    fun isNeeded(config: RenderConfig): Boolean =
+        config.videoClips.any { (it.startUs ?: 0) > 0 || (it.endUs ?: 0) > 0 }
+
+    /**
+     * [config] with every video clip's trim on the pictures it names. Reads
+     * the clips' samples, so it must run off the main thread.
+     */
     fun snapped(context: Context, config: RenderConfig): RenderConfig {
-        if (config.videoClips.none { (it.startUs ?: 0) > 0 || (it.endUs ?: 0) > 0 }) {
-            return config
-        }
+        if (!isNeeded(config)) return config
         return config.copy(videoClips = config.videoClips.map { snapped(context, it) })
     }
 
