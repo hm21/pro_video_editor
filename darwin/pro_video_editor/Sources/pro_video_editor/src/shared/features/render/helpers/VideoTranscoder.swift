@@ -181,8 +181,7 @@ internal class VideoTranscoder {
   ///   - sourceDurationUs: The source's duration, which bounds that tail
   /// - Returns: TranscodeResult indicating success or error
   static func transcodeToH264(
-    _ videoPath: String, range: SourceRange? = nil, sourceDurationUs: Int64 = 0,
-    preserveSourceFrameTiming: Bool = false
+    _ videoPath: String, range: SourceRange? = nil, sourceDurationUs: Int64 = 0
   ) async -> TranscodeResult {
     let encoded = range.map { encodedRange(for: $0, sourceDurationUs: sourceDurationUs) }
     let span = encoded.map { " [\($0.startUs)µs, \($0.endUs)µs)" } ?? ""
@@ -199,9 +198,7 @@ internal class VideoTranscoder {
         "transcoded_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString).mp4")
 
     do {
-      try await transcodeVideo(
-        from: inputURL, to: outputURL, range: encoded,
-        preserveSourceFrameTiming: preserveSourceFrameTiming)
+      try await transcodeVideo(from: inputURL, to: outputURL, range: encoded)
 
       // Verify output
       let outputInfo = await MediaInfoExtractor.getVideoFormatInfo(outputURL.path)
@@ -265,9 +262,7 @@ internal class VideoTranscoder {
   /// - Returns: The clips rewritten onto their transcoded files, and those files
   /// - Throws: `CancellationError` if the job was cancelled mid-transcode, or
   ///   the watchdog's error if a transcode stalled.
-  static func transcodeClipsIfNeeded(
-    _ clips: [VideoClip], preserveSourceFrameTiming: Bool = false
-  ) async throws -> PreTranscode {
+  static func transcodeClipsIfNeeded(_ clips: [VideoClip]) async throws -> PreTranscode {
     var rewritten = clips
     var produced: [String] = []
     var outputs: [TranscodeKey: (path: String, trimmed: Trimmed?)] = [:]
@@ -296,10 +291,7 @@ internal class VideoTranscoder {
         // second pass would re-encode the same range and leave one of the two
         // outputs with nothing to clean it up.
         if outputs[key] == nil, !failed.contains(key) {
-          switch await transcodeToH264(
-            path, range: range, sourceDurationUs: sourceDurationUs,
-            preserveSourceFrameTiming: preserveSourceFrameTiming)
-          {
+          switch await transcodeToH264(path, range: range, sourceDurationUs: sourceDurationUs) {
           case .success(let outputPath, let trimmed):
             outputs[key] = (outputPath, trimmed)
             produced.append(outputPath)
@@ -467,8 +459,7 @@ internal class VideoTranscoder {
   /// `range` limits the encode to that part of the source, video and audio
   /// alike; the output's time zero is the range's start.
   private static func transcodeVideo(
-    from inputURL: URL, to outputURL: URL, range: SourceRange?,
-    preserveSourceFrameTiming: Bool
+    from inputURL: URL, to outputURL: URL, range: SourceRange?
   ) async throws {
     let asset = AVURLAsset(
       url: inputURL,
@@ -569,9 +560,6 @@ internal class VideoTranscoder {
       videoComposition.renderSize = renderSize
       videoComposition.frameDuration = CMTime(
         value: 1, timescale: CMTimeScale(nominalFrameRate))
-      if preserveSourceFrameTiming {
-        videoComposition.sourceTrackIDForFrameTiming = videoTrack.trackID
-      }
 
       #if os(iOS)
         if #available(iOS 14.0, *) {

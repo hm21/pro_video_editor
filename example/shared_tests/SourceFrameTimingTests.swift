@@ -44,12 +44,13 @@ final class SourceFrameTimingTests: XCTestCase {
     }
   }
 
+  /// The pre-transcode is not told about the mode: its filter composition
+  /// takes the source track's timing on its own, which this pins down.
   func testPreTranscodeKeepsFractionalRatePictures() async throws {
     let ticks = (0..<189).map { Int64($0 * 1001) }
     let source = try await makeVideo(ticks: ticks)
     defer { try? FileManager.default.removeItem(at: source) }
-    let result = await VideoTranscoder.transcodeToH264(
-      source.path, preserveSourceFrameTiming: true)
+    let result = await VideoTranscoder.transcodeToH264(source.path)
     switch result {
     case .success(let path, _):
       let output = URL(fileURLWithPath: path)

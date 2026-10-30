@@ -75,11 +75,12 @@ class RenderVideo {
 
         // Source timing is an identity-preserving effects mode. Transitions
         // and reverse preprocess on their own clocks; speed edits deliberately
-        // change the source timestamps. Reject them before touching media.
+        // change the source timestamps. Reject them before touching media. The
+        // HEVC pre-transcode needs nothing extra: a filter composition built
+        // from a one-video-track asset already runs on that track's timing.
         if config.preserveSourceFrameTiming {
           let changesTiming = config.videoClips.contains {
-            $0.reverseVideo || $0.transition != nil || $0.speedRamp != nil
-              || ($0.playbackSpeed ?? 1) != 1
+            $0.reverseVideo || $0.transition != nil || $0.changesSpeed
           }
           if config.composition != nil || config.videoClips.count != 1
             || config.maxFrameRate != nil || changesTiming || (config.playbackSpeed ?? 1) != 1
@@ -147,8 +148,7 @@ class RenderVideo {
         // its start, so every later stage sees the trimmed window.
         let preTranscode: VideoTranscoder.PreTranscode
         do {
-          preTranscode = try await VideoTranscoder.transcodeClipsIfNeeded(
-            config.videoClips, preserveSourceFrameTiming: config.preserveSourceFrameTiming)
+          preTranscode = try await VideoTranscoder.transcodeClipsIfNeeded(config.videoClips)
         } catch {
           // Only a cancelled or stalled job throws here; it cleaned up after
           // itself, and nothing else exists yet to finalize.
