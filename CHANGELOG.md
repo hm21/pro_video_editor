@@ -1,5 +1,6 @@
-## Unreleased
-- **FIX**(iOS, macOS): Opt in to source-track frame timing with `VideoRenderData.preserveSourceFrameTiming` when an effect must retain each picture of a fractional- or variable-rate source. Requires one forward video segment at original speed, without transitions, speed ramps or a frame-rate cap. Ordinary renders keep their existing clock.
+## 2.50.0
+- **FEAT**(iOS, macOS): `VideoRenderData.preserveSourceFrameTiming` renders on the source video track's own frame times instead of the fixed composition clock, so every picture of a fractional- or variable-rate source keeps its place and timestamp. On that clock a 29.97 fps clip showed its first picture twice. It requires one forward video segment at its original speed, without transitions, speed ramps, a layered composition or `maxFrameRate`; other combinations fail the render. Defaults to `false`. Android ignores it, since it already keeps the source frame times.
+- **FIX**(android): A trimmed segment keeps the B-frames shown just before its end. Media3 ended a clipped stream at the first sample past the end in decode order, which comes ahead of those B-frames, and lost up to three pictures before the cut. Media3 is updated to 1.11.1, which ends it in presentation order. Apps that force a Media3 version need 1.11.0 or later for this fix.
 
 ## 2.49.0
 - **FEAT**(android, iOS, macOS): Speed ramps on audio tracks. `VideoAudioTrack.speedRamp` speeds a custom track up and down along a `VideoSpeedRamp` at unchanged pitch, and `AudioMergeSegment.speedRamp` bakes the same stretch into a merged file for an editor preview. Ducking and `AudioLevelEnvelope` follow the ramp.
