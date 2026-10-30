@@ -64,12 +64,17 @@ class VideoSegment {
 
   /// Optional start time for trimming this clip.
   ///
-  /// If null, the clip starts from the beginning of the video.
+  /// If null, the clip starts from the beginning of the video. A time within
+  /// a microsecond of a frame's start means that frame, so a frame time read
+  /// back in whole microseconds, as `getLumaFrameStream` reports it, cuts on
+  /// the frame it was read from.
   final Duration? startTime;
 
-  /// Optional end time for trimming this clip.
+  /// Optional end time for trimming this clip: the start of the first frame
+  /// left out.
   ///
-  /// If null, the clip plays until the end of the video.
+  /// If null, the clip plays until the end of the video. As with [startTime],
+  /// a time within a microsecond of a frame's start means that frame.
   final Duration? endTime;
 
   /// Volume multiplier for this segment's audio.
