@@ -53,10 +53,14 @@ internal object PictureStartSnapping {
                     ?.startsWith("video/") == true
             } ?: return clip
             extractor.selectTrack(track)
+            // The samples end with the track, not at a negative time: an edit
+            // list that starts after a sync sample puts that sample, and the
+            // ones decoded with it, before zero.
             val samplesFrom = { fromUs: Long ->
                 extractor.seekTo(fromUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-                generateSequence(extractor.sampleTime.takeIf { it >= 0 }) {
-                    if (extractor.advance()) extractor.sampleTime.takeIf { it >= 0 } else null
+                val hasSample = { extractor.sampleTrackIndex >= 0 }
+                generateSequence(extractor.sampleTime.takeIf { hasSample() }) {
+                    if (extractor.advance() && hasSample()) extractor.sampleTime else null
                 }
             }
             clip.copy(
