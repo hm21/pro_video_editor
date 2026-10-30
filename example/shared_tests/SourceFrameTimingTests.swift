@@ -44,6 +44,40 @@ final class SourceFrameTimingTests: XCTestCase {
     }
   }
 
+  /// A trim read back from a frame time is rounded or truncated to whole
+  /// microseconds, so it misses its picture's start by a fraction of one. It
+  /// still cuts on that picture, at 30 fps and 29.97 fps, on the source's
+  /// timing and on the fixed clock.
+  func testTrimsAFractionOfAMicrosecondOffAPictureCutOnIt() async throws {
+    for (frameTicks, sourceTiming) in [(1000, [true, false]), (1001, [true])] {
+      let ticks = (0..<120).map { Int64($0 * frameTicks) }
+      let source = try await makeVideo(ticks: ticks)
+      defer { try? FileManager.default.removeItem(at: source) }
+      // Pictures 10 and 86 both start between two microseconds.
+      for preserveSourceFrameTiming in sourceTiming {
+        for startRoundsUp in [false, true] {
+          for endRoundsUp in [false, true] {
+            let output = try await render(
+              source,
+              startUs: microseconds(ticks[10], roundingUp: startRoundsUp),
+              endUs: microseconds(ticks[86], roundingUp: endRoundsUp),
+              preserveSourceFrameTiming: preserveSourceFrameTiming)
+            defer { try? FileManager.default.removeItem(at: output) }
+            let pictures = try await readPictures(output)
+            let label =
+              "\(frameTicks) ticks, start \(startRoundsUp ? "up" : "down"), "
+              + "end \(endRoundsUp ? "up" : "down"), source timing \(preserveSourceFrameTiming)"
+            XCTAssertEqual(pictures.map(\.index), Array(10..<86), label)
+            for (actual, tick) in zip(pictures, ticks[10..<86]) {
+              XCTAssertEqual(
+                actual.seconds, Double(tick - ticks[10]) / 30_000, accuracy: 0.002, label)
+            }
+          }
+        }
+      }
+    }
+  }
+
   /// The pre-transcode is not told about the mode: its filter composition
   /// takes the source track's timing on its own, which this pins down.
   func testPreTranscodeKeepsFractionalRatePictures() async throws {
@@ -111,8 +145,14 @@ final class SourceFrameTimingTests: XCTestCase {
     }
   }
 
+  /// `tick` of a 30000 timescale in whole microseconds, rounded down or up.
+  private func microseconds(_ tick: Int64, roundingUp: Bool) -> Int64 {
+    (tick * 100 + (roundingUp ? 2 : 0)) / 3
+  }
+
   private func render(
-    _ source: URL, bitrate: Int? = nil, startUs: Int64? = nil, endUs: Int64? = nil
+    _ source: URL, bitrate: Int? = nil, startUs: Int64? = nil, endUs: Int64? = nil,
+    preserveSourceFrameTiming: Bool = true
   ) async throws -> URL {
     let output = FileManager.default.temporaryDirectory
       .appendingPathComponent("pve_source_timing_\(UUID().uuidString).mp4")
@@ -124,7 +164,7 @@ final class SourceFrameTimingTests: XCTestCase {
     if let endUs { clip["endUs"] = endUs }
     var arguments: [String: Any] = [
       "videoClips": [clip], "outputPath": output.path,
-      "outputFormat": "mp4", "preserveSourceFrameTiming": true,
+      "outputFormat": "mp4", "preserveSourceFrameTiming": preserveSourceFrameTiming,
     ]
     if let bitrate { arguments["bitrate"] = bitrate }
     let config = try XCTUnwrap(RenderConfig.fromArguments(arguments))
@@ -230,5 +270,69 @@ final class SourceFrameTimingTests: XCTestCase {
     }
     XCTAssertEqual(reader.status, .completed)
     return pictures
+  }
+}
+
+final class PictureStartSnappingTests: XCTestCase {
+  private let unedited = [
+    CMTimeMapping(
+      source: CMTimeRange(start: .zero, duration: CMTime(value: 120_000, timescale: 30_000)),
+      target: CMTimeRange(start: .zero, duration: CMTime(value: 120_000, timescale: 30_000)))
+  ]
+
+  private func snapped(_ us: Int64, edits: [CMTimeMapping]) -> CMTime {
+    PictureStartSnapping.snapped(
+      microseconds(us), mediaTimeScale: 30_000, edits: edits)
+  }
+
+  private func microseconds(_ us: Int64) -> CMTime {
+    CMTime(value: us, timescale: 1_000_000)
+  }
+
+  func testAMicrosecondEitherSideOfAPictureMeansThatPicture() {
+    // Picture 86 of a 30 fps clip starts at 2866666.67 µs.
+    let picture = CMTime(value: 86_000, timescale: 30_000)
+    XCTAssertEqual(snapped(2_866_666, edits: unedited), picture)
+    XCTAssertEqual(snapped(2_866_667, edits: unedited), picture)
+    XCTAssertEqual(snapped(2_866_668, edits: unedited), microseconds(2_866_668))
+    XCTAssertEqual(snapped(2_866_665, edits: unedited), microseconds(2_866_665))
+  }
+
+  func testATimeOnAPictureStaysWhereItIs() {
+    XCTAssertEqual(
+      snapped(3_000_000, edits: unedited), CMTime(value: 90_000, timescale: 30_000))
+    XCTAssertEqual(snapped(0, edits: unedited), .zero)
+  }
+
+  func testAnEditThatShiftsTheMediaIsFollowed() {
+    // A B-frame delay of two pictures cut off by the edit list, and an empty
+    // edit of 21 ms in the movie's timescale before it.
+    let delay = CMTime(value: 2_000, timescale: 30_000)
+    let empty = CMTime(value: 21, timescale: 1_000)
+    let duration = CMTime(value: 118_000, timescale: 30_000)
+    let edits = [
+      CMTimeMapping(
+        source: CMTimeRange(start: delay, duration: duration),
+        target: CMTimeRange(start: empty, duration: duration))
+    ]
+    // Picture 12 starts 400000 µs into the media. The edit drops its first
+    // two pictures and plays the rest 21 ms late: 354333.33 µs on the track.
+    let picture = CMTimeAdd(empty, CMTime(value: 10_000, timescale: 30_000))
+    XCTAssertEqual(snapped(354_333, edits: edits), picture)
+    XCTAssertEqual(snapped(354_334, edits: edits), picture)
+  }
+
+  func testAnEditAtAnotherRateIsLeftAlone() {
+    let edits = [
+      CMTimeMapping(
+        source: CMTimeRange(start: .zero, duration: CMTime(value: 120_000, timescale: 30_000)),
+        target: CMTimeRange(start: .zero, duration: CMTime(value: 60_000, timescale: 30_000)))
+    ]
+    XCTAssertEqual(snapped(1_433_333, edits: edits), microseconds(1_433_333))
+  }
+
+  func testATimeOutsideEveryEditIsLeftAlone() {
+    XCTAssertEqual(snapped(5_000_001, edits: unedited), microseconds(5_000_001))
+    XCTAssertEqual(snapped(1_433_333, edits: []), microseconds(1_433_333))
   }
 }

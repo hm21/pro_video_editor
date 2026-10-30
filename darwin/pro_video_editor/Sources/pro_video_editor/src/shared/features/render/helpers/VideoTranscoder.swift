@@ -198,7 +198,18 @@ internal class VideoTranscoder {
         "transcoded_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString).mp4")
 
     do {
-      try await transcodeVideo(from: inputURL, to: outputURL, range: encoded)
+      var played = range
+      var encodedTimeRange: CMTimeRange?
+      if let range, let encoded {
+        let aligned = try await pictureAligned(range, in: inputURL)
+        played = aligned.window
+        encodedTimeRange = CMTimeRange(
+          start: aligned.timeRange.start,
+          end: CMTimeMaximum(
+            CMTimeRangeGetEnd(aligned.timeRange),
+            CMTime(value: encoded.endUs, timescale: 1_000_000)))
+      }
+      try await transcodeVideo(from: inputURL, to: outputURL, range: encodedTimeRange)
 
       // Verify output
       let outputInfo = await MediaInfoExtractor.getVideoFormatInfo(outputURL.path)
@@ -207,11 +218,11 @@ internal class VideoTranscoder {
         "   Output: isHevc=\(outputInfo.isHevc), bitDepth=\(outputInfo.bitDepth), isHdr=\(outputInfo.isHdr)"
       )
 
-      guard let range else { return .success(outputPath: outputURL.path, trimmed: nil) }
+      guard let played else { return .success(outputPath: outputURL.path, trimmed: nil) }
       let asset = AVURLAsset(url: outputURL)
       let track = try await MediaInfoExtractor.loadVideoTrack(from: asset)
       let window = clipWindow(
-        playing: range, writtenTrack: await TrackEndTrimmer.timeRange(of: track))
+        playing: played, writtenTrack: await TrackEndTrimmer.timeRange(of: track))
       // An empty window would drop the clip from the render without a word;
       // failing here keeps it on the source instead.
       guard window.durationUs > 0 else {
@@ -453,13 +464,38 @@ internal class VideoTranscoder {
       .value
   }
 
+  /// `window` of the source at `url` cut on the pictures it names
+  /// (`PictureStartSnapping`), as a time range and to the nearest microsecond.
+  ///
+  /// A window starting a fraction of a microsecond before a picture would open
+  /// the short file on a sliver of the picture before, which the render cannot
+  /// tell from a picture of its own. Rounded to the nearest microsecond, its
+  /// length stays within the render's own snapping of the short file's
+  /// pictures; the raw window's could miss them by more.
+  private static func pictureAligned(_ window: SourceRange, in url: URL) async throws
+    -> (timeRange: CMTimeRange, window: SourceRange)
+  {
+    let track = try await MediaInfoExtractor.loadVideoTrack(from: AVURLAsset(url: url))
+    let start = await PictureStartSnapping.snapped(
+      CMTime(value: window.startUs, timescale: 1_000_000), on: track)
+    let end = await PictureStartSnapping.snapped(
+      CMTime(value: window.endUs, timescale: 1_000_000), on: track)
+    func microseconds(_ time: CMTime) -> Int64 {
+      CMTimeConvertScale(time, timescale: 1_000_000, method: .roundHalfAwayFromZero).value
+    }
+    return (
+      CMTimeRange(start: start, end: end),
+      SourceRange(startUs: microseconds(start), endUs: microseconds(end))
+    )
+  }
+
   /// Performs the actual video transcoding using AVAssetExportSession.
   /// This is simpler and more reliable than AVAssetWriter for basic transcoding.
   ///
   /// `range` limits the encode to that part of the source, video and audio
   /// alike; the output's time zero is the range's start.
   private static func transcodeVideo(
-    from inputURL: URL, to outputURL: URL, range: SourceRange?
+    from inputURL: URL, to outputURL: URL, range: CMTimeRange?
   ) async throws {
     let asset = AVURLAsset(
       url: inputURL,
@@ -478,9 +514,7 @@ internal class VideoTranscoder {
 
     exportSession.shouldOptimizeForNetworkUse = true
     if let range {
-      exportSession.timeRange = CMTimeRange(
-        start: CMTime(value: range.startUs, timescale: 1_000_000),
-        end: CMTime(value: range.endUs, timescale: 1_000_000))
+      exportSession.timeRange = range
     }
 
     // Create video composition for HDR → SDR conversion
