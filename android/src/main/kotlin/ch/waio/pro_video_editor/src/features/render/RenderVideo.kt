@@ -28,6 +28,7 @@ import ch.waio.pro_video_editor.src.features.render.helpers.reversedSegmentKeyfr
 import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionGeometry
 import ch.waio.pro_video_editor.src.features.render.helpers.ClipTransitionRenderer
 import ch.waio.pro_video_editor.src.features.render.helpers.MediaInfoExtractor
+import ch.waio.pro_video_editor.src.features.render.helpers.PictureStartSnapping
 import ch.waio.pro_video_editor.src.features.render.models.ChromaKeyConfig
 import ch.waio.pro_video_editor.src.features.render.models.CodecResourceExhaustedException
 import ch.waio.pro_video_editor.src.features.render.models.RenderConfig
@@ -175,6 +176,46 @@ class RenderVideo(private val context: Context) {
      * @return RenderJobHandle that can be used to cancel the render job
      */
     fun render(
+        config: RenderConfig,
+        onProgress: (Double) -> Unit,
+        onComplete: (ByteArray?) -> Unit,
+        onError: (Throwable) -> Unit
+    ): RenderJobHandle {
+        if (!PictureStartSnapping.isNeeded(config)) {
+            return startRender(config, onProgress, onComplete, onError)
+        }
+        // Every stage reads the clips' trims, so they move onto the pictures
+        // they name once, first. That reads the samples around each trim,
+        // which is too slow for the main thread this is called on.
+        val lock = Any()
+        var canceled = false
+        var started: RenderJobHandle? = null
+        Thread {
+            val snapped = PictureStartSnapping.snapped(context, config)
+            Handler(Looper.getMainLooper()).post {
+                synchronized(lock) {
+                    if (!canceled) {
+                        started = startRender(snapped, onProgress, onComplete, onError)
+                    }
+                }
+            }
+        }.start()
+        return RenderJobHandle {
+            val handle = synchronized(lock) {
+                canceled = true
+                started
+            }
+            if (handle != null) {
+                handle.cancel()
+            } else {
+                // Cancelled before it started, the job has nothing to tear
+                // down but must still report its end, as a started one does.
+                onError(CancellationException("Render canceled"))
+            }
+        }
+    }
+
+    private fun startRender(
         config: RenderConfig,
         onProgress: (Double) -> Unit,
         onComplete: (ByteArray?) -> Unit,

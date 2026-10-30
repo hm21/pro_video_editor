@@ -396,6 +396,21 @@ final class TrimmedPreTranscodeTests: XCTestCase {
     XCTAssertEqual(rendered.seconds, 0.4, accuracy: 0.001)
   }
 
+  func testARenderOfAWindowAMicrosecondOffItsPicturesKeepsExactlyThem() async throws {
+    // 30 fps on a 90 kHz timescale starts every picture on a third of a
+    // microsecond, so a window read back from frame times misses them: this
+    // one opens two thirds of a microsecond before picture 32 and ends two
+    // thirds after picture 61. The window is then 1.33 µs longer than its
+    // pictures, too far for the render to take its end for picture 61's
+    // start, and the short file kept a sliver of picture 61.
+    let source = try await makeHdrSource(timescale: 90_000)
+    defer { try? FileManager.default.removeItem(at: source) }
+
+    let rendered = try await renderWindow(of: source, startUs: 1_066_666, endUs: 2_033_334)
+    XCTAssertEqual(rendered.frames, 29, "pictures 32 to 60")
+    XCTAssertEqual(rendered.seconds, 29.0 / 30, accuracy: 0.001)
+  }
+
   func testARenderOfAWindowOnACoarseTimescaleKeepsTheSourceCadence() async throws {
     // 60 fps rounded onto a 1000 timescale, as a remux from Matroska stores
     // it: every frame lasts 16 or 17 ms. Their median alone reads 58.8 fps,

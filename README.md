@@ -1023,8 +1023,8 @@ VideoSegment({
 
 **Parameters:**
 - `video` (required): The video source using `EditorVideo.file()`, `EditorVideo.asset()`, `EditorVideo.network()`, or `EditorVideo.memory()`.
-- `startTime` (optional): The starting point for this clip. If omitted, starts from the beginning (0:00).
-- `endTime` (optional): The ending point for this clip. If omitted, uses the full video duration.
+- `startTime` (optional): The starting point for this clip. If omitted, starts from the beginning (0:00). In `videoSegments`, a time within a microsecond of a frame's start cuts on that frame, so frame times from `getLumaFrameStream` can be passed as they are; a `VideoLayer` clip is cut at the time as given.
+- `endTime` (optional): The ending point for this clip, the start of the first frame left out. If omitted, uses the full video duration.
 - `volume` (optional): Per-clip audio volume multiplier (`0.0` = mute, `1.0` = original).
 - `equalizer` (optional): An `AudioEqualizer` whose `bands` raise or lower parts of the clip's audio, one after the other. Each `AudioEqualizerBand` is a `lowShelf` (everything below its `frequency`), a `peak` (a bell around its `frequency`, as narrow as its `q`) or a `highShelf` (everything above its `frequency`), with a `gain` in decibels, and there can be any number of them. Applied before `volume`; while any band boosts, the result is limited at -1 dBFS rather than clipped.
 - `playbackSpeed` (optional): Per-clip playback speed (e.g. `0.5` = half, `2.0` = double).

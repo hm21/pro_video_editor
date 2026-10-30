@@ -113,8 +113,15 @@ internal enum ClipTransitionRenderer {
           withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
       else { return nil }
 
-      let outStart = CMTime(value: outTailStartUs, timescale: 1_000_000)
-      let inStart = CMTime(value: inHeadStartUs, timescale: 1_000_000)
+      // Each side starts on the picture its trim names, as the clips beside
+      // the blend do (`PictureStartSnapping`): the blend samples its sides on
+      // a fixed clock, and one starting a fraction of a microsecond before a
+      // picture showed the picture before it on every frame. Each side keeps
+      // its length, so a blend at the clips' own speed is not rescaled.
+      let outStart = await PictureStartSnapping.snapped(
+        CMTime(value: outTailStartUs, timescale: 1_000_000), on: outVideo)
+      let inStart = await PictureStartSnapping.snapped(
+        CMTime(value: inHeadStartUs, timescale: 1_000_000), on: inVideo)
       // Only the part of each span its video track holds. A container can
       // outlast its video (demo_world.mp4 by ~0.5 s), and `insertTimeRange`
       // silently stops at the track's end: the blend then had no outgoing

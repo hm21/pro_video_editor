@@ -499,7 +499,8 @@ internal class VideoSequenceBuilder {
     for clip: VideoClip, from asset: AVAsset, videoTrack: AVAssetTrack,
     trimToCommonTrackEnd: Bool, label: String
   ) async -> CMTimeRange {
-    let rawClipTimeRange = await calculateTimeRange(for: clip, from: asset)
+    let rawClipTimeRange = await calculateTimeRange(
+      for: clip, from: asset, videoTrack: videoTrack)
 
     // Clamp clip range to the video track's actual available range.
     // Some MP4 files have a container duration slightly longer than the video
@@ -527,21 +528,25 @@ internal class VideoSequenceBuilder {
     return clipTimeRange
   }
 
-  /// Calculates time range for a clip considering start/end trimming.
+  /// Calculates time range for a clip considering start/end trimming. A trim
+  /// a fraction of a microsecond off a picture's start cuts at that start
+  /// (`PictureStartSnapping`).
   private static func calculateTimeRange(
-    for clip: VideoClip, from asset: AVAsset
+    for clip: VideoClip, from asset: AVAsset, videoTrack: AVAssetTrack
   ) async -> CMTimeRange {
     let startTime: CMTime
     let endTime: CMTime
 
     if let startUs = clip.startUs {
-      startTime = CMTime(value: startUs, timescale: 1_000_000)
+      startTime = await PictureStartSnapping.snapped(
+        CMTime(value: startUs, timescale: 1_000_000), on: videoTrack)
     } else {
       startTime = .zero
     }
 
     if let endUs = clip.endUs {
-      endTime = CMTime(value: endUs, timescale: 1_000_000)
+      endTime = await PictureStartSnapping.snapped(
+        CMTime(value: endUs, timescale: 1_000_000), on: videoTrack)
     } else {
       let assetDuration: CMTime
       if #available(macOS 12.0, iOS 15.0, *) {

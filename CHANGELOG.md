@@ -1,3 +1,7 @@
+## 2.50.1
+- **FIX**(iOS, macOS): A `VideoSegment` trim a fraction of a microsecond off a frame's start, such as a frame time from `getLumaFrameStream`, cuts on that frame. The sliver of the neighbouring frame it took in rendered as a whole extra frame at the end or the start.
+- **FIX**(android): A `VideoSegment` trim one microsecond after a frame's start, such as a frame time rounded instead of truncated, cuts on that frame instead of keeping it at the end or dropping it at the start.
+
 ## 2.50.0
 - **FEAT**(iOS, macOS): `VideoRenderData.preserveSourceFrameTiming` renders on the source track's own frame times, so a fractional- or variable-rate clip keeps every picture and timestamp. Needs one forward segment at original speed; Android already behaves this way.
 - **FIX**(android): A trimmed segment no longer loses the B-frames just before its end. Media3 is updated to 1.11.1; apps that force a Media3 version need 1.11.0 or later.
