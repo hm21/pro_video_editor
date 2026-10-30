@@ -363,9 +363,9 @@ class VideoRenderData {
   /// including fractional or variable frame rates. Defaults to `false`, leaving
   /// the renderer's ordinary fixed composition clock unchanged.
   ///
-  /// On iOS/macOS this requires exactly one video segment, no layered
-  /// composition and no [maxFrameRate]. Unsupported combinations fail the
-  /// render.
+  /// On iOS/macOS this requires exactly one forward video segment at its
+  /// original speed, without transitions, speed ramps, a layered composition
+  /// or [maxFrameRate]. Unsupported combinations fail the render.
   /// Other platforms ignore this option.
   final bool preserveSourceFrameTiming;
 

@@ -70,6 +70,23 @@ final class SourceFrameTimingTests: XCTestCase {
       ["videoClips": [clip, clip]],
       ["videoClips": [clip], "maxFrameRate": 30],
       ["composition": ["layers": [["clips": [clip]]]]],
+      ["videoClips": [clip.merging(["reverseVideo": true]) { _, new in new }]],
+      [
+        "videoClips": [
+          clip.merging([
+            "transition": ["type": "dissolve", "durationUs": 500_000]
+          ]) { _, new in new }
+        ]
+      ],
+      ["videoClips": [clip.merging(["playbackSpeed": 2.0]) { _, new in new }]],
+      ["videoClips": [clip], "playbackSpeed": 0.5],
+      [
+        "videoClips": [
+          clip.merging([
+            "speedRamp": [["start": 0.0, "end": 1.0, "speed": 2.0]]
+          ]) { _, new in new }
+        ]
+      ],
     ]
     for var arguments in invalid {
       arguments["preserveSourceFrameTiming"] = true

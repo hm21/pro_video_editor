@@ -73,14 +73,27 @@ class RenderVideo {
           return
         }
 
-        if config.preserveSourceFrameTiming
-          && (config.composition != nil || config.videoClips.count != 1 || config.maxFrameRate != nil)
-        {
-          onError(NSError(
-            domain: "SourceFrameTiming", code: 1,
-            userInfo: [NSLocalizedDescriptionKey:
-              "Source frame timing requires one video segment without a frame-rate cap"]))
-          return
+        // Source timing is an identity-preserving effects mode. Transitions
+        // and reverse preprocess on their own clocks; speed edits deliberately
+        // change the source timestamps. Reject them before touching media.
+        if config.preserveSourceFrameTiming {
+          let changesTiming = config.videoClips.contains {
+            $0.reverseVideo || $0.transition != nil || $0.speedRamp != nil
+              || ($0.playbackSpeed ?? 1) != 1
+          }
+          if config.composition != nil || config.videoClips.count != 1
+            || config.maxFrameRate != nil || changesTiming || (config.playbackSpeed ?? 1) != 1
+          {
+            onError(
+              NSError(
+                domain: "SourceFrameTiming", code: 1,
+                userInfo: [
+                  NSLocalizedDescriptionKey:
+                    "Source frame timing requires one forward video segment at original speed, "
+                    + "without transitions, a layered composition or a frame-rate cap"
+                ]))
+            return
+          }
         }
 
         // Bitrate-cap fast path: a no-edit export whose source already fits
