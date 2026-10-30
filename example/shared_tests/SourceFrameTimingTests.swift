@@ -78,6 +78,31 @@ final class SourceFrameTimingTests: XCTestCase {
     }
   }
 
+  /// A transition blend takes its sides from the clips' trims as well, and
+  /// samples them on a fixed clock: a side cut a fraction of a microsecond
+  /// before a picture starts on that picture, not on the one before.
+  func testATransitionBlendStartsEachSideOnThePictureItsTrimNames() async throws {
+    let ticks = (0..<120).map { Int64($0 * 1000) }
+    let source = try await makeVideo(ticks: ticks)
+    defer { try? FileManager.default.removeItem(at: source) }
+    // Pictures 10 and 40 start a third of a microsecond after these.
+    let outStartUs = microseconds(ticks[10], roundingUp: false)
+    let inStartUs = microseconds(ticks[40], roundingUp: false)
+    let rendered = try await ClipTransitionRenderer.render(
+      outgoingPath: source.path, outTailStartUs: outStartUs, outTailEndUs: outStartUs + 500_000,
+      incomingPath: source.path, inHeadStartUs: inStartUs, inHeadEndUs: inStartUs + 500_000,
+      outputDurationUs: 500_000, type: "dissolve", direction: "left", curve: "linear",
+      includeAudio: false, outputFormat: "mp4")
+    let blend = try XCTUnwrap(rendered)
+    defer { try? FileManager.default.removeItem(at: blend.outputURL) }
+    let pictures = try await readPictures(blend.outputURL)
+    XCTAssertEqual(pictures.count, 15)
+    // The outgoing bars show while that side is at least two thirds opaque,
+    // the incoming ones once it is at most 40 % opaque.
+    XCTAssertEqual(pictures.prefix(6).map(\.index), Array(10..<16))
+    XCTAssertEqual(pictures.suffix(6).map(\.index), Array(49..<55))
+  }
+
   /// The pre-transcode is not told about the mode: its filter composition
   /// takes the source track's timing on its own, which this pins down.
   func testPreTranscodeKeepsFractionalRatePictures() async throws {
