@@ -11,6 +11,7 @@
 		331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C807B294A618700263BE5 /* RunnerTests.swift */; };
 		A1B2C3D400000000000000E1 /* ExportSessionGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000000E2 /* ExportSessionGuardTests.swift */; };
 		A1B2C3D400000000000000E5 /* TrimmedPreTranscodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000000E6 /* TrimmedPreTranscodeTests.swift */; };
+		FC0A8C010000000000000001 /* SourceFrameTimingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC0A8C010000000000000002 /* SourceFrameTimingTests.swift */; };
 		A1B2C3D400000000000000F1 /* AudioFadeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000000F2 /* AudioFadeTests.swift */; };
 		A1B2C3D400000000000000F5 /* BackgroundSafeJobTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000000F6 /* BackgroundSafeJobTests.swift */; };
 		A1B2C3D400000000000000F9 /* FlattenedLayersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000000FA /* FlattenedLayersTests.swift */; };
@@ -58,6 +59,7 @@
 		331C807B294A618700263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		A1B2C3D400000000000000E2 /* ExportSessionGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ExportSessionGuardTests.swift; path = ../shared_tests/ExportSessionGuardTests.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D400000000000000E6 /* TrimmedPreTranscodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TrimmedPreTranscodeTests.swift; path = ../shared_tests/TrimmedPreTranscodeTests.swift; sourceTree = SOURCE_ROOT; };
+		FC0A8C010000000000000002 /* SourceFrameTimingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceFrameTimingTests.swift; path = ../shared_tests/SourceFrameTimingTests.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D400000000000000F2 /* AudioFadeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AudioFadeTests.swift; path = ../shared_tests/AudioFadeTests.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D400000000000000F6 /* BackgroundSafeJobTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BackgroundSafeJobTests.swift; path = ../shared_tests/BackgroundSafeJobTests.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D400000000000000FA /* FlattenedLayersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FlattenedLayersTests.swift; path = ../shared_tests/FlattenedLayersTests.swift; sourceTree = SOURCE_ROOT; };
@@ -127,6 +129,7 @@
 				331C807B294A618700263BE5 /* RunnerTests.swift */,
 				A1B2C3D400000000000000E2 /* ExportSessionGuardTests.swift */,
 				A1B2C3D400000000000000E6 /* TrimmedPreTranscodeTests.swift */,
+				FC0A8C010000000000000002 /* SourceFrameTimingTests.swift */,
 				A1B2C3D400000000000000F2 /* AudioFadeTests.swift */,
 				A1B2C3D400000000000000F6 /* BackgroundSafeJobTests.swift */,
 				A1B2C3D400000000000000FA /* FlattenedLayersTests.swift */,
@@ -391,6 +394,7 @@
 				331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */,
 				A1B2C3D400000000000000E1 /* ExportSessionGuardTests.swift in Sources */,
 				A1B2C3D400000000000000E5 /* TrimmedPreTranscodeTests.swift in Sources */,
+				FC0A8C010000000000000001 /* SourceFrameTimingTests.swift in Sources */,
 				A1B2C3D400000000000000F1 /* AudioFadeTests.swift in Sources */,
 				A1B2C3D400000000000000F5 /* BackgroundSafeJobTests.swift in Sources */,
 				A1B2C3D400000000000000F9 /* FlattenedLayersTests.swift in Sources */,

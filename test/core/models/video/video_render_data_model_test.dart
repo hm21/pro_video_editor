@@ -26,6 +26,33 @@ import 'package:pro_video_editor/core/models/video/video_speed_ramp_model.dart';
 import 'package:pro_video_editor/core/utils/video_effect_frames.dart';
 
 void main() {
+  test(
+    'source frame timing survives the render channel and saved edits',
+    () async {
+      final data = VideoRenderData(
+        id: 'source-clock',
+        videoSegments: [VideoSegment(video: EditorVideo.file('test.mp4'))],
+        preserveSourceFrameTiming: true,
+      );
+      expect((await data.toAsyncMap())['preserveSourceFrameTiming'], isTrue);
+      final restored = VideoRenderData.fromMap(data.toMap());
+      expect(restored.preserveSourceFrameTiming, isTrue);
+      expect(restored.copyWith().preserveSourceFrameTiming, isTrue);
+      expect(
+        restored.copyWith(preserveSourceFrameTiming: false),
+        isNot(restored),
+      );
+      expect(
+        VideoRenderData.withQualityPreset(
+          videoSegments: data.videoSegments,
+          qualityPreset: VideoQualityPreset.p720,
+          preserveSourceFrameTiming: true,
+        ).preserveSourceFrameTiming,
+        isTrue,
+      );
+    },
+  );
+
   group('VideoRenderData maxFrameRate', () {
     VideoRenderData buildData({int? maxFrameRate}) {
       return VideoRenderData(

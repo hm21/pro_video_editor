@@ -73,6 +73,16 @@ class RenderVideo {
           return
         }
 
+        if config.preserveSourceFrameTiming
+          && (config.composition != nil || config.videoClips.count != 1 || config.maxFrameRate != nil)
+        {
+          onError(NSError(
+            domain: "SourceFrameTiming", code: 1,
+            userInfo: [NSLocalizedDescriptionKey:
+              "Source frame timing requires one video segment without a frame-rate cap"]))
+          return
+        }
+
         // Bitrate-cap fast path: a no-edit export whose source already fits
         // the cap (× tolerance) is remuxed losslessly (passthrough) instead
         // of re-encoded — the Darwin equivalent of Android's transmux fast
@@ -124,7 +134,8 @@ class RenderVideo {
         // its start, so every later stage sees the trimmed window.
         let preTranscode: VideoTranscoder.PreTranscode
         do {
-          preTranscode = try await VideoTranscoder.transcodeClipsIfNeeded(config.videoClips)
+          preTranscode = try await VideoTranscoder.transcodeClipsIfNeeded(
+            config.videoClips, preserveSourceFrameTiming: config.preserveSourceFrameTiming)
         } catch {
           // Only a cancelled or stalled job throws here; it cleaned up after
           // itself, and nothing else exists yet to finalize.
@@ -436,6 +447,11 @@ class RenderVideo {
           // Build the final AVMutableVideoComposition
           let videoComposition = AVMutableVideoComposition()
           videoComposition.frameDuration = outputFrameDuration
+          if workingConfig.preserveSourceFrameTiming {
+            // A fixed clock can repeat/drop source pictures even at nearly
+            // equal nominal rates. Schedule requests on the source track's PTS.
+            videoComposition.sourceTrackIDForFrameTiming = sourceTrackID
+          }
           videoComposition.renderSize = finalRenderSize
           // The compositor reads its configuration off the instruction it is
           // serving, so every concurrent render keeps its own — a type-level
