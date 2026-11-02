@@ -53,6 +53,12 @@ class VideoAudioTrack with TimeRangeMixin {
        );
 
   /// Path to the audio file.
+  ///
+  /// It also takes the URIs `EditorVideo.content` takes, so the sound of a
+  /// video from the gallery plays without copying the video: an Android
+  /// `content://` URI or an iOS/macOS photo library `ph://` URL. Ask for
+  /// photo library access before rendering with a `ph://` track; see
+  /// `EditorVideo.content`.
   final String path;
 
   /// Playback multiplier at unchanged pitch: `0.5` doubles the source's

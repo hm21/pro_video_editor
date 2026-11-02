@@ -5109,3 +5109,27 @@ final class ShapeMaskTests: XCTestCase {
     XCTAssertTrue(redAt(compositor, 1_000_000, 60, 19))
   }
 }
+
+final class PhotoLibraryVideoTests: XCTestCase {
+  func testReadsTheIdentifierWithTwoOrThreeSlashes() {
+    let identifier = "ED7AC36B-A150-4C38-BB8C-B6D696F4F2ED/L0/001"
+
+    XCTAssertEqual(PhotoLibraryVideo.localIdentifier(in: "ph://\(identifier)"), identifier)
+    XCTAssertEqual(PhotoLibraryVideo.localIdentifier(in: "ph:///\(identifier)"), identifier)
+    XCTAssertTrue(PhotoLibraryVideo.isPhotoLibraryURL("ph:///\(identifier)"))
+    XCTAssertFalse(PhotoLibraryVideo.isPhotoLibraryURL("/var/mobile/Media/IMG_0042.MOV"))
+  }
+
+  func testRefusesAnInputThatIsNotAPhotoLibraryURL() {
+    let plugin = ProVideoEditorPlugin()
+    let call = FlutterMethodCall(
+      methodName: "resolvePhotoLibraryVideo", arguments: ["inputPath": "/tmp/video.mp4"])
+
+    let answered = expectation(description: "result block must be called.")
+    plugin.handle(call) { result in
+      XCTAssertEqual((result as? FlutterError)?.code, "INVALID_ARGUMENTS")
+      answered.fulfill()
+    }
+    waitForExpectations(timeout: 1)
+  }
+}

@@ -16,6 +16,7 @@ A Flutter plugin which adds support for video editing.
   s.source_files     = 'pro_video_editor/Sources/pro_video_editor/**/*'
   s.swift_version    = '5.0'
   s.osx.frameworks   = 'FlutterMacOS'
+  s.frameworks       = 'Photos'
 
   s.ios.deployment_target = '13.0'
   s.ios.dependency 'Flutter'

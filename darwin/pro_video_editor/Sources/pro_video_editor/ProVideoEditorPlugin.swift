@@ -141,6 +141,7 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
   /// - renderVideo: Renders video with effects
   /// - extractAudio: Extracts audio from video
   /// - cancelTask: Cancels an active render, audio, waveform or thumbnail stream task
+  /// - resolvePhotoLibraryVideo: Resolves a photo library `ph://` URL to a file
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     applyInlineNativeLogLevel(call: call)
 
@@ -186,6 +187,9 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
 
     case "cancelTask":
       handleCancelTask(call: call, result: result)
+
+    case "resolvePhotoLibraryVideo":
+      handleResolvePhotoLibraryVideo(call: call, result: result)
 
     default:
       result(FlutterMethodNotImplemented)
@@ -1025,6 +1029,36 @@ public class ProVideoEditorPlugin: NSObject, FlutterPlugin {
 
     result(
       FlutterError(code: "TASK_NOT_FOUND", message: "No task found for id \(id)", details: nil))
+  }
+
+  /// Resolves a photo library `ph://` URL to the path of the file the other
+  /// calls open, read in place or, for a video Photos plays from a
+  /// composition, exported once into the cache.
+  private func handleResolvePhotoLibraryVideo(
+    call: FlutterMethodCall, result: @escaping FlutterResult
+  ) {
+    guard let args = call.arguments as? [String: Any],
+      let inputPath = args["inputPath"] as? String,
+      PhotoLibraryVideo.isPhotoLibraryURL(inputPath)
+    else {
+      result(
+        FlutterError(
+          code: "INVALID_ARGUMENTS", message: "Expected a ph:// inputPath", details: nil))
+      return
+    }
+
+    Task {
+      do {
+        let file = try await PhotoLibraryVideo.shared.resolve(inputPath)
+        self.deliverResult(result, file.path)
+      } catch {
+        self.deliverResult(
+          result,
+          FlutterError(
+            code: "PHOTO_LIBRARY_ERROR", message: error.localizedDescription,
+            details: FailureDetails.of(error)))
+      }
+    }
   }
 
   // MARK: - Helper Methods

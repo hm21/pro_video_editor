@@ -35,6 +35,7 @@ let package = Package(
         .linkedFramework("CoreMedia"),
         .linkedFramework("CoreVideo"),
         .linkedFramework("Foundation"),
+        .linkedFramework("Photos"),
       ],
     )
   ]

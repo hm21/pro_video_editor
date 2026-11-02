@@ -209,9 +209,24 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 
 ## Setup
 
-#### Android, iOS, macOS, Linux, Windows, Web
+#### Android, Linux, Windows, Web
 
 No additional setup required.
+
+#### iOS
+
+Add `NSPhotoLibraryUsageDescription` to `ios/Runner/Info.plist`. The plugin reads photo library videos with PhotoKit, and App Store Connect rejects an app that links PhotoKit without this key, even if it never opens the photo library.
+
+```xml
+<key>NSPhotoLibraryUsageDescription</key>
+<string>Edit videos from your photo library.</string>
+```
+
+The plugin never asks for photo library access, so apps that don't read `ph://` videos never show a prompt. An app that does should ask for access first; otherwise the system prompts on the first `ph://` call, and that call fails.
+
+#### macOS
+
+No additional setup required. To read photo library videos, add the same `NSPhotoLibraryUsageDescription` key and, for a sandboxed app, the `com.apple.security.personal-information.photos-library` entitlement.
 
 ## Usage
 
@@ -224,8 +239,11 @@ var data = VideoRenderData(
             // video: EditorVideo.file(File('/path/to/video.mp4')),
             // video: EditorVideo.network('https://example.com/video.mp4'),
             // video: EditorVideo.memory(videoBytes),
-            // Android only: a content:// URI, e.g. from the photo picker, read in place without copying.
+            // Android: a content:// URI, e.g. from the photo picker, read in place without copying.
             // video: EditorVideo.content('content://media/picker/0/com.android.providers.media.photopicker/media/1000000123'),
+            // iOS, macOS: a photo library video, e.g. from file_picker with DarwinOptions(copyMedia: false), read in place.
+            // Ask for photo library access first; otherwise the system prompts on first use and that call fails.
+            // video: EditorVideo.content('ph:///ED7AC36B-A150-4C38-BB8C-B6D696F4F2ED/L0/001'),
         ),
     ],
     enableAudio: false,

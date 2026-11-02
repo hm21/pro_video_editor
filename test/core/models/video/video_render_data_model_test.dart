@@ -2,6 +2,9 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, debugDefaultTargetPlatformOverride;
+import 'package:flutter/services.dart' show MethodCall, MethodChannel;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/core/models/audio/audio_equalizer_model.dart';
 import 'package:pro_video_editor/core/models/audio/audio_track_model.dart';
@@ -291,6 +294,65 @@ void main() {
         expect(tracks[1]['equalizer'], isNull);
       },
     );
+
+    group('from the photo library', () {
+      const url = 'ph:///ED7AC36B-A150-4C38-BB8C-B6D696F4F2ED/L0/001';
+      const resolvedPath = '/var/mobile/Media/DCIM/100APPLE/IMG_0042.MOV';
+      late List<MethodCall> calls;
+
+      VideoRenderData buildData() => VideoRenderData(
+        videoSegments: [VideoSegment(video: EditorVideo.file('/video.mp4'))],
+        audioTracks: const [
+          VideoAudioTrack(path: url),
+          VideoAudioTrack(path: '/audio/plain.m4a'),
+        ],
+      );
+
+      setUp(() {
+        TestWidgetsFlutterBinding.ensureInitialized();
+        calls = [];
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(const MethodChannel('pro_video_editor'), (
+              call,
+            ) async {
+              calls.add(call);
+              return resolvedPath;
+            });
+      });
+
+      tearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              const MethodChannel('pro_video_editor'),
+              null,
+            );
+      });
+
+      for (final platform in [TargetPlatform.iOS, TargetPlatform.macOS]) {
+        test(
+          'sends the file a track resolves to on ${platform.name}',
+          () async {
+            debugDefaultTargetPlatformOverride = platform;
+
+            final tracks =
+                (await buildData().toAsyncMap())['audioTracks'] as List;
+
+            expect(tracks[0]['path'], resolvedPath);
+            expect(tracks[1]['path'], '/audio/plain.m4a');
+            expect(calls.single.method, 'resolvePhotoLibraryVideo');
+            expect(calls.single.arguments, {'inputPath': url});
+          },
+        );
+      }
+
+      test('throws a clear error on other platforms', () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+
+        await expectLater(buildData().toAsyncMap(), throwsUnsupportedError);
+        expect(calls, isEmpty);
+      });
+    });
   });
 
   group('VideoRenderData chromaKey', () {
