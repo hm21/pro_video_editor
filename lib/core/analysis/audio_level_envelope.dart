@@ -5,6 +5,7 @@ import '../models/audio/audio_track_model.dart';
 import '../models/audio/waveform_configs_model.dart';
 import '../models/audio/waveform_data_model.dart';
 import '../models/video/editor_video_model.dart';
+import '../platform/photo_library_video.dart';
 import '../platform/platform_interface.dart';
 
 /// How loud a set of audio tracks is over the exported video: the highest
@@ -75,7 +76,9 @@ class AudioLevelEnvelope {
         '${track.path}|${end?.inMicroseconds}',
         () => ProVideoEditor.instance.getWaveform(
           WaveformConfigs(
-            video: track.path.startsWith('content://')
+            video:
+                track.path.startsWith('content://') ||
+                    isPhotoLibraryUrl(track.path)
                 ? EditorVideo.content(track.path)
                 : EditorVideo.file(track.path),
             resolution: WaveformResolution.high,

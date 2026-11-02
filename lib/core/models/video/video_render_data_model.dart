@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 
 import 'package:pro_video_editor/core/models/image/timeline_keyframe_model.dart'
     show sortTimelineKeyframes;
+import 'package:pro_video_editor/core/platform/photo_library_video.dart'
+    show isPhotoLibraryUrl;
 import 'package:pro_video_editor/core/utils/video_effect_frames.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 import 'package:pro_video_editor/shared/utils/parser/double_parser.dart';
@@ -496,26 +498,26 @@ class VideoRenderData {
             ?_triggeredEffectMap(effect),
     ];
 
-    final audioTrackMaps = audioTracks
-        .map(
-          (t) => {
-            'path': t.path,
-            'volume': t.volume,
-            'playbackSpeed': t.playbackSpeed,
-            'speedRamp': t.speedRamp?.toChannelSteps(),
-            'loop': t.loop,
-            'audioStartUs': t.audioStartTime?.inMicroseconds,
-            'audioEndUs': t.audioEndTime?.inMicroseconds,
-            'startUs': t.startTime?.inMicroseconds,
-            'endUs': t.endTime?.inMicroseconds,
-            'fadeInUs': t.fadeInDuration.inMicroseconds,
-            'fadeOutUs': t.fadeOutDuration.inMicroseconds,
-            'equalizer': t.equalizer?.toMap(),
-            if (t.volumeCurve case final curve? when !curve.isFlat)
-              'volumeCurve': curve.toChannelData(),
-          },
-        )
-        .toList();
+    final audioTrackMaps = await Future.wait(
+      audioTracks.map(
+        (t) async => {
+          'path': await _audioTrackPath(t.path),
+          'volume': t.volume,
+          'playbackSpeed': t.playbackSpeed,
+          'speedRamp': t.speedRamp?.toChannelSteps(),
+          'loop': t.loop,
+          'audioStartUs': t.audioStartTime?.inMicroseconds,
+          'audioEndUs': t.audioEndTime?.inMicroseconds,
+          'startUs': t.startTime?.inMicroseconds,
+          'endUs': t.endTime?.inMicroseconds,
+          'fadeInUs': t.fadeInDuration.inMicroseconds,
+          'fadeOutUs': t.fadeOutDuration.inMicroseconds,
+          'equalizer': t.equalizer?.toMap(),
+          if (t.volumeCurve case final curve? when !curve.isFlat)
+            'volumeCurve': curve.toChannelData(),
+        },
+      ),
+    );
 
     final imageLayerMaps = imageLayers == null
         ? <Map<String, dynamic>>[]
@@ -648,6 +650,14 @@ class VideoRenderData {
       imageBytesWithCropping:
           imageBytesWithCropping ?? this.imageBytesWithCropping,
     );
+  }
+
+  /// What the native renderers open an audio track from: the file a photo
+  /// library `ph://` URL resolves to, like [EditorVideo.content], or else
+  /// [path] as it is, which Android also reads a `content://` URI from.
+  static Future<String> _audioTrackPath(String path) async {
+    if (!isPhotoLibraryUrl(path)) return path;
+    return EditorVideo.content(path).contentOrSafeFilePath();
   }
 
   /// [effect]'s map for the native renderers when it has triggers, or `null`

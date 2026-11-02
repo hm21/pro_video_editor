@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -130,6 +131,38 @@ void main() {
 
     expect(rendered.duration.inMilliseconds, closeTo(2000, 300));
     expect(rendered.resolution, const Size(1920, 1080));
+  }, skip: !isSupported);
+
+  testWidgets('an audio track plays the sound of the video', (_) async {
+    final output = '$tempDir/photo_library_audio_track.mp4';
+    addTearDown(() {
+      if (File(output).existsSync()) File(output).deleteSync();
+    });
+    final track = VideoAudioTrack(path: clip.contentUrl!);
+
+    await pve.renderVideoToFile(
+      output,
+      VideoRenderData(
+        videoSegments: [
+          VideoSegment(
+            video: EditorVideo.file(clipFile),
+            endTime: const Duration(seconds: 2),
+            // Muted, so all sound in the output comes from the track.
+            volume: 0,
+          ),
+        ],
+        audioTracks: [track],
+      ),
+    );
+    final rendered = await pve.getWaveform(
+      WaveformConfigs(video: EditorVideo.file(output)),
+    );
+    final envelope = await AudioLevelEnvelope.ofTracks([
+      track,
+    ], videoDuration: const Duration(seconds: 2));
+
+    expect(rendered.leftChannel.reduce(math.max), greaterThan(0.05));
+    expect(envelope.levels.reduce(math.max), greaterThan(0.05));
   }, skip: !isSupported);
 
   testWidgets('safeFilePath and safeByteArray read in place', (_) async {

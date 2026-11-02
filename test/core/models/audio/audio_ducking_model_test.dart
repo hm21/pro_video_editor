@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 
 /// An envelope at 100 levels a second that is loud over [talkMs] ranges.
@@ -285,4 +286,60 @@ void main() {
       );
     });
   });
+
+  group('AudioLevelEnvelope.ofTracks', () {
+    late ProVideoEditor original;
+    late _FakeWaveforms fake;
+
+    setUp(() {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      original = ProVideoEditor.instance;
+      fake = _FakeWaveforms();
+      ProVideoEditor.instance = fake;
+    });
+
+    tearDown(() => ProVideoEditor.instance = original);
+
+    test('measures content:// and ph:// tracks as content videos', () async {
+      const paths = [
+        '/voice.m4a',
+        'content://media/external/video/media/42',
+        'ph:///ED7AC36B-A150-4C38-BB8C-B6D696F4F2ED/L0/001',
+      ];
+
+      await AudioLevelEnvelope.ofTracks([
+        for (final path in paths) VideoAudioTrack(path: path),
+      ]);
+
+      expect(fake.videos.map((v) => v.type), [
+        EditorVideoType.file,
+        EditorVideoType.content,
+        EditorVideoType.content,
+      ]);
+      expect(fake.videos.map((v) => v.file?.path ?? v.contentUrl), paths);
+    });
+  });
+}
+
+/// Answers every `getWaveform` with a second of silence and records the
+/// video it was asked for.
+class _FakeWaveforms extends ProVideoEditor with MockPlatformInterfaceMixin {
+  final List<EditorVideo> videos = [];
+
+  @override
+  void initializeStream() {}
+
+  @override
+  Future<WaveformData> getWaveform(
+    WaveformConfigs value, {
+    NativeLogLevel? nativeLogLevel,
+  }) async {
+    videos.add(value.video);
+    return WaveformData(
+      leftChannel: Float32List(100),
+      sampleRate: 44100,
+      duration: const Duration(seconds: 1),
+      samplesPerSecond: 100,
+    );
+  }
 }
