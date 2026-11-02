@@ -138,7 +138,7 @@ void main() {
     final bytes = await EditorVideo.content(clip.contentUrl!).safeByteArray();
 
     expect(path, await clip.contentOrSafeFilePath());
-    expect(video.file?.path, path);
+    expect(video.hasFile, isFalse);
     expect(bytes.length, File(clipFile).lengthSync());
   }, skip: !isSupported);
 

@@ -18,7 +18,8 @@ import Photos
 /// The plugin never asks for photo library access itself. Without it, or with
 /// limited access that leaves the video out, the video is not found. If the
 /// app has not asked yet, the system shows its prompt on the first lookup,
-/// which still fails.
+/// which still fails. Without `NSPhotoLibraryUsageDescription` in the app's
+/// Info.plist, every lookup fails before it reaches the photo library.
 actor PhotoLibraryVideo {
   static let shared = PhotoLibraryVideo()
 
@@ -83,6 +84,15 @@ actor PhotoLibraryVideo {
   }
 
   private static func fetchVideo(_ identifier: String) throws -> PHAsset {
+    // Without the key, the system ends the app on the first photo library
+    // access instead of failing the call.
+    guard Bundle.main.object(forInfoDictionaryKey: "NSPhotoLibraryUsageDescription") != nil
+    else {
+      throw failure(
+        code: 5,
+        "Reading photo library videos needs NSPhotoLibraryUsageDescription in the app's Info.plist."
+      )
+    }
     guard
       let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil)
         .firstObject
@@ -120,7 +130,9 @@ actor PhotoLibraryVideo {
     _ asset: PHAsset, identifier: String, modificationDate: Date?
   ) async throws -> URL {
     let (avAsset, audioMix) = try await requestAVAsset(asset, identifier: identifier)
-    if let urlAsset = avAsset as? AVURLAsset {
+    // Only a local file can be handed on as a path; anything else, such as a
+    // stream, is exported like a composition.
+    if let urlAsset = avAsset as? AVURLAsset, urlAsset.url.isFileURL {
       return urlAsset.url
     }
     return try await export(
@@ -150,7 +162,8 @@ actor PhotoLibraryVideo {
     }
   }
 
-  /// Exports a video Photos plays from a composition, as it plays there.
+  /// Exports a video Photos plays from a composition, as it plays there, or
+  /// hands out as anything but a local file.
   private static func export(
     _ composition: AVAsset, audioMix: AVAudioMix?, identifier: String, modificationDate: Date?
   ) async throws -> URL {

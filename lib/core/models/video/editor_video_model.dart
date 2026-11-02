@@ -218,9 +218,10 @@ class EditorVideo {
             'by the native Android implementation.',
           );
         }
-        byteArray = await readFileAsUint8List(
-          File(await contentOrSafeFilePath()),
-        );
+        // Not kept in [byteArray]: the video would then count as a memory
+        // video, and every later call would write the bytes to a temp file
+        // instead of reading the video in place.
+        return readFileAsUint8List(File(await contentOrSafeFilePath()));
     }
     return byteArray!;
   }
@@ -242,13 +243,19 @@ class EditorVideo {
   /// a file based on the type of the video.
   ///
   /// An Android [EditorVideo.content] video is copied into a temporary file,
-  /// the same way a network video is downloaded. A photo library video is not
-  /// copied: the path is the file it resolves to (see [EditorVideo.content]),
-  /// which belongs to the photo library or the plugin's cache and must not be
-  /// moved or deleted. Like a downloaded network video, that file is then
-  /// used for this video from now on, also by the plugin's own calls, which
-  /// otherwise read the URI in place (see [contentOrSafeFilePath]). On a
-  /// platform the URI is not supported on, it throws an [UnsupportedError].
+  /// the same way a network video is downloaded. Like a downloaded network
+  /// video, that file is then used for this video from now on, also by the
+  /// plugin's own calls, which otherwise read the URI in place (see
+  /// [contentOrSafeFilePath]).
+  ///
+  /// A photo library video is not copied: the path is the file it resolves to
+  /// (see [EditorVideo.content]), which belongs to the photo library or the
+  /// plugin's cache and must not be moved or deleted. It is looked up again on
+  /// every call and not kept in [file], because only the running app may read
+  /// it and it changes when the video is edited in Photos.
+  ///
+  /// On a platform the URI is not supported on, it throws an
+  /// [UnsupportedError].
   Future<String> safeFilePath() async {
     switch (typePreferredFile) {
       case EditorVideoType.memory:
@@ -262,13 +269,14 @@ class EditorVideo {
         break;
       case EditorVideoType.content:
         _ensureContentSupported();
+        // Not kept in [file]: a restored video would then open that path in
+        // a later launch, which the photo library has not granted access to.
+        if (_isPhotoLibraryVideo) return resolvePhotoLibraryVideo(contentUrl!);
         file = File(
-          _isPhotoLibraryVideo
-              ? await resolvePhotoLibraryVideo(contentUrl!)
-              : await copyContentUriToFile(
-                  contentUrl!,
-                  await _tempFilePath(withExtension: false),
-                ),
+          await copyContentUriToFile(
+            contentUrl!,
+            await _tempFilePath(withExtension: false),
+          ),
         );
     }
     return file!.path;

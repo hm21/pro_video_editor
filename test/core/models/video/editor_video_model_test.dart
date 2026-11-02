@@ -237,9 +237,12 @@ void main() {
         final video = EditorVideo.content(_photoLibraryUrl);
 
         expect(await video.safeFilePath(), resolvedPath);
-        expect(video.file?.path, resolvedPath);
+        // Not kept: only the running app may read it, so a video restored
+        // from toMap in a later launch must resolve the URL again.
+        expect(video.hasFile, isFalse);
+        expect(video.toMap(), {'contentUrl': _photoLibraryUrl});
         expect(await video.contentOrSafeFilePath(), resolvedPath);
-        expect(calls, hasLength(1));
+        expect(calls, hasLength(2));
       });
 
       test('safeByteArray reads the resolved file', () async {
@@ -248,12 +251,12 @@ void main() {
         addTearDown(() => directory.deleteSync(recursive: true));
         resolvedPath = '${directory.path}/IMG_0042.MOV';
         File(resolvedPath).writeAsBytesSync([1, 2, 3]);
+        final video = EditorVideo.content(_photoLibraryUrl);
 
-        final bytes = await EditorVideo.content(
-          _photoLibraryUrl,
-        ).safeByteArray();
-
-        expect(bytes, [1, 2, 3]);
+        expect(await video.safeByteArray(), [1, 2, 3]);
+        // Kept bytes would make later calls copy them into a temp file.
+        expect(video.hasBytes, isFalse);
+        expect(await video.contentOrSafeFilePath(), resolvedPath);
       });
     });
   });
