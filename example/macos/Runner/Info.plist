@@ -26,6 +26,8 @@
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Edit videos from your photo library.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>
