@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart'
 import '/core/platform/content_uri_copy.dart';
 import '/core/platform/io/io_helper.dart';
 import '/core/platform/path/path_provider_helper.dart';
+import '/core/platform/photo_library_video.dart';
 import '/shared/utils/converters.dart';
 import '/shared/utils/file_constructor_utils.dart';
 
@@ -128,22 +129,37 @@ class EditorVideo {
   /// ```
   factory EditorVideo.network(String src) => EditorVideo._(networkUrl: src);
 
-  /// Creates an [EditorVideo] from an Android `content://` URI, such as one
-  /// returned by the photo picker or the Storage Access Framework.
+  /// Creates an [EditorVideo] from a platform content URI: an Android
+  /// `content://` URI or an Apple photo library `ph://` URL.
   ///
-  /// The video is read in place through the `ContentResolver`, so large files
-  /// are not copied. Only a provider that streams the file without random
-  /// access, as some cloud and archive providers do, gets it copied once into
-  /// the cache. Your app must be able to read the URI for as long as the video
-  /// is used, for example by taking a persistable URI permission.
+  /// **Android:** a `content://` URI, such as one returned by the photo picker
+  /// or the Storage Access Framework, is read in place through the
+  /// `ContentResolver`, so large files are not copied. Only a provider that
+  /// streams the file without random access, as some cloud and archive
+  /// providers do, gets it copied once into the cache. Your app must be able
+  /// to read the URI for as long as the video is used, for example by taking a
+  /// persistable URI permission.
   ///
-  /// **Android only.** Using it on another platform throws an
-  /// [UnsupportedError].
+  /// **iOS and macOS:** a `ph://<localIdentifier>` URL, such as the
+  /// `ph:///` URIs `file_picker` returns with `DarwinOptions(copyMedia:
+  /// false)`, is read in place from the file the photo library keeps, also
+  /// downloading it from iCloud first if needed. Only a video Photos plays
+  /// from a composition rather than a file, such as a slow-motion video, is
+  /// exported once into the cache. Your app needs read access to the photo
+  /// library and should ask for it before it uses such a video. The plugin
+  /// does not ask; if the app has not asked yet, the system shows its prompt
+  /// on first use, and that call fails.
+  ///
+  /// Using a `content://` URI off Android or a `ph://` URL off iOS and macOS
+  /// throws an [UnsupportedError].
   ///
   /// Example:
   /// ```dart
   /// final video = EditorVideo.content(
   ///   'content://media/picker_get_content/0/com.android.providers.media.photopicker/media/1000032497',
+  /// );
+  /// final video = EditorVideo.content(
+  ///   'ph:///ED7AC36B-A150-4C38-BB8C-B6D696F4F2ED/L0/001',
   /// );
   /// ```
   factory EditorVideo.content(String url) => EditorVideo._(contentUrl: url);
@@ -157,7 +173,8 @@ class EditorVideo {
   /// A URL string pointing to an video on the internet.
   final String? networkUrl;
 
-  /// An Android `content://` URI pointing to the video (Android only).
+  /// An Android `content://` URI or an iOS/macOS photo library `ph://` URL
+  /// pointing to the video.
   final String? contentUrl;
 
   /// A string representing the asset path of an video.
@@ -181,8 +198,9 @@ class EditorVideo {
   /// A future that retrieves the image data as a `Uint8List` from the
   /// appropriate source based on the `EditorVideoType`.
   ///
-  /// Throws an [UnsupportedError] for an [EditorVideo.content] video, which is
-  /// only read natively on Android.
+  /// A photo library video is read from the file it resolves to. Throws an
+  /// [UnsupportedError] for an Android `content://` video, which is only read
+  /// natively.
   Future<Uint8List> safeByteArray() async {
     switch (type) {
       case EditorVideoType.memory:
@@ -194,34 +212,43 @@ class EditorVideo {
       case EditorVideoType.network:
         byteArray = await fetchVideoAsUint8List(networkUrl!);
       case EditorVideoType.content:
-        throw UnsupportedError(
-          'A content:// video cannot be read as bytes; it is only supported '
-          'by the native Android implementation.',
+        if (!_isPhotoLibraryVideo) {
+          throw UnsupportedError(
+            'A content:// video cannot be read as bytes; it is only supported '
+            'by the native Android implementation.',
+          );
+        }
+        byteArray = await readFileAsUint8List(
+          File(await contentOrSafeFilePath()),
         );
     }
     return byteArray!;
   }
 
   /// Returns what the native side opens the video from: the [contentUrl] for
-  /// a content video, or else the local path from [safeFilePath].
+  /// an Android content video, the file a photo library video resolves to, or
+  /// else the local path from [safeFilePath].
   ///
-  /// Throws an [UnsupportedError] for a content video on any platform but
-  /// Android.
+  /// Throws an [UnsupportedError] for a `content://` video on any platform
+  /// but Android, and for a `ph://` video on any platform but iOS and macOS.
   Future<String> contentOrSafeFilePath() async {
     if (typePreferredFile != EditorVideoType.content) return safeFilePath();
     _ensureContentSupported();
+    if (_isPhotoLibraryVideo) return resolvePhotoLibraryVideo(contentUrl!);
     return contentUrl!;
   }
 
   /// Safely generates a file path for the video and writes the video data to
   /// a file based on the type of the video.
   ///
-  /// An [EditorVideo.content] video is copied into a temporary file on
-  /// Android, the same way a network video is downloaded; on other platforms
-  /// it throws an [UnsupportedError]. Like a downloaded network video, that
-  /// file is then used for this video from now on, also by the plugin's own
-  /// calls, which otherwise read the URI in place (see
-  /// [contentOrSafeFilePath]).
+  /// An Android [EditorVideo.content] video is copied into a temporary file,
+  /// the same way a network video is downloaded. A photo library video is not
+  /// copied: the path is the file it resolves to (see [EditorVideo.content]),
+  /// which belongs to the photo library or the plugin's cache and must not be
+  /// moved or deleted. Like a downloaded network video, that file is then
+  /// used for this video from now on, also by the plugin's own calls, which
+  /// otherwise read the URI in place (see [contentOrSafeFilePath]). On a
+  /// platform the URI is not supported on, it throws an [UnsupportedError].
   Future<String> safeFilePath() async {
     switch (typePreferredFile) {
       case EditorVideoType.memory:
@@ -236,17 +263,30 @@ class EditorVideo {
       case EditorVideoType.content:
         _ensureContentSupported();
         file = File(
-          await copyContentUriToFile(
-            contentUrl!,
-            await _tempFilePath(withExtension: false),
-          ),
+          _isPhotoLibraryVideo
+              ? await resolvePhotoLibraryVideo(contentUrl!)
+              : await copyContentUriToFile(
+                  contentUrl!,
+                  await _tempFilePath(withExtension: false),
+                ),
         );
     }
     return file!.path;
   }
 
+  bool get _isPhotoLibraryVideo => isPhotoLibraryUrl(contentUrl!);
+
   void _ensureContentSupported() {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    if (_isPhotoLibraryVideo) {
+      if (kIsWeb ||
+          (defaultTargetPlatform != TargetPlatform.iOS &&
+              defaultTargetPlatform != TargetPlatform.macOS)) {
+        throw UnsupportedError(
+          'EditorVideo.content with a photo library ph:// URL is only '
+          'supported on iOS and macOS.',
+        );
+      }
+    } else if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
       throw UnsupportedError(
         'EditorVideo.content (content:// URIs) is only supported on Android.',
       );
@@ -410,6 +450,7 @@ enum EditorVideoType {
   /// Represents a video loaded from an asset path.
   asset,
 
-  /// Represents a video loaded from `content://` URL (Android only).
+  /// Represents a video loaded from an Android `content://` URI or an
+  /// iOS/macOS photo library `ph://` URL.
   content,
 }

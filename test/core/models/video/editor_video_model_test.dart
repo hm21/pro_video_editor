@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -174,7 +176,88 @@ void main() {
         );
       });
     });
+
+    group('photo library source', () {
+      late List<MethodCall> calls;
+      late String resolvedPath;
+
+      setUp(() {
+        calls = [];
+        resolvedPath = '/var/mobile/Media/DCIM/100APPLE/IMG_0042.MOV';
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(const MethodChannel('pro_video_editor'), (
+              call,
+            ) async {
+              calls.add(call);
+              return resolvedPath;
+            });
+      });
+
+      tearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              const MethodChannel('pro_video_editor'),
+              null,
+            );
+      });
+
+      test('reports the content type', () {
+        final video = EditorVideo.content(_photoLibraryUrl);
+
+        expect(video.type, EditorVideoType.content);
+        expect(EditorVideo.fromMap(video.toMap()), video);
+      });
+
+      for (final platform in [TargetPlatform.iOS, TargetPlatform.macOS]) {
+        test('resolves natively on ${platform.name}', () async {
+          debugDefaultTargetPlatformOverride = platform;
+          final video = EditorVideo.content(_photoLibraryUrl);
+
+          expect(await video.contentOrSafeFilePath(), resolvedPath);
+          expect(calls.single.method, 'resolvePhotoLibraryVideo');
+          expect(calls.single.arguments, {'inputPath': _photoLibraryUrl});
+          // Read in place, so it is resolved again on the next call.
+          expect(video.hasFile, isFalse);
+        });
+      }
+
+      test('throws a clear error on other platforms', () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+
+        await expectLater(
+          EditorVideo.content(_photoLibraryUrl).contentOrSafeFilePath(),
+          throwsUnsupportedError,
+        );
+        expect(calls, isEmpty);
+      });
+
+      test('safeFilePath uses the resolved file without copying', () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        final video = EditorVideo.content(_photoLibraryUrl);
+
+        expect(await video.safeFilePath(), resolvedPath);
+        expect(video.file?.path, resolvedPath);
+        expect(await video.contentOrSafeFilePath(), resolvedPath);
+        expect(calls, hasLength(1));
+      });
+
+      test('safeByteArray reads the resolved file', () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        final directory = Directory.systemTemp.createTempSync('photo_library');
+        addTearDown(() => directory.deleteSync(recursive: true));
+        resolvedPath = '${directory.path}/IMG_0042.MOV';
+        File(resolvedPath).writeAsBytesSync([1, 2, 3]);
+
+        final bytes = await EditorVideo.content(
+          _photoLibraryUrl,
+        ).safeByteArray();
+
+        expect(bytes, [1, 2, 3]);
+      });
+    });
   });
 }
 
 const _contentUrl = 'content://media/external/video/media/42';
+const _photoLibraryUrl = 'ph:///ED7AC36B-A150-4C38-BB8C-B6D696F4F2ED/L0/001';
