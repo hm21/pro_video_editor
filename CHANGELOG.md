@@ -1,3 +1,6 @@
+## 2.51.0
+- **FEAT**(iOS, macOS): `EditorVideo.content` takes a photo library `ph://` URL, such as the ones `file_picker` returns with `copyMedia: false`, and reads the video in place without copying it. Only a slow-motion video is exported once into the cache. iOS apps now need `NSPhotoLibraryUsageDescription` in their `Info.plist`.
+
 ## 2.50.1
 - **FIX**(iOS, macOS): A `VideoSegment` trim a fraction of a microsecond off a frame's start, such as a frame time from `getLumaFrameStream`, cuts on that frame. The sliver of the neighbouring frame it took in rendered as a whole extra frame at the end or the start.
 - **FIX**(android): A `VideoSegment` trim one microsecond after a frame's start, such as a frame time rounded instead of truncated, cuts on that frame instead of keeping it at the end or dropping it at the start.
