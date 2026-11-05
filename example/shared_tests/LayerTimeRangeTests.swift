@@ -73,6 +73,30 @@ final class LayerTimeRangeTests: XCTestCase {
     XCTAssertNil(compositor.getLUTForActiveFilters(at: time(500_000)))
   }
 
+  func testAFrameOnTheEndIsReadAsTheEndItself() {
+    // 30 fps at timescale 600: the frame at 4.1 s is 4.0999999… s as a
+    // Double, which used to truncate to 4 099 999 µs and still draw a layer or
+    // filter ending at 4.1 s on it.
+    let frameAtEnd = CMTime(value: 2_460, timescale: 600)
+
+    XCTAssertEqual(compositionTimeUs(frameAtEnd), 4_100_000)
+    XCTAssertFalse(
+      isWithinTimeRange(compositionTimeUs(frameAtEnd), startUs: 0, endUs: 4_100_000))
+
+    let compositor = VideoCompositor()
+    var config = VideoCompositorConfig()
+    config.colorFilterConfigs = [
+      ColorFilterConfig(
+        matrix: [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0],
+        startUs: 0, endUs: 4_100_000)
+    ]
+    compositor.apply(config)
+
+    XCTAssertNotNil(
+      compositor.getLUTForActiveFilters(at: CMTime(value: 2_440, timescale: 600)))
+    XCTAssertNil(compositor.getLUTForActiveFilters(at: frameAtEnd))
+  }
+
   // MARK: - Helpers
 
   private enum Color { case red, green, blue, other }
