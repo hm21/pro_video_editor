@@ -307,9 +307,35 @@ class ExtractAudio {
     onError: @escaping (Error) -> Void
   ) -> AudioExtractJobHandle {
 
+    /// Raised by the returned handle, read by the worker between two buffers.
+    ///
+    /// The handle must not touch the reader itself. A `cancelReading` that
+    /// lands before `startReading` makes `startReading` raise
+    /// NSInternalInconsistencyException, which aborts the app, and one that
+    /// lands while the worker sits in `copyNextSampleBuffer` can fault inside
+    /// AVFoundation (see `BitrateCappedExporter`).
+    final class CancelFlag {
+      private let lock = NSLock()
+      private var raised = false
+
+      var isRaised: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return raised
+      }
+
+      func raise() {
+        lock.lock()
+        raised = true
+        lock.unlock()
+      }
+    }
+
     let maxWavDataSize: Int64 = 0xFFFF_FFFF - 36
-    var assetReader: AVAssetReader?
-    var isCancelled = false
+    let cancelled = CancelFlag()
+    let cancellationError = NSError(
+      domain: "ExtractAudio", code: -3,
+      userInfo: [NSLocalizedDescriptionKey: "Extraction was cancelled"])
 
     // A dispatch queue, not a Swift task: `copyNextSampleBuffer` below blocks
     // its thread for the whole extraction, and the cooperative pool tasks run
@@ -440,7 +466,8 @@ class ExtractAudio {
           effectiveDuration = timeRange.duration
           progressStartSeconds = CMTimeGetSeconds(timeRange.start)
         }
-        assetReader = reader
+
+        if cancelled.isRaised { throw cancellationError }
 
         let fm = FileManager.default
         guard fm.createFile(atPath: outputURL.path, contents: nil) else {
@@ -475,7 +502,7 @@ class ExtractAudio {
         var decodedFormatKnown = false
 
         while let sampleBuffer = readerOutput.copyNextSampleBuffer() {
-          if isCancelled { break }
+          if cancelled.isRaised { break }
 
           // The header must describe the PCM as decoded, not the track: for
           // HE-AAC the track only describes the AAC core layer, while the
@@ -525,36 +552,31 @@ class ExtractAudio {
               userInfo: [NSLocalizedDescriptionKey: "AVAssetReader failed during reading"])
         }
 
-        if isCancelled {
+        if cancelled.isRaised {
           reader.cancelReading()
+          throw cancellationError
+        }
+
+        fileHandle.seek(toFileOffset: 0)
+        fileHandle.write(
+          buildWavHeader(
+            pcmDataSize: Int(totalPcmBytes), sampleRate: sampleRate, channels: channels,
+            bitsPerSample: bitsPerSample))
+
+        writeSuccess = true
+
+        if config.outputPath != nil {
           DispatchQueue.main.async {
-            onError(
-              NSError(
-                domain: "ExtractAudio", code: -3,
-                userInfo: [NSLocalizedDescriptionKey: "Extraction was cancelled"]))
+            onProgress(1.0)
+            onComplete(nil)
           }
         } else {
-          fileHandle.seek(toFileOffset: 0)
-          fileHandle.write(
-            buildWavHeader(
-              pcmDataSize: Int(totalPcmBytes), sampleRate: sampleRate, channels: channels,
-              bitsPerSample: bitsPerSample))
-
-          writeSuccess = true
-
-          if config.outputPath != nil {
-            DispatchQueue.main.async {
-              onProgress(1.0)
-              onComplete(nil)
-            }
-          } else {
-            let data = try Data(contentsOf: outputURL)
-            try? fm.removeItem(at: outputURL)
-            DispatchQueue.main.async {
-              onProgress(1.0)
-              let flutterData = FlutterStandardTypedData(bytes: data)
-              onComplete(flutterData)
-            }
+          let data = try Data(contentsOf: outputURL)
+          try? fm.removeItem(at: outputURL)
+          DispatchQueue.main.async {
+            onProgress(1.0)
+            let flutterData = FlutterStandardTypedData(bytes: data)
+            onComplete(flutterData)
           }
         }
 
@@ -563,10 +585,7 @@ class ExtractAudio {
       }
     }
 
-    return {
-      isCancelled = true
-      assetReader?.cancelReading()
-    }
+    return { cancelled.raise() }
   }
 
   /// Loads the tracks and duration of [asset], blocking the calling thread

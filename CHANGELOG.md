@@ -1,6 +1,7 @@
 ## 2.51.1
 - **FIX**(android, iOS, macOS): `extractAudio` calls that run at the same time each return their own audio. They shared one temporary file, so a call could return another call's audio or fail.
 - **FIX**(macOS): Many WAV extractions at once, around as many as the Mac has CPU cores, no longer hang.
+- **FIX**(iOS, macOS): Cancelling a WAV extraction just as it starts reading no longer crashes the app.
 
 ## 2.51.0
 - **FEAT**(iOS, macOS): `EditorVideo.content` and `VideoAudioTrack.path` take a photo library `ph://` URL, such as the ones `file_picker` returns with `copyMedia: false`, and read the video in place without copying it. Only a slow-motion video is exported once into the cache. iOS apps now need `NSPhotoLibraryUsageDescription` in their `Info.plist`.

@@ -359,10 +359,13 @@ void main() {
     }
     // else: extraction completed before the cancel arrived — no error expected.
 
-    // Clean up if file was created
-    final file = File(outputPath);
-    if (await file.exists()) {
-      await file.delete();
+    // Clean up if file was created. A cancel answers at once and the native
+    // side removes the partial file afterwards, so it can vanish between an
+    // `exists` check and the delete.
+    try {
+      await File(outputPath).delete();
+    } on PathNotFoundException {
+      // Never written, or already removed by the cancelled extraction.
     }
   }, skip: skipPlatform);
 
