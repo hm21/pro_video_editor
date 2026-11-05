@@ -206,6 +206,66 @@ void main() {
       },
       skip: skipPlatform || !isFormatSupported(format),
     );
+
+    /// Extractions started together each return their own audio (issue #273).
+    ///
+    /// Named after the clock alone, extractions that reached the native side
+    /// in the same instant shared one temporary file: a call returned another
+    /// call's audio, or failed on a file another call had already deleted or
+    /// was still writing. Android's millisecond clock collided with a handful
+    /// of calls; the microsecond one on iOS and macOS needs a crowd, and a few
+    /// rounds of it.
+    ///
+    /// A WAV extraction also held a thread of the Swift cooperative pool, which
+    /// has one per core, for as long as it ran. On an 18-core Mac, 24 of them
+    /// at once never finished.
+    ///
+    /// A plain file as the source sends all calls to the platform in one burst.
+    testWidgets(
+      'parallel extractAudio with $format returns each call its own audio',
+      (tester) async {
+        final video = EditorVideo.file(await testVideo.safeFilePath());
+        const count = 24;
+
+        // Windows of different lengths, so one call's audio cannot pass for
+        // another's.
+        List<AudioExtractConfigs> configs() => [
+          for (var i = 0; i < count; i++)
+            AudioExtractConfigs(
+              video: video,
+              format: format,
+              startTime: Duration(seconds: i),
+              endTime: Duration(milliseconds: i * 1000 + (i + 1) * 250),
+            ),
+        ];
+
+        final alone = [
+          for (final config in configs()) await pve.extractAudio(config),
+        ];
+
+        for (var round = 0; round < 8; round++) {
+          final together = await Future.wait(configs().map(pve.extractAudio))
+              .timeout(
+                const Duration(seconds: 60),
+                onTimeout: () => fail(
+                  '$count extractions at once never answered (round $round)',
+                ),
+              );
+
+          for (var i = 0; i < count; i++) {
+            expect(
+              together[i].length,
+              closeTo(alone[i].length, alone[i].length * 0.02),
+              reason:
+                  'round $round: window $i came back with '
+                  '${together[i].length} bytes instead of the '
+                  '${alone[i].length} it has on its own',
+            );
+          }
+        }
+      },
+      skip: skipPlatform || !isFormatSupported(format),
+    );
   }
 
   testWidgets('extractAudio emits progress updates', (tester) async {
@@ -299,10 +359,13 @@ void main() {
     }
     // else: extraction completed before the cancel arrived — no error expected.
 
-    // Clean up if file was created
-    final file = File(outputPath);
-    if (await file.exists()) {
-      await file.delete();
+    // Clean up if file was created. A cancel answers at once and the native
+    // side removes the partial file afterwards, so it can vanish between an
+    // `exists` check and the delete.
+    try {
+      await File(outputPath).delete();
+    } on PathNotFoundException {
+      // Never written, or already removed by the cancelled extraction.
     }
   }, skip: skipPlatform);
 
