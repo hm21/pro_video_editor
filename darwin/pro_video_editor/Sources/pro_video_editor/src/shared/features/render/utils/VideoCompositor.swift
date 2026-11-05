@@ -63,6 +63,23 @@ struct ImageLayer {
         atUs: currentTimeUs, startUs: startUs, animationOffsetUs: animationOffsetUs,
         frameEndsUs: frameEndsUs, loop: loop)]
   }
+
+  /// Whether the layer shows at composition time `timeUs`; see
+  /// `isWithinTimeRange`.
+  func isShown(atUs timeUs: Int64) -> Bool {
+    isWithinTimeRange(timeUs, startUs: startUs, endUs: endUs)
+  }
+}
+
+/// Whether something shown from `startUs` to `endUs` shows at `timeUs`: from
+/// `startUs` up to, but not including, `endUs` (`-1` = from the start, until
+/// the end).
+///
+/// Clips and video effects keep to the same rule, so a frame at exactly
+/// `endUs` shows what comes after the range, and of two ranges that meet there
+/// only the later one shows.
+func isWithinTimeRange(_ timeUs: Int64, startUs: Int64, endUs: Int64) -> Bool {
+  (startUs == -1 || timeUs >= startUs) && (endUs == -1 || timeUs < endUs)
 }
 
 /// Index of the animated-image frame on screen at composition time [currentTimeUs].
@@ -586,6 +603,19 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     }
   }
 
+  /// Draws the overlay layers shown at [currentTimeUs] over [outputImage], in
+  /// order, laid out in [imageRect]. A layer shows from its start up to, but
+  /// not including, its end; see `ImageLayer.isShown(atUs:)`.
+  func drawOverlayLayers(
+    over outputImage: CIImage, imageRect: CGRect, atUs currentTimeUs: Int64
+  ) -> CIImage {
+    var image = outputImage
+    for layer in overlayImageLayers where layer.isShown(atUs: currentTimeUs) {
+      image = drawImageLayer(layer, over: image, imageRect: imageRect, currentTimeUs: currentTimeUs)
+    }
+    return image
+  }
+
   /// Draws [layer] at [currentTimeUs] over [outputImage], laid out in
   /// [imageRect]; a censor layer instead hides the part of [outputImage] it
   /// covers.
@@ -684,19 +714,18 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// Computes the color-filter cube active at the given composition time.
   ///
   /// Results are cached so each unique combination is built only once.
-  private func getLUTForActiveFilters(at compositionTime: CMTime) -> (data: Data, size: Int)? {
+  ///
+  /// Internal rather than private so RunnerTests can pin when a filter
+  /// applies.
+  func getLUTForActiveFilters(at compositionTime: CMTime) -> (data: Data, size: Int)? {
     guard !colorFilterConfigs.isEmpty else { return nil }
 
     let currentTimeUs = Int64(CMTimeGetSeconds(compositionTime) * 1_000_000)
 
     var activeIndices: [Int] = []
-    for (index, filter) in colorFilterConfigs.enumerated() {
-      let inRange =
-        (filter.startUs == -1 || currentTimeUs >= filter.startUs)
-        && (filter.endUs == -1 || currentTimeUs <= filter.endUs)
-      if inRange {
-        activeIndices.append(index)
-      }
+    for (index, filter) in colorFilterConfigs.enumerated()
+    where filter.isActive(atUs: currentTimeUs) {
+      activeIndices.append(index)
     }
 
     guard !activeIndices.isEmpty else { return nil }
@@ -1311,16 +1340,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
       // Apply time-based overlay layers
       let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
-      for layer in overlayImageLayers {
-        let inTimeRange =
-          (layer.startUs == -1 || currentTimeUs >= layer.startUs)
-          && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
-
-        if inTimeRange {
-          outputImage = drawImageLayer(
-            layer, over: outputImage, imageRect: imageRect, currentTimeUs: currentTimeUs)
-        }
-      }
+      outputImage = drawOverlayLayers(over: outputImage, imageRect: imageRect, atUs: currentTimeUs)
 
       // Clip overlay content that animated beyond the frame back to the frame
       // extent so a subsequent crop and the final render operate on the exact
@@ -1404,15 +1424,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       let imageRect = outputImage.extent
 
       let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
-      for layer in overlayImageLayers {
-        let inTimeRange =
-          (layer.startUs == -1 || currentTimeUs >= layer.startUs)
-          && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
-        if inTimeRange {
-          outputImage = drawImageLayer(
-            layer, over: outputImage, imageRect: imageRect, currentTimeUs: currentTimeUs)
-        }
-      }
+      outputImage = drawOverlayLayers(over: outputImage, imageRect: imageRect, atUs: currentTimeUs)
 
       // Clip any overlay content that animated beyond the frame (e.g. a layer
       // sliding in from an edge) back to the video frame, so the composed

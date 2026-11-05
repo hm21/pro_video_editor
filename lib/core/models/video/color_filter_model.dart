@@ -26,9 +26,16 @@ class ColorFilter with TimeRangeMixin {
   /// (e.g., saturation, brightness).
   final List<double> matrix;
 
+  /// When the filter starts to apply, relative to the start of the video.
+  /// `null` applies it from the start.
   @override
   final Duration? startTime;
 
+  /// When the filter stops applying, relative to the start of the video.
+  /// `null` keeps it until the end.
+  ///
+  /// The filter applies from [startTime] up to, but not including,
+  /// [endTime]: a frame at exactly [endTime] is drawn without it.
   @override
   final Duration? endTime;
 

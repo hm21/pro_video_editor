@@ -439,8 +439,9 @@ private fun addLayerOverlay(
 }
 
 /**
- * Adds [effect] to [videoEffects], shown from [startTimeUs] to [endTimeUs]
- * (`-1` = from the start, until the end).
+ * Adds [effect] to [videoEffects], shown from [startTimeUs] up to, but not
+ * including, [endTimeUs] (`-1` = from the start, until the end); see
+ * [halfOpenTimestampWrapper].
  */
 @UnstableApi
 private fun addTimedOverlayEffect(
@@ -454,19 +455,7 @@ private fun addTimedOverlayEffect(
         videoEffects += effect
         return
     }
-    val effectiveStart = if (startTimeUs == -1L) 0L else startTimeUs
-    val effectiveEnd = if (endTimeUs == -1L) Long.MAX_VALUE else endTimeUs
-    videoEffects += TimestampWrapper(effect, effectiveStart, effectiveEnd)
-}
-
-/**
- * Whether a layer shown from [startTimeUs] to [endTimeUs] (`-1` = from the
- * start, until the end) is never shown, which `TimestampWrapper` rejects.
- */
-internal fun isEmptyTimeRange(startTimeUs: Long, endTimeUs: Long): Boolean {
-    if (startTimeUs < -1L) return true
-    if (endTimeUs == -1L) return false
-    return endTimeUs <= (if (startTimeUs == -1L) 0L else startTimeUs)
+    videoEffects += halfOpenTimestampWrapper(effect, startTimeUs, endTimeUs)
 }
 
 /**
@@ -491,7 +480,7 @@ internal class OverlayBatch(private val videoEffects: MutableList<Effect>) {
     private var startTimeUs = -1L
     private var endTimeUs = -1L
 
-    /** Adds [overlay], shown from [startTimeUs] to [endTimeUs]. */
+    /** Adds [overlay], shown from [startTimeUs] up to, but not including, [endTimeUs]. */
     fun add(overlay: TextureOverlay, startTimeUs: Long, endTimeUs: Long) {
         if (isEmptyTimeRange(startTimeUs, endTimeUs)) {
             Log.d(RENDER_TAG, "Layer: empty time range; skipping layer")

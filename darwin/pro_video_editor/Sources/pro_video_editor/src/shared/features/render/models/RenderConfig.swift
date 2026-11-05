@@ -301,7 +301,9 @@ public struct ImageLayerConfig: Sendable {
   /// disk, bytes otherwise.
   let image: EncodedImage
   let startUs: Int64
-  /// endUs of -1 indicates the image should be displayed until the end of the video.
+  /// The first time the layer no longer shows: it shows up to, but not
+  /// including, endUs. endUs of -1 indicates the image should be displayed
+  /// until the end of the video.
   var endUs: Int64
   /// x position in pixels. When nil, the image is stretched to fill the video frame.
   let x: Int64?
@@ -421,6 +423,12 @@ public struct ColorFilterConfig: Sendable {
   let startUs: Int64
   /// endUs of -1 means the filter applies until the end of the video.
   let endUs: Int64
+
+  /// Whether the filter applies at composition time `timeUs`: from `startUs`
+  /// up to, but not including, `endUs`; see `isWithinTimeRange`.
+  func isActive(atUs timeUs: Int64) -> Bool {
+    isWithinTimeRange(timeUs, startUs: startUs, endUs: endUs)
+  }
 
   static func fromArguments(_ args: [String: Any]?) -> ColorFilterConfig? {
     guard let args = args,

@@ -1,7 +1,8 @@
 import androidx.media3.common.Effect
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.SingleColorLut
-import androidx.media3.effect.TimestampWrapper
+import ch.waio.pro_video_editor.src.features.render.helpers.halfOpenTimestampWrapper
+import ch.waio.pro_video_editor.src.features.render.helpers.isEmptyTimeRange
 import ch.waio.pro_video_editor.src.features.render.models.ColorFilterConfig
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
 
@@ -10,7 +11,8 @@ import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
  *
  * Supports multiple color filters with optional time ranges.
  * Untimed filters are combined into a single LUT via matrix multiplication.
- * Timed filters get individual LUTs wrapped with TimestampWrapper.
+ * Timed filters get individual LUTs wrapped with TimestampWrapper, each
+ * applied from its start up to, but not including, its end.
  * Each matrix must be 4x5 (20 elements) representing RGBA transformation.
  * Uses 33x33x33 LUT size for optimal quality/performance balance.
  *
@@ -45,21 +47,26 @@ fun applyColorMatrix(
         }
     }
 
-    // Apply each timed filter as an individual LUT with TimestampWrapper
+    // Apply each timed filter as an individual LUT with TimestampWrapper,
+    // from its start up to, but not including, its end.
     for (filter in timed) {
         if (filter.matrix.size != 20) {
             Log.w(RENDER_TAG, "Skipping timed color filter with invalid matrix size: ${filter.matrix.size}")
             continue
         }
+        val startUs = filter.startUs ?: -1L
+        val endUs = filter.endUs ?: -1L
+        if (isEmptyTimeRange(startUs, endUs)) {
+            Log.d(RENDER_TAG, "Skipping timed color filter with an empty time range")
+            continue
+        }
         val lutData = generateLutFromColorMatrix(filter.matrix, lutSize)
         val lutEffect = SingleColorLut.createFromCube(lutData)
-        val startUs = filter.startUs ?: 0L
-        val endUs = filter.endUs ?: Long.MAX_VALUE
         Log.d(
             RENDER_TAG,
-            "Applying timed color filter: ${startUs / 1000}ms - ${if (endUs == Long.MAX_VALUE) "end" else "${endUs / 1000}ms"}"
+            "Applying timed color filter: ${maxOf(startUs, 0L) / 1000}ms - ${if (endUs == -1L) "end" else "${endUs / 1000}ms"}"
         )
-        videoEffects += TimestampWrapper(lutEffect, startUs, endUs)
+        videoEffects += halfOpenTimestampWrapper(lutEffect, startUs, endUs)
     }
 }
 
