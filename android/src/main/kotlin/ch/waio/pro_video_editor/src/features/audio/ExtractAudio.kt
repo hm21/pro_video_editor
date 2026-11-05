@@ -26,6 +26,7 @@ import ch.waio.pro_video_editor.src.shared.media.contentDataSource
 import ch.waio.pro_video_editor.src.shared.media.contentUri
 import java.io.File
 import java.nio.ByteBuffer
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -95,6 +96,17 @@ class ExtractAudio(private val context: Context) {
     }
 
     /**
+     * Where an extraction whose bytes are returned is written first. The UUID
+     * keeps extractions that run at the same time apart: named after the
+     * millisecond alone, they shared one file, so one call returned another's
+     * audio or failed on a file another call had already deleted (#273).
+     */
+    private fun temporaryOutputFile(extension: String) = File(
+        context.cacheDir,
+        "audio_output_${System.currentTimeMillis()}_${UUID.randomUUID()}.$extension"
+    )
+
+    /**
      * Extracts audio to WAV format using custom WAV file writer.
      *
      * This method properly handles both compressed and PCM audio formats:
@@ -110,15 +122,7 @@ class ExtractAudio(private val context: Context) {
         val shouldStop = AtomicBoolean(false)
         val mainHandler = Handler(Looper.getMainLooper())
 
-        // Determine output file location
-        val outputFile = if (config.outputPath != null) {
-            File(config.outputPath)
-        } else {
-            File(
-                context.cacheDir,
-                "audio_output_${System.currentTimeMillis()}.wav"
-            )
-        }
+        val outputFile = config.outputPath?.let(::File) ?: temporaryOutputFile("wav")
 
         // Run extraction in background thread
         Thread {
@@ -268,15 +272,8 @@ class ExtractAudio(private val context: Context) {
         val shouldStop = AtomicBoolean(false)
         val mainHandler = Handler(Looper.getMainLooper())
 
-        // Determine output file location
-        val outputFile = if (config.outputPath != null) {
-            File(config.outputPath)
-        } else {
-            File(
-                context.cacheDir,
-                "audio_output_${System.currentTimeMillis()}.${config.getExtension()}"
-            )
-        }
+        val outputFile =
+            config.outputPath?.let(::File) ?: temporaryOutputFile(config.getExtension())
 
         // Run extraction in background thread
         Thread {
@@ -479,14 +476,8 @@ class ExtractAudio(private val context: Context) {
         val canceled = AtomicBoolean(false)
         val transformerRef = AtomicReference<Transformer?>(null)
 
-        val outputFile = if (config.outputPath != null) {
-            File(config.outputPath)
-        } else {
-            File(
-                context.cacheDir,
-                "audio_output_${System.currentTimeMillis()}.${config.getExtension()}"
-            )
-        }
+        val outputFile =
+            config.outputPath?.let(::File) ?: temporaryOutputFile(config.getExtension())
 
         fun cleanupOnFailure() {
             if (config.outputPath == null && outputFile.exists()) {

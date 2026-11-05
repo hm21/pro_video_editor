@@ -91,36 +91,12 @@ class ExtractAudio {
 
         let applySpeed = config.speed > 0 && config.speed != 1.0
 
-        /// https://developer.apple.com/documentation/dispatch/dispatchsemaphore
-        let semaphore = DispatchSemaphore(value: 0)
-        var loadError: Error?
-
-        asset.loadValuesAsynchronously(forKeys: ["tracks", "duration"]) {
-          let tracksStatus = asset.statusOfValue(forKey: "tracks", error: nil)
-          let durationStatus = asset.statusOfValue(forKey: "duration", error: nil)
-
-          if tracksStatus == .failed || durationStatus == .failed {
-            loadError = NSError(
-              domain: "ExtractAudio",
-              code: -10,
-              userInfo: [NSLocalizedDescriptionKey: "Failed to load asset properties"]
-            )
-          }
-          semaphore.signal()
-        }
-        semaphore.wait()
-
-        if let error = loadError { throw error }
+        try loadTracksAndDuration(of: asset)
         let duration = asset.duration
 
-        let outputURL: URL
-        if let outputPath = config.outputPath {
-          outputURL = URL(fileURLWithPath: outputPath)
-        } else {
-          let tempDir = FileManager.default.temporaryDirectory
-          let filename = "audio_\(Date().timeIntervalSince1970).\(config.getOutputExtension())"
-          outputURL = tempDir.appendingPathComponent(filename)
-        }
+        let outputURL =
+          config.outputPath.map { URL(fileURLWithPath: $0) }
+          ?? temporaryOutputURL(extension: config.getOutputExtension())
 
         try? FileManager.default.removeItem(at: outputURL)
 
@@ -335,66 +311,29 @@ class ExtractAudio {
     var assetReader: AVAssetReader?
     var isCancelled = false
 
-    let task = Task.detached(priority: .userInitiated) {
+    // A dispatch queue, not a Swift task: `copyNextSampleBuffer` below blocks
+    // its thread for the whole extraction, and the cooperative pool tasks run
+    // on has only one thread per CPU core. With as many extractions running at
+    // once as the device has cores, every one of them stalled for good (#273).
+    DispatchQueue.global(qos: .userInitiated).async {
       do {
         let sourceURL = URL(fileURLWithPath: config.inputPath)
         let asset = AVURLAsset(url: sourceURL)
 
-        var duration = CMTime.zero
+        try loadTracksAndDuration(of: asset)
+        let duration = asset.duration
 
-        if #available(macOS 12.0, iOS 15.0, *) {
-          (_, duration) = try await asset.load(.tracks, .duration)
-        } else {
-          try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<Void, Error>) in
-            asset.loadValuesAsynchronously(forKeys: ["tracks", "duration"]) {
-              let tracksStatus = asset.statusOfValue(forKey: "tracks", error: nil)
-              let durationStatus = asset.statusOfValue(forKey: "duration", error: nil)
-
-              if tracksStatus == .failed || durationStatus == .failed {
-                continuation.resume(
-                  throwing: NSError(
-                    domain: "ExtractAudio",
-                    code: -10,
-                    userInfo: [NSLocalizedDescriptionKey: "Failed to load asset properties"]
-                  ))
-              } else {
-                duration = asset.duration
-                continuation.resume()
-              }
-            }
-          }
-        }
-
-        let outputURL: URL
-        if let outputPath = config.outputPath {
-          outputURL = URL(fileURLWithPath: outputPath)
-        } else {
-          let tempDir = FileManager.default.temporaryDirectory
-          let filename = "audio_\(Date().timeIntervalSince1970).wav"
-          outputURL = tempDir.appendingPathComponent(filename)
-        }
+        let outputURL =
+          config.outputPath.map { URL(fileURLWithPath: $0) }
+          ?? temporaryOutputURL(extension: "wav")
 
         try? FileManager.default.removeItem(at: outputURL)
 
-        let audioTracks: [AVAssetTrack]
-        if #available(macOS 12.0, iOS 15.0, *) {
-          audioTracks = try await asset.loadTracks(withMediaType: .audio)
-        } else {
-          audioTracks = asset.tracks(withMediaType: .audio)
-        }
-
-        guard let audioTrack = audioTracks.first else {
+        guard let audioTrack = asset.tracks(withMediaType: .audio).first else {
           throw NoAudioTrackException()
         }
 
-        let formatDescriptions: [CMAudioFormatDescription]
-        if #available(macOS 12.0, iOS 15.0, *) {
-          formatDescriptions = try await audioTrack.load(.formatDescriptions)
-        } else {
-          formatDescriptions = audioTrack.formatDescriptions as! [CMAudioFormatDescription]
-        }
-
+        let formatDescriptions = audioTrack.formatDescriptions as! [CMAudioFormatDescription]
         guard let formatDescription = formatDescriptions.first else {
           throw NSError(
             domain: "ExtractAudio",
@@ -626,9 +565,30 @@ class ExtractAudio {
 
     return {
       isCancelled = true
-      task.cancel()
       assetReader?.cancelReading()
     }
+  }
+
+  /// Loads the tracks and duration of [asset], blocking the calling thread
+  /// until they are there.
+  private static func loadTracksAndDuration(of asset: AVURLAsset) throws {
+    let keys = ["tracks", "duration"]
+    let loaded = DispatchSemaphore(value: 0)
+    asset.loadValuesAsynchronously(forKeys: keys) { loaded.signal() }
+    loaded.wait()
+    if keys.contains(where: { asset.statusOfValue(forKey: $0, error: nil) == .failed }) {
+      throw NSError(
+        domain: "ExtractAudio", code: -10,
+        userInfo: [NSLocalizedDescriptionKey: "Failed to load asset properties"])
+    }
+  }
+
+  /// Where an extraction whose bytes are returned is written first. The UUID
+  /// keeps extractions that run at the same time apart: named after the clock
+  /// alone, they shared one file and returned each other's audio (#273).
+  private static func temporaryOutputURL(extension ext: String) -> URL {
+    FileManager.default.temporaryDirectory.appendingPathComponent(
+      "audio_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString).\(ext)")
   }
 
   /// Builds a standard 44-byte RIFF/WAV header for 16-bit PCM audio.
