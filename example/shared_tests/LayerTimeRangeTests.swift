@@ -97,6 +97,23 @@ final class LayerTimeRangeTests: XCTestCase {
     XCTAssertNil(compositor.getLUTForActiveFilters(at: frameAtEnd))
   }
 
+  func testAFrameBetweenTwoMicrosecondsIsReadAsTheOneBefore() {
+    // 30 fps: the frame at 2/30 s is 66 666.67 µs, before a layer starting
+    // at 66 667 µs. Media3 rounds frame times down too, so Android reads the
+    // same 66 666.
+    let frame = CMTime(value: 2, timescale: 30)
+
+    XCTAssertEqual(compositionTimeUs(frame), 66_666)
+    XCTAssertTrue(isWithinTimeRange(compositionTimeUs(frame), startUs: 0, endUs: 66_667))
+    XCTAssertFalse(isWithinTimeRange(compositionTimeUs(frame), startUs: 66_667, endUs: -1))
+    // 29.97 fps: 1001/30000 s is 33 366.67 µs.
+    XCTAssertEqual(compositionTimeUs(CMTime(value: 1_001, timescale: 30_000)), 33_366)
+
+    // Stabilization and keyframe motion keep the nearest microsecond.
+    XCTAssertEqual(nearestMicroseconds(frame), 66_667)
+    XCTAssertEqual(nearestMicroseconds(CMTime(value: 2_460, timescale: 600)), 4_100_000)
+  }
+
   // MARK: - Helpers
 
   private enum Color { case red, green, blue, other }

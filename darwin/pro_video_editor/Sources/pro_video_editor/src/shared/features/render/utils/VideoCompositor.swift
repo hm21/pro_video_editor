@@ -82,12 +82,26 @@ func isWithinTimeRange(_ timeUs: Int64, startUs: Int64, endUs: Int64) -> Bool {
   (startUs == -1 || timeUs >= startUs) && (endUs == -1 || timeUs < endUs)
 }
 
-/// `time` in whole microseconds, rounded to the nearest one.
+/// `time` in whole microseconds, rounded down, to match against time ranges in
+/// whole microseconds.
 ///
 /// Converted exactly rather than through seconds as a `Double`: a frame at
 /// 4.1 s (2460/600) is 4.0999999… s as a `Double`, which truncates to the
 /// microsecond before a range ending at 4.1 s and would still draw it there.
+///
+/// Rounded down, not to the nearest microsecond: a frame at 2/30 s
+/// (66 666.67 µs) is before a range starting at 66 667 µs, and only the
+/// rounded-down 66 666 says so. Media3 rounds frame times down too, so Android
+/// draws that frame the same way.
 func compositionTimeUs(_ time: CMTime) -> Int64 {
+  CMTimeConvertScale(time, timescale: 1_000_000, method: .roundTowardNegativeInfinity).value
+}
+
+/// `time` rounded to the nearest whole microsecond, converted exactly.
+///
+/// The time the stabilization and keyframe-motion windows are built and looked
+/// up with; layers, filters and effects use `compositionTimeUs`.
+func nearestMicroseconds(_ time: CMTime) -> Int64 {
   CMTimeConvertScale(time, timescale: 1_000_000, method: .roundHalfAwayFromZero).value
 }
 
@@ -813,7 +827,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         // screen.
         frame = applySourceFrameStages(
           to: frame,
-          atUs: compositionTimeUs(request.compositionTime)
+          atUs: nearestMicroseconds(request.compositionTime)
             - offsetUs)
         return resampled(frame, scale: stage.historyScale).cropped(to: extent)
       }
@@ -1291,7 +1305,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       // keyframes' shifts are fractions of.
       outputImage = applySourceFrameStages(
         to: outputImage,
-        atUs: compositionTimeUs(request.compositionTime))
+        atUs: nearestMicroseconds(request.compositionTime))
 
       outputImage = applyCustomEffectStage(
         to: outputImage, request: request, orientation: orientation)

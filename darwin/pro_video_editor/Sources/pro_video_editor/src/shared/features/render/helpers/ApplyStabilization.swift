@@ -71,5 +71,5 @@ func applyStabilization(
 }
 
 private func microseconds(_ time: CMTime) -> Int64 {
-  Int64((CMTimeGetSeconds(time) * 1_000_000).rounded())
+  nearestMicroseconds(time)
 }
