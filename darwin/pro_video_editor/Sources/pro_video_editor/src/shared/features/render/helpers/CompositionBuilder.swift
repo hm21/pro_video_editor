@@ -211,8 +211,8 @@ internal class CompositionBuilder {
       let range = clipInstructions[index].timeRange
       windows.append(
         ChromaKeyWindow(
-          startUs: Int64(CMTimeGetSeconds(range.start) * 1_000_000),
-          endUs: Int64(CMTimeGetSeconds(CMTimeRangeGetEnd(range)) * 1_000_000),
+          startUs: compositionTimeUs(range.start),
+          endUs: compositionTimeUs(CMTimeRangeGetEnd(range)),
           config: effective
         ))
     }
@@ -239,10 +239,9 @@ internal class CompositionBuilder {
 
       let dHalfUs = transition.durationUs / 2
       let instr = clipInstructions[i]
-      let clipStartUs = Int64(CMTimeGetSeconds(instr.timeRange.start) * 1_000_000)
-      let boundaryUs = Int64(CMTimeGetSeconds(CMTimeRangeGetEnd(instr.timeRange)) * 1_000_000)
-      let nextEndUs = Int64(
-        CMTimeGetSeconds(CMTimeRangeGetEnd(clipInstructions[i + 1].timeRange)) * 1_000_000)
+      let clipStartUs = compositionTimeUs(instr.timeRange.start)
+      let boundaryUs = compositionTimeUs(CMTimeRangeGetEnd(instr.timeRange))
+      let nextEndUs = compositionTimeUs(CMTimeRangeGetEnd(clipInstructions[i + 1].timeRange))
 
       // Fade out (to color) over the tail of clip i.
       windows.append(
@@ -274,10 +273,10 @@ internal class CompositionBuilder {
     {
       let toWhite = wrap.type == "fadeToWhite"
       let dHalfUs = wrap.durationUs / 2
-      let lastStartUs = Int64(CMTimeGetSeconds(lastInstr.timeRange.start) * 1_000_000)
-      let lastEndUs = Int64(CMTimeGetSeconds(CMTimeRangeGetEnd(lastInstr.timeRange)) * 1_000_000)
-      let firstStartUs = Int64(CMTimeGetSeconds(firstInstr.timeRange.start) * 1_000_000)
-      let firstEndUs = Int64(CMTimeGetSeconds(CMTimeRangeGetEnd(firstInstr.timeRange)) * 1_000_000)
+      let lastStartUs = compositionTimeUs(lastInstr.timeRange.start)
+      let lastEndUs = compositionTimeUs(CMTimeRangeGetEnd(lastInstr.timeRange))
+      let firstStartUs = compositionTimeUs(firstInstr.timeRange.start)
+      let firstEndUs = compositionTimeUs(CMTimeRangeGetEnd(firstInstr.timeRange))
 
       // Fade the last clip out to the color at the very end.
       windows.append(

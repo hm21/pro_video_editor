@@ -1,3 +1,8 @@
+## 2.51.2
+- **FIX**(android, iOS, macOS): An `ImageLayer` and a timed `ColorFilter` show from their `startTime` up to, but not including, their `endTime`, like clips and `VideoEffect`s do. A frame at exactly `endTime` no longer draws them, so where one layer ends as the next one starts, such as the frames `pro_image_editor` exports for a text with highlights or reveals, that frame shows only the next one instead of both.
+- **FIX**(iOS, macOS): Layers, color filters and effects are matched against a frame's exact time, rounded down to the microsecond as on Android. A frame such as the one at 4.1 s was read through a `Double` as the microsecond before it, so a layer, filter or effect ending at 4.1 s was still drawn on it.
+- **FIX**(android): A timed `ColorFilter` whose time range holds no frame, such as one that ends at `Duration.zero`, is left out instead of failing the render.
+
 ## 2.51.1
 - **FIX**(android, iOS, macOS): `extractAudio` calls that run at the same time each return their own audio. They shared one temporary file, so a call could return another call's audio or fail.
 - **FIX**(macOS): Many WAV extractions at once, around as many as the Mac has CPU cores, no longer hang.

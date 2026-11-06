@@ -187,5 +187,5 @@ func computeMotionWindows(
 
 private func motionMicroseconds(_ time: CMTime) -> Int64 {
   guard time.isValid, time.isNumeric else { return 0 }
-  return Int64((CMTimeGetSeconds(time) * 1_000_000).rounded())
+  return nearestMicroseconds(time)
 }

@@ -163,9 +163,18 @@ class ImageLayer with TimeRangeMixin {
   /// Not drawn when [frames] is not empty.
   final EditorLayerImage image;
 
+  /// When the layer appears, relative to the start of the video. `null` shows
+  /// it from the start.
   @override
   final Duration? startTime;
 
+  /// When the layer disappears, relative to the start of the video. `null`
+  /// keeps it until the end.
+  ///
+  /// The layer shows from [startTime] up to, but not including, [endTime]: a
+  /// frame at exactly [endTime] is drawn without it. So of two layers where
+  /// one ends exactly where the next one starts, such as the parts of a text
+  /// that types itself out, a frame on that boundary shows only the next one.
   @override
   final Duration? endTime;
 

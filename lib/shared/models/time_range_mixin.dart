@@ -4,6 +4,9 @@
 /// Classes that mix in [TimeRangeMixin] can be constrained to be active only
 /// during a specific time range of the video.
 ///
+/// The element is active from [startTime] up to, but not including,
+/// [endTime]: at exactly [endTime] it is no longer active.
+///
 /// - If [startTime] is `null`, the element starts from the beginning.
 /// - If [endTime] is `null`, the element lasts until the end.
 mixin TimeRangeMixin {
@@ -12,7 +15,8 @@ mixin TimeRangeMixin {
   /// If `null`, the element is active from the beginning of the video.
   Duration? get startTime;
 
-  /// The end time for this element, relative to the start of the video.
+  /// The end time for this element, relative to the start of the video: the
+  /// first point in time the element is no longer active.
   ///
   /// If `null`, the element is active until the end of the video.
   Duration? get endTime;

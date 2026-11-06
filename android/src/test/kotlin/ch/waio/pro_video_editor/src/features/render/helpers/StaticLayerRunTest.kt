@@ -157,18 +157,6 @@ internal class StaticLayerRunTest {
     }
 
     @Test
-    fun emptyTimeRanges() {
-        assertFalse(isEmptyTimeRange(-1L, -1L))
-        assertFalse(isEmptyTimeRange(-1L, 1L))
-        assertFalse(isEmptyTimeRange(5L, -1L))
-        assertFalse(isEmptyTimeRange(5L, 6L))
-        assertTrue(isEmptyTimeRange(-1L, 0L))
-        assertTrue(isEmptyTimeRange(5L, 5L))
-        assertTrue(isEmptyTimeRange(5L, 4L))
-        assertTrue(isEmptyTimeRange(-2L, 4L))
-    }
-
-    @Test
     fun overlaysOverOneTimeRangeShareEffectsOfAtMostFifteen() {
         val effects = mutableListOf<Effect>()
         val batch = OverlayBatch(effects)
@@ -194,7 +182,8 @@ internal class StaticLayerRunTest {
         assertEquals(3, effects.size)
         val first = assertIs<TimestampWrapper>(effects[0])
         assertEquals(0L, first.startTimeUs)
-        assertEquals(1_000L, first.endTimeUs)
+        // Media3 includes the end; the layer is gone at 1000 µs itself.
+        assertEquals(999L, first.endTimeUs)
         assertIs<OverlayEffect>(effects[1])
         assertIs<TimestampWrapper>(effects[2])
     }

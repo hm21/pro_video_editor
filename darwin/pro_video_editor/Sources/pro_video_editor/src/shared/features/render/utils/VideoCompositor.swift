@@ -63,6 +63,46 @@ struct ImageLayer {
         atUs: currentTimeUs, startUs: startUs, animationOffsetUs: animationOffsetUs,
         frameEndsUs: frameEndsUs, loop: loop)]
   }
+
+  /// Whether the layer shows at composition time `timeUs`; see
+  /// `isWithinTimeRange`.
+  func isShown(atUs timeUs: Int64) -> Bool {
+    isWithinTimeRange(timeUs, startUs: startUs, endUs: endUs)
+  }
+}
+
+/// Whether something shown from `startUs` to `endUs` shows at `timeUs`: from
+/// `startUs` up to, but not including, `endUs` (`-1` = from the start, until
+/// the end).
+///
+/// Clips and video effects keep to the same rule, so a frame at exactly
+/// `endUs` shows what comes after the range, and of two ranges that meet there
+/// only the later one shows.
+func isWithinTimeRange(_ timeUs: Int64, startUs: Int64, endUs: Int64) -> Bool {
+  (startUs == -1 || timeUs >= startUs) && (endUs == -1 || timeUs < endUs)
+}
+
+/// `time` in whole microseconds, rounded down, to match against time ranges in
+/// whole microseconds.
+///
+/// Converted exactly rather than through seconds as a `Double`: a frame at
+/// 4.1 s (2460/600) is 4.0999999… s as a `Double`, which truncates to the
+/// microsecond before a range ending at 4.1 s and would still draw it there.
+///
+/// Rounded down, not to the nearest microsecond: a frame at 2/30 s
+/// (66 666.67 µs) is before a range starting at 66 667 µs, and only the
+/// rounded-down 66 666 says so. Media3 rounds frame times down too, so Android
+/// draws that frame the same way.
+func compositionTimeUs(_ time: CMTime) -> Int64 {
+  CMTimeConvertScale(time, timescale: 1_000_000, method: .roundTowardNegativeInfinity).value
+}
+
+/// `time` rounded to the nearest whole microsecond, converted exactly.
+///
+/// The time the stabilization and keyframe-motion windows are built and looked
+/// up with; layers, filters and effects use `compositionTimeUs`.
+func nearestMicroseconds(_ time: CMTime) -> Int64 {
+  CMTimeConvertScale(time, timescale: 1_000_000, method: .roundHalfAwayFromZero).value
 }
 
 /// Index of the animated-image frame on screen at composition time [currentTimeUs].
@@ -363,7 +403,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// Windows are per clip and never overlap, so the first match wins.
   private func activeChromaKey(at compositionTime: CMTime) -> ChromaKeyConfig? {
     guard !chromaKeyWindows.isEmpty else { return nil }
-    let tUs = Int64(CMTimeGetSeconds(compositionTime) * 1_000_000)
+    let tUs = compositionTimeUs(compositionTime)
     for window in chromaKeyWindows
     where window.endUs > window.startUs && tUs >= window.startUs && tUs < window.endUs {
       return window.config
@@ -394,7 +434,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// the dip color by `dipAmount` (0 = full video, 1 = full color).
   private func applyFadeDip(to image: CIImage, at compositionTime: CMTime) -> CIImage {
     guard !fadeWindows.isEmpty else { return image }
-    let tUs = Int64(CMTimeGetSeconds(compositionTime) * 1_000_000)
+    let tUs = compositionTimeUs(compositionTime)
 
     var dipAmount = 0.0
     var toWhite = false
@@ -586,6 +626,19 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     }
   }
 
+  /// Draws the overlay layers shown at [currentTimeUs] over [outputImage], in
+  /// order, laid out in [imageRect]. A layer shows from its start up to, but
+  /// not including, its end; see `ImageLayer.isShown(atUs:)`.
+  func drawOverlayLayers(
+    over outputImage: CIImage, imageRect: CGRect, atUs currentTimeUs: Int64
+  ) -> CIImage {
+    var image = outputImage
+    for layer in overlayImageLayers where layer.isShown(atUs: currentTimeUs) {
+      image = drawImageLayer(layer, over: image, imageRect: imageRect, currentTimeUs: currentTimeUs)
+    }
+    return image
+  }
+
   /// Draws [layer] at [currentTimeUs] over [outputImage], laid out in
   /// [imageRect]; a censor layer instead hides the part of [outputImage] it
   /// covers.
@@ -684,19 +737,18 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// Computes the color-filter cube active at the given composition time.
   ///
   /// Results are cached so each unique combination is built only once.
-  private func getLUTForActiveFilters(at compositionTime: CMTime) -> (data: Data, size: Int)? {
+  ///
+  /// Internal rather than private so RunnerTests can pin when a filter
+  /// applies.
+  func getLUTForActiveFilters(at compositionTime: CMTime) -> (data: Data, size: Int)? {
     guard !colorFilterConfigs.isEmpty else { return nil }
 
-    let currentTimeUs = Int64(CMTimeGetSeconds(compositionTime) * 1_000_000)
+    let currentTimeUs = compositionTimeUs(compositionTime)
 
     var activeIndices: [Int] = []
-    for (index, filter) in colorFilterConfigs.enumerated() {
-      let inRange =
-        (filter.startUs == -1 || currentTimeUs >= filter.startUs)
-        && (filter.endUs == -1 || currentTimeUs <= filter.endUs)
-      if inRange {
-        activeIndices.append(index)
-      }
+    for (index, filter) in colorFilterConfigs.enumerated()
+    where filter.isActive(atUs: currentTimeUs) {
+      activeIndices.append(index)
     }
 
     guard !activeIndices.isEmpty else { return nil }
@@ -757,7 +809,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     orientation: CGAffineTransform?
   ) -> CIImage {
     guard !customEffects.isEmpty else { return image }
-    let tUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
+    let tUs = compositionTimeUs(request.compositionTime)
     let extent = image.extent
     var output = image
     for stage in customEffects where stage.config.isActive(atUs: tUs) {
@@ -775,7 +827,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         // screen.
         frame = applySourceFrameStages(
           to: frame,
-          atUs: Int64((CMTimeGetSeconds(request.compositionTime) * 1_000_000).rounded())
+          atUs: nearestMicroseconds(request.compositionTime)
             - offsetUs)
         return resampled(frame, scale: stage.historyScale).cropped(to: extent)
       }
@@ -813,7 +865,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     to image: CIImage, at compositionTime: CMTime, orientation: CGAffineTransform = .identity
   ) -> CIImage {
     guard !videoEffects.isEmpty else { return image }
-    let tUs = Int64(CMTimeGetSeconds(compositionTime) * 1_000_000)
+    let tUs = compositionTimeUs(compositionTime)
     let frame = VideoEffectConfig.resolve(videoEffects, atUs: tUs)
     guard !orientation.isIdentity else { return applyVideoEffect(to: image, frame) }
     return applyVideoEffect(to: image.transformed(by: orientation), frame)
@@ -999,7 +1051,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     let bg = instruction.backgroundColor ?? CGColor(red: 0, green: 0, blue: 0, alpha: 1)
     var canvas = CIImage(color: CIColor(cgColor: bg))
       .cropped(to: CGRect(origin: .zero, size: renderSize))
-    let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
+    let currentTimeUs = compositionTimeUs(request.compositionTime)
 
     for placement in instruction.layerPlacements {
       // Where the layer's keyframes put it on this frame, if it has any.
@@ -1253,7 +1305,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       // keyframes' shifts are fractions of.
       outputImage = applySourceFrameStages(
         to: outputImage,
-        atUs: Int64((CMTimeGetSeconds(request.compositionTime) * 1_000_000).rounded()))
+        atUs: nearestMicroseconds(request.compositionTime))
 
       outputImage = applyCustomEffectStage(
         to: outputImage, request: request, orientation: orientation)
@@ -1310,17 +1362,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       let imageRect = outputImage.extent
 
       // Apply time-based overlay layers
-      let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
-      for layer in overlayImageLayers {
-        let inTimeRange =
-          (layer.startUs == -1 || currentTimeUs >= layer.startUs)
-          && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
-
-        if inTimeRange {
-          outputImage = drawImageLayer(
-            layer, over: outputImage, imageRect: imageRect, currentTimeUs: currentTimeUs)
-        }
-      }
+      let currentTimeUs = compositionTimeUs(request.compositionTime)
+      outputImage = drawOverlayLayers(over: outputImage, imageRect: imageRect, atUs: currentTimeUs)
 
       // Clip overlay content that animated beyond the frame back to the frame
       // extent so a subsequent crop and the final render operate on the exact
@@ -1403,16 +1446,8 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     if !imageBytesWithCropping {
       let imageRect = outputImage.extent
 
-      let currentTimeUs = Int64(CMTimeGetSeconds(request.compositionTime) * 1_000_000)
-      for layer in overlayImageLayers {
-        let inTimeRange =
-          (layer.startUs == -1 || currentTimeUs >= layer.startUs)
-          && (layer.endUs == -1 || currentTimeUs <= layer.endUs)
-        if inTimeRange {
-          outputImage = drawImageLayer(
-            layer, over: outputImage, imageRect: imageRect, currentTimeUs: currentTimeUs)
-        }
-      }
+      let currentTimeUs = compositionTimeUs(request.compositionTime)
+      outputImage = drawOverlayLayers(over: outputImage, imageRect: imageRect, atUs: currentTimeUs)
 
       // Clip any overlay content that animated beyond the frame (e.g. a layer
       // sliding in from an edge) back to the video frame, so the composed
