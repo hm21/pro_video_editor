@@ -8,8 +8,9 @@ import Foundation
 /// frame at a time. Decoded up front, every frame stayed in memory once it had
 /// been drawn: a drawing that draws itself over six seconds, about 175 frames
 /// of 1.4 megapixels each, held close to 2 GB on macOS by the end of the
-/// render. A render asks for the frames in order, so each one is still decoded
-/// once.
+/// render. A render asks for the frames in order, so each one is decoded once
+/// per playthrough: once for a sequence that does not loop, again on every pass
+/// of one that does.
 final class LayerFrames: @unchecked Sendable {
   /// How many frames there are.
   let count: Int

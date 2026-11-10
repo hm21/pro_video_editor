@@ -600,6 +600,18 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(decoded, [1, 2, 3])
   }
 
+  func testLayerFramesDecodeTheFirstFrameAgainWhenALoopComesBack() {
+    var decoded: [Int] = []
+    let frames = LayerFrames(count: 2, first: frameImage(0)) { index in
+      decoded.append(index)
+      return self.frameImage(index)
+    }
+
+    XCTAssertEqual(frameWidth(frames, at: 1), 2)
+    XCTAssertEqual(frameWidth(frames, at: 0), 1)
+    XCTAssertEqual(decoded, [1, 0])
+  }
+
   func testLayerFramesDecodedUpFrontReturnTheirFrames() {
     let frames: LayerFrames = [frameImage(0), frameImage(1)]
 

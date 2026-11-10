@@ -562,7 +562,22 @@ private fun prepareFrameSequence(
         frames = OnDemandFrames(
             count = layer.frames.size,
             first = first.bitmap,
-            decode = { prepareFrame(it)?.bitmap },
+            decode = { index ->
+                // Prepared mid-render, where an exception fails the whole
+                // render; before it started, addImageLayer skipped the layer.
+                // A frame that cannot be prepared counts as one that does not
+                // decode. An OutOfMemoryError still fails the render.
+                try {
+                    prepareFrame(index)?.bitmap
+                } catch (e: Exception) {
+                    Log.e(
+                        RENDER_TAG,
+                        "Layer: frame $index of ${layer.frames.size} failed to prepare " +
+                                "(${e.message}); keeping the frame before it"
+                    )
+                    null
+                }
+            },
             release = Bitmap::recycle,
         ),
         durationsUs = layer.frames.map { it.durationUs },

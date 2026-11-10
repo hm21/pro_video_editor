@@ -28,7 +28,8 @@ internal class DecodedFrames<T>(private val frames: List<T>) : OverlayFrames<T> 
  * Decoding every frame up front held all of them at once. A drawing that draws
  * itself over six seconds exports as about 175 images of up to 8 MB each at
  * 1080p, so the render needed a gigabyte or more before it started. A render
- * asks for the frames in order, so each one is still decoded once, only later.
+ * asks for the frames in order, so each one is decoded once per playthrough:
+ * once for a sequence that does not loop, again on every pass of one that does.
  *
  * [first] is frame 0, already decoded. [decode] decodes frame `index`, or
  * returns `null` when it does not decode; the frame shown before it then stays
