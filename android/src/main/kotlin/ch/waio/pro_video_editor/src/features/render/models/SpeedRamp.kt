@@ -145,6 +145,14 @@ val VideoClip.changesSpeed: Boolean
     get() = speedRamp != null || playbackSpeed.let { it != null && it > 0f && it != 1.0f }
 
 /**
+ * Whether some stretch of the clip plays slower than its own speed: a
+ * [VideoClip.playbackSpeed] below 1, or a ramp step below 1.
+ */
+val VideoClip.slowsDown: Boolean
+    get() = speedRamp?.steps?.any { it.speed < 1.0 }
+        ?: playbackSpeed.let { it != null && it > 0f && it < 1.0f }
+
+/**
  * The constant speed that plays this clip in the time it takes:
  * [VideoClip.playbackSpeed], or a speed ramp's average.
  */

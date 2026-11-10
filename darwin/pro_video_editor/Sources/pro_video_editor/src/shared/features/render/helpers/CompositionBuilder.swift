@@ -158,6 +158,8 @@ internal class CompositionBuilder {
       instructions.append(instruction)
     }
 
+    let frameBlendWindows = computeFrameBlendWindows(
+      videoClips: videoClips, clipInstructions: videoResult.clipInstructions)
     let videoCompositionData = VideoCompositionData(
       instructions: instructions,
       frameDuration: frameDuration,
@@ -165,7 +167,11 @@ internal class CompositionBuilder {
       stabilizationWindows: computeStabilizationWindows(
         videoClips: videoClips, clipInstructions: videoResult.clipInstructions),
       motionWindows: computeMotionWindows(
-        videoClips: videoClips, clipInstructions: videoResult.clipInstructions)
+        videoClips: videoClips, clipInstructions: videoResult.clipInstructions),
+      frameBlendWindows: frameBlendWindows,
+      frameBlendTrackID: try await applyFrameBlendTrack(
+        composition: composition, videoTrack: videoResult.videoTrack,
+        windows: frameBlendWindows)
     )
 
     PluginLog.print("✅ Composition created successfully with \(videoClips.count) clips")

@@ -55,6 +55,9 @@ data class TransitionConfig(
  *  [playbackSpeed]. Its positions run along this clip's own window, so a clip
  *  trimmed to part of itself carries the matching [SpeedRamp.cropped].
  * @property reverseVideo Whether to render this clip backwards
+ * @property frameBlending Whether a slowed-down stretch shows cross-fades of
+ *  its neighbouring source frames instead of holding each frame; see
+ *  [FrameBlendGlEffect]. Ignored with [reverseVideo].
  * @property transition Transition into the next clip (null = hard cut). On the
  *  **last** clip it wraps into the first clip, making the track loop seamlessly
  *  (see the wrap handling in RenderVideo/VideoSequenceBuilder).
@@ -68,6 +71,7 @@ data class VideoClip(
     val playbackSpeed: Float? = null,
     val speedRamp: SpeedRamp? = null,
     val reverseVideo: Boolean = false,
+    val frameBlending: Boolean = false,
     val transition: TransitionConfig? = null,
     /** Start position on the layer timeline in microseconds (composition only). */
     val timelineStartUs: Long? = null,
@@ -118,6 +122,7 @@ data class VideoClip(
                 playbackSpeed = (clipMap["playbackSpeed"] as? Number)?.toFloat(),
                 speedRamp = SpeedRamp.fromList(clipMap["speedRamp"]),
                 reverseVideo = clipMap["reverseVideo"] as? Boolean ?: false,
+                frameBlending = clipMap["frameBlending"] as? Boolean ?: false,
                 transition = transitionRaw?.let { TransitionConfig.fromMap(it) },
                 timelineStartUs = (clipMap["timelineStartUs"] as? Number)?.toLong(),
                 transform = transformRaw?.let { SegmentTransformConfig.fromMap(it) },

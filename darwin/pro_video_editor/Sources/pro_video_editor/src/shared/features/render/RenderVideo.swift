@@ -307,6 +307,16 @@ class RenderVideo {
             composition: composition, instructions: videoCompConfig.instructions,
             speed: workingConfig.playbackSpeed)
 
+          // Frame-blended clips mix in the next source frame from a track of
+          // their own; the speed change above rebuilt the instructions, so the
+          // track is added to them only now.
+          if let blendTrackID = videoCompData.frameBlendTrackID {
+            videoCompConfig.instructions = videoCompConfig.instructions.map {
+              ($0 as? CustomVideoCompositionInstruction)?.addingFrameBlendTrack(blendTrackID) ?? $0
+            }
+            effectsConfig.frameBlendWindows = videoCompData.frameBlendWindows
+          }
+
           // Custom effects get one renderer each for this render, and the ones
           // that read earlier frames get delayed copies of the video track.
           // After the speed change, so their offsets are on the rendered video.
@@ -927,7 +937,9 @@ class RenderVideo {
           incomingFrameRate: next!.frameRateOverride,
           outgoingAudio: .init(volume: current.volume, equalizer: current.equalizer),
           incomingAudio: .init(volume: next!.volume, equalizer: next!.equalizer),
-          outgoingKeyframes: current.keyframes, incomingKeyframes: next!.keyframes)
+          outgoingKeyframes: current.keyframes, incomingKeyframes: next!.keyframes,
+          outgoingFrameBlending: current.frameBlending,
+          incomingFrameBlending: next!.frameBlending)
       } catch {
         return TransitionPreRender(clips: result, urls: urls, stall: error)
       }
@@ -943,7 +955,8 @@ class RenderVideo {
             playbackSpeed: current.playbackSpeed,
             speedRamp: current.croppedSpeedRamp(
               fromUs: 0, toUs: curDur - tailSrc, ofSourceUs: curDur),
-            reverseVideo: false, transition: nil, chromaKey: current.chromaKey,
+            reverseVideo: false, frameBlending: current.frameBlending, transition: nil,
+            chromaKey: current.chromaKey,
             frameRateOverride: current.frameRateOverride,
             stabilization: current.stabilization,
             keyframes: current.keyframes))
@@ -959,7 +972,8 @@ class RenderVideo {
           volume: next!.volume, equalizer: next!.equalizer,
           playbackSpeed: next!.playbackSpeed,
           speedRamp: next!.croppedSpeedRamp(fromUs: headSrc, toUs: nextDur, ofSourceUs: nextDur),
-          reverseVideo: next!.reverseVideo, transition: next!.transition,
+          reverseVideo: next!.reverseVideo, frameBlending: next!.frameBlending,
+          transition: next!.transition,
           chromaKey: next!.chromaKey, frameRateOverride: next!.frameRateOverride,
           stabilization: next!.stabilization,
           keyframes: next!.keyframes)
@@ -1064,7 +1078,9 @@ class RenderVideo {
             incomingFrameRate: first.frameRateOverride,
             outgoingAudio: .init(volume: last.volume, equalizer: last.equalizer),
             incomingAudio: .init(volume: first.volume, equalizer: first.equalizer),
-            outgoingKeyframes: last.keyframes, incomingKeyframes: first.keyframes)
+            outgoingKeyframes: last.keyframes, incomingKeyframes: first.keyframes,
+            outgoingFrameBlending: last.frameBlending,
+            incomingFrameBlending: first.frameBlending)
         } catch {
           return TransitionPreRender(clips: result, urls: urls, stall: error)
         }
@@ -1080,7 +1096,7 @@ class RenderVideo {
               playbackSpeed: first.playbackSpeed,
               speedRamp: first.croppedSpeedRamp(
                 fromUs: headSrc, toUs: lastDur - tailSrc, ofSourceUs: lastDur),
-              reverseVideo: false, transition: nil,
+              reverseVideo: false, frameBlending: first.frameBlending, transition: nil,
               chromaKey: first.chromaKey, frameRateOverride: first.frameRateOverride,
               stabilization: first.stabilization,
               keyframes: first.keyframes)
@@ -1091,7 +1107,7 @@ class RenderVideo {
               playbackSpeed: first.playbackSpeed,
               speedRamp: first.croppedSpeedRamp(
                 fromUs: headSrc, toUs: firstDur, ofSourceUs: firstDur),
-              reverseVideo: false,
+              reverseVideo: false, frameBlending: first.frameBlending,
               transition: first.transition, chromaKey: first.chromaKey,
               frameRateOverride: first.frameRateOverride, stabilization: first.stabilization,
               keyframes: first.keyframes)
@@ -1101,7 +1117,8 @@ class RenderVideo {
               playbackSpeed: last.playbackSpeed,
               speedRamp: last.croppedSpeedRamp(
                 fromUs: 0, toUs: lastDur - tailSrc, ofSourceUs: lastDur),
-              reverseVideo: false, transition: nil, chromaKey: last.chromaKey,
+              reverseVideo: false, frameBlending: last.frameBlending, transition: nil,
+              chromaKey: last.chromaKey,
               frameRateOverride: last.frameRateOverride, stabilization: last.stabilization,
               keyframes: last.keyframes)
           }
@@ -1139,7 +1156,8 @@ class RenderVideo {
       inputPath: clip.inputPath, startUs: clip.startUs, endUs: clip.endUs,
       volume: clip.volume, equalizer: clip.equalizer, playbackSpeed: clip.playbackSpeed,
       speedRamp: clip.speedRamp,
-      reverseVideo: clip.reverseVideo, transition: nil, chromaKey: clip.chromaKey,
+      reverseVideo: clip.reverseVideo, frameBlending: clip.frameBlending, transition: nil,
+      chromaKey: clip.chromaKey,
       frameRateOverride: clip.frameRateOverride, stabilization: clip.stabilization,
       keyframes: clip.keyframes)
   }

@@ -14,6 +14,10 @@ internal struct VideoClip: Sendable {
   /// of itself carries the matching `SpeedRamp.cropped(from:to:)`.
   let speedRamp: SpeedRamp?
   let reverseVideo: Bool
+  /// Whether a slowed-down stretch shows cross-fades of its neighbouring
+  /// source frames instead of holding each frame; see `FrameBlendWindow`.
+  /// Single-track path only, and ignored with `reverseVideo`.
+  let frameBlending: Bool
   /// Transition into the next clip (nil = hard cut). On the **last** clip it
   /// wraps into the first clip, making the track loop seamlessly (handled by the
   /// wrap pass in RenderVideo / the dip windows in CompositionBuilder).
@@ -62,6 +66,7 @@ internal struct VideoClip: Sendable {
     playbackSpeed: Float? = nil,
     speedRamp: SpeedRamp? = nil,
     reverseVideo: Bool = false,
+    frameBlending: Bool = false,
     transition: ClipTransitionConfig? = nil,
     timelineStartUs: Int64? = nil,
     transform: SegmentTransformConfig? = nil,
@@ -79,6 +84,7 @@ internal struct VideoClip: Sendable {
     self.playbackSpeed = playbackSpeed
     self.speedRamp = speedRamp
     self.reverseVideo = reverseVideo
+    self.frameBlending = frameBlending
     self.transition = transition
     self.timelineStartUs = timelineStartUs
     self.transform = transform
@@ -112,6 +118,7 @@ internal struct VideoClip: Sendable {
       playbackSpeed: playbackSpeed,
       speedRamp: speedRamp ?? self.speedRamp,
       reverseVideo: reverseVideo,
+      frameBlending: frameBlending,
       transition: transition,
       timelineStartUs: timelineStartUs,
       transform: transform,
@@ -136,6 +143,7 @@ internal struct VideoClip: Sendable {
       playbackSpeed: (clipMap["playbackSpeed"] as? NSNumber)?.floatValue,
       speedRamp: SpeedRamp.fromArguments(clipMap["speedRamp"]),
       reverseVideo: clipMap["reverseVideo"] as? Bool ?? false,
+      frameBlending: clipMap["frameBlending"] as? Bool ?? false,
       transition: ClipTransitionConfig.fromArguments(
         clipMap["transition"] as? [String: Any]
       ),
@@ -155,6 +163,13 @@ internal struct VideoClip: Sendable {
 }
 
 extension VideoClip {
+  /// Whether some stretch of the clip plays slower than its own speed: a
+  /// `playbackSpeed` below 1, or a ramp step below 1.
+  var slowsDown: Bool {
+    if let speedRamp { return speedRamp.steps.contains { $0.speed < 1 } }
+    return playbackSpeed.map { $0 > 0 && $0 < 1 } ?? false
+  }
+
   /// Whether the clip plays at anything other than its own speed.
   var changesSpeed: Bool {
     speedRamp != nil || (playbackSpeed.map { $0 > 0 && $0 != 1 } ?? false)

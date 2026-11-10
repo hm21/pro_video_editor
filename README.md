@@ -110,6 +110,7 @@ The ProVideoEditor is a Flutter widget designed for video editing within your ap
 - 🎬 **Stop-Motion**: Turn a sequence of still images into a video, each frame held for a configurable duration.
 - ⏩ **Playback Speed**: Adjust the playback speed of the video.
 - 🎢 **Speed Ramps**: Let a clip speed up and slow down while it plays, eased between the speeds you set.
+- 🌊 **Frame Blending**: Smooth slow motion with `VideoSegment.frameBlending`, which mixes neighbouring frames of a slowed-down clip instead of repeating them.
 - ⏪ **Reverse Video**: Play a video segment backwards.
 - 🎥 **Clip Keyframes**: Pan, zoom into and turn a clip's picture between keyframes, for a slow push-in, a punch-in on a reaction or a pan across a wide shot.
 - 🔇 **Mute Audio**: Remove or mute the audio track from the video.

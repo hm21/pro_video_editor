@@ -19,6 +19,7 @@ import java.io.DataOutputStream
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -70,6 +71,10 @@ object ClipTransitionRenderer {
      * @param outgoingKeyframes The outgoing clip's motion, by source timestamp
      *  (see [segmentMotionAt]); each of its frames is moved before the blend.
      * @param incomingKeyframes The incoming clip's motion, likewise.
+     * @param outgoingFrameBlending Whether the outgoing side, when slowed down,
+     *  mixes its two nearest source frames instead of holding the nearest one
+     *  (see [FrameBlendSchedule]).
+     * @param incomingFrameBlending The same for the incoming side.
      * @return The rendered transition clip, or `null` if it could not be
      *  produced (caller should fall back to a hard cut).
      */
@@ -92,6 +97,8 @@ object ClipTransitionRenderer {
         incomingEqualizer: EqualizerConfig? = null,
         outgoingKeyframes: List<KeyframeConfig> = emptyList(),
         incomingKeyframes: List<KeyframeConfig> = emptyList(),
+        outgoingFrameBlending: Boolean = false,
+        incomingFrameBlending: Boolean = false,
         onProgress: (Float) -> Unit = {},
     ): TransitionResult? {
         val outputFile = File(context.cacheDir, "transition_${System.currentTimeMillis()}.mp4")
@@ -186,12 +193,16 @@ object ClipTransitionRenderer {
                 // heap only ever holds one frame per side.
                 val outRaf = RandomAccessFile(outSeg.framesFile, "r").also { outFramesRaf = it }
                 val inRaf = RandomAccessFile(inSeg.framesFile, "r").also { inFramesRaf = it }
-                val outFrameBuf = ByteArray(outSeg.frameBytes)
-                val inFrameBuf = ByteArray(inSeg.frameBytes)
-                // A side with keyframes is moved into a buffer of its own, so
-                // the decoded frame it reads from stays intact.
-                val outMoved = Motion(outgoingKeyframes, outSeg)
-                val inMoved = Motion(incomingKeyframes, inSeg)
+                val outSide = SideFrames(
+                    outRaf, outSeg, outgoingKeyframes,
+                    blends = outgoingFrameBlending &&
+                        slowedDown(outSeg, frameCount, frameDurationUs),
+                )
+                val inSide = SideFrames(
+                    inRaf, inSeg, incomingKeyframes,
+                    blends = incomingFrameBlending &&
+                        slowedDown(inSeg, frameCount, frameDurationUs),
+                )
                 var nextEncoderFrame = 0
                 var outputDone = false
 
@@ -208,18 +219,12 @@ object ClipTransitionRenderer {
                             // Sample BOTH sides by progress so each source range
                             // (tail/head) is replayed across the output frames,
                             // applying that clip's playback speed to its footage.
-                            val aIdx = if (frameCount > 1) {
-                                (progress * (outSeg.frameCount - 1)).roundToInt()
-                            } else outSeg.frameCount - 1
-                            val bIdx = if (frameCount > 1) {
-                                (progress * (inSeg.frameCount - 1)).roundToInt()
-                            } else inSeg.frameCount - 1
-                            val aFrame = aIdx.coerceIn(0, outSeg.frameCount - 1)
-                            val bFrame = bIdx.coerceIn(0, inSeg.frameCount - 1)
-                            readFrame(outRaf, aFrame, outFrameBuf)
-                            readFrame(inRaf, bFrame, inFrameBuf)
-                            val outFrame = outMoved.apply(outFrameBuf, aFrame)
-                            val inFrame = inMoved.apply(inFrameBuf, bFrame)
+                            val outFrame = outSide.at(
+                                if (frameCount > 1) progress else 1.0
+                            )
+                            val inFrame = inSide.at(
+                                if (frameCount > 1) progress else 1.0
+                            )
                             val blended = if (ClipTransitionEffects.handles(type)) {
                                 ClipTransitionEffects.compose(
                                     type, direction, outFrame, inFrame,
@@ -359,6 +364,80 @@ object ClipTransitionRenderer {
         /** The source timestamp of each frame, in the order they were written. */
         val ptsUs: LongArray,
     )
+
+    /**
+     * Whether a side of [segment]'s decoded frames, replayed across
+     * [frameCount] output frames [frameDurationUs] apart, plays slowed down
+     * enough to blend (see [FrameBlendSchedule.blendsSpread]).
+     */
+    private fun slowedDown(
+        segment: DecodedSegment,
+        frameCount: Int,
+        frameDurationUs: Long,
+    ): Boolean = segment.ptsUs.size > 1 && FrameBlendSchedule.blendsSpread(
+        sourceSpanUs = segment.ptsUs.max() - segment.ptsUs.min(),
+        outputFrames = frameCount,
+        outputFrameUs = frameDurationUs,
+    )
+
+    /**
+     * One side's frames as the blend takes them: by progress through the
+     * side's decoded frames, moved by its keyframes.
+     *
+     * Without [blends] a progress shows the nearest decoded frame. With it,
+     * a progress between two frames mixes them by how far between them it
+     * falls, each moved first.
+     */
+    private class SideFrames(
+        private val raf: RandomAccessFile,
+        private val segment: DecodedSegment,
+        keyframes: List<KeyframeConfig>,
+        private val blends: Boolean,
+    ) {
+        // A side with keyframes is moved into a buffer of its own, so the
+        // decoded frame it reads from stays intact.
+        private val frame = ByteArray(segment.frameBytes)
+        private val motion = Motion(keyframes, segment)
+        private val next = if (blends) ByteArray(segment.frameBytes) else null
+        private val nextMotion = if (blends) Motion(keyframes, segment) else null
+        private val mixed = if (blends) ByteArray(segment.frameBytes) else null
+
+        /** The frame at [progress] (0 = first decoded frame, 1 = last). */
+        fun at(progress: Double): ByteArray {
+            val last = segment.frameCount - 1
+            val position = (progress * last).coerceIn(0.0, last.toDouble())
+            if (!blends) return read(position.roundToInt())
+
+            val index = floor(position).toInt()
+            val weight = FrameBlendSchedule.snapped((position - index).toFloat())
+            if (weight == 0f || index >= last) return read(index)
+            if (weight == 1f) return read(index + 1)
+            val from = read(index)
+            readFrame(raf, index + 1, next!!)
+            val to = nextMotion!!.apply(next, index + 1)
+            mix(from, to, weight, mixed!!)
+            return mixed
+        }
+
+        private fun read(index: Int): ByteArray {
+            readFrame(raf, index, frame)
+            return motion.apply(frame, index)
+        }
+    }
+
+    /**
+     * Mixes two packed I420 frames plane by plane, [weight] of the way from
+     * [from] to [to], into [out].
+     */
+    private fun mix(from: ByteArray, to: ByteArray, weight: Float, out: ByteArray) {
+        val toWeight = (weight * 256f).roundToInt().coerceIn(0, 256)
+        val fromWeight = 256 - toWeight
+        for (i in out.indices) {
+            val value = (from[i].toInt() and 0xFF) * fromWeight +
+                (to[i].toInt() and 0xFF) * toWeight + 128
+            out[i] = (value shr 8).toByte()
+        }
+    }
 
     /**
      * Moves the frames of [segment] by [keyframes], each by its own source

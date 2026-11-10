@@ -243,6 +243,8 @@ internal class VideoSequenceBuilder {
           timeRange: CMTimeRange(start: insertStart, duration: effectiveDuration),
           sourceStart: clipTimeRange.start,
           sourceFrameDuration: sourceFrameDuration,
+          sourceFirstFrame: clip.frameBlending
+            ? await TrackEndTrimmer.mediaTimeRange(of: videoTrack).start : .zero,
           transform: preferredTransform,
           naturalSize: naturalSize,
           renderSize: correctedSize
@@ -599,6 +601,8 @@ internal struct ClipInstruction {
   let sourceStart: CMTime
   /// The frame duration of the clip's file; zero when it is unknown.
   let sourceFrameDuration: CMTime
+  /// The time in the clip's file of its first frame.
+  let sourceFirstFrame: CMTime
   let transform: CGAffineTransform
   let naturalSize: CGSize
   let renderSize: CGSize
@@ -627,6 +631,11 @@ internal struct VideoCompositionData {
   var stabilizationWindows: [StabilizationWindow] = []
   /// One window per clip with keyframes; single-track path only.
   var motionWindows: [MotionWindow] = []
+  /// One window per frame-blended clip; single-track path only.
+  var frameBlendWindows: [FrameBlendWindow] = []
+  /// The track of next source frames the blended clips mix in, `nil`
+  /// without frame-blended clips.
+  var frameBlendTrackID: CMPersistentTrackID? = nil
 }
 
 /// Placement of one video layer inside a layered composition window.
@@ -710,9 +719,13 @@ internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionIn
 {
   let timeRange: CMTimeRange
   let enablePostProcessing: Bool = false
-  let containsTweening: Bool = false
   let backgroundColor: CGColor?
   let layerInstructions: [AVVideoCompositionLayerInstruction]
+
+  /// A frame-blended clip changes its picture between source frames, so
+  /// AVFoundation must not reuse a frame composed from the same two source
+  /// frames: it froze every mix after the first at its weight.
+  var containsTweening: Bool { frameBlendTrackID != kCMPersistentTrackID_Invalid }
 
   /// The render's compositor configuration, applied by
   /// `VideoCompositor.configureIfNeeded(from:)` on the session's first request.
@@ -735,6 +748,11 @@ internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionIn
   /// frames; empty unless a custom effect asks for them.
   let historyTrackIDs: [CMPersistentTrackID]
 
+  /// The track showing, on frame-blended clips, the source frame after the
+  /// one the video track shows (see `applyFrameBlendTrack`); invalid when no
+  /// clip is blended.
+  let frameBlendTrackID: CMPersistentTrackID
+
   private let _requiredSourceTrackIDs: [NSValue]
   var requiredSourceTrackIDs: [NSValue]? {
     return _requiredSourceTrackIDs
@@ -749,17 +767,29 @@ internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionIn
     sourceTrackID: CMPersistentTrackID,
     layerInstructions: [AVVideoCompositionLayerInstruction],
     backgroundColor: CGColor? = nil,
-    historyTrackIDs: [CMPersistentTrackID] = []
+    historyTrackIDs: [CMPersistentTrackID] = [],
+    frameBlendTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
   ) {
     self.timeRange = timeRange
-    self._requiredSourceTrackIDs = ([sourceTrackID] + historyTrackIDs).map { NSNumber(value: $0) }
+    let blendTrackIDs =
+      frameBlendTrackID == kCMPersistentTrackID_Invalid ? [] : [frameBlendTrackID]
+    self._requiredSourceTrackIDs = ([sourceTrackID] + historyTrackIDs + blendTrackIDs).map {
+      NSNumber(value: $0)
+    }
     self.layerInstructions = layerInstructions
     self.backgroundColor = backgroundColor
     self.isLayered = false
     self.layerPlacements = []
     self.primaryTrackID = sourceTrackID
     self.historyTrackIDs = historyTrackIDs
+    self.frameBlendTrackID = frameBlendTrackID
     super.init()
+  }
+
+  /// Whether the instruction requires tracks besides the video, so the
+  /// video's frame has to be asked for by its id.
+  var requiresExtraTracks: Bool {
+    !historyTrackIDs.isEmpty || frameBlendTrackID != kCMPersistentTrackID_Invalid
   }
 
   /// This single-track instruction, also requiring `trackIDs`, the delayed
@@ -770,7 +800,20 @@ internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionIn
       sourceTrackID: primaryTrackID,
       layerInstructions: layerInstructions,
       backgroundColor: backgroundColor,
-      historyTrackIDs: historyTrackIDs + trackIDs)
+      historyTrackIDs: historyTrackIDs + trackIDs,
+      frameBlendTrackID: frameBlendTrackID)
+  }
+
+  /// This single-track instruction, also requiring `trackID`, the track of
+  /// next source frames frame-blended clips mix in.
+  func addingFrameBlendTrack(_ trackID: CMPersistentTrackID) -> CustomVideoCompositionInstruction {
+    CustomVideoCompositionInstruction(
+      timeRange: timeRange,
+      sourceTrackID: primaryTrackID,
+      layerInstructions: layerInstructions,
+      backgroundColor: backgroundColor,
+      historyTrackIDs: historyTrackIDs,
+      frameBlendTrackID: trackID)
   }
 
   /// Layered initializer. `placements` lists every layer visible during
@@ -789,6 +832,7 @@ internal class CustomVideoCompositionInstruction: NSObject, AVVideoCompositionIn
     self.layerPlacements = layerPlacements
     self.primaryTrackID = layerPlacements.first?.trackID ?? kCMPersistentTrackID_Invalid
     self.historyTrackIDs = []
+    self.frameBlendTrackID = kCMPersistentTrackID_Invalid
     super.init()
   }
 }

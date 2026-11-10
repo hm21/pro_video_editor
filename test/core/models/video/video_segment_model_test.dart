@@ -142,6 +142,27 @@ void main() {
 
         expect(restored, segment);
       });
+
+      test('roundtrip keeps frameBlending', () {
+        final blended = segment.copyWith(frameBlending: true);
+        final restored = VideoSegment.fromJson(blended.toJson());
+
+        expect(restored.frameBlending, isTrue);
+        expect(restored, blended);
+        expect(restored, isNot(segment));
+      });
+    });
+
+    group('toAsyncMap', () {
+      test('sends frameBlending to the platform', () async {
+        final map = await VideoSegment(
+          video: EditorVideo.file('/tmp/clip.mp4'),
+          playbackSpeed: 0.5,
+          frameBlending: true,
+        ).toAsyncMap();
+
+        expect(map['frameBlending'], isTrue);
+      });
     });
 
     group('copyWith', () {

@@ -24,6 +24,7 @@ class VideoSegment {
     this.playbackSpeed,
     this.speedRamp,
     this.reverseVideo = false,
+    this.frameBlending = false,
     this.transition,
     this.timelineStart,
     this.transform,
@@ -137,6 +138,27 @@ class VideoSegment {
   /// [videoSegments] instead.
   final bool reverseVideo;
 
+  /// Whether a slowed-down stretch of this segment shows cross-fades of its
+  /// neighbouring source frames instead of holding each frame.
+  ///
+  /// At a speed below 1, or wherever a [speedRamp] dips below 1, a source
+  /// frame lasts longer than one frame of the source's frame rate: at `0.5`
+  /// every frame shows twice and at `0.25` four times, so the motion steps.
+  /// With frame blending the output keeps the source's frame rate there, and
+  /// each frame in between mixes the two source frames around it by how far
+  /// between them it falls, so the motion runs on. Fast movement leaves
+  /// ghosts: both frames show at once, each partly see-through.
+  ///
+  /// Stretches at or above the source's own speed are unchanged, and so is
+  /// the rest of the render. Inside an overlap [transition] each side blends
+  /// its own frames before the two sides are mixed.
+  ///
+  /// **Default**: `false`
+  ///
+  /// Currently supported on Android and iOS/macOS for [videoSegments] only;
+  /// ignored with [reverseVideo] and inside a [VideoComposition].
+  final bool frameBlending;
+
   /// The transition played between this clip and the **next** clip.
   ///
   /// Describes how this segment transitions into the following segment (e.g. a
@@ -238,6 +260,7 @@ class VideoSegment {
       'playbackSpeed': playbackSpeed,
       'speedRamp': speedRamp?.toChannelSteps(),
       'reverseVideo': reverseVideo,
+      'frameBlending': frameBlending,
       'transition': transition?.toMap(),
       'timelineStartUs': timelineStart?.inMicroseconds,
       'transform': transform?.toMap(),
@@ -263,6 +286,7 @@ class VideoSegment {
     double? playbackSpeed,
     VideoSpeedRamp? speedRamp,
     bool? reverseVideo,
+    bool? frameBlending,
     ClipTransition? transition,
     Duration? timelineStart,
     SegmentTransform? transform,
@@ -280,6 +304,7 @@ class VideoSegment {
           playbackSpeed ?? (speedRamp == null ? this.playbackSpeed : null),
       speedRamp: speedRamp ?? (playbackSpeed == null ? this.speedRamp : null),
       reverseVideo: reverseVideo ?? this.reverseVideo,
+      frameBlending: frameBlending ?? this.frameBlending,
       transition: transition ?? this.transition,
       timelineStart: timelineStart ?? this.timelineStart,
       transform: transform ?? this.transform,
@@ -301,6 +326,7 @@ class VideoSegment {
         other.playbackSpeed == playbackSpeed &&
         other.speedRamp == speedRamp &&
         other.reverseVideo == reverseVideo &&
+        other.frameBlending == frameBlending &&
         other.transition == transition &&
         other.timelineStart == timelineStart &&
         other.transform == transform &&
@@ -319,6 +345,7 @@ class VideoSegment {
         playbackSpeed.hashCode ^
         speedRamp.hashCode ^
         reverseVideo.hashCode ^
+        frameBlending.hashCode ^
         transition.hashCode ^
         timelineStart.hashCode ^
         transform.hashCode ^
@@ -337,6 +364,7 @@ class VideoSegment {
         'playbackSpeed: $playbackSpeed, '
         'speedRamp: $speedRamp, '
         'reverseVideo: $reverseVideo, '
+        'frameBlending: $frameBlending, '
         'transition: $transition, '
         'timelineStart: $timelineStart, '
         'transform: $transform, '
@@ -355,6 +383,7 @@ class VideoSegment {
       'playbackSpeed': playbackSpeed,
       'speedRamp': speedRamp?.toMap(),
       'reverseVideo': reverseVideo,
+      'frameBlending': frameBlending,
       'transition': transition?.toMap(),
       'timelineStart': timelineStart?.inMicroseconds,
       'transform': transform?.toMap(),
@@ -382,6 +411,7 @@ class VideoSegment {
           ? VideoSpeedRamp.fromMap(map['speedRamp'] as Map<String, dynamic>)
           : null,
       reverseVideo: map['reverseVideo'] as bool? ?? false,
+      frameBlending: map['frameBlending'] as bool? ?? false,
       transition: map['transition'] != null
           ? ClipTransition.fromMap(map['transition'] as Map<String, dynamic>)
           : null,

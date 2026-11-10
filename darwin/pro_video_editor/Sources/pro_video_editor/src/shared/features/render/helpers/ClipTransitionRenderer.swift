@@ -81,7 +81,9 @@ internal enum ClipTransitionRenderer {
     outgoingAudio: SideAudio = SideAudio(),
     incomingAudio: SideAudio = SideAudio(),
     outgoingKeyframes: [KeyframeConfig] = [],
-    incomingKeyframes: [KeyframeConfig] = []
+    incomingKeyframes: [KeyframeConfig] = [],
+    outgoingFrameBlending: Bool = false,
+    incomingFrameBlending: Bool = false
   ) async throws -> RenderResult? {
     // Only a *successful* blend reaches the caller, so only a successful blend
     // can be cleaned up by it. An export that fails, stalls or is cancelled
@@ -183,6 +185,19 @@ internal enum ClipTransitionRenderer {
         inFps = try await loadFrameRate(inVideo)
       }
       let targetFps = max(30, Int(max(outFps, inFps).rounded()))
+
+      // A slowed-down side that blends its frames gets a track of its next
+      // source frames, as the clips beside the blend do (`applyFrameBlendTrack`).
+      let outgoingBlend =
+        outgoingFrameBlending
+        ? try await sideBlend(
+          composition: composition, track: outVideo, range: outVideoRange,
+          blendDuration: d, fps: outFps) : nil
+      let incomingBlend =
+        incomingFrameBlending
+        ? try await sideBlend(
+          composition: composition, track: inVideo, range: inVideoRange,
+          blendDuration: d, fps: inFps) : nil
       let steps = easingStepCount(durationUs: dUs, fps: targetFps)
 
       // Optional cross-faded audio.
@@ -207,7 +222,9 @@ internal enum ClipTransitionRenderer {
         keyframes: outgoingKeyframes, sourceRange: outVideoRange, blendDuration: d)
       let incomingMotion = TransitionSideMotion(
         keyframes: incomingKeyframes, sourceRange: inVideoRange, blendDuration: d)
-      if ClipTransitionEffects.handles(type) || outgoingMotion != nil || incomingMotion != nil {
+      if ClipTransitionEffects.handles(type) || outgoingMotion != nil || incomingMotion != nil
+        || outgoingBlend != nil || incomingBlend != nil
+      {
         // Zooms, turns, blurs and flashes need both frames at once, which
         // layer instructions cannot give; a compositor draws each frame.
         videoComposition.customVideoCompositorClass = ClipTransitionCompositor.self
@@ -218,7 +235,8 @@ internal enum ClipTransitionRenderer {
             outgoingTransform: transformA, incomingTransform: transformB,
             type: type, direction: direction, curve: curve,
             frameDuration: videoComposition.frameDuration,
-            outgoingMotion: outgoingMotion, incomingMotion: incomingMotion)
+            outgoingMotion: outgoingMotion, incomingMotion: incomingMotion,
+            outgoingBlend: outgoingBlend, incomingBlend: incomingBlend)
         ]
       } else {
         // Build the layer instructions with eased ramps.
@@ -275,6 +293,53 @@ internal enum ClipTransitionRenderer {
       if SetupStageExport.isStall(error) { throw error }
       return nil
     }
+  }
+
+  /// The frame blending of the side playing `range` of `track` over the
+  /// blend's `blendDuration`, with a new track in `composition` showing its
+  /// next source frames; nil when the side is not slowed down enough to blend
+  /// or shows only one frame.
+  private static func sideBlend(
+    composition: AVMutableComposition, track: AVAssetTrack, range: CMTimeRange,
+    blendDuration: CMTime, fps: Float
+  ) async throws -> TransitionSideBlend? {
+    guard fps > 0 else { return nil }
+    let frame = CMTime(seconds: 1 / Double(fps), preferredTimescale: 1_000_000)
+    let media = await TrackEndTrimmer.mediaTimeRange(of: track)
+    let probe = TransitionSideBlend(
+      nextTrackID: kCMPersistentTrackID_Invalid, sourceRange: range,
+      blendDuration: blendDuration, frameDuration: frame, firstFrame: media.start)
+    guard probe != nil else { return nil }
+
+    // A frame ahead of the side, up to where the side's last frame ends: the
+    // frame after it, which the clip's end or the file's cut off, is left
+    // out, as on Android, which never decodes it.
+    let nextStart = range.start + frame
+    let lastFrameEnd = CMTime(
+      value: Int64(
+        frameBoundaryUs(
+          atOrAfter: range.end.seconds * 1_000_000,
+          firstFrameUs: media.start.seconds * 1_000_000,
+          frameUs: frame.seconds * 1_000_000
+        ).rounded(.down)),
+      timescale: 1_000_000)
+    guard lastFrameEnd > nextStart else { return nil }
+    let shifted = CMTimeRangeGetIntersection(
+      CMTimeRange(start: nextStart, end: lastFrameEnd), otherRange: media)
+    guard shifted.duration > .zero,
+      let next = composition.addMutableTrack(
+        withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+    else { return nil }
+    try next.insertTimeRange(shifted, of: track, at: .zero)
+    // Scaled as the side is, so it runs a frame ahead of it throughout; cut
+    // short at the side's last frame, which is then held.
+    let ratio = CMTimeGetSeconds(blendDuration) / CMTimeGetSeconds(range.duration)
+    next.scaleTimeRange(
+      CMTimeRange(start: .zero, duration: shifted.duration),
+      toDuration: CMTimeMultiplyByFloat64(shifted.duration, multiplier: ratio))
+    return TransitionSideBlend(
+      nextTrackID: next.trackID, sourceRange: range, blendDuration: blendDuration,
+      frameDuration: frame, firstFrame: media.start)
   }
 
   // MARK: - Ramps
