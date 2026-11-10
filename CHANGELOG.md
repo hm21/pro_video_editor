@@ -1,3 +1,6 @@
+## 2.53.0
+- **FEAT**: `LayerAnimationType.drawOn`, for a drawing that draws itself stroke by stroke. Like the text reveals, the renderer leaves the image as it is and the app passes an image per step, so a layer's animations convert between `pro_image_editor` and this package unchanged. A `switch` over `LayerAnimationType` has to handle the new value.
+
 ## 2.52.0
 - **FEAT**(android, iOS, macOS): `VideoSegment.frameBlending` smooths slow motion: where a segment plays slower than its source, each in-between frame mixes the two source frames around it instead of repeating one, also inside overlap transitions. Off by default, since fast motion leaves ghosts.
 

@@ -273,9 +273,10 @@ internal data class OverlayAnimationState(
  * angles add up and flip squeezes multiply. A bounce lifts the layer by a
  * multiple of its own height ([halfNormH] is half of it), a wiggle tilts and a
  * spin turns it around its own center, and a flip squeezes it across the axis
- * it turns around. Text reveals (`typewriter`, `wordByWord`) change what the
- * image shows, which a fixed image cannot do, so they are skipped here; the
- * caller passes one layer per step instead.
+ * it turns around. Text reveals (`typewriter`, `wordByWord`) and a drawing
+ * that draws itself (`drawOn`) change what the image shows, which a fixed image
+ * cannot do, so they are skipped here; the caller passes one layer per step
+ * instead.
  *
  * Values that an elastic or bounce curve can push out of range are clamped:
  * opacity to [0, 1] and scale to at least 0.
@@ -350,7 +351,8 @@ internal fun overlayAnimationState(
                 val squeeze = cos(2.0 * Math.PI * progress.turn)
                 if (anim.flipAxis == "horizontal") flipY *= squeeze else flipX *= squeeze
             }
-            // "typewriter", "wordByWord": see the function's documentation.
+            // "typewriter", "wordByWord", "drawOn": see the function's
+            // documentation.
         }
     }
 

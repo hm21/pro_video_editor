@@ -166,10 +166,11 @@ internal class OverlayAnimationStateTest {
     }
 
     @Test
-    fun textRevealsLeaveTheImageAsItIs() {
+    fun revealsLeaveTheImageAsItIs() {
         val reveals = listOf(
             anim("typewriter", "animateIn"),
             anim("wordByWord", "animateOut"),
+            anim("drawOn", "animateIn"),
         )
         val s = state(reveals, 0L)
         assertEquals(1f, s.alpha, 1e-6f)

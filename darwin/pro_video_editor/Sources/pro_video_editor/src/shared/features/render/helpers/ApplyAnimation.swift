@@ -280,9 +280,9 @@ func animationProgress(
 /// slides and bounces move it, as on Android and in the editor preview; a
 /// bounce lifts it by a multiple of its unscaled height. A flip squeezes the
 /// overlay across the axis it turns around, before anything turns it. Text
-/// reveals ("typewriter", "wordByWord") change what the image shows, which a
-/// fixed image cannot do, so they are skipped; the caller passes one layer per
-/// step instead.
+/// reveals ("typewriter", "wordByWord") and a drawing that draws itself
+/// ("drawOn") change what the image shows, which a fixed image cannot do, so
+/// they are skipped; the caller passes one layer per step instead.
 ///
 /// A [keyframe] places the layer first: [overlayExtent] is then its upright,
 /// unscaled box at the keyframed corner, which the keyframe's scale grows and

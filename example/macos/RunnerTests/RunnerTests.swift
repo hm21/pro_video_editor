@@ -511,9 +511,10 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(upright.y, 125, accuracy: 1e-9)
   }
 
-  func testTextRevealsLeaveTheImageAsItIs() {
+  func testRevealsLeaveTheImageAsItIs() {
     let layer = animatedLayer([
       animation("typewriter", "animateIn"), animation("wordByWord", "animateOut"),
+      animation("drawOn", "animateIn"),
     ])
     let (opacity, transform, _) = computeAnimation(
       layer: layer, currentTimeUs: 0, overlayExtent: animatedOverlay,

@@ -19,8 +19,8 @@ struct LayerAnimationConfig {
   static let defaultTurns = 1.0
 
   /// The kind of animation: "fade", "slide", "scale", "wiggle", "bounce",
-  /// "spin", "flip", or "typewriter" / "wordByWord", which the renderer skips
-  /// because a layer is one fixed image.
+  /// "spin", "flip", or "typewriter" / "wordByWord" / "drawOn", which the
+  /// renderer skips because a layer is one fixed image.
   let type: String
   /// When the animation plays: "animateIn", "animateOut", "animateInOut", or
   /// "loop" for as long as the layer is visible.
