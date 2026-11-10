@@ -1,5 +1,6 @@
 ## 2.53.0
 - **FEAT**: `LayerAnimationType.drawOn`, for a drawing that draws itself stroke by stroke. Like the text reveals, the renderer leaves the image as it is and the app passes an image per step, so a layer's animations convert between `pro_image_editor` and this package unchanged. A `switch` over `LayerAnimationType` has to handle the new value.
+- **FIX**(android, iOS, macOS): An `ImageLayer.sequence` decodes each frame as it comes on screen and holds only the one on screen. Android decoded every frame before the render started, and Darwin kept every frame it had drawn, so a drawing that draws itself over six seconds (about 175 frames of 1.4 megapixels) needed about 1 GB of native memory on a Galaxy S26 and about 1.9 GB on macOS. Now it needs about as much as a still image, and on macOS it renders in a quarter of the time. A frame after the first that does not decode leaves the one before it on screen instead of dropping the layer.
 
 ## 2.52.0
 - **FEAT**(android, iOS, macOS): `VideoSegment.frameBlending` smooths slow motion: where a segment plays slower than its source, each in-between frame mixes the two source frames around it instead of repeating one, also inside overlap transitions. Off by default, since fast motion leaves ghosts.

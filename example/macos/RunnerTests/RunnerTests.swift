@@ -559,6 +559,55 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(gifFrame(at: 1_750_000, offsetUs: 1_000_000), 3)
   }
 
+  // MARK: - Layer frames
+
+  /// A one-pixel-high image `index + 1` pixels wide, so its width names the
+  /// frame it stands for.
+  private func frameImage(_ index: Int) -> CIImage {
+    CIImage(color: .red).cropped(to: CGRect(x: 0, y: 0, width: index + 1, height: 1))
+  }
+
+  private func frameWidth(_ frames: LayerFrames, at index: Int) -> Int {
+    Int(frames.frame(at: index).extent.width)
+  }
+
+  func testLayerFramesDecodeEachSequenceFrameOnceAsItComesOnScreen() {
+    var decoded: [Int] = []
+    let frames = LayerFrames(count: 4, first: frameImage(0)) { index in
+      decoded.append(index)
+      return self.frameImage(index)
+    }
+
+    // A render asks for every video frame, several per sequence frame.
+    let shown = [0, 0, 1, 1, 1, 2, 3, 3].map { frameWidth(frames, at: $0) }
+
+    XCTAssertEqual(shown, [1, 1, 2, 2, 2, 3, 4, 4])
+    XCTAssertEqual(decoded, [1, 2, 3])
+  }
+
+  func testLayerFramesKeepTheFrameBeforeOneThatDoesNotDecode() {
+    var decoded: [Int] = []
+    let frames = LayerFrames(count: 4, first: frameImage(0)) { index in
+      decoded.append(index)
+      return index == 2 ? nil : self.frameImage(index)
+    }
+
+    XCTAssertEqual(frameWidth(frames, at: 1), 2)
+    XCTAssertEqual(frameWidth(frames, at: 2), 2)
+    XCTAssertEqual(frameWidth(frames, at: 2), 2)
+    XCTAssertEqual(frameWidth(frames, at: 3), 4)
+    // Tried once, not on every video frame it covers.
+    XCTAssertEqual(decoded, [1, 2, 3])
+  }
+
+  func testLayerFramesDecodedUpFrontReturnTheirFrames() {
+    let frames: LayerFrames = [frameImage(0), frameImage(1)]
+
+    XCTAssertEqual(frames.count, 2)
+    XCTAssertEqual(frameWidth(frames, at: 1), 2)
+    XCTAssertEqual(frameWidth(frames, at: 0), 1)
+  }
+
   func testALayerPickingUpWhereAnotherLeftOffContinuesItsAnimation() {
     let times = stride(from: Int64(0), to: 3_000_000, by: 40_000)
     let single = times.map { gifFrame(at: $0, startUs: 0) }

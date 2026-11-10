@@ -3,6 +3,7 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 import android.graphics.Bitmap
 import android.util.Pair
 import androidx.media3.common.OverlaySettings
+import androidx.media3.common.VideoFrameProcessingException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
 import ch.waio.pro_video_editor.src.features.render.models.KeyframeClock
@@ -694,7 +695,7 @@ internal fun liesOffFrame(
  */
 @UnstableApi
 internal class AnimatedBitmapOverlay(
-    private val frames: List<Bitmap>,
+    private val frames: OverlayFrames<Bitmap>,
     private val frameDurationsUs: List<Long>,
     private val baseNormX: Float,
     private val baseNormY: Float,
@@ -774,7 +775,7 @@ internal class AnimatedBitmapOverlay(
         shapeMask: ShapeMaskConfig? = null,
         restRotation: Double = 0.0
     ) : this(
-        frames = listOf(bitmap),
+        frames = DecodedFrames(listOf(bitmap)),
         frameDurationsUs = listOf(0L),
         baseNormX = baseNormX,
         baseNormY = baseNormY,
@@ -801,9 +802,9 @@ internal class AnimatedBitmapOverlay(
     // Cumulative end time of each frame within one playthrough. A frame
     // sequence's durations are the caller's, so the sum stops at Long.MAX_VALUE
     // rather than wrapping negative.
-    private val frameEndsUs: LongArray = LongArray(frames.size).also { ends ->
+    private val frameEndsUs: LongArray = LongArray(frames.count).also { ends ->
         var acc = 0L
-        for (i in frames.indices) {
+        for (i in 0 until frames.count) {
             val durationUs = frameDurationsUs[i]
             acc = if (acc > Long.MAX_VALUE - durationUs) Long.MAX_VALUE else acc + durationUs
             ends[i] = acc
@@ -813,11 +814,16 @@ internal class AnimatedBitmapOverlay(
     private val maskedImage = shapeMask?.let { ShapeMaskedImage() }
 
     override fun getBitmap(presentationTimeUs: Long): Bitmap {
-        val frame = frames[
-            animatedFrameIndex(
-                presentationTimeUs, layerStartUs, animationOffsetUs, frameEndsUs, loop
-            )
-        ]
+        val index = animatedFrameIndex(
+            presentationTimeUs, layerStartUs, animationOffsetUs, frameEndsUs, loop
+        )
+        val frame = try {
+            frames.frameAt(index)
+        } catch (e: OutOfMemoryError) {
+            // A frame decoded on demand allocates mid-render, on the frame
+            // processing thread, where an Error would take the process down.
+            throw VideoFrameProcessingException("Overlay frame $index did not fit in memory", e)
+        }
         val mask = shapeMask ?: return frame
         return maskedImage!!.masked(
             frame, mask.stateAt(keyframeClock.keyframeTimeUs(presentationTimeUs))
