@@ -284,6 +284,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   private var chromaKeyWindows: [ChromaKeyWindow] = []
   private var stabilizationWindows: [StabilizationWindow] = []
   private var motionWindows: [MotionWindow] = []
+  private var frameBlendWindows: [FrameBlendWindow] = []
   private var motionTimeScale: Double = 1
 
   /// Decoded chroma-key background images, keyed by config, so a background is
@@ -371,7 +372,28 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     self.chromaKeyWindows = config.chromaKeyWindows
     self.stabilizationWindows = config.stabilizationWindows
     self.motionWindows = config.motionWindows
+    self.frameBlendWindows = config.frameBlendWindows
     self.motionTimeScale = config.motionTimeScale
+  }
+
+  /// The source frame of a frame-blended clip mixed with the one after it, as
+  /// far towards it as the moment of `request` lies between the two; the
+  /// frame as it is everywhere else.
+  private func applyFrameBlendStage(
+    to image: CIImage, request: AVAsynchronousVideoCompositionRequest
+  ) -> CIImage {
+    guard !frameBlendWindows.isEmpty,
+      let instruction = request.videoCompositionInstruction as? CustomVideoCompositionInstruction,
+      instruction.frameBlendTrackID != kCMPersistentTrackID_Invalid
+    else { return image }
+    let tUs = Int64(
+      (Double(nearestMicroseconds(request.compositionTime)) * motionTimeScale).rounded())
+    guard
+      let window = frameBlendWindows.first(where: { tUs >= $0.startUs && tUs < $0.endUs }),
+      let weight = window.weight(atCompositionUs: tUs),
+      let next = request.sourceFrame(byTrackID: instruction.frameBlendTrackID)
+    else { return image }
+    return blendFrames(image, CIImage(cvPixelBuffer: next), weight: weight)
   }
 
   /// Steadies the upright source frame shown at composition time `tUs` with
@@ -1205,7 +1227,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       // With delayed copies of the video track required as well, the first
       // source track is not necessarily the video itself; ask for it by id.
       if let custom = request.videoCompositionInstruction as? CustomVideoCompositionInstruction,
-        !custom.historyTrackIDs.isEmpty
+        custom.requiresExtraTracks
       {
         sourceBuffer = request.sourceFrame(byTrackID: custom.primaryTrackID)
       }
@@ -1257,6 +1279,11 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       }
 
       outputImage = CIImage(cvPixelBuffer: sourceBuffer)
+
+      // A slowed-down frame-blended clip mixes in its next source frame
+      // first, so every stage after it, the chroma key included, sees the
+      // mixed frame as a frame of its own, as on Android.
+      outputImage = applyFrameBlendStage(to: outputImage, request: request)
 
       // Remove the chroma key on the raw decoded frame and fill the keyed area
       // with its background — before the layer-instruction transform below,

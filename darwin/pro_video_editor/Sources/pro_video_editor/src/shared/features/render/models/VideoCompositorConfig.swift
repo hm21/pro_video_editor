@@ -73,8 +73,14 @@ public struct VideoCompositorConfig {
   /// speed.
   var motionWindows: [MotionWindow] = []
 
+  /// Frame-blend windows for the **single-track** path, one per
+  /// frame-blended clip, on the composition timeline before any render-wide
+  /// speed, like `motionWindows`.
+  var frameBlendWindows: [FrameBlendWindow] = []
+
   /// How much composition time a microsecond of the render covers: the
-  /// render-wide playback speed, which `motionWindows` are measured before.
+  /// render-wide playback speed, which `motionWindows` and `frameBlendWindows`
+  /// are measured before.
   var motionTimeScale: Double = 1
 
   var videoRotationDegrees: Double = 0.0

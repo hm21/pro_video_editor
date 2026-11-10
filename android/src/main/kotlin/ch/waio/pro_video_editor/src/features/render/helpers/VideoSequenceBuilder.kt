@@ -27,6 +27,7 @@ import ch.waio.pro_video_editor.src.features.render.models.LayerCensorConfig
 import ch.waio.pro_video_editor.src.features.render.models.ShapeMaskConfig
 import ch.waio.pro_video_editor.src.features.render.models.VideoClip
 import ch.waio.pro_video_editor.src.features.render.models.changesSpeed
+import ch.waio.pro_video_editor.src.features.render.models.slowsDown
 import ch.waio.pro_video_editor.src.features.thumbnail.SequentialFrameDecoder
 import ch.waio.pro_video_editor.src.features.render.utils.getRotatedVideoDimensions
 import ch.waio.pro_video_editor.src.shared.logging.PluginLog as Log
@@ -52,6 +53,9 @@ class VideoSequenceBuilder(
     private companion object {
         /** Channels of the silence Media3 plays for a clip without audio. */
         const val SILENCE_CHANNEL_COUNT = 2
+
+        /** The frame step of a blended clip whose frame rate cannot be read. */
+        const val DEFAULT_FRAME_US = 1_000_000L / 30
     }
 
     /**
@@ -686,6 +690,15 @@ class VideoSequenceBuilder(
             clipVideoEffects += SpeedChangeEffect(clipSpeed)
         }
 
+        // Right after the speed change, on the frames it retimed: the blend
+        // fills a slowed-down stretch with mixes of its source frames, and
+        // every effect after it sees those as frames of their own.
+        if (clip.frameBlending && clip.slowsDown) {
+            val frameUs = anchor.second.takeIf { it > 0 } ?: DEFAULT_FRAME_US
+            Log.d(RENDER_TAG, "Clip $index: frame blending on a ${frameUs} us grid")
+            clipVideoEffects += FrameBlendGlEffect(frameUs)
+        }
+
         // Chroma key next, so it sees the original decoded colors — before
         // rotation, flip, the color LUT and blur. A clip's own key wins over
         // the global one; they are never merged.
@@ -993,6 +1006,8 @@ class VideoSequenceBuilder(
                         startUs = 0L,
                         endUs = reversed.durationUs.takeIf { it > 0 },
                         reverseVideo = false,
+                        // Not blended in reverse, as on iOS.
+                        frameBlending = false,
                         // Its keyframes belong to the forward source's timestamps.
                         stabilization = null,
                         keyframes = reversedSegmentKeyframes(
@@ -1009,7 +1024,11 @@ class VideoSequenceBuilder(
                 // The ramp runs in the order the clip was to play, so it
                 // turns round with it.
                 result.add(
-                    clip.copy(reverseVideo = false, speedRamp = clip.speedRamp?.reversed())
+                    clip.copy(
+                        reverseVideo = false,
+                        frameBlending = false,
+                        speedRamp = clip.speedRamp?.reversed(),
+                    )
                 )
             }
         }

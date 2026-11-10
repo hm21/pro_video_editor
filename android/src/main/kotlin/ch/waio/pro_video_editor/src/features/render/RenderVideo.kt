@@ -489,6 +489,8 @@ class RenderVideo(private val context: Context) {
                     startUs = 0L,
                     endUs = reversed.durationUs.takeIf { it > 0 },
                     reverseVideo = false,
+                    // Not blended in reverse, as on iOS.
+                    frameBlending = false,
                     // Its keyframes belong to the forward source's timestamps.
                     stabilization = null,
                     keyframes = reversedSegmentKeyframes(
@@ -505,6 +507,7 @@ class RenderVideo(private val context: Context) {
                 // turns round with it.
                 result[clipIdx] = clip.copy(
                     reverseVideo = false,
+                    frameBlending = false,
                     speedRamp = clip.speedRamp?.reversed(),
                 )
             }
@@ -701,6 +704,8 @@ class RenderVideo(private val context: Context) {
                 incomingEqualizer = next.equalizer,
                 outgoingKeyframes = current.keyframes,
                 incomingKeyframes = next.keyframes,
+                outgoingFrameBlending = current.frameBlending,
+                incomingFrameBlending = next.frameBlending,
                 onProgress = { f ->
                     onProgress(((doneCount + f) / total).coerceIn(0f, 1f))
                 },
@@ -848,6 +853,8 @@ class RenderVideo(private val context: Context) {
                     incomingEqualizer = first.equalizer,
                     outgoingKeyframes = last.keyframes,
                     incomingKeyframes = first.keyframes,
+                    outgoingFrameBlending = last.frameBlending,
+                    incomingFrameBlending = first.frameBlending,
                     onProgress = { f ->
                         onProgress(((doneCount + f) / total).coerceIn(0f, 1f))
                     },

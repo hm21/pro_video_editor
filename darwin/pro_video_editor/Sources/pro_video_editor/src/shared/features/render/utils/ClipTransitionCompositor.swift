@@ -30,9 +30,14 @@ internal final class ClipTransitionInstruction: NSObject, AVVideoCompositionInst
   /// Each side's keyframed motion, or nil when it stays where it is.
   let outgoingMotion: TransitionSideMotion?
   let incomingMotion: TransitionSideMotion?
+  /// Each side's frame blending, or nil when it shows its frames as they are.
+  let outgoingBlend: TransitionSideBlend?
+  let incomingBlend: TransitionSideBlend?
 
   var requiredSourceTrackIDs: [NSValue]? {
-    [NSNumber(value: outgoingTrackID), NSNumber(value: incomingTrackID)]
+    ([outgoingTrackID, incomingTrackID]
+      + [outgoingBlend?.nextTrackID, incomingBlend?.nextTrackID].compactMap { $0 })
+      .map { NSNumber(value: $0) }
   }
 
   init(
@@ -40,7 +45,8 @@ internal final class ClipTransitionInstruction: NSObject, AVVideoCompositionInst
     outgoingTrackID: CMPersistentTrackID, incomingTrackID: CMPersistentTrackID,
     outgoingTransform: CGAffineTransform, incomingTransform: CGAffineTransform,
     type: String, direction: String, curve: String, frameDuration: CMTime,
-    outgoingMotion: TransitionSideMotion? = nil, incomingMotion: TransitionSideMotion? = nil
+    outgoingMotion: TransitionSideMotion? = nil, incomingMotion: TransitionSideMotion? = nil,
+    outgoingBlend: TransitionSideBlend? = nil, incomingBlend: TransitionSideBlend? = nil
   ) {
     self.timeRange = timeRange
     self.outgoingTrackID = outgoingTrackID
@@ -53,6 +59,8 @@ internal final class ClipTransitionInstruction: NSObject, AVVideoCompositionInst
     self.frameDuration = frameDuration
     self.outgoingMotion = outgoingMotion
     self.incomingMotion = incomingMotion
+    self.outgoingBlend = outgoingBlend
+    self.incomingBlend = incomingBlend
     super.init()
   }
 
@@ -97,6 +105,54 @@ internal struct TransitionSideMotion: Sendable {
   }
 }
 
+/// One side's frame blending inside a pre-rendered blend: the track showing
+/// the source frame after the one the side's track shows, and where each
+/// moment of the blend falls between the two.
+///
+/// Like ``TransitionSideMotion`` it maps a moment linearly onto the side's
+/// `sourceRange`, stretched over the blend. Mirrors the Android
+/// `ClipTransitionRenderer`, which mixes the two nearest decoded frames.
+internal struct TransitionSideBlend: Sendable {
+  let nextTrackID: CMPersistentTrackID
+  let sourceStartUs: Double
+  let sourceDurationUs: Double
+  let blendDurationUs: Double
+  /// The file's frame duration and the time of its first frame.
+  let frameUs: Double
+  let firstFrameUs: Double
+
+  /// nil when the side does not play slowed down enough to blend.
+  init?(
+    nextTrackID: CMPersistentTrackID, sourceRange: CMTimeRange, blendDuration: CMTime,
+    frameDuration: CMTime, firstFrame: CMTime
+  ) {
+    let blendSeconds = CMTimeGetSeconds(blendDuration)
+    let frameSeconds = CMTimeGetSeconds(frameDuration)
+    guard blendSeconds > 0, frameSeconds > 0, frameSeconds.isFinite,
+      CMTimeGetSeconds(sourceRange.duration) / blendSeconds
+        < FrameBlendWindow.minimumUnblendedSpeed
+    else { return nil }
+    self.nextTrackID = nextTrackID
+    sourceStartUs = CMTimeGetSeconds(sourceRange.start) * 1_000_000
+    sourceDurationUs = CMTimeGetSeconds(sourceRange.duration) * 1_000_000
+    blendDurationUs = blendSeconds * 1_000_000
+    frameUs = frameSeconds * 1_000_000
+    firstFrameUs = CMTimeGetSeconds(firstFrame) * 1_000_000
+  }
+
+  /// How far the moment `time` into the blend lies from the source frame the
+  /// side shows then towards the next one, or nil right on a source frame.
+  func weight(at time: CMTime) -> Double? {
+    let elapsedUs = CMTimeGetSeconds(time) * 1_000_000
+    guard elapsedUs.isFinite else { return nil }
+    let share = min(max(elapsedUs / blendDurationUs, 0), 1)
+    let position = (sourceStartUs + share * sourceDurationUs - firstFrameUs) / frameUs
+    let weight = position - position.rounded(.down)
+    if weight <= FrameBlendWindow.snap || weight >= 1 - FrameBlendWindow.snap { return nil }
+    return weight
+  }
+}
+
 /// Draws one frame of a ``ClipTransitionInstruction``'s transition from the
 /// two source frames, with ``ClipTransitionEffects``.
 ///
@@ -130,13 +186,23 @@ internal final class ClipTransitionCompositor: NSObject, AVVideoCompositing {
     let blendTime = instruction.map {
       CMTimeSubtract(request.compositionTime, $0.timeRange.start)
     }
-    let outgoingFrame = instruction.flatMap {
-      source(request, $0.outgoingTrackID, $0.outgoingTransform, size: size)
-        .map { moved($0, by: instruction?.outgoingMotion, at: blendTime) }
+    let outgoingFrame = instruction.flatMap { instruction in
+      source(request, instruction.outgoingTrackID, instruction.outgoingTransform, size: size)
+        .map {
+          blended(
+            $0, by: instruction.outgoingBlend, request, instruction.outgoingTransform, size,
+            blendTime)
+        }
+        .map { moved($0, by: instruction.outgoingMotion, at: blendTime) }
     }
-    let incomingFrame = instruction.flatMap {
-      source(request, $0.incomingTrackID, $0.incomingTransform, size: size)
-        .map { moved($0, by: instruction?.incomingMotion, at: blendTime) }
+    let incomingFrame = instruction.flatMap { instruction in
+      source(request, instruction.incomingTrackID, instruction.incomingTransform, size: size)
+        .map {
+          blended(
+            $0, by: instruction.incomingBlend, request, instruction.incomingTransform, size,
+            blendTime)
+        }
+        .map { moved($0, by: instruction.incomingMotion, at: blendTime) }
     }
     guard let instruction,
       let outgoing = outgoingFrame ?? incomingFrame,
@@ -163,6 +229,20 @@ internal final class ClipTransitionCompositor: NSObject, AVVideoCompositing {
       linearProgress: linear, durationUs: durationUs)
     context.render(image, to: target)
     request.finish(withComposedVideoFrame: target)
+  }
+
+  /// `frame`, upright, mixed with the side's next source frame as `blend`
+  /// has it at `time` into the blend; `frame` itself without a blend, right
+  /// on a source frame, or where the side has no next frame.
+  private func blended(
+    _ frame: CIImage, by blend: TransitionSideBlend?,
+    _ request: AVAsynchronousVideoCompositionRequest, _ transform: CGAffineTransform,
+    _ size: CGSize, _ time: CMTime?
+  ) -> CIImage {
+    guard let blend, let time, let weight = blend.weight(at: time),
+      let next = source(request, blend.nextTrackID, transform, size: size)
+    else { return frame }
+    return blendFrames(frame, next, weight: weight)
   }
 
   /// `frame`, upright, moved by `motion` as it applies at `time` into the
