@@ -694,7 +694,12 @@ class VideoSequenceBuilder(
         // fills a slowed-down stretch with mixes of its source frames, and
         // every effect after it sees those as frames of their own.
         if (clip.frameBlending && clip.slowsDown) {
-            val frameUs = anchor.second.takeIf { it > 0 } ?: DEFAULT_FRAME_US
+            // The scan behind the anchor can fail on a file Media3 still
+            // plays; the blend then falls back to 30 fps rather than failing
+            // the render.
+            val frameUs = runCatching { anchor.second }
+                .onFailure { Log.w(RENDER_TAG, "Clip $index: frame rate unreadable, $it") }
+                .getOrNull()?.takeIf { it > 0 } ?: DEFAULT_FRAME_US
             Log.d(RENDER_TAG, "Clip $index: frame blending on a ${frameUs} us grid")
             clipVideoEffects += FrameBlendGlEffect(frameUs)
         }

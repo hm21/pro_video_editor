@@ -115,6 +115,23 @@ void main() {
       expect(near(l, 0.75), inInclusiveRange(26, 31), reason: '$l');
     });
 
+    testWidgets('holds the last source frame instead of mixing in the next', (
+      _,
+    ) async {
+      // The segment ends where the flash clip's next frame starts. That frame
+      // is cut off, so the last one shown has nothing to blend towards.
+      final frames = await renderFrames([flashSegment(speed: 0.25)]);
+      final l = frameLevels(frames);
+      // It shows from 133 ms (4 frames) before the 4 s output ends.
+      final held = [
+        for (var i = 0; i < frames.length; i++)
+          if (frames[i].time >= const Duration(milliseconds: 3850)) l[i],
+      ];
+
+      expect(held, isNotEmpty);
+      expect(mixed(held), 0, reason: '$held');
+    });
+
     testWidgets('leaves a segment at its own speed as it is', (_) async {
       final frames = await renderFrames([flashSegment()]);
       final l = frameLevels(frames);

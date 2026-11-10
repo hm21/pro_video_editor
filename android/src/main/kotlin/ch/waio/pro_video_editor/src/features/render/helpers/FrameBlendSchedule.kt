@@ -34,6 +34,20 @@ object FrameBlendSchedule {
         sourceStepsPerFrame > 0.0 && sourceStepsPerFrame * MAX_UNBLENDED_GAP < 1.0
 
     /**
+     * Whether frames spanning [sourceSpanUs] of their source, spread evenly
+     * over [outputFrames] output frames [outputFrameUs] apart, play slowed
+     * down enough to blend.
+     *
+     * Decided by their speed, as on iOS, not by how many of them fall on an
+     * output frame: frames at their own speed but at a lower frame rate than
+     * the output, such as a 30 fps side of a 60 fps transition, are not
+     * blended.
+     */
+    fun blendsSpread(sourceSpanUs: Long, outputFrames: Int, outputFrameUs: Long): Boolean =
+        outputFrames > 1 && outputFrameUs > 0 &&
+            blends(sourceSpanUs.toDouble() / ((outputFrames - 1).toLong() * outputFrameUs))
+
+    /**
      * A frame this close to a source frame, as a share of the way to the
      * next, shows that source frame alone. Keeps a clip at its own speed
      * from blurring by the jitter of its timestamps, and matches iOS, where a

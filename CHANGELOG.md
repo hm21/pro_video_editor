@@ -1,5 +1,5 @@
 ## 2.52.0
-- **FEAT**(android, iOS, macOS): `VideoSegment.frameBlending` smooths slow motion. Where a segment plays slower than its source, at a `playbackSpeed` below 1 or a `speedRamp` that dips below 1, the output keeps the source's frame rate and each frame in between mixes the two source frames around it instead of repeating the earlier one, so 0.5x and 0.25x move on instead of stepping. Off by default, since fast movement leaves ghosts. Each side of an overlap transition blends its own frames too.
+- **FEAT**(android, iOS, macOS): `VideoSegment.frameBlending` smooths slow motion: where a segment plays slower than its source, each in-between frame mixes the two source frames around it instead of repeating one, also inside overlap transitions. Off by default, since fast motion leaves ghosts.
 
 ## 2.51.2
 - **FIX**(android, iOS, macOS): An `ImageLayer` and a timed `ColorFilter` show from their `startTime` up to, but not including, their `endTime`, like clips and `VideoEffect`s do. A frame at exactly `endTime` no longer draws them, so where one layer ends as the next one starts, such as the frames `pro_image_editor` exports for a text with highlights or reveals, that frame shows only the next one instead of both.

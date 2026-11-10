@@ -195,11 +195,13 @@ object ClipTransitionRenderer {
                 val inRaf = RandomAccessFile(inSeg.framesFile, "r").also { inFramesRaf = it }
                 val outSide = SideFrames(
                     outRaf, outSeg, outgoingKeyframes,
-                    blends = outgoingFrameBlending && slowedDown(outSeg, frameCount),
+                    blends = outgoingFrameBlending &&
+                        slowedDown(outSeg, frameCount, frameDurationUs),
                 )
                 val inSide = SideFrames(
                     inRaf, inSeg, incomingKeyframes,
-                    blends = incomingFrameBlending && slowedDown(inSeg, frameCount),
+                    blends = incomingFrameBlending &&
+                        slowedDown(inSeg, frameCount, frameDurationUs),
                 )
                 var nextEncoderFrame = 0
                 var outputDone = false
@@ -364,17 +366,19 @@ object ClipTransitionRenderer {
     )
 
     /**
-     * Moves the frames of [segment] by [keyframes], each by its own source
-     * timestamp; a side without keyframes passes its frames through.
-     */
-    /**
      * Whether a side of [segment]'s decoded frames, replayed across
-     * [frameCount] output frames, plays slowed down enough to blend.
+     * [frameCount] output frames [frameDurationUs] apart, plays slowed down
+     * enough to blend (see [FrameBlendSchedule.blendsSpread]).
      */
-    private fun slowedDown(segment: DecodedSegment, frameCount: Int): Boolean =
-        frameCount > 1 && FrameBlendSchedule.blends(
-            (segment.frameCount - 1).toDouble() / (frameCount - 1)
-        )
+    private fun slowedDown(
+        segment: DecodedSegment,
+        frameCount: Int,
+        frameDurationUs: Long,
+    ): Boolean = segment.ptsUs.size > 1 && FrameBlendSchedule.blendsSpread(
+        sourceSpanUs = segment.ptsUs.max() - segment.ptsUs.min(),
+        outputFrames = frameCount,
+        outputFrameUs = frameDurationUs,
+    )
 
     /**
      * One side's frames as the blend takes them: by progress through the
@@ -435,6 +439,10 @@ object ClipTransitionRenderer {
         }
     }
 
+    /**
+     * Moves the frames of [segment] by [keyframes], each by its own source
+     * timestamp; a side without keyframes passes its frames through.
+     */
     private class Motion(
         private val keyframes: List<KeyframeConfig>,
         private val segment: DecodedSegment,

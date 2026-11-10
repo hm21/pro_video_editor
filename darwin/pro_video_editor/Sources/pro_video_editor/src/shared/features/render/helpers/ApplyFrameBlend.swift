@@ -117,9 +117,10 @@ func computeFrameBlendWindows(
 /// receives both frames a moment mixes.
 ///
 /// Each stretch of `videoTrack` inside a window is inserted again from one
-/// source frame later, onto the same span and scaled the same way. Where the
-/// file has no later frame, at the very end of a clip, the track is empty and
-/// the frame shown is held.
+/// source frame later, onto the same span and scaled the same way. The clip's
+/// last frame has no later frame of the clip to mix with: the frame after it,
+/// which the clip's end or the file's cut off, is left out, so the track is
+/// empty there and that last frame is held, as on Android.
 ///
 /// Call before any render-wide speed change, which then scales this track
 /// with the rest.
@@ -152,10 +153,32 @@ func applyFrameBlendTrack(
       end: CMTime(value: window.endUs, timescale: 1_000_000))
     let frame = CMTime(seconds: window.frameUs / 1_000_000, preferredTimescale: 1_000_000)
 
-    for segment in segments {
+    // The stretches of the video track inside the clip.
+    let parts = segments.compactMap { segment -> (AVCompositionTrackSegment, CMTimeRange)? in
+      let part = segment.timeMapping.target.intersection(span)
+      return part.duration > .zero ? (segment, part) : nil
+    }
+    // The next frames stop where the frame after the clip's last one starts,
+    // so that last frame is held rather than mixed with one the clip's end
+    // cut off.
+    let clipSourceEndUs =
+      parts.map { segment, part in
+        let target = segment.timeMapping.target
+        let mapped = segment.timeMapping.source
+        let ratio = mapped.duration.seconds / target.duration.seconds
+        return (mapped.start.seconds + (part.end - target.start).seconds * ratio) * 1_000_000
+      }.max() ?? 0
+    let lastFrameEnd = CMTime(
+      value: Int64(
+        frameBoundaryUs(
+          atOrAfter: clipSourceEndUs, firstFrameUs: Double(window.firstFrameUs),
+          frameUs: window.frameUs
+        ).rounded(.down)),
+      timescale: 1_000_000)
+
+    for (segment, part) in parts {
       let target = segment.timeMapping.target
-      let part = target.intersection(span)
-      guard part.duration > .zero, let url = segment.sourceURL else { continue }
+      guard let url = segment.sourceURL else { continue }
 
       let key = "\(url.absoluteString)#\(segment.sourceTrackID)"
       if sourceTracks[key] == nil {
@@ -172,14 +195,17 @@ func applyFrameBlendTrack(
       }
       guard let source = sourceTracks[key] else { continue }
 
-      // The source behind `part`, a frame later, cut where the file ends.
+      // The source behind `part`, a frame later, cut where the clip's last
+      // frame or the file ends.
       let mapped = segment.timeMapping.source
       let ratio = mapped.duration.seconds / target.duration.seconds
       let start =
         mapped.start + CMTimeMultiplyByFloat64(part.start - target.start, multiplier: ratio)
         + frame
       let sourceEnd = CMTimeMinimum(
-        start + CMTimeMultiplyByFloat64(part.duration, multiplier: ratio), source.end)
+        CMTimeMinimum(
+          start + CMTimeMultiplyByFloat64(part.duration, multiplier: ratio), source.end),
+        lastFrameEnd)
       guard sourceEnd > start else { continue }
       let sourceRange = CMTimeRange(start: start, end: sourceEnd)
       let shownFor = CMTimeMinimum(
@@ -202,6 +228,18 @@ func applyFrameBlendTrack(
     "[\(Tags.render)] 🎞️ Frame blending: \(windows.count) clip(s), next frames on track \(next.trackID)"
   )
   return next.trackID
+}
+
+/// The start of the first source frame at or after `timeUs`, on the grid of
+/// `frameUs` steps from `firstFrameUs`: the end of the last frame a clip cut
+/// at `timeUs` shows. A frame the clip reaches into by no more than
+/// `FrameBlendWindow.snap` of it does not count, since no moment shows it.
+func frameBoundaryUs(atOrAfter timeUs: Double, firstFrameUs: Double, frameUs: Double)
+  -> Double
+{
+  guard frameUs > 0, timeUs.isFinite else { return timeUs }
+  let steps = ((timeUs - firstFrameUs) / frameUs - FrameBlendWindow.snap).rounded(.up)
+  return firstFrameUs + max(steps, 0) * frameUs
 }
 
 /// `image` mixed `weight` of the way towards `next`, on their values as they

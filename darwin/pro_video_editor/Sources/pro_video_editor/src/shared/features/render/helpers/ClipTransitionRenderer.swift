@@ -298,7 +298,7 @@ internal enum ClipTransitionRenderer {
   /// The frame blending of the side playing `range` of `track` over the
   /// blend's `blendDuration`, with a new track in `composition` showing its
   /// next source frames; nil when the side is not slowed down enough to blend
-  /// or the file has no frame after the range's first.
+  /// or shows only one frame.
   private static func sideBlend(
     composition: AVMutableComposition, track: AVAssetTrack, range: CMTimeRange,
     blendDuration: CMTime, fps: Float
@@ -311,15 +311,28 @@ internal enum ClipTransitionRenderer {
       blendDuration: blendDuration, frameDuration: frame, firstFrame: media.start)
     guard probe != nil else { return nil }
 
+    // A frame ahead of the side, up to where the side's last frame ends: the
+    // frame after it, which the clip's end or the file's cut off, is left
+    // out, as on Android, which never decodes it.
+    let nextStart = range.start + frame
+    let lastFrameEnd = CMTime(
+      value: Int64(
+        frameBoundaryUs(
+          atOrAfter: range.end.seconds * 1_000_000,
+          firstFrameUs: media.start.seconds * 1_000_000,
+          frameUs: frame.seconds * 1_000_000
+        ).rounded(.down)),
+      timescale: 1_000_000)
+    guard lastFrameEnd > nextStart else { return nil }
     let shifted = CMTimeRangeGetIntersection(
-      CMTimeRange(start: range.start + frame, duration: range.duration), otherRange: media)
+      CMTimeRange(start: nextStart, end: lastFrameEnd), otherRange: media)
     guard shifted.duration > .zero,
       let next = composition.addMutableTrack(
         withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
     else { return nil }
     try next.insertTimeRange(shifted, of: track, at: .zero)
     // Scaled as the side is, so it runs a frame ahead of it throughout; cut
-    // short where the file ends, after which the side holds its last frame.
+    // short at the side's last frame, which is then held.
     let ratio = CMTimeGetSeconds(blendDuration) / CMTimeGetSeconds(range.duration)
     next.scaleTimeRange(
       CMTimeRange(start: .zero, duration: shifted.duration),

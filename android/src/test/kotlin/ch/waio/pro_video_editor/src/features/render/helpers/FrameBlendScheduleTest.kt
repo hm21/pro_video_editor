@@ -2,6 +2,7 @@ package ch.waio.pro_video_editor.src.features.render.helpers
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 internal class FrameBlendScheduleTest {
@@ -95,6 +96,22 @@ internal class FrameBlendScheduleTest {
         )
 
         assertEquals(0f, nearPrevious.first().weight)
+    }
+
+    @Test
+    fun aSpreadSideBlendsBySpeedNotByFrameRate() {
+        // A second of 30 fps footage, spread over a 1 s blend at 60 fps: at
+        // its own speed, only at a lower rate, so it is not blended.
+        val ownSpeed = 29 * frameUs
+        assertFalse(FrameBlendSchedule.blendsSpread(ownSpeed, 60, 16_667L))
+        assertFalse(FrameBlendSchedule.blendsSpread(ownSpeed, 30, frameUs))
+        // Half a second of it over the same blend plays at 0.5x.
+        val halfSpeed = 14 * frameUs
+        assertTrue(FrameBlendSchedule.blendsSpread(halfSpeed, 30, frameUs))
+        assertTrue(FrameBlendSchedule.blendsSpread(halfSpeed, 60, 16_667L))
+        // One frame, or one output frame, has nothing to blend.
+        assertFalse(FrameBlendSchedule.blendsSpread(0L, 30, frameUs))
+        assertFalse(FrameBlendSchedule.blendsSpread(halfSpeed, 1, frameUs))
     }
 
     @Test
