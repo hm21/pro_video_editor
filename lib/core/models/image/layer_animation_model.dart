@@ -81,6 +81,14 @@ enum LayerAnimationType {
   /// keyframes turn it, and on Android so is one with an
   /// [ImageLayer.shapeMask], which is drawn upright and turned afterwards.
   flip,
+
+  /// Draw a drawing stroke by stroke, in the order and direction it was
+  /// drawn (in), or take it away from the last stroke back (out).
+  ///
+  /// Skipped by the renderer for the same reason as [typewriter]:
+  /// `pro_image_editor` captures an image per step of the drawing, which an
+  /// app passes as one layer per step or as one [ImageLayer.sequence].
+  drawOn,
 }
 
 /// The axis a [LayerAnimationType.flip] turns a layer around.

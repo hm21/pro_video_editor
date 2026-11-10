@@ -511,9 +511,10 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(upright.y, 125, accuracy: 1e-9)
   }
 
-  func testTextRevealsLeaveTheImageAsItIs() {
+  func testRevealsLeaveTheImageAsItIs() {
     let layer = animatedLayer([
       animation("typewriter", "animateIn"), animation("wordByWord", "animateOut"),
+      animation("drawOn", "animateIn"),
     ])
     let (opacity, transform, _) = computeAnimation(
       layer: layer, currentTimeUs: 0, overlayExtent: animatedOverlay,
@@ -556,6 +557,67 @@ class RunnerTests: XCTestCase {
   func testAnimationOffsetStartsPlaybackThatFarIn() {
     XCTAssertEqual(gifFrame(at: 1_000_000, offsetUs: 1_000_000), 2)
     XCTAssertEqual(gifFrame(at: 1_750_000, offsetUs: 1_000_000), 3)
+  }
+
+  // MARK: - Layer frames
+
+  /// A one-pixel-high image `index + 1` pixels wide, so its width names the
+  /// frame it stands for.
+  private func frameImage(_ index: Int) -> CIImage {
+    CIImage(color: .red).cropped(to: CGRect(x: 0, y: 0, width: index + 1, height: 1))
+  }
+
+  private func frameWidth(_ frames: LayerFrames, at index: Int) -> Int {
+    Int(frames.frame(at: index).extent.width)
+  }
+
+  func testLayerFramesDecodeEachSequenceFrameOnceAsItComesOnScreen() {
+    var decoded: [Int] = []
+    let frames = LayerFrames(count: 4, first: frameImage(0)) { index in
+      decoded.append(index)
+      return self.frameImage(index)
+    }
+
+    // A render asks for every video frame, several per sequence frame.
+    let shown = [0, 0, 1, 1, 1, 2, 3, 3].map { frameWidth(frames, at: $0) }
+
+    XCTAssertEqual(shown, [1, 1, 2, 2, 2, 3, 4, 4])
+    XCTAssertEqual(decoded, [1, 2, 3])
+  }
+
+  func testLayerFramesKeepTheFrameBeforeOneThatDoesNotDecode() {
+    var decoded: [Int] = []
+    let frames = LayerFrames(count: 4, first: frameImage(0)) { index in
+      decoded.append(index)
+      return index == 2 ? nil : self.frameImage(index)
+    }
+
+    XCTAssertEqual(frameWidth(frames, at: 1), 2)
+    XCTAssertEqual(frameWidth(frames, at: 2), 2)
+    XCTAssertEqual(frameWidth(frames, at: 2), 2)
+    XCTAssertEqual(frameWidth(frames, at: 3), 4)
+    // Tried once, not on every video frame it covers.
+    XCTAssertEqual(decoded, [1, 2, 3])
+  }
+
+  func testLayerFramesDecodeTheFirstFrameAgainWhenALoopComesBack() {
+    var decoded: [Int] = []
+    let frames = LayerFrames(count: 2, first: frameImage(0)) { index in
+      decoded.append(index)
+      return self.frameImage(index)
+    }
+
+    XCTAssertEqual(frameWidth(frames, at: 1), 2)
+    XCTAssertEqual(frameWidth(frames, at: 0), 1)
+    XCTAssertEqual(decoded, [1, 0])
+  }
+
+  func testLayerFramesDecodedUpFrontReturnTheirFrames() {
+    let frames: LayerFrames = [frameImage(0), frameImage(1)]
+
+    XCTAssertEqual(frames.count, 2)
+    XCTAssertEqual(frameWidth(frames, at: 1), 2)
+    XCTAssertEqual(frameWidth(frames, at: 0), 1)
   }
 
   func testALayerPickingUpWhereAnotherLeftOffContinuesItsAnimation() {

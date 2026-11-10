@@ -252,13 +252,15 @@ private fun addImageLayer(
                     // Prepare every frame identically so they share
                     // dimensions and anchor; the overlay swaps frames over
                     // time.
+                    val prepared = gifFrames.map {
+                        prepareOverlay(
+                            it.bitmap, layer, videoWidth, videoHeight,
+                            rasterScale, rasterBudget
+                        )
+                    }
                     AnimatedFrames(
-                        prepared = gifFrames.map {
-                            prepareOverlay(
-                                it.bitmap, layer, videoWidth, videoHeight,
-                                rasterScale, rasterBudget
-                            )
-                        },
+                        first = prepared.first(),
+                        frames = DecodedFrames(prepared.map { it.bitmap }),
                         durationsUs = gifFrames.map { it.durationUs },
                     )
                 }
@@ -266,9 +268,9 @@ private fun addImageLayer(
 
         val bitmapOverlay: BitmapOverlay
         if (animatedFrames != null) {
-            val first = animatedFrames.prepared.first()
+            val first = animatedFrames.first
             bitmapOverlay = AnimatedBitmapOverlay(
-                frames = animatedFrames.prepared.map { it.bitmap },
+                frames = animatedFrames.frames,
                 frameDurationsUs = animatedFrames.durationsUs,
                 baseNormX = first.baseNormX,
                 baseNormY = first.baseNormY,
@@ -295,7 +297,7 @@ private fun addImageLayer(
             Log.d(
                 RENDER_TAG,
                 "Layer: ${if (isSequence) "frame sequence" else "animated GIF"} " +
-                        "with ${animatedFrames.prepared.size} frame(s), loop=${layer.loop}, " +
+                        "with ${animatedFrames.frames.count} frame(s), loop=${layer.loop}, " +
                         "animationOffset=${layer.animationOffsetUs}us"
             )
         } else {
@@ -507,16 +509,20 @@ internal class OverlayBatch(private val videoEffects: MutableList<Effect>) {
     }
 }
 
-/** The frames of an animated layer, prepared alike, and how long each shows. */
+/**
+ * The frames of an animated layer, prepared alike, and how long each shows.
+ * [first] is frame 0, which places and sizes the overlay for all of them.
+ */
 private class AnimatedFrames(
-    val prepared: List<PreparedOverlay>,
+    val first: PreparedOverlay,
+    val frames: OverlayFrames<Bitmap>,
     val durationsUs: List<Long>,
 )
 
 /**
- * [layer]'s frame sequence, decoded and prepared one frame at a time so no more
- * than one raw decode is held next to the prepared frames, or null when a frame
- * does not decode: a sequence with a hole would jump past it.
+ * [layer]'s frame sequence, each frame decoded and prepared as it comes on
+ * screen (see [OnDemandFrames]), or null when the first frame does not decode.
+ * A later frame that does not decode leaves the one before it on screen.
  */
 private fun prepareFrameSequence(
     layer: VideoSequenceBuilder.ImageLayerConfig,
@@ -528,8 +534,8 @@ private fun prepareFrameSequence(
     val (reqWidth, reqHeight) = overlayDecodeSize(
         layer, videoWidth, videoHeight, rasterScale, rasterBudget
     )
-    val prepared = ArrayList<PreparedOverlay>(layer.frames.size)
-    for ((index, frame) in layer.frames.withIndex()) {
+    fun prepareFrame(index: Int): PreparedOverlay? {
+        val frame = layer.frames[index]
         val bitmap = ImageOrientation.decode(
             frame.image,
             reqWidth = reqWidth,
@@ -537,19 +543,45 @@ private fun prepareFrameSequence(
             config = Bitmap.Config.ARGB_8888,
         )
         if (bitmap == null) {
-            prepared.forEach { it.bitmap.recycle() }
             Log.e(
                 RENDER_TAG,
                 "Layer: frame $index of ${layer.frames.size} did not decode " +
-                        "(${frame.image.describe()}); skipping layer"
+                        "(${frame.image.describe()}); " +
+                        if (index == 0) "skipping layer" else "keeping the frame before it"
             )
             return null
         }
-        prepared += prepareOverlay(
+        return prepareOverlay(
             bitmap, layer, videoWidth, videoHeight, rasterScale, rasterBudget
         )
     }
-    return AnimatedFrames(prepared, layer.frames.map { it.durationUs })
+
+    val first = prepareFrame(0) ?: return null
+    return AnimatedFrames(
+        first = first,
+        frames = OnDemandFrames(
+            count = layer.frames.size,
+            first = first.bitmap,
+            decode = { index ->
+                // Prepared mid-render, where an exception fails the whole
+                // render; before it started, addImageLayer skipped the layer.
+                // A frame that cannot be prepared counts as one that does not
+                // decode. An OutOfMemoryError still fails the render.
+                try {
+                    prepareFrame(index)?.bitmap
+                } catch (e: Exception) {
+                    Log.e(
+                        RENDER_TAG,
+                        "Layer: frame $index of ${layer.frames.size} failed to prepare " +
+                                "(${e.message}); keeping the frame before it"
+                    )
+                    null
+                }
+            },
+            release = Bitmap::recycle,
+        ),
+        durationsUs = layer.frames.map { it.durationUs },
+    )
 }
 
 /**

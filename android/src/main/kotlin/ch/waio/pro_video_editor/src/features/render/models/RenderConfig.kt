@@ -531,8 +531,8 @@ data class AudioTrackConfig(
  * Represents a single animation configuration for an image layer.
  *
  * @property type The kind of animation: "fade", "slide", "scale", "wiggle",
- *   "bounce", "spin", "flip", or "typewriter" / "wordByWord", which the renderer
- *   skips because a layer is one fixed image
+ *   "bounce", "spin", "flip", or "typewriter" / "wordByWord" / "drawOn", which
+ *   the renderer skips because a layer is one fixed image
  * @property phase When the animation plays: "animateIn", "animateOut",
  *   "animateInOut", or "loop" for as long as the layer is visible
  * @property durationUs Duration of the animation in microseconds, or of one

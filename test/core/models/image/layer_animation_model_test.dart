@@ -373,10 +373,11 @@ void main() {
         expect(restored.bounceHeight, 1.25);
       });
 
-      test('text reveals round-trip', () {
+      test('reveals round-trip', () {
         for (final type in [
           LayerAnimationType.typewriter,
           LayerAnimationType.wordByWord,
+          LayerAnimationType.drawOn,
         ]) {
           final original = LayerAnimation(
             type: type,
@@ -745,6 +746,7 @@ void main() {
         LayerAnimationType.wordByWord,
         LayerAnimationType.spin,
         LayerAnimationType.flip,
+        LayerAnimationType.drawOn,
       ]);
     });
 

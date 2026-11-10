@@ -4,9 +4,9 @@ import Foundation
 import ImageIO
 
 struct ImageLayer {
-  /// Decoded frames: one for a static image, several for an animated GIF or
-  /// a frame sequence.
-  let frames: [CIImage]
+  /// The frames: one for a static image, several for an animated GIF or a
+  /// frame sequence; see `LayerFrames`.
+  let frames: LayerFrames
   /// Cumulative end time (µs) of each frame within one playthrough; the last
   /// entry is one playthrough's length, 0 for a static image.
   let frameEndsUs: [Int64]
@@ -58,10 +58,10 @@ struct ImageLayer {
   /// elapsed time (relative to the layer's start) onto the frame timeline,
   /// looping or holding the last frame depending on [loop].
   func currentFrame(atUs currentTimeUs: Int64) -> CIImage {
-    frames[
-      animatedFrameIndex(
+    frames.frame(
+      at: animatedFrameIndex(
         atUs: currentTimeUs, startUs: startUs, animationOffsetUs: animationOffsetUs,
-        frameEndsUs: frameEndsUs, loop: loop)]
+        frameEndsUs: frameEndsUs, loop: loop))
   }
 
   /// Whether the layer shows at composition time `timeUs`; see
@@ -159,23 +159,28 @@ private func decodeGifFrames(_ image: EncodedImage) -> (
 }
 
 /// A layer's frame sequence as frames and a timeline like a GIF's, or nil when
-/// a frame does not decode: a sequence with a hole would jump past it.
+/// its first frame does not decode.
 ///
-/// The frames stay encoded until they are drawn, so a long sequence holds its
-/// encoded bytes rather than a decoded image for every frame.
+/// Each frame is decoded as it comes on screen (see `LayerFrames`), so a long
+/// sequence holds its encoded bytes and one decoded frame. A later frame that
+/// does not decode leaves the one before it on screen.
 private func decodeFrameSequence(_ sequence: [ImageLayerFrameConfig]) -> (
-  frames: [CIImage], frameEndsUs: [Int64]
+  frames: LayerFrames, frameEndsUs: [Int64]
 )? {
-  var frames: [CIImage] = []
+  guard let firstConfig = sequence.first,
+    let first = decodeOrientedImage(firstConfig.image, cache: false)
+  else { return nil }
   var frameEndsUs: [Int64] = []
   var accUs: Int64 = 0
   for frame in sequence {
-    guard let image = decodeOrientedImage(frame.image, cache: false) else { return nil }
     // The caller picks the durations, and an overflowing sum would trap.
     let (sum, overflow) = accUs.addingReportingOverflow(frame.durationUs)
     accUs = overflow ? .max : sum
-    frames.append(image)
     frameEndsUs.append(accUs)
+  }
+  let images = sequence.map(\.image)
+  let frames = LayerFrames(count: sequence.count, first: first) { index in
+    decodeOrientedImage(images[index], cache: false)
   }
   return (frames, frameEndsUs)
 }
@@ -551,7 +556,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
         ))
       return
     }
-    let frames: [CIImage]
+    let frames: LayerFrames
     let frameEndsUs: [Int64]
 
     if !layer.frames.isEmpty, layer.censor == nil {
@@ -563,7 +568,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       frameEndsUs = sequence.frameEndsUs
     } else if let gif = decodeGifFrames(layer.image) {
       // Animated GIF: keep every frame and its timeline.
-      frames = gif.frames
+      frames = LayerFrames(decoded: gif.frames)
       frameEndsUs = gif.frameEndsUs
     } else {
       // Static image: decode the single frame, honoring its EXIF orientation
@@ -581,7 +586,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
 
   /// `layer` drawn from `frames`, shown over `frameEndsUs`.
   private func imageLayer(
-    _ layer: ImageLayerConfig, frames: [CIImage], frameEndsUs: [Int64]
+    _ layer: ImageLayerConfig, frames: LayerFrames, frameEndsUs: [Int64]
   ) -> ImageLayer {
     ImageLayer(
       frames: frames,
