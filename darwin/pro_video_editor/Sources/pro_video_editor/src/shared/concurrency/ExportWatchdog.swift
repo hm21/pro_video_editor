@@ -163,7 +163,7 @@ enum ExportWatchdog {
       // Inner bound: no forward progress for `stallTimeout`. Past the finalize
       // watermark the bound is relaxed to `finalizeGrace` (the progress-silent
       // moov rewrite must not be misread as a stall) but never fully disabled,
-      // so a wedged finalize still terminates and releases the gate.
+      // so a stalled finalize is cancelled; safe unwind still frees the gate.
       if stallTimeout > 0 {
         let bound =
           current >= finalizeWatermark ? max(stallTimeout, finalizeGrace) : stallTimeout
