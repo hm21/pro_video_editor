@@ -1,3 +1,6 @@
+## 2.53.1
+- **FIX**(iOS, macOS): Cancelling a render with a bitrate cap no longer waits on the cancelling thread for the frame being composed. A cancel from Dart that arrived while the custom compositor was slow or stuck froze the whole app until it was killed, and the stall watchdog's cancel never unwound the render. The teardown now runs on a dispatch queue, in the same order as before.
+
 ## 2.53.0
 - **FEAT**: `LayerAnimationType.drawOn` for a drawing that draws itself stroke by stroke. Like the text reveals, the renderer skips it and the app passes an image per step. A `switch` over `LayerAnimationType` has to handle the new value.
 - **FIX**(android, iOS, macOS): An `ImageLayer.sequence` decodes each frame as it comes on screen instead of holding all of them, so a long sequence needs about as much memory as a still image (a 175-frame drawing: 1 GB → 120 MB on a Galaxy S26). A frame after the first that does not decode keeps the one before it on screen instead of dropping the layer.

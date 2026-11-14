@@ -40,7 +40,7 @@ internal enum BitrateCappedExporter {
   /// cancel tears down. The lock is recursive so that arming — which runs
   /// inside the gate — cannot deadlock if AVFoundation ever invokes the pump
   /// block on the arming thread.
-  private final class SessionGate {
+  final class SessionGate {
     private let lock = NSRecursiveLock()
     private var ended = false
 
@@ -438,13 +438,44 @@ internal enum BitrateCappedExporter {
       // fire and the task would hang holding the export gate. Only delete the
       // output if this cancel actually won the race (the export hadn't already
       // finished successfully).
-      if session.end() {
-        reader.cancelReading()
-        writer.cancelWriting()
-      }
-      if terminator.finish(.failure(CancellationError())) {
-        try? FileManager.default.removeItem(at: outputURL)
-      }
+      cancelOffCallerThread(
+        session: session,
+        teardown: {
+          reader.cancelReading()
+          writer.cancelWriting()
+        },
+        finish: {
+          if terminator.finish(.failure(CancellationError())) {
+            try? FileManager.default.removeItem(at: outputURL)
+          }
+        })
+    }
+  }
+
+  /// Ends [session], runs [teardown] if this call ended it, then [finish] —
+  /// on a dispatch queue, never on the calling thread.
+  ///
+  /// `onCancel` runs synchronously on whichever thread cancels: the platform
+  /// thread for a `cancelTask` from Dart, a cooperative-pool thread for the
+  /// stall watchdog. `end()` waits for a pump to step out of the gate, and a
+  /// pump holds it for a whole `copyNextSampleBuffer`, which the custom
+  /// compositor can keep waiting indefinitely; `cancelWriting` blocks too. On
+  /// the platform thread that froze the host app, and on a pool thread it
+  /// kept the stall watchdog from ever unwinding the export.
+  ///
+  /// The order is unchanged: the reader is still never torn down inside a
+  /// read, and the export still reports only after its reader and writer are
+  /// gone, so a job restarted under the same id cannot have its output
+  /// removed by `cancelWriting`. A dispatch queue rather than a task, since
+  /// blocking a cooperative-pool thread starves every other task.
+  static func cancelOffCallerThread(
+    session: SessionGate,
+    teardown: @escaping () -> Void,
+    finish: @escaping () -> Void
+  ) {
+    DispatchQueue.global(qos: .userInitiated).async {
+      if session.end() { teardown() }
+      finish()
     }
   }
 
