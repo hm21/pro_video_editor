@@ -460,8 +460,8 @@ internal enum BitrateCappedExporter {
   /// The order is unchanged: the reader is still never torn down inside a
   /// read, and the export still reports only after its reader and writer are
   /// gone, so a job restarted under the same id cannot have its output
-  /// removed by its predecessor. If a read never returns, cleanup and the
-  /// watchdog still cannot finish; the cancelling thread remains responsive.
+  /// removed by its predecessor. If a read or finalization never returns, cleanup and
+  /// the watchdog still cannot finish; cancellation remains responsive.
   static func cancelOffCallerThread(
     session: SessionGate,
     teardown: @escaping () -> Void,

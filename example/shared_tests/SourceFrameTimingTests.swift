@@ -254,7 +254,13 @@ final class SourceFrameTimingTests: XCTestCase {
       while !input.isReadyForMoreMediaData && writer.status == .writing && Date() < deadline {
         try await Task.sleep(nanoseconds: 500_000)
       }
-      XCTAssertTrue(input.isReadyForMoreMediaData)
+      guard input.isReadyForMoreMediaData else {
+        let failure = writer.error ?? NSError(
+          domain: "SourceFrameTimingTests", code: 1,
+          userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for the fixture writer"])
+        writer.cancelWriting()
+        throw failure
+      }
       XCTAssertTrue(
         adaptor.append(buffer, withPresentationTime: CMTime(value: tick, timescale: 30_000)))
     }
