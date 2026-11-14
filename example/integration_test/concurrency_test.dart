@@ -163,6 +163,103 @@ void main() {
   /// depends on the machine, so a single delay would only sometimes land in it.
   const cancelDelays = <int>[0, 10, 25, 50, 90, 150, 240, 400];
 
+  // A trim prevents the bitrate-cap passthrough fast path. These renders must
+  // use the reader/writer exporter on Darwin, unlike renderTask's preset path.
+  VideoRenderData cappedRenderTask(
+    String id, {
+    Duration end = const Duration(seconds: 4),
+  }) => renderTask(
+    id,
+    const Duration(seconds: 1),
+    end,
+  ).copyWith(bitrate: 1000000);
+
+  testWidgets(
+    'a bitrate-capped render can be cancelled while encoding',
+    (tester) async {
+      final model = cappedRenderTask('capped-cancel-progress');
+      final encoding = model.progressStream
+          .firstWhere((event) => event.progress > 0 && event.progress < 1)
+          .timeout(const Duration(seconds: 30));
+      final settled = expectCancelledOrDone(
+        pve.renderVideo(model),
+        'a bitrate-capped render cancelled after encoding starts',
+      );
+
+      await encoding;
+      await cancelIgnoringNotFound(
+        model.id,
+      ).timeout(const Duration(seconds: 5));
+      await settled;
+
+      final bytes = await pve.renderVideo(cappedRenderTask('capped-survivor'));
+      final metadata = await pve.getMetadata(EditorVideo.memory(bytes));
+      expect(metadata.duration.inMilliseconds, closeTo(3000, 250));
+    },
+    skip: !supportsCancel,
+  );
+
+  testWidgets(
+    'a bitrate-capped render restarted at the same path keeps its output',
+    (tester) async {
+      final directory = await getTemporaryDirectory();
+      final outputs = await Directory(
+        '${directory.path}/capped-cancel-restart-',
+      ).createTemp();
+      addTearDown(() async {
+        if (await outputs.exists()) await outputs.delete(recursive: true);
+      });
+
+      for (final ms in cancelDelays) {
+        final model = cappedRenderTask('capped-restart-$ms');
+        final path = '${outputs.path}/render-$ms.mp4';
+        final settled = expectCancelledOrDone(
+          pve.renderVideoToFile(path, model),
+          'a bitrate-capped file render cancelled after ${ms}ms',
+        );
+        await Future<void>.delayed(Duration(milliseconds: ms));
+        await cancelIgnoringNotFound(
+          model.id,
+        ).timeout(const Duration(seconds: 5));
+
+        // Reuse both identity and destination before the predecessor unwinds.
+        // A different duration also catches accidentally returning its output.
+        final retried = pve.renderVideoToFile(
+          path,
+          cappedRenderTask(model.id, end: const Duration(seconds: 3)),
+        );
+        await settled;
+        expect(await retried.timeout(const Duration(seconds: 90)), path);
+        expect(await File(path).length(), greaterThan(10000));
+        final metadata = await pve.getMetadata(EditorVideo.file(path));
+        expect(metadata.duration.inMilliseconds, closeTo(2000, 250));
+      }
+    },
+    skip: !supportsCancel,
+  );
+
+  testWidgets(
+    'cancelling a bitrate-capped render leaves the other running',
+    (tester) async {
+      final model = cappedRenderTask('capped-cancel-isolated');
+      final settled = expectCancelledOrDone(
+        pve.renderVideo(model),
+        'the first concurrent bitrate-capped render',
+      );
+      final survivor = pve.renderVideo(cappedRenderTask('capped-concurrent'));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await cancelIgnoringNotFound(
+        model.id,
+      ).timeout(const Duration(seconds: 5));
+
+      final bytes = await survivor.timeout(const Duration(seconds: 90));
+      await settled;
+      final metadata = await pve.getMetadata(EditorVideo.memory(bytes));
+      expect(metadata.duration.inMilliseconds, closeTo(3000, 250));
+    },
+    skip: !supportsCancel,
+  );
+
   /// The same sweep for the split, compressed. Both halves are stream-copied
   /// (no bitrate, so `AVAssetExportPresetPassthrough`) and finish in
   /// milliseconds, so the delays above would land after the whole job is

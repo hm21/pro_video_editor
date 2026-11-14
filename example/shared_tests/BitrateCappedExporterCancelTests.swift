@@ -95,7 +95,6 @@ class BitrateCappedExporterCancelTests: XCTestCase {
     let lock = NSLock()
     var teardowns = 0
     let finished = expectation(description: "finished")
-    finished.expectedFulfillmentCount = 2
 
     for _ in 0..<2 {
       BitrateCappedExporter.cancelOffCallerThread(
@@ -106,5 +105,46 @@ class BitrateCappedExporterCancelTests: XCTestCase {
 
     wait(for: [finished], timeout: 5)
     XCTAssertEqual(lock.withLock { teardowns }, 1)
+  }
+
+  func testCancelDoesNotFinishWhileAnotherCancelIsTearingDown() {
+    let gate = BitrateCappedExporter.SessionGate()
+    let tearingDown = DispatchSemaphore(value: 0)
+    let release = DispatchSemaphore(value: 0)
+    let secondFinished = DispatchSemaphore(value: 0)
+    let finished = expectation(description: "first cancel finished")
+
+    BitrateCappedExporter.cancelOffCallerThread(
+      session: gate,
+      teardown: {
+        tearingDown.signal()
+        release.wait()
+      },
+      finish: { finished.fulfill() })
+    XCTAssertEqual(tearingDown.wait(timeout: .now() + 5), .success)
+
+    BitrateCappedExporter.cancelOffCallerThread(
+      session: gate,
+      teardown: { XCTFail("the second cancel must not tear down") },
+      finish: { secondFinished.signal() })
+    let prematureFinish = secondFinished.wait(timeout: .now() + 1)
+    release.signal()
+    wait(for: [finished], timeout: 5)
+    XCTAssertEqual(prematureFinish, .timedOut, "completion ran before teardown ended")
+  }
+
+  func testCancelLeavesCompletionToTheFinalizingWriter() {
+    let gate = BitrateCappedExporter.SessionGate()
+    // The normal completion path has claimed the writer for finishWriting.
+    XCTAssertTrue(gate.end())
+    let finished = expectation(description: "cancel must not finish the export")
+    finished.isInverted = true
+
+    BitrateCappedExporter.cancelOffCallerThread(
+      session: gate,
+      teardown: { XCTFail("the finalizing writer must not be torn down") },
+      finish: { finished.fulfill() })
+
+    wait(for: [finished], timeout: 1)
   }
 }
