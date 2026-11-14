@@ -203,9 +203,7 @@ void main() {
     'a bitrate-capped render restarted at the same path keeps its output',
     (tester) async {
       final directory = await getTemporaryDirectory();
-      final outputs = await Directory(
-        '${directory.path}/capped-cancel-restart-',
-      ).createTemp();
+      final outputs = await directory.createTemp('capped-cancel-restart-');
       addTearDown(() async {
         if (await outputs.exists()) await outputs.delete(recursive: true);
       });
