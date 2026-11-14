@@ -33,14 +33,13 @@ internal enum BitrateCappedExporter {
   ///   4", i.e. `.cancelled`).
   ///
   /// Routing both sides through this gate means a teardown can only ever land
-  /// *between* whole operations. Contention stays cheap: a pump holds the gate
-  /// for a single `copyNextSampleBuffer` / `append`, and a pump waiting on a
-  /// wedged encoder has already returned (`isReadyForMoreMediaData` went false
-  /// and the block is simply not re-invoked), so it holds nothing while a
-  /// cancel tears down. The lock is recursive so that arming — which runs
+  /// *between* whole operations. A composition read can wait indefinitely
+  /// while holding the gate, so cancellation waits for it off the calling
+  /// thread (``cancelOffCallerThread``). A pump parked on writer back-pressure
+  /// instead holds nothing. The lock is recursive so that arming — which runs
   /// inside the gate — cannot deadlock if AVFoundation ever invokes the pump
   /// block on the arming thread.
-  private final class SessionGate {
+  final class SessionGate {
     private let lock = NSRecursiveLock()
     private var ended = false
 
@@ -92,13 +91,13 @@ internal enum BitrateCappedExporter {
     private let lock = NSLock()
     private var cont: CheckedContinuation<Void, Error>?
     private var pending: Result<Void, Error>?
-    private var finished = false
+    private var claimed = false
 
     /// Registers the continuation. If [finish] already ran (the task was
     /// cancelled before the continuation body executed), resumes it at once.
     func attach(_ continuation: CheckedContinuation<Void, Error>) {
       lock.lock()
-      if finished, let pending = pending {
+      if let pending = pending {
         self.pending = nil
         lock.unlock()
         continuation.resume(with: pending)
@@ -109,17 +108,25 @@ internal enum BitrateCappedExporter {
     }
 
     /// Resumes the continuation once; later calls are ignored. Returns `true`
-    /// only for the call that actually completed it, so the winner can own any
-    /// side effects (e.g. deleting the partial output) without a late cancel
-    /// clobbering an already-succeeded export.
+    /// only for the call that actually completed it.
+    ///
+    /// [beforeResuming] runs for that call only, after it claimed completion
+    /// and before the task resumes. Removing the partial output there means a
+    /// late caller can never delete a file, and the winner deletes it before
+    /// the export gate lets a retry write to the same path.
     @discardableResult
-    func finish(_ result: Result<Void, Error>) -> Bool {
+    func finish(
+      _ result: Result<Void, Error>, beforeResuming prepare: () -> Void = {}
+    ) -> Bool {
       lock.lock()
-      if finished {
+      if claimed {
         lock.unlock()
         return false
       }
-      finished = true
+      claimed = true
+      lock.unlock()
+      prepare()
+      lock.lock()
       let continuation = cont
       cont = nil
       if continuation == nil { pending = result }
@@ -392,39 +399,40 @@ internal enum BitrateCappedExporter {
         }
 
         group.notify(queue: DispatchQueue(label: "ch.waio.pro_video_editor.bitrate_export.done")) {
-          // A cancel that got here first already tore the session down and
-          // finished the continuation from `onCancel`; `end` then returns false
-          // and every `terminator.finish` below is a no-op.
+          // Exactly one path owns teardown/finalization and completion. A
+          // cancellation may still be tearing down after ending the session;
+          // leave its continuation alone until that cleanup has finished.
+          guard session.end() else { return }
           if reader.status == .failed {
-            if session.end() {
-              writer.cancelWriting()
+            writer.cancelWriting()
+            let failure = reader.error ?? error(6, "Reading composed frames failed")
+            terminator.finish(.failure(failure)) {
               try? FileManager.default.removeItem(at: outputURL)
             }
-            terminator.finish(.failure(reader.error ?? error(6, "Reading composed frames failed")))
             return
           }
           if writer.status == .failed {
-            if session.end() {
-              reader.cancelReading()
+            reader.cancelReading()
+            let failure = writer.error ?? error(7, "Writing encoded samples failed")
+            terminator.finish(.failure(failure)) {
               try? FileManager.default.removeItem(at: outputURL)
             }
-            terminator.finish(.failure(writer.error ?? error(7, "Writing encoded samples failed")))
             return
           }
           // Finalizing owns the writer from here: `cancelWriting` concurrent
-          // with `finishWriting` is not safe, so take the session before
-          // starting it. Losing that race means a cancel already tore the
-          // writer down and unwound the task, so there is nothing to finalize.
-          guard session.end() else { return }
+          // with `finishWriting` is not safe. A cancel arriving now waits for
+          // this callback, so a retry at the same path cannot race the writer
+          // still touching the output — unless the callback never comes (see
+          // ``finalizeCancelGrace``); a late callback then reports nothing.
           writer.finishWriting {
             if writer.status == .completed {
               terminator.finish(.success(()))
             } else {
-              try? FileManager.default.removeItem(at: outputURL)
-              terminator.finish(
-                .failure(
-                  writer.error
-                    ?? error(8, "Writer finished with status \(writer.status.rawValue)")))
+              let failure =
+                writer.error ?? error(8, "Writer finished with status \(writer.status.rawValue)")
+              terminator.finish(.failure(failure)) {
+                try? FileManager.default.removeItem(at: outputURL)
+              }
             }
           }
         }
@@ -432,19 +440,65 @@ internal enum BitrateCappedExporter {
     } onCancel: {
       // Ending the session stops the pumps (their next gated step returns the
       // "done" fallback) and guarantees none is mid-operation, so the teardown
-      // below cannot land inside one. Complete the continuation directly too —
-      // a pump parked on a wedged encoder (isReadyForMoreMediaData stuck false)
+      // cannot land inside one. Complete the continuation directly too — a
+      // pump parked on a wedged encoder (isReadyForMoreMediaData stuck false)
       // is never re-invoked to observe the cancel, so group.notify would never
-      // fire and the task would hang holding the export gate. Only delete the
-      // output if this cancel actually won the race (the export hadn't already
-      // finished successfully).
-      if session.end() {
-        reader.cancelReading()
-        writer.cancelWriting()
+      // fire and the task would hang holding the export gate.
+      cancelOffCallerThread(
+        session: session,
+        grace: finalizeCancelGrace,
+        teardown: {
+          reader.cancelReading()
+          writer.cancelWriting()
+        },
+        finish: {
+          terminator.finish(.failure(CancellationError())) {
+            try? FileManager.default.removeItem(at: outputURL)
+          }
+        })
+    }
+  }
+
+  /// How long a cancel that lost the session to the finalizing writer waits
+  /// for `finishWriting` to call back before it completes the export as
+  /// cancelled anyway. A healthy finalize, even the moov rewrite of a large
+  /// file, reports well within it; one stuck behind a wedged encoder would
+  /// otherwise keep the task, and with it the process-wide export gate,
+  /// forever. Giving up leaves that writer running, so only a writer that is
+  /// already stuck can still race a retry at the same path.
+  static let finalizeCancelGrace: TimeInterval = 30
+
+  /// Claims [session], then runs [teardown] and [finish] on a dispatch queue.
+  /// Losing the claim leaves completion to the path that owns the session —
+  /// the finalizing writer — and runs only [finish], after [grace], in case
+  /// that path never reports. [finish] must complete the export at most once.
+  ///
+  /// `onCancel` runs synchronously on whichever thread cancels: the platform
+  /// thread for a `cancelTask` from Dart, a cooperative-pool thread for the
+  /// stall watchdog. `end()` waits for a pump to step out of the gate, and a
+  /// pump holds it for a whole `copyNextSampleBuffer`, which the custom
+  /// compositor can keep waiting indefinitely; `cancelWriting` blocks too. On
+  /// the platform thread that froze the host app. Dispatching this wait also
+  /// avoids blocking a Swift cooperative-pool thread during cancellation.
+  ///
+  /// The order is unchanged: the reader is still never torn down inside a
+  /// read, and the export still reports only after its reader and writer are
+  /// gone, so a job restarted under the same id cannot have its output
+  /// removed by its predecessor. A read that never returns still keeps the
+  /// cleanup, and with it the task, waiting; the cancelling thread does not.
+  static func cancelOffCallerThread(
+    session: SessionGate,
+    grace: TimeInterval,
+    teardown: @escaping () -> Void,
+    finish: @escaping () -> Void
+  ) {
+    DispatchQueue.global(qos: .userInitiated).async {
+      guard session.end() else {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + grace, execute: finish)
+        return
       }
-      if terminator.finish(.failure(CancellationError())) {
-        try? FileManager.default.removeItem(at: outputURL)
-      }
+      teardown()
+      finish()
     }
   }
 

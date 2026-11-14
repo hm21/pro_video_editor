@@ -23,6 +23,7 @@
 /* Begin PBXBuildFile section */
 		331C80D8294CF71000263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C80D7294CF71000263BE5 /* RunnerTests.swift */; };
 		A1B2C3D400000000000000E3 /* ExportSessionGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000000E4 /* ExportSessionGuardTests.swift */; };
+		CA9CE10000000000000000A1 /* BitrateCappedExporterCancelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA9CE10000000000000000A2 /* BitrateCappedExporterCancelTests.swift */; };
 		A1B2C3D400000000000000E7 /* TrimmedPreTranscodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000000E8 /* TrimmedPreTranscodeTests.swift */; };
 		FC0A8C010000000000000001 /* SourceFrameTimingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC0A8C010000000000000002 /* SourceFrameTimingTests.swift */; };
 		A1B2C3D400000000000000F3 /* AudioFadeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000000F4 /* AudioFadeTests.swift */; };
@@ -76,6 +77,7 @@
 		331C80D5294CF71000263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		331C80D7294CF71000263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		A1B2C3D400000000000000E4 /* ExportSessionGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ExportSessionGuardTests.swift; path = ../shared_tests/ExportSessionGuardTests.swift; sourceTree = SOURCE_ROOT; };
+		CA9CE10000000000000000A2 /* BitrateCappedExporterCancelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BitrateCappedExporterCancelTests.swift; path = ../shared_tests/BitrateCappedExporterCancelTests.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D400000000000000E8 /* TrimmedPreTranscodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TrimmedPreTranscodeTests.swift; path = ../shared_tests/TrimmedPreTranscodeTests.swift; sourceTree = SOURCE_ROOT; };
 		FC0A8C010000000000000002 /* SourceFrameTimingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceFrameTimingTests.swift; path = ../shared_tests/SourceFrameTimingTests.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D400000000000000F4 /* AudioFadeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AudioFadeTests.swift; path = ../shared_tests/AudioFadeTests.swift; sourceTree = SOURCE_ROOT; };
@@ -153,6 +155,7 @@
 			children = (
 				331C80D7294CF71000263BE5 /* RunnerTests.swift */,
 				A1B2C3D400000000000000E4 /* ExportSessionGuardTests.swift */,
+				CA9CE10000000000000000A2 /* BitrateCappedExporterCancelTests.swift */,
 				A1B2C3D400000000000000E8 /* TrimmedPreTranscodeTests.swift */,
 				FC0A8C010000000000000002 /* SourceFrameTimingTests.swift */,
 				A1B2C3D400000000000000F4 /* AudioFadeTests.swift */,
@@ -456,6 +459,7 @@
 			files = (
 				331C80D8294CF71000263BE5 /* RunnerTests.swift in Sources */,
 				A1B2C3D400000000000000E3 /* ExportSessionGuardTests.swift in Sources */,
+				CA9CE10000000000000000A1 /* BitrateCappedExporterCancelTests.swift in Sources */,
 				A1B2C3D400000000000000E7 /* TrimmedPreTranscodeTests.swift in Sources */,
 				FC0A8C010000000000000001 /* SourceFrameTimingTests.swift in Sources */,
 				A1B2C3D400000000000000F3 /* AudioFadeTests.swift in Sources */,

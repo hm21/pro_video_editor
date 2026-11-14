@@ -35,7 +35,9 @@ final class ProgressBox {
 /// process-wide ``ExportGate`` slot while encoding: a body that neither returns
 /// nor throws would never `release()` the slot and would deadlock *every* later
 /// export. The monitor force-cancels a stalled session, which unwinds the body
-/// and frees the slot, so a wedged encoder can only ever hang its own job.
+/// and frees the slot, so a wedged encoder can only ever hang its own job. The
+/// one exception is a bitrate-capped export stuck inside a composition read:
+/// its reader cannot be torn down until that read returns.
 ///
 /// Two bounds are enforced:
 /// - inner **stall** bound: no forward progress for `stallTimeout` (the
