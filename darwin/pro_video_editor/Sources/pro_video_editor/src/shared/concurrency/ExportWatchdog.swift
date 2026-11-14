@@ -34,16 +34,17 @@ final class ProgressBox {
 /// This matters now that both the split and render pipelines hold a single
 /// process-wide ``ExportGate`` slot while encoding: a body that neither returns
 /// nor throws would never `release()` the slot and would deadlock *every* later
-/// export. The monitor cancels a stalled session; the slot is freed once the
-/// exporter safely unwinds. A bitrate-capped export stuck inside a read or
-/// writer finalization can still prevent that unwind.
+/// export. The monitor force-cancels a stalled session, which unwinds the body
+/// and frees the slot, so a wedged encoder can only ever hang its own job. The
+/// one exception is a bitrate-capped export stuck inside a composition read:
+/// its reader cannot be torn down until that read returns.
 ///
 /// Two bounds are enforced:
 /// - inner **stall** bound: no forward progress for `stallTimeout` (the
 ///   "stuck at 0%" hardware-pool-exhaustion case). Past the finalize watermark
 ///   it is *relaxed* to `finalizeGrace` — not disabled — because the moov-atom
 ///   rewrite (`shouldOptimizeForNetworkUse`) is progress-silent healthy I/O, yet
-///   a silent finalize still needs a cancellation request if it stalls.
+///   a *wedged* finalize must still terminate and release the gate.
 /// - outer **hard** bound: an absolute wall-clock cap, even while still
 ///   reporting progress. Skipped when `exportTimeout <= 0` (the render pipeline
 ///   has no fixed upper bound on clip length, so it relies on the stall bound
@@ -65,8 +66,9 @@ enum ExportWatchdog {
 
   /// No-progress tolerance during the finalize tail (progress ≥
   /// ``finalizeWatermark``). Generous enough that a real moov rewrite of a large
-  /// file completes, but still bounded so a stalled finalize is cancelled.
-  /// Releasing the gate still depends on the exporter finishing safe cleanup.
+  /// file completes, but still bounded so a *wedged* finalize releases the gate
+  /// instead of hanging forever — without it, a render (which runs with no hard
+  /// bound) that wedges past the watermark would deadlock every later export.
   private static let finalizeGrace: TimeInterval = 60
 
   /// Drives `body` (which reports progress through the callback it is handed)
@@ -163,7 +165,7 @@ enum ExportWatchdog {
       // Inner bound: no forward progress for `stallTimeout`. Past the finalize
       // watermark the bound is relaxed to `finalizeGrace` (the progress-silent
       // moov rewrite must not be misread as a stall) but never fully disabled,
-      // so a stalled finalize is cancelled; safe unwind still frees the gate.
+      // so a wedged finalize still terminates and releases the gate.
       if stallTimeout > 0 {
         let bound =
           current >= finalizeWatermark ? max(stallTimeout, finalizeGrace) : stallTimeout

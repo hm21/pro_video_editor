@@ -22,11 +22,12 @@ class RenderVideo {
 
   /// Stall bound for a render encode. A gated encode that makes no forward
   /// progress for this long (a wedged VideoToolbox session sitting at
-  /// `progress == 0`) is cancelled. Its ``ExportGate`` slot is released once
-  /// safe cleanup finishes; a bitrate-capped read or finalization that never
-  /// returns can still hold the slot. Renders have no fixed upper length, so
-  /// only the stall bound applies (no hard
-  /// timeout) — a slow-but-progressing long render is never killed.
+  /// `progress == 0`) is force-cancelled so it releases its ``ExportGate`` slot
+  /// instead of holding it forever and deadlocking every later export (except
+  /// a bitrate-capped composition read that never returns, see
+  /// ``ExportWatchdog``). Renders have no fixed upper length, so only the
+  /// stall bound applies (no hard timeout) — a slow-but-progressing long
+  /// render is never killed.
   static let renderStallTimeout: TimeInterval = 20
 
   // MARK: - Public Methods
