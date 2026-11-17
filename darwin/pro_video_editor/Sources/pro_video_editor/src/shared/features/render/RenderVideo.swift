@@ -65,6 +65,16 @@ class RenderVideo {
   ) {
     queue.async {
       let renderTask = Task {
+        guard let config = withoutEmptyClips(config) else {
+          onError(
+            NSError(
+              domain: "RenderVideo",
+              code: 1,
+              userInfo: [NSLocalizedDescriptionKey: "Every video clip has an empty time range"]
+            ))
+          return
+        }
+
         guard !config.videoClips.isEmpty || config.composition != nil else {
           onError(
             NSError(
@@ -575,6 +585,21 @@ class RenderVideo {
 
   // MARK: - Helper Methods
 
+  /// `config` without the clips whose window holds no time, or `nil` when it
+  /// had clips and none is left.
+  ///
+  /// Such a clip adds nothing, and its empty range would fail the whole
+  /// composition (`insertTimeRange` throws -11800 / -12780), so it is left
+  /// out, as the overlap pass leaves out a clip a blend takes whole.
+  static func withoutEmptyClips(_ config: RenderConfig) -> RenderConfig? {
+    let clips = config.videoClips.filter { !$0.hasEmptyWindow }
+    let skipped = config.videoClips.count - clips.count
+    guard skipped > 0 else { return config }
+    PluginLog.print("⚠️ Skipping \(skipped) video clip(s) whose time range is empty")
+    if clips.isEmpty, config.composition == nil { return nil }
+    return config.copyWith(videoClips: clips)
+  }
+
   private static func uniqueFilename(prefix: String, extension ext: String) -> String {
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyyMMdd_HHmmss_SSS"
@@ -841,8 +866,7 @@ class RenderVideo {
     // a clip), leaving a zero-length body — drop it and let the blend clip take
     // its place rather than feed a zero-length clip to the composer.
     func appendClip(_ clip: VideoClip) {
-      let start = clip.startUs ?? 0
-      if let end = clip.endUs, end <= start { return }
+      if clip.hasEmptyWindow { return }
       result.append(clip)
     }
 
@@ -1138,6 +1162,9 @@ class RenderVideo {
       }
     }
 
+    // The wrap can take the whole first or last clip too, which leaves it
+    // with an empty window; the blend already plays what it held.
+    result.removeAll(where: \.hasEmptyWindow)
     return TransitionPreRender(clips: result, urls: urls, stall: nil)
   }
 
