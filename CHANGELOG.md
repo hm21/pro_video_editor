@@ -1,5 +1,5 @@
 ## 2.53.2
-- **FIX**(iOS, macOS): A `VideoSegment` whose `endTime` is not after its `startTime`, such as one that ends at `Duration.zero`, is left out of the render instead of failing it with `AVFoundationErrorDomain` -11800. So is a first or last segment that a loop-restart transition takes in full. A render whose segments are all empty fails with "Every video clip has an empty time range".
+- **FIX**(iOS, macOS): A `VideoSegment` whose `endTime` is not after its `startTime` (e.g. one ending at `Duration.zero`), or that a loop-restart transition takes in full, is left out of the render instead of failing it with `AVFoundationErrorDomain` -11800. A render of only such segments fails with a clear error.
 
 ## 2.53.1
 - **FIX**(iOS, macOS): Cancelling a bitrate-capped render no longer freezes the app while a frame is slow to compose, and a retry at the same output path keeps its file.

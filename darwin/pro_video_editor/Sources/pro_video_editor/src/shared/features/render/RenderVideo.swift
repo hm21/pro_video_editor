@@ -1021,7 +1021,11 @@ class RenderVideo {
       let singleClip = lastIdx == 0
 
       let firstStart = await playedStartUs(first)
-      let firstDur = await sourceEndUs(first) - firstStart
+      // Explicit even for an untrimmed clip, like an incoming clip in the pass
+      // above: a wrap that takes the whole first clip must leave it an empty
+      // window, which an open end (`endUs == nil`) would hide.
+      let firstEnd = await sourceEndUs(first)
+      let firstDur = firstEnd - firstStart
       let lastStart = await playedStartUs(last)
       let lastEnd = await sourceEndUs(last)
       let lastDur = lastEnd - lastStart
@@ -1082,7 +1086,7 @@ class RenderVideo {
         PluginLog.print("✂️ Loop wrap: starts after the render end, not rendered")
         result[0] = first.reading(
           first.inputPath, startUs: firstStart + plan.incomingHeadSourceUs,
-          endUs: first.endUs, frameRateOverride: first.frameRateOverride,
+          endUs: firstEnd, frameRateOverride: first.frameRateOverride,
           speedRamp: first.croppedSpeedRamp(
             fromUs: plan.incomingHeadSourceUs, toUs: firstDur, ofSourceUs: firstDur))
       } else if let plan = plan {
@@ -1129,7 +1133,7 @@ class RenderVideo {
           } else {
             result[0] = VideoClip(
               inputPath: first.inputPath, startUs: firstStart + headSrc,
-              endUs: first.endUs, volume: first.volume, equalizer: first.equalizer,
+              endUs: firstEnd, volume: first.volume, equalizer: first.equalizer,
               playbackSpeed: first.playbackSpeed,
               speedRamp: first.croppedSpeedRamp(
                 fromUs: headSrc, toUs: firstDur, ofSourceUs: firstDur),

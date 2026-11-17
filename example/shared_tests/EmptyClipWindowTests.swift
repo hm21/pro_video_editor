@@ -75,9 +75,21 @@ final class EmptyClipWindowTests: XCTestCase {
     XCTAssertEqual(duration, 2.0, accuracy: 0.05)
   }
 
-  private func clip(startUs: Int64?, endUs: Int64, wrapUs: Int64? = nil) -> [String: Any] {
-    var clip: [String: Any] = ["inputPath": source.path, "endUs": endUs]
+  func testALoopWrapThatTakesTheWholeUntrimmedFirstClipLeavesItOut() async throws {
+    // The first clip plays the source's last 200 ms and sets no end, so only
+    // the source's length shows that the 400 ms wrap takes all of it.
+    let duration = try await renderedDuration([
+      clip(startUs: 2_800_000, endUs: nil),
+      clip(startUs: 0, endUs: 2_000_000, wrapUs: 400_000),
+    ])
+
+    XCTAssertEqual(duration, 2.0, accuracy: 0.05)
+  }
+
+  private func clip(startUs: Int64?, endUs: Int64?, wrapUs: Int64? = nil) -> [String: Any] {
+    var clip: [String: Any] = ["inputPath": source.path]
     if let startUs { clip["startUs"] = startUs }
+    if let endUs { clip["endUs"] = endUs }
     if let wrapUs { clip["transition"] = ["type": "dissolve", "durationUs": wrapUs] }
     return clip
   }
