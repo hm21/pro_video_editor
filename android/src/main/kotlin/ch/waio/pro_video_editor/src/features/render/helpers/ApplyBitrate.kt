@@ -44,9 +44,16 @@ fun resolveBitrateSettings(mimeType: String?, bitrate: Int?): BitrateChoice? {
         return null
     }
 
+    // Both getters are @Nullable from compileSdk 37 on.
     val capabilities = codecInfo.getCapabilitiesForType(mimeType)
-    val bitrateRange = capabilities.videoCapabilities.bitrateRange
-    val supportsCBR = capabilities.encoderCapabilities
+    val videoCapabilities = capabilities.videoCapabilities
+    val encoderCapabilities = capabilities.encoderCapabilities
+    if (videoCapabilities == null || encoderCapabilities == null) {
+        Log.e(RENDER_TAG, "${codecInfo.name} reports no video encoder capabilities for $mimeType")
+        return null
+    }
+    val bitrateRange = videoCapabilities.bitrateRange
+    val supportsCBR = encoderCapabilities
         .isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
 
     // Clamp the requested bitrate into the supported range instead of bailing
