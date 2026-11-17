@@ -65,6 +65,16 @@ class RenderVideo {
   ) {
     queue.async {
       let renderTask = Task {
+        guard let config = withoutEmptyClips(config) else {
+          onError(
+            NSError(
+              domain: "RenderVideo",
+              code: 1,
+              userInfo: [NSLocalizedDescriptionKey: "Every video clip has an empty time range"]
+            ))
+          return
+        }
+
         guard !config.videoClips.isEmpty || config.composition != nil else {
           onError(
             NSError(
@@ -575,6 +585,21 @@ class RenderVideo {
 
   // MARK: - Helper Methods
 
+  /// `config` without the clips whose window holds no time, or `nil` when it
+  /// had clips and none is left.
+  ///
+  /// Such a clip adds nothing, and its empty range would fail the whole
+  /// composition (`insertTimeRange` throws -11800 / -12780), so it is left
+  /// out, as the overlap pass leaves out a clip a blend takes whole.
+  static func withoutEmptyClips(_ config: RenderConfig) -> RenderConfig? {
+    let clips = config.videoClips.filter { !$0.hasEmptyWindow }
+    let skipped = config.videoClips.count - clips.count
+    guard skipped > 0 else { return config }
+    PluginLog.print("⚠️ Skipping \(skipped) video clip(s) whose time range is empty")
+    if clips.isEmpty, config.composition == nil { return nil }
+    return config.copyWith(videoClips: clips)
+  }
+
   private static func uniqueFilename(prefix: String, extension ext: String) -> String {
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyyMMdd_HHmmss_SSS"
@@ -841,8 +866,7 @@ class RenderVideo {
     // a clip), leaving a zero-length body — drop it and let the blend clip take
     // its place rather than feed a zero-length clip to the composer.
     func appendClip(_ clip: VideoClip) {
-      let start = clip.startUs ?? 0
-      if let end = clip.endUs, end <= start { return }
+      if clip.hasEmptyWindow { return }
       result.append(clip)
     }
 
@@ -997,7 +1021,11 @@ class RenderVideo {
       let singleClip = lastIdx == 0
 
       let firstStart = await playedStartUs(first)
-      let firstDur = await sourceEndUs(first) - firstStart
+      // Explicit even for an untrimmed clip, like an incoming clip in the pass
+      // above: a wrap that takes the whole first clip must leave it an empty
+      // window, which an open end (`endUs == nil`) would hide.
+      let firstEnd = await sourceEndUs(first)
+      let firstDur = firstEnd - firstStart
       let lastStart = await playedStartUs(last)
       let lastEnd = await sourceEndUs(last)
       let lastDur = lastEnd - lastStart
@@ -1058,7 +1086,7 @@ class RenderVideo {
         PluginLog.print("✂️ Loop wrap: starts after the render end, not rendered")
         result[0] = first.reading(
           first.inputPath, startUs: firstStart + plan.incomingHeadSourceUs,
-          endUs: first.endUs, frameRateOverride: first.frameRateOverride,
+          endUs: firstEnd, frameRateOverride: first.frameRateOverride,
           speedRamp: first.croppedSpeedRamp(
             fromUs: plan.incomingHeadSourceUs, toUs: firstDur, ofSourceUs: firstDur))
       } else if let plan = plan {
@@ -1105,7 +1133,7 @@ class RenderVideo {
           } else {
             result[0] = VideoClip(
               inputPath: first.inputPath, startUs: firstStart + headSrc,
-              endUs: first.endUs, volume: first.volume, equalizer: first.equalizer,
+              endUs: firstEnd, volume: first.volume, equalizer: first.equalizer,
               playbackSpeed: first.playbackSpeed,
               speedRamp: first.croppedSpeedRamp(
                 fromUs: headSrc, toUs: firstDur, ofSourceUs: firstDur),
@@ -1138,6 +1166,9 @@ class RenderVideo {
       }
     }
 
+    // The wrap can take the whole first or last clip too, which leaves it
+    // with an empty window; the blend already plays what it held.
+    result.removeAll(where: \.hasEmptyWindow)
     return TransitionPreRender(clips: result, urls: urls, stall: nil)
   }
 

@@ -170,6 +170,14 @@ extension VideoClip {
     return playbackSpeed.map { $0 > 0 && $0 < 1 } ?? false
   }
 
+  /// Whether the clip's window holds no time: it ends where it starts, or
+  /// before. Such a clip has nothing to show, and AVFoundation refuses to
+  /// insert its empty range, failing the whole render with -11800 / -12780.
+  var hasEmptyWindow: Bool {
+    guard let endUs else { return false }
+    return endUs <= (startUs ?? 0)
+  }
+
   /// Whether the clip plays at anything other than its own speed.
   var changesSpeed: Bool {
     speedRamp != nil || (playbackSpeed.map { $0 > 0 && $0 != 1 } ?? false)
