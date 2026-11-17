@@ -1,3 +1,6 @@
+## 2.53.2
+- **FIX**(android): The plugin compiles against Android SDK 37. Apps that raise their plugins' `compileSdk` to 37 failed with `UNSAFE_CALL` in `ApplyBitrate.kt`.
+
 ## 2.53.1
 - **FIX**(iOS, macOS): Cancelling a bitrate-capped render no longer freezes the app while a frame is slow to compose, and a retry at the same output path keeps its file.
 
