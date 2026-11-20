@@ -296,14 +296,14 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// decoded once per render rather than once per frame.
   private var chromaBackgroundCache: [String: CIImage] = [:]
 
-  /// Cache for computed LUTs keyed by the active chroma key and filter indices
+  /// Cache for computed color-filter LUTs keyed by the active filter indices
   private let lutCacheQueue = DispatchQueue(label: "lut.cache.queue")
   private var lutCache: [String: (data: Data, size: Int)] = [:]
   /// Insertion order of `lutCache`, so the oldest entry can be evicted.
   private var lutCacheOrder: [String] = []
   private let defaultLutSize = 33
-  /// A 33³ cube is 574 KB; a long timeline with many distinct keys and filters
-  /// would otherwise accumulate one per combination.
+  /// A 33³ cube is 574 KB; a long timeline with many distinct filter
+  /// combinations would otherwise accumulate one per combination.
   private let lutCacheLimit = 8
 
   /// No-argument by AVFoundation's contract; the configuration arrives with
@@ -909,43 +909,6 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       .concatenating(CGAffineTransform(a: cos, b: sin, c: -sin, d: cos, tx: 0, ty: 0))
   }
 
-  /// Applies a chroma key as its own color cube.
-  ///
-  /// The cube encodes the whole key — matte alpha *and* despilled color — since
-  /// both are pure functions of the input RGB. Entries are premultiplied, as
-  /// `CIColorCube` requires. Cached like the color-filter cube.
-  private func applyChromaKeyCube(to image: CIImage, _ config: ChromaKeyConfig) -> CIImage {
-    let cacheKey = "ck:\(config.cacheKey)"
-
-    var cached: (data: Data, size: Int)?
-    lutCacheQueue.sync { cached = lutCache[cacheKey] }
-
-    let lut: (data: Data, size: Int)
-    if let cached = cached {
-      lut = cached
-    } else {
-      guard
-        let data = generateChromaLUTData(chroma: config, size: defaultLutSize)
-      else { return image }
-      lut = (data: data, size: defaultLutSize)
-      lutCacheQueue.sync {
-        if lutCache[cacheKey] == nil {
-          lutCache[cacheKey] = lut
-          lutCacheOrder.append(cacheKey)
-          while lutCacheOrder.count > lutCacheLimit {
-            lutCache.removeValue(forKey: lutCacheOrder.removeFirst())
-          }
-        }
-      }
-    }
-
-    guard let filter = CIFilter(name: "CIColorCube") else { return image }
-    filter.setValue(lut.size, forKey: "inputCubeDimension")
-    filter.setValue(lut.data, forKey: "inputCubeData")
-    filter.setValue(image, forKey: kCIInputImageKey)
-    return filter.outputImage ?? image
-  }
-
   /// Removes the chroma key from a source frame and fills the keyed area.
   ///
   /// Runs on the **raw source frame**, before crop, rotation, flip and scale.
@@ -959,7 +922,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
   /// 2. It matches the Android ordering exactly: there the chroma shader is
   ///    first in the per-clip chain and `SingleColorLut` grades whatever it
   ///    produced — so a color filter grades the substituted background too.
-  ///    Folding the filter into the key's own cube instead would grade only the
+  ///    Folding the filter into the key's kernel instead would grade only the
   ///    video and leave the background at its raw color.
   /// 3. It keys unresampled pixels, which keeps the soft edge crisp.
   ///
@@ -973,7 +936,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
     -> CIImage
   {
     guard let chroma = activeChromaKey(at: compositionTime) else { return image }
-    return compositeChromaBackground(applyChromaKeyCube(to: image, chroma), chroma)
+    return compositeChromaBackground(applyChromaKeyKernel(to: image, chroma), chroma)
   }
 
   /// Fills the keyed-out area with the key's background.
@@ -1093,7 +1056,7 @@ class VideoCompositor: NSObject, AVVideoCompositing {
       //    here — unlike the single-track path, there really is something
       //    underneath, and step 5's composite lets it show through.
       if let key = placement.chromaKey {
-        img = applyChromaKeyCube(to: img, key)
+        img = applyChromaKeyKernel(to: img, key)
         img = compositeChromaBackground(img, key)
       }
 

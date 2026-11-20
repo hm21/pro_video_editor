@@ -293,8 +293,8 @@ data class ColorFilterConfig(
  * Removes a solid-colored background ("green screen").
  *
  * Mirrors the Dart `ChromaKey` model and the Swift `ChromaKeyConfig`. The
- * keying math lives in `ChromaKeyMath` and is the same formula Apple bakes into
- * its color cube; the GPU runs it in `ChromaKeyEffect`'s fragment shader.
+ * keying math lives in `ChromaKeyMath` and is the same formula Apple runs in
+ * its Metal kernel; the GPU runs it in `ChromaKeyEffect`'s fragment shader.
  *
  * @property keyR/keyG/keyB The screen color to remove, gamma-encoded, 0..1
  * @property similarity Radius around the key within which a pixel is fully

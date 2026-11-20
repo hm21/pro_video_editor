@@ -28,7 +28,7 @@ fun applyChromaKey(
     // H.264/HEVC carry no alpha channel, and the single-track path has no layer
     // underneath to blend into, so "transparent" has no meaning there. Left
     // alone the two platforms would disagree visibly: Apple's premultiplied
-    // color cube writes rgb*0 and the area comes out black, while this shader
+    // kernel writes rgb*0 and the area comes out black, while this shader
     // writes straight alpha and leaves the RGB untouched, so the screen would
     // simply stay green — "nothing happened". Substituting opaque black makes
     // both platforms produce the documented result.

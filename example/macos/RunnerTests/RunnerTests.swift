@@ -1529,11 +1529,11 @@ final class SetupStageWatchdogTests: XCTestCase {
 ///
 /// The golden tables below are duplicated verbatim in the Kotlin test
 /// (`android/src/test/.../ChromaKeyMathTest.kt`). Both run it against their own
-/// implementation — Swift's `chromaKeyed(r:g:b:_:)`, which is baked into the
-/// Core Image color cube, and Kotlin's `ChromaKeyMath`, which the GLSL shader
-/// mirrors. If either platform drifts, one of these two tests fails immediately
-/// instead of the difference surfacing later as "the key looks slightly
-/// different on Android".
+/// implementation — Swift's `chromaKeyed(r:g:b:_:)` and
+/// `chromaKeyNeighbourhoodDistance`, which the Metal kernel mirrors, and
+/// Kotlin's `ChromaKeyMath`, which the GLSL shader mirrors. If either platform
+/// drifts, one of these two tests fails immediately instead of the difference
+/// surfacing later as "the key looks slightly different on Android".
 ///
 /// **When you change the formula, regenerate both tables.**
 class ChromaKeyMathTests: XCTestCase {
@@ -1839,58 +1839,143 @@ class ChromaKeyMathTests: XCTestCase {
     XCTAssertFalse(out.r.isNaN || out.g.isNaN || out.b.isNaN || out.a.isNaN)
   }
 
-  /// The cube is what actually runs on Apple, so verify it carries the same
-  /// numbers **and** that its entries are premultiplied, which `CIColorCube`
-  /// requires and which is the one place Apple and Android must differ.
-  func testCubeIsPremultipliedAndMatchesTheFormula() throws {
-    let size = 33
-    let data = try XCTUnwrap(
-      generateChromaLUTData(chroma: config, size: size))
-
-    XCTAssertEqual(data.count, size * size * size * 4 * MemoryLayout<Float>.size)
-
-    let floats: [Float] = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
-
-    // Walk the cube's own sample grid, so no interpolation is involved.
-    for bi in stride(from: 0, to: size, by: 8) {
-      for gi in stride(from: 0, to: size, by: 8) {
-        for ri in stride(from: 0, to: size, by: 8) {
-          let rf = Double(ri) / Double(size - 1)
-          let gf = Double(gi) / Double(size - 1)
-          let bf = Double(bi) / Double(size - 1)
-          let expected = chromaKeyed(r: rf, g: gf, b: bf, config)
-
-          let offset = (bi * size * size + gi * size + ri) * 4
-          XCTAssertEqual(
-            Double(floats[offset]), expected.r * expected.a, accuracy: 1e-5)
-          XCTAssertEqual(
-            Double(floats[offset + 1]), expected.g * expected.a, accuracy: 1e-5)
-          XCTAssertEqual(
-            Double(floats[offset + 2]), expected.b * expected.a, accuracy: 1e-5)
-          XCTAssertEqual(Double(floats[offset + 3]), expected.a, accuracy: 1e-5)
-        }
-      }
+  /// The neighbourhood table, duplicated verbatim in Kotlin's
+  /// `ChromaKeyMathTest`. Taps are row-major NW, N, NE, W, C, E, SW, S, SE.
+  func testNeighbourhoodDistanceTableMatchesTheSharedFormula() {
+    let rows: [(name: String, taps: [Double], distance: Double)] = [
+      ("uniform", Array(repeating: 0.3, count: 9), 0.3),
+      ("speck", [0.1, 0.1, 0.1, 0.1, 0.4, 0.1, 0.1, 0.1, 0.1], 0.175),
+      ("edge", [0.05, 0.4, 0.4, 0.05, 0.4, 0.4, 0.05, 0.4, 0.4], 0.3125),
+    ]
+    for row in rows {
+      XCTAssertEqual(
+        chromaKeyNeighbourhoodDistance(row.taps), row.distance, accuracy: 1e-9, row.name)
     }
   }
 
-  /// A fully keyed entry must be `(0, 0, 0, 0)`, not `(rgb, 0)` — Core Image
-  /// would otherwise composite the key color back in at the edges.
-  func testFullyKeyedCubeEntriesAreZero() throws {
-    let size = 33
-    let data = try XCTUnwrap(
-      generateChromaLUTData(chroma: config, size: size))
-    let floats: [Float] = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+  /// The Metal kernel is what actually runs on Apple, so render a small frame
+  /// through it and compare every pixel, borders included, against the spec
+  /// evaluated on the CPU: per-tap distance, binomial neighbourhood (clamped to
+  /// the edge), smoothstep, centre-pixel despill, alpha times the centre's own
+  /// alpha, premultiplied.
+  func testKernelMatchesTheSpecPixelForPixel() throws {
+    let width = 16
+    let height = 8
+    let frame = Self.keyTestFrame(width: width, height: height)
+    let expected = Self.referenceKey(frame, width: width, height: height, config)
 
-    // Nearest grid point to the key color.
-    let ri = Int((config.keyR * Double(size - 1)).rounded())
-    let gi = Int((config.keyG * Double(size - 1)).rounded())
-    let bi = Int((config.keyB * Double(size - 1)).rounded())
-    let offset = (bi * size * size + gi * size + ri) * 4
+    let input = CIImage(
+      bitmapData: Data(frame), bytesPerRow: width * 4,
+      size: CGSize(width: width, height: height), format: .RGBA8, colorSpace: nil)
+    let output = applyChromaKeyKernel(to: input, config)
+    XCTAssertEqual(output.extent, input.extent)
 
-    XCTAssertEqual(floats[offset + 3], 0.0, accuracy: 1e-5, "key should be fully removed")
-    XCTAssertEqual(floats[offset], 0.0, accuracy: 1e-5, "premultiplied red must be 0")
-    XCTAssertEqual(floats[offset + 1], 0.0, accuracy: 1e-5, "premultiplied green must be 0")
-    XCTAssertEqual(floats[offset + 2], 0.0, accuracy: 1e-5, "premultiplied blue must be 0")
+    let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
+    // The whole frame, then a window off the origin, so the kernel's mapping
+    // from output to input texels is exercised with offset regions too.
+    let windows = [
+      input.extent,
+      CGRect(x: 3, y: 2, width: 9, height: 5),
+    ]
+    for window in windows {
+      let rendered = Self.renderRGBAf(output, in: window, context: context)
+      let columns = Int(window.width)
+      for row in 0..<Int(window.height) {
+        for column in 0..<columns {
+          // Bitmap rows run top to bottom, Core Image's y axis bottom to top.
+          let x = Int(window.minX) + column
+          let y = height - Int(window.maxY) + row
+          for channel in 0..<4 {
+            let got = Double(rendered[(row * columns + column) * 4 + channel])
+            let want = expected[(y * width + x) * 4 + channel]
+            XCTAssertEqual(
+              got, want, accuracy: 1.0 / 255.0,
+              "pixel (\(x), \(y)) channel \(channel) in \(window)")
+          }
+        }
+      }
+    }
+
+    // The frame must exercise the ramp, not only fully kept and removed pixels.
+    let alphas = stride(from: 3, to: expected.count, by: 4).map { expected[$0] }
+    XCTAssertTrue(alphas.contains { $0 > 0.05 && $0 < 0.95 }, "expected a partial matte")
+    // A fully removed pixel is (0, 0, 0, 0), not (rgb, 0), or Core Image would
+    // composite the screen color back in along the soft edge.
+    let interior = Self.renderRGBAf(
+      output, in: CGRect(x: 1, y: 1, width: 1, height: 1), context: context)
+    XCTAssertEqual(interior, [0, 0, 0, 0])
+  }
+
+  /// A 16×8 premultiplied RGBA8 frame, rows top to bottom: the key on the left
+  /// half and skin on the right, with details that exercise each part of the
+  /// spec. The top row of the screen half is gray, so a frame read upside down
+  /// would not match.
+  private static func keyTestFrame(width: Int, height: Int) -> [UInt8] {
+    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+    func set(_ x: Int, _ y: Int, _ rgba: [UInt8]) {
+      for channel in 0..<4 { pixels[(y * width + x) * 4 + channel] = rgba[channel] }
+    }
+    let key: [UInt8] = [0x00, 0xB1, 0x40, 255]
+    let skin: [UInt8] = [219, 166, 135, 255]
+    for y in 0..<height {
+      for x in 0..<width { set(x, y, x < width / 2 ? key : skin) }
+    }
+    for x in 0..<width / 2 { set(x, 0, [128, 128, 128, 255]) }
+    set(3, 4, skin)  // A one-pixel subject detail on the screen.
+    // A dimly lit patch of screen against the bottom edge: a partial matte.
+    for y in height - 3..<height {
+      for x in 4..<7 { set(x, y, [0, 88, 32, 255]) }
+    }
+    set(12, 5, key)  // A one-pixel speck of screen on the subject.
+    set(9, 6, [140, 191, 140, 255])  // Green-spilled gray, despilled.
+    set(10, 1, [0, 0, 0, 0])  // Fully transparent.
+    set(13, 3, [110, 83, 68, 128])  // Half-transparent skin, premultiplied.
+    return pixels
+  }
+
+  /// The spec on the CPU, for a premultiplied RGBA8 frame; premultiplied RGBA
+  /// out, rows top to bottom.
+  private static func referenceKey(
+    _ pixels: [UInt8], width: Int, height: Int, _ key: ChromaKeyConfig
+  ) -> [Double] {
+    func straight(_ x: Int, _ y: Int) -> (r: Double, g: Double, b: Double, a: Double) {
+      let i = (min(max(y, 0), height - 1) * width + min(max(x, 0), width - 1)) * 4
+      let a = Double(pixels[i + 3]) / 255
+      guard a > 0 else { return (0, 0, 0, 0) }
+      return (
+        Double(pixels[i]) / 255 / a, Double(pixels[i + 1]) / 255 / a,
+        Double(pixels[i + 2]) / 255 / a, a
+      )
+    }
+    var out: [Double] = []
+    for y in 0..<height {
+      for x in 0..<width {
+        var taps: [Double] = []
+        for dy in -1...1 {
+          for dx in -1...1 {
+            let tap = straight(x + dx, y + dy)
+            taps.append(chromaKeyDistance(r: tap.r, g: tap.g, b: tap.b, key))
+          }
+        }
+        let matte = chromaKeyMatte(distance: chromaKeyNeighbourhoodDistance(taps), key)
+        let centre = straight(x, y)
+        let despilled = chromaKeyed(r: centre.r, g: centre.g, b: centre.b, key)
+        let alpha = matte * centre.a
+        out += [despilled.r * alpha, despilled.g * alpha, despilled.b * alpha, alpha]
+      }
+    }
+    return out
+  }
+
+  /// `image` within `bounds` as premultiplied float RGBA, rows top to bottom.
+  private static func renderRGBAf(_ image: CIImage, in bounds: CGRect, context: CIContext)
+    -> [Float]
+  {
+    var pixels = [Float](repeating: -1, count: Int(bounds.width * bounds.height) * 4)
+    context.render(
+      image, toBitmap: &pixels, rowBytes: Int(bounds.width) * 4 * MemoryLayout<Float>.size,
+      bounds: bounds, format: .RGBAf, colorSpace: nil)
+    return pixels
   }
 
   /// Two different background images of the same byte length must not share a
@@ -1920,6 +2005,96 @@ class ChromaKeyMathTests: XCTestCase {
     XCTAssertNotEqual(config.cacheKey, withSpill(0.9).cacheKey)
   }
 
+}
+
+/// The chroma key through the real compositor, on both paths that run
+/// `ChromaKeyKernel`: a second of screen green keyed onto blue must come out
+/// blue, and the red second after it must stay red. A kernel that does not run
+/// leaves the first second green; one that fails yields a clear frame, which
+/// turns the red second blue too.
+final class ChromaKeyRenderTests: XCTestCase {
+  private static let subject = 0
+  private static let screen = 1
+  private static let backdrop = 2
+
+  func testSingleTrackKeyFillsTheScreenWithItsBackground() async throws {
+    try await assertKeysTheScreenAndKeepsTheSubject { source in
+      [
+        "videoClips": [["inputPath": source.path]],
+        "chromaKey": [
+          "keyColor": Self.argb(Self.screen), "bgColor": Self.argb(Self.backdrop),
+        ],
+      ]
+    }
+  }
+
+  func testLayeredKeyShowsTheCanvasBeneath() async throws {
+    try await assertKeysTheScreenAndKeepsTheSubject { source in
+      [
+        "composition": [
+          "layers": [
+            [
+              "clips": [["inputPath": source.path]],
+              "chromaKey": ["keyColor": Self.argb(Self.screen)],
+            ]
+          ],
+          "backgroundColor": Self.argb(Self.backdrop),
+        ]
+      ]
+    }
+  }
+
+  private func assertKeysTheScreenAndKeepsTheSubject(
+    _ arguments: (URL) -> [String: Any], file: StaticString = #filePath, line: UInt = #line
+  ) async throws {
+    let palette = ThumbnailTimestampFixture.palette
+    let source = try ThumbnailTimestampFixture.makeColorVideo(
+      colors: [palette[Self.screen], palette[Self.subject]])
+    let output = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pve_chroma_\(UUID().uuidString).mp4")
+    defer {
+      try? FileManager.default.removeItem(at: source)
+      try? FileManager.default.removeItem(at: output)
+    }
+
+    var args = arguments(source)
+    args["outputPath"] = output.path
+    args["outputFormat"] = "mp4"
+    args["enableAudio"] = false
+    let config = try XCTUnwrap(RenderConfig.fromArguments(args), file: file, line: line)
+
+    let settled = expectation(description: "render settles")
+    var failure: Error?
+    RenderVideo.render(
+      config: config,
+      onProgress: { _ in },
+      onComplete: { _ in settled.fulfill() },
+      onError: { error in
+        failure = error
+        settled.fulfill()
+      })
+    await fulfillment(of: [settled], timeout: 120)
+    if let failure { throw failure }
+
+    let generator = AVAssetImageGenerator(asset: AVURLAsset(url: output))
+    generator.requestedTimeToleranceBefore = .zero
+    generator.requestedTimeToleranceAfter = CMTime(value: 1, timescale: 10)
+    for (seconds, expected) in [(0.5, Self.backdrop), (1.5, Self.subject)] {
+      let image = try generator.copyCGImage(
+        at: CMTime(seconds: seconds, preferredTimescale: 600), actualTime: nil)
+      let color = try XCTUnwrap(
+        ThumbnailTimestampFixture.averageColor(of: image), file: file, line: line)
+      XCTAssertEqual(
+        ThumbnailTimestampFixture.nearestPaletteIndex(color, palette: palette), expected,
+        "at \(seconds) s: expected palette[\(expected)], got \(color)", file: file, line: line)
+    }
+  }
+
+  private static func argb(_ index: Int) -> NSNumber {
+    let color = ThumbnailTimestampFixture.palette[index]
+    return NSNumber(
+      value: Int64(0xFF00_0000) | Int64(color.r) << 16 | Int64(color.g) << 8 | Int64(color.b))
+  }
 }
 
 // MARK: - EXIF orientation on caller-supplied images

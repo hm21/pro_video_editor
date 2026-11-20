@@ -9,11 +9,18 @@ import kotlin.math.sqrt
  * The chroma-key formula, in plain Kotlin.
  *
  * This is the single spec both platforms implement. The GPU actually runs it
- * inside [ChromaKeyEffect]'s fragment shader; Apple bakes the very same math
- * into a Core Image color cube (`ApplyChromaKey.swift`). This class exists so
- * the formula can be unit-tested without a GL context, and so the Kotlin and
- * Swift tests can assert the *same* golden table — a drift in either
- * implementation then fails a fast test instead of an emulator run.
+ * inside [ChromaKeyEffect]'s fragment shader; Apple runs the very same math in
+ * a Metal kernel (`ApplyChromaKey.swift`). This class exists so the formula can
+ * be unit-tested without a GL context, and so the Kotlin and Swift tests can
+ * assert the *same* golden tables — a drift in either implementation then
+ * fails a fast test instead of an emulator run.
+ *
+ * The matte is not taken from one pixel alone. Video stores colour at half the
+ * resolution of brightness, so a per-pixel key steps along an edge and
+ * flickers with compression noise. Both renderers evaluate [distance] on the
+ * 3×3 neighbourhood of each pixel and average the nine with
+ * [neighbourhoodDistance] before the smoothstep; despill still reads the
+ * centre pixel alone.
  *
  * Keep this file, the fragment shader and `chromaKeyed(r:g:b:_:)` in Swift in
  * lockstep. All values are gamma-encoded, non-color-managed RGB in `0..1`.
@@ -67,7 +74,60 @@ object ChromaKeyMath {
     }
 
     /**
-     * Evaluates the key for one pixel.
+     * The key distance of one pixel: chroma, plus brightness weighted by how
+     * neutral the key is.
+     */
+    fun distance(r: Double, g: Double, b: Double, config: ChromaKeyConfig): Double {
+        val c = chroma(r, g, b)
+        val y = luma(r, g, b)
+        val dCb = c[0] - config.keyCb
+        val dCr = c[1] - config.keyCr
+        val dY = (y - config.keyLuma) * config.lumaWeight
+        return sqrt(dCb * dCb + dCr * dCr + dY * dY)
+    }
+
+    /**
+     * Averages the key distances of a pixel's 3×3 neighbourhood, given
+     * row-major (NW, N, NE, W, C, E, SW, S, SE), into the distance the matte
+     * is ramped on.
+     *
+     * The binomial weights smooth the steps that half-resolution colour leaves
+     * along an edge and the flicker of compression noise. A uniform
+     * neighbourhood returns its own distance, so a flat area keys exactly as a
+     * single pixel would. The renderers clamp the neighbourhood to the frame
+     * edge.
+     *
+     * The matte is deliberately not shrunk as well: a one-pixel hair strand
+     * looks to a 3×3 neighbourhood exactly like the screen-coloured fringe of
+     * an edge, so any shrink deletes both. The fringe's tint is despill's job.
+     */
+    fun neighbourhoodDistance(taps: DoubleArray): Double {
+        require(taps.size == 9) { "Expected 9 taps, got ${taps.size}" }
+        return (
+            4 * taps[4] +
+                2 * (taps[1] + taps[3] + taps[5] + taps[7]) +
+                taps[0] + taps[2] + taps[6] + taps[8]
+            ) / 16
+    }
+
+    /**
+     * The matte alpha for a key distance, ramped by smoothstep from
+     * `similarity` over `smoothness`.
+     */
+    fun matte(distance: Double, config: ChromaKeyConfig): Double =
+        // max() keeps a zero-width ramp from dividing by zero, matching the
+        // shader's `max(uSmoothness, 1e-4)`.
+        smoothstep(
+            config.similarity,
+            config.similarity + max(config.smoothness, 1e-4),
+            distance,
+        )
+
+    /**
+     * Evaluates the key for one pixel inside an area of its own colour.
+     *
+     * The renderers combine the [distance] of nine pixels instead (see
+     * [neighbourhoodDistance]); over a flat area the two agree.
      *
      * @return `[r, g, b, alpha]` with **straight** (not premultiplied) alpha,
      *  which is the convention Media3 uses end to end.
@@ -75,18 +135,7 @@ object ChromaKeyMath {
     fun evaluate(r: Double, g: Double, b: Double, config: ChromaKeyConfig): DoubleArray {
         val c = chroma(r, g, b)
         val y = luma(r, g, b)
-        val dCb = c[0] - config.keyCb
-        val dCr = c[1] - config.keyCr
-        val dY = (y - config.keyLuma) * config.lumaWeight
-        val distance = sqrt(dCb * dCb + dCr * dCr + dY * dY)
-
-        // max() keeps a zero-width ramp from dividing by zero, matching the
-        // shader's `max(uSmoothness, 1e-4)`.
-        val alpha = smoothstep(
-            config.similarity,
-            config.similarity + max(config.smoothness, 1e-4),
-            distance,
-        )
+        val alpha = matte(distance(r, g, b, config), config)
 
         // Spill suppression. `projection` is how far the pixel leans toward the
         // key hue; only pixels leaning toward it (> 0) are touched, so a

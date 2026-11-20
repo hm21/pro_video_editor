@@ -27,12 +27,14 @@ class ChromaKeyDetection {
   /// into the subject. See "Neutral keys" on [ChromaKey.color].
   final double similarity;
 
-  /// The fraction of sampled border pixels that belong to the detected screen,
-  /// in `0..1`.
+  /// The fraction of sampled pixels that belong to the detected screen, in
+  /// `0..1`: the frame border for [ChromaKeyDetector.fromFrames], the whole
+  /// patch for [ChromaKeyDetector.fromPatch].
   ///
   /// Low coverage means the border was not one solid color — the frame likely
   /// shows more than just the screen (studio walls, lights, a subject standing
-  /// at the edge), and the result should not be trusted.
+  /// at the edge), and the result should not be trusted. For a patch it means
+  /// the tap caught more than the screen.
   final double coverage;
 
   /// The 99th-percentile distance of the screen from [color], in the space the
@@ -73,8 +75,9 @@ class ChromaKeyDetectionException implements Exception {
 /// offset entirely, and works the same for a green, blue or any other screen,
 /// and for a bright white or light grey wall.
 ///
-/// The screen is assumed to reach the frame border, which is what lets the
-/// subject be ignored: only a ring around the edge is sampled.
+/// [fromFrames] assumes the screen reaches the frame border, which is what lets
+/// the subject be ignored: only a ring around the edge is sampled. [fromPatch]
+/// measures a spot someone pointed at instead.
 abstract final class ChromaKeyDetector {
   /// Fraction of the frame, per side, sampled as the border ring.
   static const _ringFraction = 0.12;
@@ -224,17 +227,58 @@ abstract final class ChromaKeyDetector {
       throw const ChromaKeyDetectionException('Frame is too small to sample');
     }
 
+    return _measure(ringR, ringG, ringB, requireScreen: true);
+  }
+
+  /// Measures the screen in a patch of pixels someone pointed at, such as the
+  /// area around a tap on the preview.
+  ///
+  /// [rgba] is a raw RGBA buffer of any shape; every pixel in it counts. The
+  /// color is the patch's median and [ChromaKeyDetection.similarity] is
+  /// derived from its spread exactly as for [fromFrames], so a tap on a
+  /// shadowed corner widens the key as far as that corner needs. Pixels that
+  /// sit far from the median, such as the edge of the subject a tap caught,
+  /// are left out of the spread rather than widening the key.
+  ///
+  /// Unlike [fromFrames] nothing is refused: the spot was chosen by hand, so a
+  /// patch that is mostly one color is trusted even when it is dark, and
+  /// [ChromaKeyDetection.coverage] only reports how much of it was.
+  ///
+  /// Throws a [ChromaKeyDetectionException] when [rgba] holds no whole pixel.
+  static ChromaKeyDetection fromPatch(Uint8List rgba) {
+    final count = rgba.length ~/ 4;
+    if (count == 0) {
+      throw const ChromaKeyDetectionException('The patch has no pixels');
+    }
+    final r = List<double>.generate(count, (i) => rgba[i * 4] / 255);
+    final g = List<double>.generate(count, (i) => rgba[i * 4 + 1] / 255);
+    final b = List<double>.generate(count, (i) => rgba[i * 4 + 2] / 255);
+    return _measure(r, g, b, requireScreen: false);
+  }
+
+  /// Measures the key color and spread of the sampled pixels.
+  ///
+  /// With [requireScreen], samples that are not one saturated color or one
+  /// bright neutral one throw instead of producing a key.
+  static ChromaKeyDetection _measure(
+    List<double> reds,
+    List<double> greens,
+    List<double> blues, {
+    required bool requireScreen,
+  }) {
     // The median rejects the subject and any studio clutter that reaches the
     // edge, as long as they are the minority there — which an average would
     // not, since a few bright pixels drag it a long way.
-    final r = _median(ringR);
-    final g = _median(ringG);
-    final b = _median(ringB);
+    final r = _median(reds);
+    final g = _median(greens);
+    final b = _median(blues);
     final key = chromaOf(r, g, b);
     final keyLuma = lumaOf(r, g, b);
     final magnitude = sqrt(key.cb * key.cb + key.cr * key.cr);
 
-    if (magnitude < _minChromaMagnitude && keyLuma < _minNeutralLuma) {
+    if (requireScreen &&
+        magnitude < _minChromaMagnitude &&
+        keyLuma < _minNeutralLuma) {
       throw ChromaKeyDetectionException(
         'The frame border averages to a dark near-neutral color '
         '(chroma magnitude ${magnitude.toStringAsFixed(3)}, luma '
@@ -243,14 +287,14 @@ abstract final class ChromaKeyDetector {
       );
     }
 
-    // How far each border pixel sits from that color, in the same space the
+    // How far each sample sits from that color, in the same space the
     // renderers key in.
     final lumaWeight = lumaWeightOf(key.cb, key.cr);
-    final distances = List<double>.generate(ringR.length, (i) {
-      final c = chromaOf(ringR[i], ringG[i], ringB[i]);
+    final distances = List<double>.generate(reds.length, (i) {
+      final c = chromaOf(reds[i], greens[i], blues[i]);
       final dcb = c.cb - key.cb;
       final dcr = c.cr - key.cr;
-      final dy = (lumaOf(ringR[i], ringG[i], ringB[i]) - keyLuma) * lumaWeight;
+      final dy = (lumaOf(reds[i], greens[i], blues[i]) - keyLuma) * lumaWeight;
       return sqrt(dcb * dcb + dcr * dcr + dy * dy);
     })..sort();
 
@@ -261,7 +305,7 @@ abstract final class ChromaKeyDetector {
     final screen = distances.takeWhile((d) => d <= _coverageBand).toList();
     final coverage = screen.length / distances.length;
 
-    if (coverage < _minCoverage) {
+    if (requireScreen && coverage < _minCoverage) {
       throw ChromaKeyDetectionException(
         'Only ${(coverage * 100).toStringAsFixed(0)}% of the frame border is '
         'one color, so it is not a clean screen. Crop the frame to the screen '
@@ -271,8 +315,11 @@ abstract final class ChromaKeyDetector {
 
     // Measured over the screen pixels alone, so anything that reached the
     // border without being part of the screen cannot widen the key.
-    final spread =
-        screen[(screen.length * 0.99).floor().clamp(0, screen.length - 1)];
+    // A patch can hold no pixel within the band of its own median when it
+    // straddles two colors evenly; it then measures as perfectly flat.
+    final spread = screen.isEmpty
+        ? 0.0
+        : screen[(screen.length * 0.99).floor().clamp(0, screen.length - 1)];
 
     final maxSimilarity =
         _maxSimilarity + (_maxNeutralSimilarity - _maxSimilarity) * lumaWeight;
