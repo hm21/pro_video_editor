@@ -26,8 +26,16 @@ import 'package:pro_video_editor/shared/utils/parser/int_parser.dart';
 ///
 /// w     = 1 - smoothstep(0.04, 0.10, |(Cb_key, Cr_key)|)
 /// d     = |(Cb - Cb_key, Cr - Cr_key, w·(Y - Y_key))|
-/// alpha = smoothstep(similarity, similarity + smoothness, d)
+/// D     = (4·d_C + 2·(d_N + d_S + d_E + d_W)
+///          + d_NE + d_NW + d_SE + d_SW) / 16
+/// alpha = smoothstep(similarity, similarity + smoothness, D)
 /// ```
+///
+/// `D` averages the distance `d` over each pixel's 3×3 neighbourhood, clamped
+/// to the frame edge. Video stores color at half the resolution of brightness,
+/// so a key read off one pixel steps along an edge and flickers with
+/// compression noise; the average smooths both, and over a flat area it is
+/// just `d`. Spill suppression reads the pixel itself.
 ///
 /// For a saturated key `w` is `0`, and the distance is measured in the
 /// **Cb/Cr chroma plane**, which is a position, not a pure hue: Cb and Cr scale
@@ -363,11 +371,7 @@ class ChromaKey {
   /// removed to fully opaque, which is what keeps hair and motion blur from
   /// turning into a jagged cutout.
   ///
-  /// `0` asks for a hard edge. Note that Apple evaluates the key through a
-  /// 33³ color cube with trilinear interpolation, so a perfectly hard edge is
-  /// not reachable there — about one cube cell of ramp always remains, which in
-  /// practice just anti-aliases the matte. Values from `0.05` up span several
-  /// cells and are smooth on both platforms.
+  /// `0` asks for a hard edge, which both platforms render alike.
   ///
   /// **Default**: `0.08`
   final double smoothness;

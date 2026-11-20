@@ -405,9 +405,9 @@ class RenderVideo {
             config: &effectsConfig, scaleX: workingConfig.scaleX,
             scaleY: workingConfig.scaleY)
           // Before applyColorMatrix, because the key must run on the original
-          // colors — the compositor folds both into one color cube, since a
-          // second CIColorCube would take its alpha from its own cube and
-          // silently un-key the frame.
+          // colors — the compositor keys the raw frame and fills the keyed
+          // area before the color filter's CIColorCube, which takes its alpha
+          // from its own cube and would otherwise silently un-key the frame.
           applyChromaKey(config: &effectsConfig, windows: chromaKeyWindows)
           applyVideoEffects(config: &effectsConfig, effects: workingConfig.effects)
           applyColorMatrix(

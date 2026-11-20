@@ -377,8 +377,82 @@ void main() {
       });
     });
 
+    group('fromPatch', () {
+      /// An RGBA patch of [count] pixels: [color] scaled by each entry of
+      /// [brightness] in turn, so a list of one is a flat patch.
+      Uint8List patch(
+        Color color, {
+        int count = 25,
+        List<double> brightness = const [1],
+        Color? other,
+        int otherCount = 0,
+      }) {
+        final buffer = Uint8List((count + otherCount) * 4);
+        for (var i = 0; i < count + otherCount; i++) {
+          final c = i < count ? color : other!;
+          final scale = i < count ? brightness[i % brightness.length] : 1.0;
+          buffer[i * 4] = ((c.r * 255) * scale).round().clamp(0, 255);
+          buffer[i * 4 + 1] = ((c.g * 255) * scale).round().clamp(0, 255);
+          buffer[i * 4 + 2] = ((c.b * 255) * scale).round().clamp(0, 255);
+          buffer[i * 4 + 3] = 255;
+        }
+        return buffer;
+      }
+
+      test('measures the color it was pointed at', () {
+        final result = ChromaKeyDetector.fromPatch(patch(green));
+
+        expect(chromaDistance(result.color, green), lessThan(0.01));
+        expect(result.coverage, equals(1));
+        expect(result.similarity, greaterThanOrEqualTo(0.08));
+      });
+
+      test('a shadowed patch widens the key as far as it needs', () {
+        final flat = ChromaKeyDetector.fromPatch(patch(green));
+        final shadowed = ChromaKeyDetector.fromPatch(
+          patch(green, brightness: const [1, 0.85, 0.7]),
+        );
+
+        expect(shadowed.spread, greaterThan(flat.spread));
+        expect(shadowed.similarity, greaterThan(flat.similarity));
+      });
+
+      test('the edge of the subject a tap caught does not widen the key', () {
+        final clean = ChromaKeyDetector.fromPatch(patch(green));
+        final caught = ChromaKeyDetector.fromPatch(
+          patch(green, other: skin, otherCount: 8),
+        );
+
+        expect(chromaDistance(caught.color, green), lessThan(0.01));
+        expect(caught.similarity, equals(clean.similarity));
+        expect(caught.coverage, lessThan(1));
+      });
+
+      test('trusts a dark patch that a frame border would refuse', () {
+        const shadow = Color(0xFF303030);
+        expect(
+          () => ChromaKeyDetector.fromFrames(
+            [frame(screen: shadow)],
+            width: width,
+            height: height,
+          ),
+          throwsA(isA<ChromaKeyDetectionException>()),
+        );
+
+        final result = ChromaKeyDetector.fromPatch(patch(shadow));
+        expect(chromaDistance(result.color, shadow), lessThan(0.01));
+      });
+
+      test('an empty patch is refused', () {
+        expect(
+          () => ChromaKeyDetector.fromPatch(Uint8List(3)),
+          throwsA(isA<ChromaKeyDetectionException>()),
+        );
+      });
+    });
+
     test('chromaOf matches the renderers\' BT.601 formula', () {
-      // Pinned against the same constants the shader and the color cube use.
+      // Pinned against the same constants the shaders use.
       final c = ChromaKeyDetector.chromaOf(0, 0xB1 / 255, 0x40 / 255);
       expect(c.cb, closeTo(-0.1044, 1e-4));
       expect(c.cr, closeTo(-0.3110, 1e-4));

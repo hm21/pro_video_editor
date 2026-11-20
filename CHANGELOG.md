@@ -1,3 +1,8 @@
+## 2.54.0
+- **FEAT**(android, iOS, macOS): The chroma key ramps its matte on the distance averaged over each pixel's 3×3 neighbourhood instead of one pixel's, so a keyed edge no longer steps along the half-resolution color of the video and flickers less with compression noise. A flat area keys exactly as before.
+- **FEAT**: `ChromaKeyDetector.fromPatch` measures the key color and similarity from a patch someone pointed at, such as the pixels around a tap, the way `fromFrames` measures the frame border.
+- **FIX**(iOS, macOS): The chroma key runs in a Metal kernel instead of a 33³ color cube, so a small `smoothness` renders as sharp on Apple as on Android instead of interpolated across a cube cell.
+
 ## 2.53.2
 - **FIX**(iOS, macOS): A `VideoSegment` whose `endTime` is not after its `startTime` (e.g. one ending at `Duration.zero`), or that a loop-restart transition takes in full, is left out of the render instead of failing it with `AVFoundationErrorDomain` -11800. A render of only such segments fails with a clear error.
 - **FIX**(android): The plugin compiles against Android SDK 37. Apps that raise their plugins' `compileSdk` to 37 failed with `UNSAFE_CALL` in `ApplyBitrate.kt`.

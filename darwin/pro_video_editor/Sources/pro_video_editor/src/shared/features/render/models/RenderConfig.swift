@@ -528,7 +528,7 @@ public struct ChromaKeyConfig: Sendable, Equatable {
     return (c.cb / length, c.cr / length)
   }
 
-  /// Stable identity for the compositor's color-cube cache.
+  /// Stable identity for the compositor's decoded-background cache.
   ///
   /// Deliberately not `hashValue`: Swift seeds its hashing per process, so a
   /// hash is not a safe cache key across the lifetime of a render, and the

@@ -23,6 +23,9 @@ import ch.waio.pro_video_editor.src.shared.media.ImageOrientation
  * [ChromaKeyConfig.similarity] of the key color are removed, with a
  * [ChromaKeyConfig.smoothness]-wide soft edge, and the key's color cast is
  * pulled back out of the pixels that remain ([ChromaKeyConfig.effectiveSpill]).
+ * The distance is averaged over each pixel's 3×3 neighbourhood
+ * ([ChromaKeyMath.neighbourhoodDistance]), which smooths the steps
+ * half-resolution video colour leaves along an edge.
  *
  * The removed area becomes, in this order of precedence: the background image,
  * the background color, or transparency. Transparency only means something in
@@ -37,8 +40,8 @@ import ch.waio.pro_video_editor.src.shared.media.ImageOrientation
  * Alpha is **straight**, not premultiplied — that is Media3's convention
  * throughout (`AlphaScale`, the LUT shader, and `DefaultCompositorGlProgram`'s
  * `glBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ONE, ONE_MINUS_SRC_ALPHA)`).
- * Apple's color cube stores premultiplied entries instead, because that is what
- * `CIColorCube` requires. Both are correct for their platform; do not align them.
+ * Apple's Metal kernel writes premultiplied alpha instead, which is Core Image's
+ * convention. Both are correct for their platform; do not align them.
  */
 @UnstableApi
 class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
@@ -131,7 +134,24 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
                 "uniform float uSpill;\n" +
                 "uniform vec3 uBgColor;\n" +
                 "uniform int uBgMode;\n" +
+                "uniform vec2 uTexelSize;\n" +
                 "varying vec2 vTexSamplingCoord;\n" +
+                // Key distance of one pixel, ChromaKeyMath.distance: BT.601
+                // chroma, plus brightness weighted by how neutral the key is.
+                "float keyDistance(vec3 c) {\n" +
+                "  float cy = dot(c, vec3(0.299, 0.587, 0.114));\n" +
+                "  vec2 ccbcr = vec2(\n" +
+                "      dot(c, vec3(-0.168736, -0.331264, 0.5)),\n" +
+                "      dot(c, vec3(0.5, -0.418688, -0.081312)));\n" +
+                "  return length(vec3(ccbcr - uKeyCbCr," +
+                " (cy - uKeyLuma) * uLumaWeight));\n" +
+                "}\n" +
+                // The neighbour at (dx, dy) pixels, clamped to the frame edge.
+                "float tap(float dx, float dy) {\n" +
+                "  vec2 coord = clamp(vTexSamplingCoord + vec2(dx, dy) * uTexelSize," +
+                " 0.5 * uTexelSize, 1.0 - 0.5 * uTexelSize);\n" +
+                "  return keyDistance(texture2D(uTexSampler, coord).rgb);\n" +
+                "}\n" +
                 "void main() {\n" +
                 "  vec4 src = texture2D(uTexSampler, vTexSamplingCoord);\n" +
                 "  vec3 rgb = src.rgb;\n" +
@@ -140,10 +160,19 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
                 "  vec2 cbcr = vec2(\n" +
                 "      dot(rgb, vec3(-0.168736, -0.331264, 0.5)),\n" +
                 "      dot(rgb, vec3(0.5, -0.418688, -0.081312)));\n" +
-                // Matte: distance in the chroma plane, plus brightness weighted
-                // by how neutral the key is, ramped by smoothstep.
-                "  float d = length(vec3(cbcr - uKeyCbCr," +
-                " (y - uKeyLuma) * uLumaWeight));\n" +
+                // Matte: ChromaKeyMath.neighbourhoodDistance, the binomial
+                // average of the 3x3 neighbourhood, ramped by smoothstep.
+                "  float nw = tap(-1.0, -1.0);\n" +
+                "  float n = tap(0.0, -1.0);\n" +
+                "  float ne = tap(1.0, -1.0);\n" +
+                "  float w = tap(-1.0, 0.0);\n" +
+                "  float c = keyDistance(rgb);\n" +
+                "  float e = tap(1.0, 0.0);\n" +
+                "  float sw = tap(-1.0, 1.0);\n" +
+                "  float s = tap(0.0, 1.0);\n" +
+                "  float se = tap(1.0, 1.0);\n" +
+                "  float d = (4.0 * c + 2.0 * (n + w + e + s)" +
+                " + nw + ne + sw + se) / 16.0;\n" +
                 "  float a = smoothstep(uSimilarity," +
                 " uSimilarity + max(uSmoothness, 1e-4), d);\n" +
                 // Spill: remove the chroma component pointing at the key hue,
@@ -194,8 +223,12 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
             }
         }
 
+        /** One pixel of the input frame, in texture coordinates. */
+        private var texelSize = floatArrayOf(0f, 0f)
+
         /** Pass-through: keying does not change the frame geometry. */
         override fun configure(inputWidth: Int, inputHeight: Int): Size {
+            texelSize = floatArrayOf(1f / inputWidth, 1f / inputHeight)
             return Size(inputWidth, inputHeight)
         }
 
@@ -231,6 +264,7 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
                 glProgram.setFloatUniform("uSpill", config.effectiveSpill.toFloat())
                 glProgram.setFloatsUniform("uBgColor", backgroundColorRgb())
                 glProgram.setIntUniform("uBgMode", bgMode)
+                glProgram.setFloatsUniform("uTexelSize", texelSize)
 
                 val vertexData = GlUtil.getNormalizedCoordinateBounds()
                 glProgram.setBufferAttribute(

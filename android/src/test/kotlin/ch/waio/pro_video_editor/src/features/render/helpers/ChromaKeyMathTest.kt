@@ -14,8 +14,8 @@ import kotlin.test.assertTrue
  * are duplicated verbatim in the Swift test
  * (`example/macos/RunnerTests/RunnerTests.swift`, `ChromaKeyMathTests`). Both
  * run it against their own implementation — Kotlin's [ChromaKeyMath], which the
- * GLSL shader mirrors, and Swift's `chromaKeyed(r:g:b:_:)`, which is baked into
- * the Core Image color cube. If either platform drifts, one of these two tests
+ * GLSL shader mirrors, and Swift's `chromaKeyed(r:g:b:_:)`, which the Metal
+ * kernel mirrors. If either platform drifts, one of these two tests
  * fails immediately instead of the difference surfacing later as "the key looks
  * slightly different on iOS".
  *
@@ -74,6 +74,34 @@ internal class ChromaKeyMathTest {
         // Leans away from the key hue, so despill leaves it alone.
         Golden("magenta", 0.8, 0.2, 0.8, 0.8, 0.2, 0.8, 1.0),
     )
+
+    /**
+     * Shared with the Swift `ChromaKeyMathTests`: the 3×3 combination both
+     * renderers apply to the per-pixel distances, row-major NW … SE.
+     */
+    @Test
+    fun neighbourhoodDistance_matchesTheSharedTable() {
+        val rows = listOf(
+            // A flat area keys exactly as one pixel would.
+            Triple("uniform", DoubleArray(9) { 0.3 }, 0.3),
+            // A speck in a screen-coloured area is averaged toward the screen.
+            Triple(
+                "speck",
+                doubleArrayOf(0.1, 0.1, 0.1, 0.1, 0.4, 0.1, 0.1, 0.1, 0.1),
+                0.175,
+            ),
+            // The screen along the left: a quarter of the weight sits on it.
+            Triple(
+                "edge",
+                doubleArrayOf(0.05, 0.4, 0.4, 0.05, 0.4, 0.4, 0.05, 0.4, 0.4),
+                0.3125,
+            ),
+        )
+        for ((name, taps, expected) in rows) {
+            val actual = ChromaKeyMath.neighbourhoodDistance(taps)
+            assertTrue(abs(actual - expected) < 1e-9, "$name: was $actual, expected $expected")
+        }
+    }
 
     @Test
     fun goldenTable_matchesTheSharedFormula() {
