@@ -4,11 +4,10 @@ import Metal
 
 // MARK: - The shared keying formula
 //
-// This is the single spec every renderer implements. Android runs it in
-// `ChromaKeyEffect.kt`'s fragment shader, the Flutter preview in its own
-// fragment shader, and Apple in the Metal compute kernel below
-// (`ChromaKeyKernel`). The Kotlin and Swift unit tests assert the same golden
-// tables against both, so a drift in either implementation fails fast.
+// This is the single spec both platforms implement. Android runs it in
+// `ChromaKeyEffect.kt`'s fragment shader, Apple in the Metal compute kernel
+// below (`ChromaKeyKernel`). The Kotlin and Swift unit tests assert the same
+// golden tables against both, so a drift in either implementation fails fast.
 //
 // All values are gamma-encoded, non-color-managed RGB in 0...1 — the compositor
 // runs with `workingColorSpace: NSNull()`, so these are exactly the numbers the

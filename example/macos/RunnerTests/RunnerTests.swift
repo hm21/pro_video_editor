@@ -1531,9 +1531,9 @@ final class SetupStageWatchdogTests: XCTestCase {
 /// (`android/src/test/.../ChromaKeyMathTest.kt`). Both run it against their own
 /// implementation — Swift's `chromaKeyed(r:g:b:_:)` and
 /// `chromaKeyNeighbourhoodDistance`, which the Metal kernel mirrors, and
-/// Kotlin's `ChromaKeyMath`, which the GLSL shader mirrors. If either platform drifts, one of these two tests fails immediately
-/// instead of the difference surfacing later as "the key looks slightly
-/// different on Android".
+/// Kotlin's `ChromaKeyMath`, which the GLSL shader mirrors. If either platform
+/// drifts, one of these two tests fails immediately instead of the difference
+/// surfacing later as "the key looks slightly different on Android".
 ///
 /// **When you change the formula, regenerate both tables.**
 class ChromaKeyMathTests: XCTestCase {
@@ -1844,8 +1844,8 @@ class ChromaKeyMathTests: XCTestCase {
   func testNeighbourhoodDistanceTableMatchesTheSharedFormula() {
     let rows: [(name: String, taps: [Double], distance: Double)] = [
       ("uniform", Array(repeating: 0.3, count: 9), 0.3),
-      ("lone centre", [0.1, 0.1, 0.1, 0.1, 0.4, 0.1, 0.1, 0.1, 0.1], 0.175),
-      ("screen to the west", [0.05, 0.4, 0.4, 0.05, 0.4, 0.4, 0.05, 0.4, 0.4], 0.3125),
+      ("speck", [0.1, 0.1, 0.1, 0.1, 0.4, 0.1, 0.1, 0.1, 0.1], 0.175),
+      ("edge", [0.05, 0.4, 0.4, 0.05, 0.4, 0.4, 0.05, 0.4, 0.4], 0.3125),
     ]
     for row in rows {
       XCTAssertEqual(

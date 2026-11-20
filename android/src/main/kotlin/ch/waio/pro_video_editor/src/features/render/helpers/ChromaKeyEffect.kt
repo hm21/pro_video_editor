@@ -166,12 +166,12 @@ class ChromaKeyEffect(private val config: ChromaKeyConfig) : GlEffect {
                 "  float n = tap(0.0, -1.0);\n" +
                 "  float ne = tap(1.0, -1.0);\n" +
                 "  float w = tap(-1.0, 0.0);\n" +
-                "  float c = keyDistance(rgb);\n" +
+                "  float centre = keyDistance(rgb);\n" +
                 "  float e = tap(1.0, 0.0);\n" +
                 "  float sw = tap(-1.0, 1.0);\n" +
                 "  float s = tap(0.0, 1.0);\n" +
                 "  float se = tap(1.0, 1.0);\n" +
-                "  float d = (4.0 * c + 2.0 * (n + w + e + s)" +
+                "  float d = (4.0 * centre + 2.0 * (n + w + e + s)" +
                 " + nw + ne + sw + se) / 16.0;\n" +
                 "  float a = smoothstep(uSimilarity," +
                 " uSimilarity + max(uSmoothness, 1e-4), d);\n" +

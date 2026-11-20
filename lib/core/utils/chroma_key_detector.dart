@@ -27,12 +27,14 @@ class ChromaKeyDetection {
   /// into the subject. See "Neutral keys" on [ChromaKey.color].
   final double similarity;
 
-  /// The fraction of sampled border pixels that belong to the detected screen,
-  /// in `0..1`.
+  /// The fraction of sampled pixels that belong to the detected screen, in
+  /// `0..1`: the frame border for [ChromaKeyDetector.fromFrames], the whole
+  /// patch for [ChromaKeyDetector.fromPatch].
   ///
   /// Low coverage means the border was not one solid color — the frame likely
   /// shows more than just the screen (studio walls, lights, a subject standing
-  /// at the edge), and the result should not be trusted.
+  /// at the edge), and the result should not be trusted. For a patch it means
+  /// the tap caught more than the screen.
   final double coverage;
 
   /// The 99th-percentile distance of the screen from [color], in the space the
@@ -73,8 +75,9 @@ class ChromaKeyDetectionException implements Exception {
 /// offset entirely, and works the same for a green, blue or any other screen,
 /// and for a bright white or light grey wall.
 ///
-/// The screen is assumed to reach the frame border, which is what lets the
-/// subject be ignored: only a ring around the edge is sampled.
+/// [fromFrames] assumes the screen reaches the frame border, which is what lets
+/// the subject be ignored: only a ring around the edge is sampled. [fromPatch]
+/// measures a spot someone pointed at instead.
 abstract final class ChromaKeyDetector {
   /// Fraction of the frame, per side, sampled as the border ring.
   static const _ringFraction = 0.12;
