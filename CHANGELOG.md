@@ -1,3 +1,6 @@
+## 2.54.1
+- **FIX**(iOS, macOS): An overlap transition next to a slowed-down or sped-up clip no longer stalls the render with `Transition pre-render stalled after 20s with no progress`, and its sound ends with its picture instead of running up to 0.16 s longer.
+
 ## 2.54.0
 - **FEAT**(android, iOS, macOS): The chroma key averages its matte over each pixel's 3×3 neighbourhood, so keyed edges no longer step along the video's half-resolution color and flicker less. Flat areas key as before.
 - **FEAT**: `ChromaKeyDetector.fromPatch` measures the key color and similarity from a tapped spot.

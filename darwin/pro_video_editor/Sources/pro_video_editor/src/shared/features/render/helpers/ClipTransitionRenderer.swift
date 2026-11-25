@@ -90,6 +90,16 @@ internal enum ClipTransitionRenderer {
     // mid-write has to remove its own partial file here, or it stays in the
     // temporary directory for good.
     var partialOutput: URL?
+    // The stretched sound of a side at another speed, read by the export and
+    // nothing after it: kept alive until the export is done and removed on
+    // every way out.
+    var audioMix: AudioMix?
+    defer {
+      withExtendedLifetime(audioMix?.stretchedAssets) {}
+      for file in audioMix?.stretchedFiles ?? [] {
+        try? FileManager.default.removeItem(at: file)
+      }
+    }
     do {
       let outAsset = AVURLAsset(url: URL(fileURLWithPath: outgoingPath))
       let inAsset = AVURLAsset(url: URL(fileURLWithPath: incomingPath))
@@ -201,7 +211,6 @@ internal enum ClipTransitionRenderer {
       let steps = easingStepCount(durationUs: dUs, fps: targetFps)
 
       // Optional cross-faded audio.
-      var audioMix: AVMutableAudioMix?
       if includeAudio {
         audioMix = try await buildAudioMix(
           composition: composition,
@@ -269,8 +278,8 @@ internal enum ClipTransitionRenderer {
       export.outputURL = outputURL
       export.outputFileType = (outputFormat.lowercased() == "mov") ? .mov : .mp4
       export.videoComposition = videoComposition
-      if let audioMix = audioMix {
-        export.audioMix = audioMix
+      if let audioMix {
+        export.audioMix = audioMix.mix
       }
       export.shouldOptimizeForNetworkUse = false
 
@@ -458,19 +467,37 @@ internal enum ClipTransitionRenderer {
 
   // MARK: - Audio
 
+  /// The audio a blend adds to its composition: the mix that cross-fades its
+  /// sides, and the stretched copies of their sound the export reads.
+  ///
+  /// The caller keeps `stretchedAssets` alive until the export is done, and
+  /// removes `stretchedFiles` afterwards.
+  struct AudioMix {
+    let mix: AVMutableAudioMix
+    let stretchedAssets: [AVAsset]
+    let stretchedFiles: [URL]
+  }
+
   /// Adds each side's audio to [composition] and cross-fades the two along
   /// [curve] over [d], in [steps] ramps; see ``crossfadeRamps``.
   ///
   /// Each side starts or ends at its own clip's volume, through its own
   /// equalizer, limited like the clip where either would clip. A muted side
   /// is left out, and the other fades in or out against silence.
+  ///
+  /// A side that plays at another speed than its clip's footage, i.e. whose
+  /// source span is not [d] long, is stretched to [d] before it goes in, at
+  /// unchanged pitch (``stretchedSide``). Scaling its span in the composition
+  /// instead left the stretch to the export session's time-pitch processing,
+  /// which wedged the export on two such sides: it stopped writing for good
+  /// part way through the blend, until the watchdog failed the render.
   static func buildAudioMix(
     composition: AVMutableComposition,
     outAsset: AVURLAsset, outStart: CMTime, outDuration: CMTime,
     inAsset: AVURLAsset, inStart: CMTime, inDuration: CMTime,
     duration d: CMTime, curve: String, steps: Int,
     outgoingAudio: SideAudio, incomingAudio: SideAudio
-  ) async throws -> AVMutableAudioMix? {
+  ) async throws -> AudioMix? {
     let sides = [
       (
         asset: outAsset, start: outStart, duration: outDuration, audio: outgoingAudio,
@@ -484,26 +511,53 @@ internal enum ClipTransitionRenderer {
     guard !sides.isEmpty else { return nil }
     // Every side's source first: a track added for one side would otherwise
     // play unfaded in the blend when the other has no audio to load.
-    var sources: [AVAssetTrack] = []
+    var heard: [(side: (fadesIn: Bool, audio: SideAudio), source: SideSource)] = []
+    var stretchedAssets: [AVAsset] = []
+    var stretchedFiles: [URL] = []
+    func discardStretched() {
+      for file in stretchedFiles { try? FileManager.default.removeItem(at: file) }
+    }
     for side in sides {
       guard let source = try? await MediaInfoExtractor.loadAudioTrack(from: side.asset)
-      else { return nil }
-      sources.append(source)
+      else {
+        discardStretched()
+        return nil
+      }
+      let span = CMTimeRange(start: side.start, duration: side.duration)
+      if side.duration == d {
+        heard.append(
+          ((side.fadesIn, side.audio), SideSource(track: source, range: span, at: .zero)))
+        continue
+      }
+      // Like a muted side, one with no sound to stretch is left out and the
+      // other fades against silence.
+      guard
+        let stretched = await stretchedSide(
+          of: side.asset, track: source, span: span, to: d)
+      else {
+        PluginLog.print("⚠️ Transition audio: a side has no sound to stretch; left out")
+        continue
+      }
+      stretchedAssets.append(stretched.asset)
+      stretchedFiles.append(stretched.file)
+      heard.append(((side.fadesIn, side.audio), stretched.source))
     }
+    guard !heard.isEmpty else { return nil }
 
     var parameters: [AVMutableAudioMixInputParameters] = []
-    for (side, sourceAudio) in zip(sides, sources) {
+    for (side, source) in heard {
       guard
         let track = composition.addMutableTrack(
           withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
-      else { return nil }
-      try track.insertTimeRange(
-        CMTimeRange(start: side.start, duration: side.duration), of: sourceAudio, at: .zero)
-      // Speed-scale each side's audio to the shared output duration so it
-      // stays aligned with the speed-adjusted video and the blend length
-      // matches.
-      if side.duration != d {
-        track.scaleTimeRange(CMTimeRange(start: .zero, duration: side.duration), toDuration: d)
+      else {
+        discardStretched()
+        return nil
+      }
+      do {
+        try track.insertTimeRange(source.range, of: source.track, at: source.at)
+      } catch {
+        discardStretched()
+        throw error
       }
 
       let volume = side.audio.volume ?? 1
@@ -522,7 +576,76 @@ internal enum ClipTransitionRenderer {
 
     let mix = AVMutableAudioMix()
     mix.inputParameters = parameters
-    return mix
+    return AudioMix(mix: mix, stretchedAssets: stretchedAssets, stretchedFiles: stretchedFiles)
+  }
+
+  /// Where a side's sound comes from: `range` of `track`, inserted into the
+  /// blend at `at`.
+  struct SideSource {
+    let track: AVAssetTrack
+    let range: CMTimeRange
+    let at: CMTime
+  }
+
+  /// The sound of `span` of `asset` played over `duration`, stretched or
+  /// squeezed at unchanged pitch into a temporary PCM file; nil when the span
+  /// holds no sound or it cannot be decoded or written.
+  ///
+  /// Only the part of the span `track` has sound in is stretched, and it goes
+  /// in where it falls in the blend: audio that starts late or ends early
+  /// leaves silence there, as the clip itself does.
+  static func stretchedSide(
+    of asset: AVURLAsset, track: AVAssetTrack, span: CMTimeRange, to duration: CMTime
+  ) async -> (asset: AVAsset, source: SideSource, file: URL)? {
+    let seconds = CMTimeGetSeconds(duration)
+    let speed = CMTimeGetSeconds(span.duration) / seconds
+    let sound = CMTimeRangeGetIntersection(span, otherRange: await soundRange(of: track))
+    // An invalid range compares greater than any time, so `> .zero` alone
+    // would pass a track whose time range did not load.
+    guard seconds > 0, speed.isFinite, speed > 0, sound.duration.isNumeric,
+      sound.duration > .zero,
+      let rendered = await AudioPreRenderer.render(
+        audioPath: asset.url.path,
+        audioStartTime: sound.start,
+        audioEndTime: sound.end,
+        loop: false,
+        targetBodyDuration: CMTimeMultiplyByFloat64(sound.duration, multiplier: 1 / speed),
+        playbackSpeed: speed)
+    else { return nil }
+    let stretched = AVURLAsset(url: rendered.outputURL)
+    guard let stretchedTrack = try? await MediaInfoExtractor.loadAudioTrack(from: stretched)
+    else {
+      try? FileManager.default.removeItem(at: rendered.outputURL)
+      return nil
+    }
+    let at = CMTimeMultiplyByFloat64(sound.start - span.start, multiplier: 1 / speed)
+    let available = await TrackEndTrimmer.timeRange(of: stretchedTrack)
+    let range = CMTimeRange(
+      start: available.start, duration: CMTimeMinimum(available.duration, duration - at))
+    guard range.duration > .zero else {
+      try? FileManager.default.removeItem(at: rendered.outputURL)
+      return nil
+    }
+    return (stretched, SideSource(track: stretchedTrack, range: range, at: at), rendered.outputURL)
+  }
+
+  /// The part of an audio track's time range that holds sound: from where its
+  /// first edit with media starts. AVFoundation folds a leading empty edit
+  /// into the track's duration rather than into its start (see
+  /// ``TrackEndTrimmer/mediaTimeRange(of:)``).
+  private static func soundRange(of track: AVAssetTrack) async -> CMTimeRange {
+    let range = await TrackEndTrimmer.timeRange(of: track)
+    let segments: [AVAssetTrackSegment]
+    if #available(iOS 15.0, macOS 13.0, *) {
+      segments = (try? await track.load(.segments)) ?? track.segments
+    } else {
+      segments = track.segments
+    }
+    guard let media = segments.first(where: { !$0.isEmpty }),
+      media.timeMapping.target.start > range.start,
+      media.timeMapping.target.start < range.end
+    else { return range }
+    return CMTimeRange(start: media.timeMapping.target.start, end: range.end)
   }
 
   /// The volume ramps that fade one side of a blend of duration [d] along

@@ -270,7 +270,7 @@ final class TransitionCrossfadeTests: XCTestCase {
         AVLinearPCMIsBigEndianKey: false,
         AVLinearPCMIsNonInterleaved: false,
       ])
-    output.audioMix = try XCTUnwrap(mix)
+    output.audioMix = try XCTUnwrap(mix).mix
     reader.add(output)
     XCTAssertTrue(reader.startReading())
     var left: [Float] = []
@@ -447,5 +447,349 @@ final class AudioTrackSpeedTests: XCTestCase {
       XCTAssertGreaterThan(peak, 1000)
       return Double(crossings) / (2 * (to - from))
     }
+  }
+}
+
+// MARK: - Overlap transition at another speed
+
+/// The audio of an overlap blend whose sides play at another speed than
+/// their clips' footage, as a slowed-down or sped-up clip's blend does.
+///
+/// Each side's span used to be scaled to the blend inside the composition,
+/// which left the stretch to the export session's time-pitch processing. With
+/// two such sides the export stopped writing part way through the blend in
+/// about one run out of four, and stayed there until the watchdog failed the
+/// render (`Transition pre-render stalled after 20s with no progress`); the
+/// runs that finished wrote up to 0.16 s of sound past the blend's end.
+final class TransitionSpeedAudioTests: XCTestCase {
+  private let sampleRate = 44_100.0
+  private let toneHz = 440.0
+
+  override func tearDown() {
+    SetupStageExport.stallTimeout = RenderVideo.renderStallTimeout
+    super.tearDown()
+  }
+
+  /// The export is left no sound to time-scale: a side whose span is not
+  /// the blend's length goes in already stretched, one unscaled edit per
+  /// side, and every side ends with the blend.
+  func testSidesAtAnotherSpeedGoInStretchedAlready() async throws {
+    let clip = AVURLAsset(url: try await writeClip(seconds: 2, busy: true))
+    let blend = CMTime(value: 500_000, timescale: 1_000_000)
+    let composition = AVMutableComposition()
+
+    let audio = try await ClipTransitionRenderer.buildAudioMix(
+      composition: composition,
+      outAsset: clip, outStart: CMTime(value: 1_750_000, timescale: 1_000_000),
+      outDuration: CMTime(value: 250_000, timescale: 1_000_000),
+      inAsset: clip, inStart: .zero, inDuration: CMTime(value: 750_000, timescale: 1_000_000),
+      duration: blend, curve: "linear", steps: 30,
+      outgoingAudio: .init(), incomingAudio: .init())
+    let mix = try XCTUnwrap(audio)
+    addTeardownBlock { mix.stretchedFiles.forEach { try? FileManager.default.removeItem(at: $0) } }
+
+    XCTAssertEqual(mix.stretchedFiles.count, 2)
+    let tracks = composition.tracks(withMediaType: .audio)
+    XCTAssertEqual(tracks.count, 2)
+    for track in tracks {
+      for segment in track.segments where !segment.isEmpty {
+        XCTAssertEqual(
+          segment.timeMapping.source.duration, segment.timeMapping.target.duration,
+          "a time-scaled edit is left to the export's time-pitch processing")
+      }
+      XCTAssertEqual(track.timeRange.end.seconds, 0.5, accuracy: 0.001)
+    }
+  }
+
+  /// The whole blend, both sides at half speed, at three quarters and at
+  /// double speed: the tail that ends the outgoing clip and the head that
+  /// starts the incoming one, in a mono recording like a phone app's camera
+  /// writes. Repeated, because the stall and the overrun came only in some of
+  /// the runs.
+  func testABlendOfTwoSpeedChangedSidesExportsAtItsOwnLength() async throws {
+    let clip = try await writeClip(seconds: 2, busy: true)
+    // A blend this small encodes in a fraction of a second.
+    SetupStageExport.stallTimeout = 5
+
+    for speed in [0.5, 0.75, 2] {
+      let span = Int64(500_000 * speed)
+      for attempt in 0..<12 {
+        let rendered = try await ClipTransitionRenderer.render(
+          outgoingPath: clip.path, outTailStartUs: 2_000_000 - span, outTailEndUs: 2_000_000,
+          incomingPath: clip.path, inHeadStartUs: 0, inHeadEndUs: span,
+          outputDurationUs: 500_000, type: "dissolve", direction: "left", curve: "linear",
+          includeAudio: true, outputFormat: "mp4")
+        let run = "speed \(speed), attempt \(attempt)"
+        let blend = try XCTUnwrap(rendered, "\(run) fell back to a hard cut")
+        addTeardownBlock { try? FileManager.default.removeItem(at: blend.outputURL) }
+
+        let asset = AVURLAsset(url: blend.outputURL)
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        let audioEnd = try await XCTUnwrap(audioTracks.first).load(.timeRange).end.seconds
+        let videoEnd = try await XCTUnwrap(videoTracks.first).load(.timeRange).end.seconds
+        XCTAssertEqual(audioEnd, 0.5, accuracy: 0.01, run)
+        XCTAssertEqual(videoEnd, 0.5, accuracy: 0.01, run)
+      }
+    }
+  }
+
+  /// A quarter second played over half a second lasts half a second and
+  /// keeps its pitch, like the clip's own sound at that speed.
+  func testAStretchedSideFillsTheBlendAtItsOwnPitch() async throws {
+    let clip = try await writeClip(seconds: 1)
+    let blend = CMTime(value: 500_000, timescale: 1_000_000)
+
+    let asset = AVURLAsset(url: clip)
+    let side = await ClipTransitionRenderer.stretchedSide(
+      of: asset, track: try await soundTrack(of: asset),
+      span: CMTimeRange(
+        start: CMTime(value: 250_000, timescale: 1_000_000),
+        duration: CMTime(value: 250_000, timescale: 1_000_000)),
+      to: blend)
+    let stretched = try XCTUnwrap(side)
+    addTeardownBlock { try? FileManager.default.removeItem(at: stretched.file) }
+
+    XCTAssertEqual(stretched.source.at, .zero)
+    XCTAssertEqual(stretched.source.range.duration.seconds, 0.5, accuracy: 0.001)
+    let samples = try readLeftChannel(stretched.asset, track: stretched.source.track)
+    XCTAssertEqual(Double(samples.count) / sampleRate, 0.5, accuracy: 0.001)
+    // Zero crossings away from the edges, where the stretch eases in and out.
+    let middle = samples[Int(0.1 * sampleRate)..<Int(0.4 * sampleRate)]
+    var crossings = 0
+    for (previous, sample) in zip(middle, middle.dropFirst())
+    where (previous < 0) != (sample < 0) {
+      crossings += 1
+    }
+    XCTAssertEqual(Double(crossings) / (2 * 0.3), toneHz, accuracy: toneHz * 0.03)
+  }
+
+  /// Sound that starts late in the clip starts as late in the blend, at its
+  /// speed: 0.3 s into a head played at half speed is 0.6 s into the blend.
+  /// A side with no sound in its span is left out and the other plays on.
+  func testASideWhoseSoundStartsLateStartsAsLateInTheBlend() async throws {
+    let clip = AVURLAsset(url: try await writeClip(seconds: 2, soundDelay: 0.3))
+    let tail = AVURLAsset(url: try await writeClip(seconds: 2))
+
+    func mixed(headUs: Int64, blendUs: Int64) async throws
+      -> (AVMutableComposition, ClipTransitionRenderer.AudioMix)
+    {
+      let composition = AVMutableComposition()
+      let audio = try await ClipTransitionRenderer.buildAudioMix(
+        composition: composition,
+        outAsset: tail, outStart: CMTime(value: 1_500_000, timescale: 1_000_000),
+        outDuration: CMTime(value: blendUs, timescale: 1_000_000),
+        inAsset: clip, inStart: .zero, inDuration: CMTime(value: headUs, timescale: 1_000_000),
+        duration: CMTime(value: blendUs, timescale: 1_000_000), curve: "linear", steps: 30,
+        outgoingAudio: .init(), incomingAudio: .init())
+      let mix = try XCTUnwrap(audio)
+      addTeardownBlock {
+        mix.stretchedFiles.forEach { try? FileManager.default.removeItem(at: $0) }
+      }
+      return (composition, mix)
+    }
+
+    let (late, lateMix) = try await mixed(headUs: 500_000, blendUs: 1_000_000)
+    XCTAssertEqual(lateMix.stretchedFiles.count, 1)
+    let starts = late.tracks(withMediaType: .audio).compactMap {
+      $0.segments.first(where: { !$0.isEmpty })?.timeMapping.target.start.seconds
+    }
+    XCTAssertEqual(starts.count, 2)
+    XCTAssertEqual(starts.max() ?? 0, 0.6, accuracy: 0.001)
+    XCTAssertEqual(starts.min() ?? 1, 0, accuracy: 0.001)
+
+    // A head of 0.1 s played over 0.2 s ends before the sound starts.
+    let (silent, silentMix) = try await mixed(headUs: 100_000, blendUs: 200_000)
+    XCTAssertTrue(silentMix.stretchedFiles.isEmpty)
+    XCTAssertEqual(silent.tracks(withMediaType: .audio).count, 1)
+  }
+
+  // MARK: - Helpers
+
+  private func soundTrack(of asset: AVAsset) async throws -> AVAssetTrack {
+    let tracks = try await asset.loadTracks(withMediaType: .audio)
+    return try XCTUnwrap(tracks.first)
+  }
+
+  /// `seconds` of a small H.264 picture and a 440 Hz mono AAC tone, the
+  /// shape of a clip a phone app's camera records, in a file removed after
+  /// the test. `busy` moves the picture and mixes noise into the tone;
+  /// `soundDelay` starts the sound that late.
+  private func writeClip(
+    seconds: Int, busy: Bool = false, soundDelay: Double = 0
+  ) async throws -> URL {
+    let width = 160
+    let height = 90
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("speed-blend-\(UUID().uuidString).mp4")
+    addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+
+    let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+    let video = AVAssetWriterInput(
+      mediaType: .video,
+      outputSettings: [
+        AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height,
+      ])
+    let audio = AVAssetWriterInput(
+      mediaType: .audio,
+      outputSettings: [
+        AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: sampleRate,
+        AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64_000,
+      ])
+    video.expectsMediaDataInRealTime = false
+    audio.expectsMediaDataInRealTime = false
+    let pixels = AVAssetWriterInputPixelBufferAdaptor(
+      assetWriterInput: video,
+      sourcePixelBufferAttributes: [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        kCVPixelBufferWidthKey as String: width, kCVPixelBufferHeightKey as String: height,
+      ])
+    writer.add(video)
+    writer.add(audio)
+    XCTAssertTrue(writer.startWriting(), String(describing: writer.error))
+    writer.startSession(atSourceTime: .zero)
+
+    let format = try toneFormat()
+    let fps = 30
+    let framesPerPicture = Int(sampleRate) / fps
+    let pictures = seconds * fps
+    // Each input is fed as soon as it takes more: the writer interleaves the
+    // two, so it can hold one back until the other catches up.
+    var nextPicture = 0
+    var nextSound = 0
+    while nextPicture < pictures || nextSound < pictures {
+      var fed = false
+      if nextPicture < pictures, video.isReadyForMoreMediaData {
+        pixels.append(
+          try pictureBuffer(nextPicture, width: width, height: height, busy: busy),
+          withPresentationTime: CMTime(value: Int64(nextPicture), timescale: 30))
+        nextPicture += 1
+        if nextPicture == pictures { video.markAsFinished() }
+        fed = true
+      }
+      if nextSound < pictures, audio.isReadyForMoreMediaData {
+        audio.append(
+          try toneBuffer(
+            from: nextSound * framesPerPicture, count: framesPerPicture, format: format,
+            busy: busy, delay: Int(soundDelay * sampleRate)))
+        nextSound += 1
+        // Marked finished at once, or the writer holds the pictures still
+        // to come back, waiting for sound to interleave them with.
+        if nextSound == pictures { audio.markAsFinished() }
+        fed = true
+      }
+      if !fed { try await Task.sleep(nanoseconds: 1_000_000) }
+    }
+    await writer.finishWriting()
+    XCTAssertEqual(writer.status, .completed, String(describing: writer.error))
+    return url
+  }
+
+  private func toneFormat() throws -> CMAudioFormatDescription {
+    var description = AudioStreamBasicDescription(
+      mSampleRate: sampleRate, mFormatID: kAudioFormatLinearPCM,
+      mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+      mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1,
+      mBitsPerChannel: 16, mReserved: 0)
+    var format: CMAudioFormatDescription?
+    let status = CMAudioFormatDescriptionCreate(
+      allocator: kCFAllocatorDefault, asbd: &description, layoutSize: 0, layout: nil,
+      magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &format)
+    XCTAssertEqual(status, noErr)
+    return try XCTUnwrap(format)
+  }
+
+  /// Picture `index`: one gray, or with `busy` a gradient that moves on
+  /// every frame, which the encoder has to work for.
+  private func pictureBuffer(
+    _ index: Int, width: Int, height: Int, busy: Bool
+  ) throws -> CVPixelBuffer {
+    var pixelBuffer: CVPixelBuffer?
+    CVPixelBufferCreate(
+      kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA, nil, &pixelBuffer)
+    let picture = try XCTUnwrap(pixelBuffer)
+    CVPixelBufferLockBaseAddress(picture, [])
+    defer { CVPixelBufferUnlockBaseAddress(picture, []) }
+    let rowBytes = CVPixelBufferGetBytesPerRow(picture)
+    let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(picture))
+      .assumingMemoryBound(to: UInt8.self)
+    for row in 0..<height {
+      for column in 0..<width {
+        let value = busy ? UInt8(truncatingIfNeeded: column * 5 + row * 3 + index * 11) : 128
+        let pixel = base + row * rowBytes + column * 4
+        pixel[0] = value
+        pixel[1] = value &+ 85
+        pixel[2] = value &+ 170
+        pixel[3] = 255
+      }
+    }
+    return picture
+  }
+
+  /// `count` mono frames of the tone from frame `start` on; with `busy`
+  /// noise is mixed in, which sounds more like a recording than a pure tone.
+  private func toneBuffer(
+    from start: Int, count: Int, format: CMAudioFormatDescription, busy: Bool = false,
+    delay: Int = 0
+  ) throws -> CMSampleBuffer {
+    var pcm = [Int16](repeating: 0, count: count)
+    for frame in 0..<count {
+      let position = start + frame
+      let phase = 2 * Double.pi * toneHz * Double(position) / sampleRate
+      // A fixed hash of the position, so every run writes the same noise.
+      let hash = UInt32(truncatingIfNeeded: position &* 2_654_435_761) >> 16
+      let noise = busy ? (Double(hash) / 32_768 - 1) * 6_000 : 0
+      let sample = Int16(8_000 * sin(phase) + noise)
+      pcm[frame] = sample
+    }
+    let length = pcm.count * MemoryLayout<Int16>.size
+    var block: CMBlockBuffer?
+    XCTAssertEqual(
+      CMBlockBufferCreateWithMemoryBlock(
+        allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: length,
+        blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0,
+        dataLength: length, flags: 0, blockBufferOut: &block),
+      kCMBlockBufferNoErr)
+    let data = try XCTUnwrap(block)
+    pcm.withUnsafeBytes { bytes in
+      _ = CMBlockBufferReplaceDataBytes(
+        with: bytes.baseAddress!, blockBuffer: data, offsetIntoDestination: 0,
+        dataLength: length)
+    }
+    var buffer: CMSampleBuffer?
+    XCTAssertEqual(
+      CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+        allocator: kCFAllocatorDefault, dataBuffer: data, formatDescription: format,
+        sampleCount: count,
+        presentationTimeStamp: CMTime(
+          value: Int64(start + delay), timescale: Int32(sampleRate)),
+        packetDescriptions: nil, sampleBufferOut: &buffer),
+      noErr)
+    return try XCTUnwrap(buffer)
+  }
+
+  /// The left channel of `track`, as float.
+  private func readLeftChannel(_ asset: AVAsset, track: AVAssetTrack) throws -> [Float] {
+    let reader = try AVAssetReader(asset: asset)
+    let output = AVAssetReaderTrackOutput(
+      track: track,
+      outputSettings: [
+        AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 32,
+        AVLinearPCMIsFloatKey: true, AVLinearPCMIsBigEndianKey: false,
+        AVLinearPCMIsNonInterleaved: false,
+      ])
+    reader.add(output)
+    XCTAssertTrue(reader.startReading())
+    var left: [Float] = []
+    while let buffer = output.copyNextSampleBuffer(),
+      let block = CMSampleBufferGetDataBuffer(buffer)
+    {
+      var interleaved = [Float](repeating: 0, count: CMBlockBufferGetDataLength(block) / 4)
+      CMBlockBufferCopyDataBytes(
+        block, atOffset: 0, dataLength: interleaved.count * 4, destination: &interleaved)
+      left += stride(from: 0, to: interleaved.count, by: 2).map { interleaved[$0] }
+    }
+    XCTAssertEqual(reader.status, .completed, String(describing: reader.error))
+    return left
   }
 }
