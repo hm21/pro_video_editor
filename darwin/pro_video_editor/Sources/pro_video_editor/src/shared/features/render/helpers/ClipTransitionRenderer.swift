@@ -600,7 +600,10 @@ internal enum ClipTransitionRenderer {
     let seconds = CMTimeGetSeconds(duration)
     let speed = CMTimeGetSeconds(span.duration) / seconds
     let sound = CMTimeRangeGetIntersection(span, otherRange: await soundRange(of: track))
-    guard seconds > 0, speed.isFinite, speed > 0, sound.duration > .zero,
+    // An invalid range compares greater than any time, so `> .zero` alone
+    // would pass a track whose time range did not load.
+    guard seconds > 0, speed.isFinite, speed > 0, sound.duration.isNumeric,
+      sound.duration > .zero,
       let rendered = await AudioPreRenderer.render(
         audioPath: asset.url.path,
         audioStartTime: sound.start,

@@ -501,16 +501,17 @@ final class TransitionSpeedAudioTests: XCTestCase {
     }
   }
 
-  /// The whole blend, both sides at half speed and at three quarters: the
-  /// tail that ends the outgoing clip and the head that starts the incoming
-  /// one, in a mono recording like a phone app's camera writes. Repeated,
-  /// because the stall and the overrun came only in some of the runs.
-  func testABlendOfTwoSlowedDownSidesExportsAtItsOwnLength() async throws {
+  /// The whole blend, both sides at half speed, at three quarters and at
+  /// double speed: the tail that ends the outgoing clip and the head that
+  /// starts the incoming one, in a mono recording like a phone app's camera
+  /// writes. Repeated, because the stall and the overrun came only in some of
+  /// the runs.
+  func testABlendOfTwoSpeedChangedSidesExportsAtItsOwnLength() async throws {
     let clip = try await writeClip(seconds: 2, busy: true)
     // A blend this small encodes in a fraction of a second.
     SetupStageExport.stallTimeout = 5
 
-    for speed in [0.5, 0.75] {
+    for speed in [0.5, 0.75, 2] {
       let span = Int64(500_000 * speed)
       for attempt in 0..<12 {
         let rendered = try await ClipTransitionRenderer.render(
