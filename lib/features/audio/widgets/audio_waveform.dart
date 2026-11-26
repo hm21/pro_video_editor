@@ -54,7 +54,8 @@ class AudioWaveform extends StatefulWidget {
        currentPosition = null,
        onSeek = null,
        showPositionIndicator = false,
-       onComplete = null;
+       onComplete = null,
+       onError = null;
 
   /// Creates an interactive [AudioWaveform] with position indicator and
   /// seek support.
@@ -71,7 +72,8 @@ class AudioWaveform extends StatefulWidget {
     this.style = const WaveformStyle(),
   }) : config = null,
        showPositionIndicator = true,
-       onComplete = null;
+       onComplete = null,
+       onError = null;
 
   /// Creates a streaming [AudioWaveform] that displays chunks progressively.
   ///
@@ -86,6 +88,7 @@ class AudioWaveform extends StatefulWidget {
   /// [style] Visual styling options for the waveform.
   /// [showPositionIndicator] Whether to show the streaming progress indicator.
   /// [onComplete] Called when the streaming waveform generation is complete.
+  /// [onError] Called when the waveform cannot be generated.
   const AudioWaveform.streaming({
     super.key,
     required WaveformConfigs this.config,
@@ -94,6 +97,7 @@ class AudioWaveform extends StatefulWidget {
     this.showPositionIndicator = false,
     this.currentPosition,
     this.onComplete,
+    this.onError,
   }) : waveform = null;
 
   /// The waveform data to render (for non-streaming mode).
@@ -116,6 +120,10 @@ class AudioWaveform extends StatefulWidget {
 
   /// Called when streaming waveform generation is complete.
   final VoidCallback? onComplete;
+
+  /// Called when streaming waveform generation fails, for example with an
+  /// [AudioNoTrackException] for a video without sound.
+  final ValueChanged<Object>? onError;
 
   /// Whether this widget is in streaming mode.
   bool get isStreaming => config != null;
@@ -242,6 +250,7 @@ class _AudioWaveformState extends State<AudioWaveform> {
               }
             },
             onComplete: widget.onComplete,
+            onError: widget.onError,
           )
         : CustomPaint(
             size: Size(double.infinity, widget.style.height),

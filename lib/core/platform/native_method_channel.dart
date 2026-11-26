@@ -356,7 +356,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       try {
         result = parse(event);
       } catch (e, stack) {
-        debugPrint('Error parsing stream frame: $e\n$stack');
+        debugPrint('Error parsing stream event: $e\n$stack');
         controller.addError(e, stack);
         return;
       }
@@ -374,15 +374,20 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
         _handoffToNative(id);
         if (finished) return;
         // Subscribe before starting: native emits the first frame as soon as
-        // it is decoded, which can be before the start call returns.
-        subscription = (events ?? _thumbnailEvents).listen(
-          onEvent,
-          onError: (Object error, StackTrace stack) {
-            if (finished) return;
-            controller.addError(error, stack);
-            finish();
-          },
-        );
+        // it is decoded, which can be before the start call returns. Windows
+        // and Linux register no event channels, so listening there would
+        // only report a MissingPluginException to FlutterError; the start
+        // call below fails the stream instead.
+        if (_hasEventChannels) {
+          subscription = (events ?? _thumbnailEvents).listen(
+            onEvent,
+            onError: (Object error, StackTrace stack) {
+              if (finished) return;
+              controller.addError(error, stack);
+              finish();
+            },
+          );
+        }
         // A consumer that leaves while this call is in flight sends its
         // `cancelTask` on the same channel, so native handles it after the
         // start and finds the task — no follow-up cancel is needed here.
@@ -804,10 +809,14 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     await methodChannel.invokeMethod<void>('cancelTask', {'id': taskId});
   }
 
+  /// Whether the native side registers event channels. Windows and Linux
+  /// don't yet.
+  bool get _hasEventChannels =>
+      kIsWeb || !(Platform.isWindows || Platform.isLinux);
+
   @override
   void initializeStream() {
-    // Windows and Linux don't support EventChannels for progress yet
-    if (!kIsWeb && (Platform.isWindows || Platform.isLinux)) return;
+    if (!_hasEventChannels) return;
 
     // Subscribe to native progress events
     _progressChannel
