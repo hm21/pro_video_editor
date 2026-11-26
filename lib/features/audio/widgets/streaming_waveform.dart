@@ -21,6 +21,7 @@ class StreamingWaveform extends StatefulWidget {
     required this.style,
     this.onDurationAvailable,
     this.onComplete,
+    this.onError,
   });
 
   /// The waveform configuration for streaming generation.
@@ -34,6 +35,11 @@ class StreamingWaveform extends StatefulWidget {
 
   /// Called when the streaming waveform generation is complete.
   final VoidCallback? onComplete;
+
+  /// Called when the waveform cannot be generated, for example with an
+  /// [AudioNoTrackException] for a video without sound. The widget keeps
+  /// the bars it has drawn so far.
+  final ValueChanged<Object>? onError;
 
   @override
   State<StreamingWaveform> createState() => _StreamingWaveformState();
@@ -69,7 +75,11 @@ class _StreamingWaveformState extends State<StreamingWaveform> {
     super.initState();
     _subscription = ProVideoEditor.instance
         .getWaveformStream(widget.config)
-        .listen(_onChunkReceived);
+        .listen(
+          _onChunkReceived,
+          // Without a handler the stream's error would be uncaught.
+          onError: (Object error) => widget.onError?.call(error),
+        );
   }
 
   @override

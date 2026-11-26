@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pro_video_editor/pro_video_editor.dart';
 
@@ -80,6 +81,58 @@ void main() {
     await tester.tap(find.byType(AudioWaveform));
     await tester.pump();
 
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets('streaming waveform reports a stream error to onError', (
+    tester,
+  ) async {
+    const methodChannel = MethodChannel('pro_video_editor');
+    const streamChannel = EventChannel('pro_video_editor_waveform_stream');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    MockStreamHandlerEventSink? sink;
+    messenger
+      ..setMockMethodCallHandler(methodChannel, (call) async {
+        if (call.method == 'startWaveformStream') {
+          sink?.success({
+            'id': 'silent',
+            'error': 'No audio track',
+            'errorCode': 'NO_AUDIO',
+          });
+        }
+        return null;
+      })
+      ..setMockStreamHandler(
+        streamChannel,
+        MockStreamHandler.inline(
+          onListen: (_, events) {
+            sink = events;
+          },
+        ),
+      );
+    addTearDown(() {
+      messenger
+        ..setMockMethodCallHandler(methodChannel, null)
+        ..setMockStreamHandler(streamChannel, null);
+    });
+    final errors = <Object>[];
+
+    await pump(
+      tester,
+      SizedBox(
+        width: 300,
+        child: AudioWaveform.streaming(
+          config: WaveformConfigs(
+            id: 'silent',
+            video: EditorVideo.file('/tmp/silent.mp4'),
+          ),
+          onError: errors.add,
+        ),
+      ),
+    );
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+
+    expect(errors, [isA<AudioNoTrackException>()]);
     expect(tester.takeException(), isNull);
   });
 }

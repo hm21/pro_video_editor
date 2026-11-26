@@ -1,3 +1,7 @@
+## 2.54.2
+- **FIX**: `getWaveformStream` no longer loses its first chunks, so a waveform keeps its start and a short sound's stream finishes. Two waveform streams running at once no longer cut each other off.
+- **FIX**: `AudioWaveform.streaming` no longer throws an uncaught error for a video without sound; the new `onError` reports it.
+
 ## 2.54.1
 - **FIX**(iOS, macOS): An overlap transition next to a slowed-down or sped-up clip no longer stalls the render with `Transition pre-render stalled after 20s with no progress`, and its sound ends with its picture instead of running up to 0.16 s longer.
 
