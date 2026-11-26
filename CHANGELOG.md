@@ -1,3 +1,6 @@
+## 2.54.2
+- **FIX**: `getWaveformStream` listens for chunks before it starts the native task. Chunks the platform sent before the start call returned were lost, so a waveform could miss its start, and a short sound's stream, whose only chunk is its last, never finished. Two waveform streams at the same time no longer cut each other off when the first one ends.
+
 ## 2.54.1
 - **FIX**(iOS, macOS): An overlap transition next to a slowed-down or sped-up clip no longer stalls the render with `Transition pre-render stalled after 20s with no progress`, and its sound ends with its picture instead of running up to 0.16 s longer.
 

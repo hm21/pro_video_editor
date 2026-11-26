@@ -97,6 +97,11 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     'pro_video_editor_waveform_stream',
   );
 
+  /// The waveform event channel's broadcast stream, created once, for the
+  /// same reason as [_thumbnailEvents].
+  late final Stream<dynamic> _waveformEvents = _waveformStreamChannel
+      .receiveBroadcastStream();
+
   /// Event channel for receiving thumbnail frames during streaming.
   ///
   /// Emits one event per decoded frame for every running
@@ -297,13 +302,14 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     nativeLogLevel: nativeLogLevel,
   );
 
-  /// Runs a native task that emits one event per frame on the shared
-  /// thumbnail event channel, tagged with [id], until a `done` or `error`
-  /// event.
+  /// Runs a native task that emits its results as events on a shared event
+  /// channel, tagged with [id], until a `done` or `error` event or a result
+  /// for which [isLast] is true.
   ///
-  /// [method] starts the task with [arguments]; [parse] turns each frame
-  /// event into a [T]. A native error without its own code is reported as a
-  /// [PlatformException] with [errorCode].
+  /// [events] is the channel's shared broadcast stream, the thumbnail
+  /// channel's unless given. [method] starts the task with [arguments];
+  /// [parse] turns each result event into a [T]. A native error without its
+  /// own code is reported as a [PlatformException] with [errorCode].
   Stream<T> _nativeFrameStream<T>({
     required String id,
     required EditorVideo video,
@@ -311,6 +317,8 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
     required Map<String, dynamic> arguments,
     required String errorCode,
     required T Function(Map<dynamic, dynamic> event) parse,
+    Stream<dynamic>? events,
+    bool Function(T result)? isLast,
     NativeLogLevel? nativeLogLevel,
   }) {
     final controller = StreamController<T>();
@@ -332,11 +340,11 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
       final error = event['error'] as String?;
       if (error != null) {
         final code = event['errorCode'] as String?;
-        controller.addError(
-          code == renderCanceledErrorCode
-              ? const RenderCanceledException()
-              : PlatformException(code: code ?? errorCode, message: error),
-        );
+        controller.addError(switch (code) {
+          renderCanceledErrorCode => const RenderCanceledException(),
+          noAudioErrorCode => const AudioNoTrackException(),
+          _ => PlatformException(code: code ?? errorCode, message: error),
+        });
         finish();
         return;
       }
@@ -344,12 +352,16 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
         finish();
         return;
       }
+      final T result;
       try {
-        controller.add(parse(event));
+        result = parse(event);
       } catch (e, stack) {
         debugPrint('Error parsing stream frame: $e\n$stack');
         controller.addError(e, stack);
+        return;
       }
+      controller.add(result);
+      if (isLast?.call(result) ?? false) finish();
     }
 
     Future<void> start() async {
@@ -363,7 +375,7 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
         if (finished) return;
         // Subscribe before starting: native emits the first frame as soon as
         // it is decoded, which can be before the start call returns.
-        subscription = _thumbnailEvents.listen(
+        subscription = (events ?? _thumbnailEvents).listen(
           onEvent,
           onError: (Object error, StackTrace stack) {
             if (finished) return;
@@ -603,90 +615,17 @@ class MethodChannelProVideoEditor extends ProVideoEditor {
   Stream<WaveformChunk> getWaveformStream(
     WaveformConfigs value, {
     NativeLogLevel? nativeLogLevel,
-  }) async* {
-    // Get the input path before starting the stream
-    final inputPath = await value.video.contentOrSafeFilePath();
-    final extension = _getFileExtension(inputPath);
-
-    // Start the streaming waveform generation on native side
-    // The native side will start sending chunks via the event channel
-    await methodChannel.invokeMethod<void>('startWaveformStream', {
-      'inputPath': inputPath,
-      'extension': extension,
-      'nativeLogLevel': nativeLogLevel?.methodValue,
-      ...value.toMap(),
-    });
-
-    // Listen to the waveform stream event channel
-    final streamController = StreamController<WaveformChunk>();
-
-    StreamSubscription<dynamic>? subscription;
-
-    subscription = _waveformStreamChannel.receiveBroadcastStream().listen(
-      (event) {
-        try {
-          if (event is Map) {
-            // Check if this event is for our task
-            final eventId = event['id'] as String?;
-            if (eventId == value.id) {
-              // Check for error
-              final error = event['error'] as String?;
-              if (error != null) {
-                final errorCode = event['errorCode'] as String?;
-                if (errorCode == noAudioErrorCode) {
-                  streamController.addError(const AudioNoTrackException());
-                } else if (errorCode == renderCanceledErrorCode) {
-                  streamController.addError(const RenderCanceledException());
-                } else {
-                  streamController.addError(
-                    PlatformException(
-                      code: errorCode ?? 'WAVEFORM_ERROR',
-                      message: error,
-                    ),
-                  );
-                }
-                streamController.close();
-                subscription?.cancel();
-                return;
-              }
-
-              // Parse the chunk data
-              final chunk = WaveformChunk.fromMap(event);
-              streamController.add(chunk);
-
-              // Close stream if this is the final chunk
-              if (chunk.isComplete) {
-                streamController.close();
-                subscription?.cancel();
-              }
-            }
-          }
-        } catch (e, stack) {
-          debugPrint('Error parsing waveform chunk: $e\n$stack');
-          streamController.addError(e);
-        }
-      },
-      onError: (error) {
-        streamController
-          ..addError(error)
-          ..close();
-      },
-      onDone: () {
-        if (!streamController.isClosed) {
-          streamController.close();
-        }
-      },
-    );
-
-    // Clean up when the stream is cancelled
-    streamController.onCancel = () {
-      subscription?.cancel();
-      // Cancel the native task if still running
-      cancel(value.id).catchError((_) {});
-    };
-
-    yield* streamController.stream;
-  }
+  }) => _nativeFrameStream(
+    id: value.id,
+    video: value.video,
+    method: 'startWaveformStream',
+    arguments: value.toMap(),
+    errorCode: 'WAVEFORM_ERROR',
+    parse: WaveformChunk.fromMap,
+    events: _waveformEvents,
+    isLast: (chunk) => chunk.isComplete,
+    nativeLogLevel: nativeLogLevel,
+  );
 
   @override
   Future<Uint8List> renderVideo(
