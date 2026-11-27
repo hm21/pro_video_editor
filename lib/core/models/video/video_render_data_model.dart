@@ -491,7 +491,11 @@ class VideoRenderData {
               'frameRate': videoEffectFrameRate,
               'stride': VideoEffectFrame.stride,
               'frames': Float64List.fromList(
-                bakeVideoEffectFrames(effect.type, effect.intensity),
+                bakeVideoEffectFrames(
+                  effect.type,
+                  effect.intensity,
+                  params: effect.params,
+                ),
               ),
             }
           else
@@ -697,6 +701,7 @@ class VideoRenderData {
         effect.type,
         effect.intensity,
         steps,
+        params: effect.params,
       ),
     };
   }

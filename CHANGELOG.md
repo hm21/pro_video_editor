@@ -1,3 +1,6 @@
+## 2.55.0
+- **FEAT**: `VideoEffect.params` shapes an effect beyond its intensity, by the names in `VideoEffectParams`: how often a glitch, block glitch or signal interference bursts and how far it jumps, how fast an RGB split swaps sides or a wave rolls, the tempo of the pixel pulse, strobe and zoom pulse, the scanlines and grain of VHS, TV static, film grain and CRT, the sepia, flicker and corners of old film, the size of pixelate, vignette and block glitch, how long a negative flash lasts, how far and how fast a shake moves, an upright mirror, the wavelength of a wave and the threshold and radius of a glow. Without params every effect looks as before, a strobe never flashes more than three times a second, and a triggered hit keeps its own pace.
+
 ## 2.54.2
 - **FIX**: `getWaveformStream` no longer loses its first chunks, so a waveform keeps its start and a short sound's stream finishes. Two waveform streams running at once no longer cut each other off.
 - **FIX**: `AudioWaveform.streaming` no longer throws an uncaught error for a video without sound; the new `onError` reports it.
