@@ -13,8 +13,12 @@ const int videoEffectFrameRate = 24;
 /// Buckets after which an animated effect repeats (20 seconds).
 const int videoEffectCycleLength = 480;
 
-/// The number of buckets [videoEffectFrameFor] cycles through for [type].
-int videoEffectCycleLengthOf(VideoEffectType type) => switch (type) {
+/// The number of buckets [videoEffectFrameFor] cycles through for [type]
+/// with [params].
+int videoEffectCycleLengthOf(
+  VideoEffectType type, {
+  Map<String, double> params = const {},
+}) => switch (type) {
   VideoEffectType.glitch ||
   VideoEffectType.vhs ||
   VideoEffectType.tvStatic ||
@@ -23,13 +27,13 @@ int videoEffectCycleLengthOf(VideoEffectType type) => switch (type) {
   VideoEffectType.filmGrain ||
   VideoEffectType.signalInterference ||
   VideoEffectType.shake => videoEffectCycleLength,
-  // Two seconds: the channels swap sides every second.
-  VideoEffectType.rgbSplit => 2 * videoEffectFrameRate,
-  VideoEffectType.pixelPulse ||
+  // Two seconds by default: the channels swap sides every second.
+  VideoEffectType.rgbSplit => 2 * _rgbSplitPeriodOf(params),
+  VideoEffectType.pixelPulse => _pixelPulsePeriodOf(params),
   VideoEffectType.negativeFlash => videoEffectFrameRate,
-  VideoEffectType.strobe => _strobePeriod,
-  VideoEffectType.zoomPulse => _zoomPulsePeriod,
-  VideoEffectType.wave => _wavePeriodBuckets,
+  VideoEffectType.strobe => _strobePeriodOf(params),
+  VideoEffectType.zoomPulse => _zoomPulsePeriodOf(params),
+  VideoEffectType.wave => _wavePeriodOf(params),
   VideoEffectType.pixelate ||
   VideoEffectType.vignette ||
   VideoEffectType.crt ||
@@ -39,15 +43,19 @@ int videoEffectCycleLengthOf(VideoEffectType type) => switch (type) {
   VideoEffectType.glow => 1,
 };
 
-/// The bucket of [localTime] into [type]'s cycle.
+/// The bucket of [localTime] into [type]'s cycle with [params].
 ///
 /// [localTime] counts from the effect's start and must not be negative.
-int videoEffectBucketOf(VideoEffectType type, Duration localTime) {
+int videoEffectBucketOf(
+  VideoEffectType type,
+  Duration localTime, {
+  Map<String, double> params = const {},
+}) {
   final bucket =
       localTime.inMicroseconds *
       videoEffectFrameRate ~/
       Duration.microsecondsPerSecond;
-  return bucket % videoEffectCycleLengthOf(type);
+  return bucket % videoEffectCycleLengthOf(type, params: params);
 }
 
 /// Steps a second on which a triggered effect's hits start.
@@ -103,7 +111,7 @@ int videoEffectHitLengthOf(VideoEffectType type) => switch (type) {
   // The white flash and its fade, without the dim between flashes: going
   // back from dim to the normal picture would be a flash of its own.
   VideoEffectType.strobe => 3,
-  // The negative, which lasts at most four buckets, without the echo.
+  // The negative, which lasts at most five buckets, without the echo.
   VideoEffectType.negativeFlash => videoEffectFrameRate ~/ 4,
   VideoEffectType.vhs ||
   VideoEffectType.tvStatic ||
@@ -120,19 +128,22 @@ int videoEffectHitLengthOf(VideoEffectType type) => switch (type) {
   VideoEffectType.glow => videoEffectFrameRate ~/ 4,
 };
 
-/// The frame of [type] at [intensity] on trigger step [step], counted from
-/// the effect's start, given the steps [triggerSteps] fire on (see
-/// [videoEffectTriggerSteps]).
+/// The frame of [type] at [intensity] with [params] on trigger step [step],
+/// counted from the effect's start, given the steps [triggerSteps] fire on
+/// (see [videoEffectTriggerSteps]).
 ///
 /// [VideoEffectFrame.none] before the first trigger and once a hit has
 /// played; see [videoEffectHitLengthOf]. [intensity] is clamped as
-/// [videoEffectFrameFor] clamps it.
+/// [videoEffectFrameFor] clamps it. A hit plays the effect's own animation,
+/// so the params that set how fast an effect repeats on its own
+/// ([VideoEffectParams.speed], [VideoEffectParams.tempo]) do not apply.
 VideoEffectFrame videoEffectTriggeredFrameFor(
   VideoEffectType type,
   double intensity,
   List<int> triggerSteps,
-  int step,
-) {
+  int step, {
+  Map<String, double> params = const {},
+}) {
   // The last trigger at or before [step], found by binary search.
   var low = 0;
   var high = triggerSteps.length;
@@ -148,7 +159,7 @@ VideoEffectFrame videoEffectTriggeredFrameFor(
   if (hit < 0) return VideoEffectFrame.none;
   final bucket = (step - triggerSteps[hit]) ~/ _stepsPerBucket;
   if (bucket >= videoEffectHitLengthOf(type)) return VideoEffectFrame.none;
-  return _hitFrame(type, intensity, hit, bucket);
+  return _hitFrame(type, intensity, hit, bucket, params);
 }
 
 /// The frame of [type] at [intensity] for [bucket] into hit number [hit].
@@ -157,7 +168,15 @@ VideoEffectFrame _hitFrame(
   double intensity,
   int hit,
   int bucket,
+  Map<String, double> params,
 ) {
+  // A hit plays the effect's own animation, whatever pace it repeats at on
+  // its own.
+  params = {
+    for (final MapEntry(:key, :value) in params.entries)
+      if (key != VideoEffectParams.speed && key != VideoEffectParams.tempo)
+        key: value,
+  };
   // The bursts below bypass [videoEffectFrameFor], which clamps on its own.
   if (!(intensity > 0)) return VideoEffectFrame.none;
   intensity = math.min(intensity, 1.0);
@@ -167,10 +186,11 @@ VideoEffectFrame _hitFrame(
     // Played continuously, a glitch mostly stays calm between short bursts,
     // so its opening alone would show for a single bucket: a hit bursts
     // throughout.
-    VideoEffectType.glitch => _glitchBurst(intensity, seed),
+    VideoEffectType.glitch => _glitchBurst(intensity, seed, params),
     VideoEffectType.blockGlitch => _blockGlitchBurst(
       intensity,
       seed,
+      params,
       window: seed - bucket,
     ),
     // The fringe swaps sides on every other hit, as it does every other
@@ -179,15 +199,18 @@ VideoEffectFrame _hitFrame(
       type,
       intensity,
       bucket + (hit.isOdd ? videoEffectFrameRate : 0),
+      params: params,
     ),
-    _ => videoEffectFrameFor(type, intensity, bucket),
+    _ => videoEffectFrameFor(type, intensity, bucket, params: params),
   };
 }
 
-/// The frame of [type] at [intensity] for [bucket].
+/// The frame of [type] at [intensity] with [params] for [bucket].
 ///
 /// Deterministic: the same arguments always give the same frame, on every
-/// platform, which is what keeps a preview and an export in step.
+/// platform, which is what keeps a preview and an export in step. A param an
+/// effect does not read, or one it reads that is missing, leaves its look as
+/// it is by default; see [VideoEffectParams].
 ///
 /// [intensity] is clamped to 0..1, and NaN counts as 0: `VideoEffect` only
 /// asserts its range, so release builds can pass anything, and an infinite
@@ -195,43 +218,50 @@ VideoEffectFrame _hitFrame(
 VideoEffectFrame videoEffectFrameFor(
   VideoEffectType type,
   double intensity,
-  int bucket,
-) {
+  int bucket, {
+  Map<String, double> params = const {},
+}) {
   if (!(intensity > 0)) return VideoEffectFrame.none;
   intensity = math.min(intensity, 1.0);
   return switch (type) {
-    VideoEffectType.glitch => _glitch(intensity, bucket),
-    VideoEffectType.rgbSplit => _rgbSplit(intensity, bucket),
-    VideoEffectType.vhs => _vhs(intensity, bucket),
-    VideoEffectType.tvStatic => _tvStatic(intensity, bucket),
-    VideoEffectType.oldFilm => _oldFilm(intensity, bucket),
-    VideoEffectType.pixelate => VideoEffectFrame(pixelSize: 0.05 * intensity),
-    VideoEffectType.pixelPulse => _pixelPulse(intensity, bucket),
-    VideoEffectType.strobe => _strobe(intensity, bucket),
-    VideoEffectType.negativeFlash => _negativeFlash(intensity, bucket),
+    VideoEffectType.glitch => _glitch(intensity, bucket, params),
+    VideoEffectType.rgbSplit => _rgbSplit(intensity, bucket, params),
+    VideoEffectType.vhs => _vhs(intensity, bucket, params),
+    VideoEffectType.tvStatic => _tvStatic(intensity, bucket, params),
+    VideoEffectType.oldFilm => _oldFilm(intensity, bucket, params),
+    VideoEffectType.pixelate => VideoEffectFrame(
+      pixelSize: 0.05 * intensity * _param(params, VideoEffectParams.size),
+    ),
+    VideoEffectType.pixelPulse => _pixelPulse(intensity, bucket, params),
+    VideoEffectType.strobe => _strobe(intensity, bucket, params),
+    VideoEffectType.negativeFlash => _negativeFlash(intensity, bucket, params),
     // More intensity darkens more and starts closer to the center. Past 1 the
     // corners are already black and the black spreads inward: at full strength
-    // everything beyond about 88% of the way to the corners.
+    // everything beyond about 88% of the way to the corners. The size scales
+    // the clear middle.
     VideoEffectType.vignette => VideoEffectFrame(
       vignette: 1.3 * intensity,
-      vignetteRadius: 0.4 - 0.3 * intensity,
+      vignetteRadius:
+          (0.4 - 0.3 * intensity) * _param(params, VideoEffectParams.size),
     ),
-    VideoEffectType.blockGlitch => _blockGlitch(intensity, bucket),
-    VideoEffectType.filmGrain => _filmGrain(intensity, bucket),
+    VideoEffectType.blockGlitch => _blockGlitch(intensity, bucket, params),
+    VideoEffectType.filmGrain => _filmGrain(intensity, bucket, params),
     VideoEffectType.signalInterference => _signalInterference(
       intensity,
       bucket,
+      params,
     ),
-    VideoEffectType.crt => _crt(intensity),
-    VideoEffectType.shake => _shake(intensity, bucket),
-    VideoEffectType.zoomPulse => _zoomPulse(intensity, bucket),
+    VideoEffectType.crt => _crt(intensity, params),
+    VideoEffectType.shake => _shake(intensity, bucket, params),
+    VideoEffectType.zoomPulse => _zoomPulse(intensity, bucket, params),
     // The mirrored and repeated effects keep their symmetry at every
     // intensity: full intensity shows as much of the picture as fits, less
-    // zooms in on its center, up to twice at the lowest.
-    VideoEffectType.mirror => VideoEffectFrame(
-      mirrorX: 0.5,
-      zoom: 1 - intensity,
-    ),
+    // zooms in on its center, up to twice at the lowest. The mirror reflects
+    // its top half downwards instead when the params ask for it.
+    VideoEffectType.mirror =>
+      _param(params, VideoEffectParams.vertical, fallback: 0) >= 0.5
+          ? VideoEffectFrame(mirrorY: 0.5, zoom: 1 - intensity)
+          : VideoEffectFrame(mirrorX: 0.5, zoom: 1 - intensity),
     VideoEffectType.kaleidoscope => VideoEffectFrame(
       mirrorX: 0.5,
       mirrorY: 0.5,
@@ -241,24 +271,42 @@ VideoEffectFrame videoEffectFrameFor(
       tiles: 2,
       zoom: 1 - intensity,
     ),
-    VideoEffectType.wave => _wave(intensity, bucket),
+    VideoEffectType.wave => _wave(intensity, bucket, params),
     // Only the brightest parts glow, from about two thirds of full brightness
-    // on; more intensity glows stronger and from a little lower. The halo
-    // spreads over about a tenth of the frame height.
+    // on; more intensity glows stronger and from a little lower, as does a
+    // higher threshold param. The halo spreads over about a tenth of the
+    // frame height, times the radius param.
     VideoEffectType.glow => VideoEffectFrame(
       glow: 2 * intensity,
-      glowThreshold: 0.78 - 0.14 * intensity,
-      glowRadius: 0.035,
+      glowThreshold:
+          (0.78 -
+                  0.14 * intensity -
+                  0.3 *
+                      (_param(
+                            params,
+                            VideoEffectParams.threshold,
+                            fallback: 0.5,
+                            min: 0,
+                            max: 1,
+                          ) -
+                          0.5))
+              .clamp(0.0, 1.0),
+      glowRadius: 0.035 * _param(params, VideoEffectParams.radius),
     ),
   };
 }
 
-/// Every frame of [type]'s cycle, flattened for the native renderers.
-List<double> bakeVideoEffectFrames(VideoEffectType type, double intensity) {
-  final length = videoEffectCycleLengthOf(type);
+/// Every frame of [type]'s cycle with [params], flattened for the native
+/// renderers.
+List<double> bakeVideoEffectFrames(
+  VideoEffectType type,
+  double intensity, {
+  Map<String, double> params = const {},
+}) {
+  final length = videoEffectCycleLengthOf(type, params: params);
   return [
     for (var bucket = 0; bucket < length; bucket++)
-      ...videoEffectFrameFor(type, intensity, bucket).toList(),
+      ...videoEffectFrameFor(type, intensity, bucket, params: params).toList(),
   ];
 }
 
@@ -281,8 +329,9 @@ int videoEffectTriggeredLengthOf(VideoEffectType type, List<int> triggerSteps) {
 Float64List bakeTriggeredVideoEffectFrames(
   VideoEffectType type,
   double intensity,
-  List<int> triggerSteps,
-) {
+  List<int> triggerSteps, {
+  Map<String, double> params = const {},
+}) {
   const stride = VideoEffectFrame.stride;
   final length = videoEffectTriggeredLengthOf(type, triggerSteps);
   // Zeroed, which is what [VideoEffectFrame.none] flattens to.
@@ -300,6 +349,7 @@ Float64List bakeTriggeredVideoEffectFrames(
         intensity,
         hit,
         (step - first) ~/ _stepsPerBucket,
+        params,
       ).toList();
       final bucketEnd = math.min(step + _stepsPerBucket, end);
       for (var s = step; s < bucketEnd; s++) {
@@ -317,20 +367,34 @@ Float64List bakeTriggeredVideoEffectFrames(
 /// A window bursts with a chance that grows with [intensity], for its first
 /// one to three buckets. The first window always bursts, so the effect opens
 /// on a glitch.
-VideoEffectFrame _glitch(double intensity, int bucket) {
+VideoEffectFrame _glitch(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
   final window = bucket ~/ 4;
-  final burstsHere =
-      window == 0 || _random(1, window) < 0.25 + 0.35 * intensity;
+  final chance =
+      (0.25 + 0.35 * intensity) *
+      _param(params, VideoEffectParams.frequency, max: 2.5, min: 0);
+  final burstsHere = window == 0 || _random(1, window) < chance;
   final burstLength = 1 + (_random(2, window) * 3).floor();
   if (!burstsHere || bucket - window * 4 >= burstLength) {
-    return VideoEffectFrame(rgbShift: 0.0025 * intensity);
+    return VideoEffectFrame(
+      rgbShift: 0.0025 * intensity * _param(params, VideoEffectParams.distance),
+    );
   }
-  return _glitchBurst(intensity, bucket);
+  return _glitchBurst(intensity, bucket, params);
 }
 
 /// One bucket of a glitch burst: the channels jump apart and one to three
-/// slices of the picture slip sideways, all picked anew for every [bucket].
-VideoEffectFrame _glitchBurst(double intensity, int bucket) {
+/// slices of the picture slip sideways, all picked anew for every [bucket],
+/// as far as [VideoEffectParams.distance] scales them.
+VideoEffectFrame _glitchBurst(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
+  intensity *= _param(params, VideoEffectParams.distance);
   final sign = _random(3, bucket) < 0.5 ? 1.0 : -1.0;
   final bands = <VideoEffectBand>[];
   final count = 1 + (_random(5, bucket) * 3).floor();
@@ -353,7 +417,11 @@ VideoEffectFrame _glitchBurst(double intensity, int bucket) {
 
 /// Scanlines, grain that changes every bucket, a slight color fringe, and a
 /// tracking band that rolls up the picture for 2.5 s of every 7.5 s.
-VideoEffectFrame _vhs(double intensity, int bucket) {
+VideoEffectFrame _vhs(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
   final phase = bucket % 180;
   final bands = <VideoEffectBand>[];
   if (phase < 60) {
@@ -372,9 +440,9 @@ VideoEffectFrame _vhs(double intensity, int bucket) {
   const tile = VideoEffectFrame.noiseTileSize;
   return VideoEffectFrame(
     rgbShift: 0.006 * intensity,
-    scanlines: 0.30 * intensity,
+    scanlines: 0.30 * intensity * _param(params, VideoEffectParams.scanlines),
     scanlinePeriod: 1 / 270,
-    noise: 0.22 * intensity,
+    noise: 0.22 * intensity * _param(params, VideoEffectParams.noise),
     noiseCellSize: 1 / 540,
     noiseOffsetX: (_random(1, bucket) * tile).floor(),
     noiseOffsetY: (_random(2, bucket) * tile).floor(),
@@ -384,19 +452,34 @@ VideoEffectFrame _vhs(double intensity, int bucket) {
 
 /// A color fringe that punches out at the start of every second and settles
 /// back to a quarter of its size, with red and blue swapping sides each second.
-VideoEffectFrame _rgbSplit(double intensity, int bucket) {
-  final phase = bucket % videoEffectFrameRate;
-  final punch = math.exp(-5 * phase / videoEffectFrameRate);
-  final side = (bucket ~/ videoEffectFrameRate).isEven ? 1.0 : -1.0;
+VideoEffectFrame _rgbSplit(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
+  final period = _rgbSplitPeriodOf(params);
+  final phase = bucket % period;
+  final punch = math.exp(-5 * phase / period);
+  final side = (bucket ~/ period).isEven ? 1.0 : -1.0;
+  final distance = _param(params, VideoEffectParams.distance);
   return VideoEffectFrame(
-    rgbShift: side * 0.02 * intensity * (0.25 + 0.75 * punch),
+    rgbShift: side * 0.02 * intensity * distance * (0.25 + 0.75 * punch),
   );
 }
+
+/// Buckets between two RGB split punches: a second, or that divided by
+/// [VideoEffectParams.speed], at least a sixth of a second.
+int _rgbSplitPeriodOf(Map<String, double> params) =>
+    _periodOf(videoEffectFrameRate, params, VideoEffectParams.speed, min: 4);
 
 /// A badly tuned television: heavy grain that flickers every bucket, fine
 /// scanlines, a slight fringe, and now and then one or two slices of the
 /// picture jumping sideways.
-VideoEffectFrame _tvStatic(double intensity, int bucket) {
+VideoEffectFrame _tvStatic(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
   final bands = <VideoEffectBand>[];
   if (_random(10, bucket) < 0.12) {
     final count = 1 + (_random(11, bucket) * 2).floor();
@@ -417,8 +500,13 @@ VideoEffectFrame _tvStatic(double intensity, int bucket) {
     rgbShift: 0.004 * intensity,
     scanlines: 0.2 * intensity,
     scanlinePeriod: 1 / 300,
-    noise: (0.45 + 0.2 * _random(16, bucket)) * intensity,
-    noiseCellSize: 1 / 400,
+    noise: math.min(
+      1,
+      (0.45 + 0.2 * _random(16, bucket)) *
+          intensity *
+          _param(params, VideoEffectParams.noise),
+    ),
+    noiseCellSize: _param(params, VideoEffectParams.grainSize, max: 4) / 400,
     noiseOffsetX: (_random(17, bucket) * tile).floor(),
     noiseOffsetY: (_random(18, bucket) * tile).floor(),
     bands: bands,
@@ -427,35 +515,61 @@ VideoEffectFrame _tvStatic(double intensity, int bucket) {
 
 /// At the start of every second the picture breaks into large blocks that
 /// shrink until it is sharp again, ten buckets (about 0.4 s) later.
-VideoEffectFrame _pixelPulse(double intensity, int bucket) {
+VideoEffectFrame _pixelPulse(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
   const resolveBuckets = 10;
-  final phase = bucket % videoEffectFrameRate;
+  final phase = bucket % _pixelPulsePeriodOf(params);
   if (phase >= resolveBuckets) return VideoEffectFrame.none;
   final remaining = 1 - phase / resolveBuckets;
   return VideoEffectFrame(pixelSize: 0.09 * intensity * remaining * remaining);
 }
 
+/// Buckets between two pixel pulses: a second, or that divided by
+/// [VideoEffectParams.tempo], at least half a second, which leaves the picture
+/// sharp between pulses.
+int _pixelPulsePeriodOf(Map<String, double> params) =>
+    _periodOf(videoEffectFrameRate, params, VideoEffectParams.tempo, min: 12);
+
 /// Sepia tones, fine grain that changes every bucket, an exposure that
-/// flickers by up to 4% either way, and darkened corners.
+/// flickers by up to 4% either way, or 5% as [VideoEffectParams.flicker]
+/// scales it, and darkened corners.
 ///
-/// The flicker stays below the 10% change that WCAG 2.3.1 counts as a flash.
-VideoEffectFrame _oldFilm(double intensity, int bucket) {
+/// The flicker stays below the 10% change that WCAG 2.3.1 counts as a flash,
+/// whatever the param says.
+VideoEffectFrame _oldFilm(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
   const tile = VideoEffectFrame.noiseTileSize;
+  final flicker = _param(params, VideoEffectParams.flicker, min: 0, max: 1.25);
   return VideoEffectFrame(
     noise: 0.16 * intensity,
     noiseCellSize: 1 / 480,
     noiseOffsetX: (_random(20, bucket) * tile).floor(),
     noiseOffsetY: (_random(21, bucket) * tile).floor(),
-    sepia: 0.85 * intensity,
-    brightness: (_random(22, bucket) - 0.5) * 0.08 * intensity,
-    vignette: 0.6 * intensity,
+    sepia: math.min(
+      1,
+      0.85 * intensity * _param(params, VideoEffectParams.sepia, min: 0),
+    ),
+    brightness: (_random(22, bucket) - 0.5) * 0.08 * intensity * flicker,
+    vignette:
+        0.6 * intensity * _param(params, VideoEffectParams.vignette, min: 0),
     vignetteRadius: 0.3,
   );
 }
 
-/// Buckets between two strobe flashes: two flashes a second, below the three
-/// a second that WCAG 2.3.1 allows.
-const int _strobePeriod = videoEffectFrameRate ~/ 2;
+/// Buckets between two strobe flashes: two flashes a second, or that times
+/// [VideoEffectParams.tempo], at most three, which WCAG 2.3.1 allows.
+int _strobePeriodOf(Map<String, double> params) => _periodOf(
+  videoEffectFrameRate ~/ 2,
+  params,
+  VideoEffectParams.tempo,
+  min: videoEffectFrameRate ~/ 3,
+);
 
 /// A white flash at the start of every half second that fades out over the
 /// next two buckets, with the picture dimmed in between so the flashes stand
@@ -463,9 +577,13 @@ const int _strobePeriod = videoEffectFrameRate ~/ 2;
 ///
 /// [intensity] sets both how bright the flash gets, fully white from 0.75
 /// on, and how far the picture is dimmed between flashes, down to half.
-VideoEffectFrame _strobe(double intensity, int bucket) {
+VideoEffectFrame _strobe(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
   final peak = math.min(1.0, 0.25 + intensity);
-  return switch (bucket % _strobePeriod) {
+  return switch (bucket % _strobePeriodOf(params)) {
     0 => VideoEffectFrame(flash: peak),
     1 => VideoEffectFrame(flash: 0.55 * peak),
     2 => VideoEffectFrame(flash: 0.2 * peak),
@@ -474,11 +592,22 @@ VideoEffectFrame _strobe(double intensity, int bucket) {
 }
 
 /// The negative for the first one to four buckets of every second, longer
-/// with more [intensity]. From half intensity on, a one-bucket echo follows a
-/// quarter second later, so there are at most two flashes a second.
-VideoEffectFrame _negativeFlash(double intensity, int bucket) {
+/// with more [intensity], or up to five as [VideoEffectParams.length] scales
+/// it. From half intensity on, a one-bucket echo follows a quarter second
+/// later, so there are at most two flashes a second.
+VideoEffectFrame _negativeFlash(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
   final phase = bucket % videoEffectFrameRate;
-  final length = 1 + (3 * intensity).round();
+  // Rounded before it is scaled, so it lasts exactly as long as before
+  // without the param, and ends before the echo, so the echo stays a flash
+  // of its own.
+  final length =
+      ((1 + (3 * intensity).round()) * _param(params, VideoEffectParams.length))
+          .round()
+          .clamp(1, videoEffectFrameRate ~/ 4 - 1);
   final echo = intensity >= 0.5 && phase == videoEffectFrameRate ~/ 4;
   if (phase < length || echo) return const VideoEffectFrame(invert: 1);
   return VideoEffectFrame.none;
@@ -493,21 +622,29 @@ VideoEffectFrame _negativeFlash(double intensity, int bucket) {
 /// to four buckets. The first window always bursts, so the effect opens on a
 /// burst. The block size holds for a whole burst; the slices and the channel
 /// split change every bucket.
-VideoEffectFrame _blockGlitch(double intensity, int bucket) {
+VideoEffectFrame _blockGlitch(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
   final window = bucket ~/ 6;
-  final burstsHere = window == 0 || _random(30, window) < 0.2 + 0.3 * intensity;
+  final chance =
+      (0.2 + 0.3 * intensity) *
+      _param(params, VideoEffectParams.frequency, max: 2.5, min: 0);
+  final burstsHere = window == 0 || _random(30, window) < chance;
   final burstLength = 2 + (_random(31, window) * 3).floor();
   if (!burstsHere || bucket - window * 6 >= burstLength) {
     return VideoEffectFrame.none;
   }
-  return _blockGlitchBurst(intensity, bucket, window: window);
+  return _blockGlitchBurst(intensity, bucket, params, window: window);
 }
 
 /// One bucket of a block glitch burst: blocks of a size [window] picks, and
 /// slices and a channel split picked anew for every [bucket].
 VideoEffectFrame _blockGlitchBurst(
   double intensity,
-  int bucket, {
+  int bucket,
+  Map<String, double> params, {
   required int window,
 }) {
   final sign = _random(33, bucket) < 0.5 ? 1.0 : -1.0;
@@ -525,7 +662,10 @@ VideoEffectFrame _blockGlitchBurst(
     }
   }
   return VideoEffectFrame(
-    pixelSize: (0.015 + 0.03 * _random(32, window)) * intensity,
+    pixelSize:
+        (0.015 + 0.03 * _random(32, window)) *
+        intensity *
+        _param(params, VideoEffectParams.blockSize),
     rgbShift: sign * (0.008 + 0.02 * _random(39, bucket)) * intensity,
     bands: bands,
   );
@@ -533,11 +673,15 @@ VideoEffectFrame _blockGlitchBurst(
 
 /// Fine grain of a constant strength that changes every bucket, like the
 /// grain of a film print, and nothing else.
-VideoEffectFrame _filmGrain(double intensity, int bucket) {
+VideoEffectFrame _filmGrain(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
   const tile = VideoEffectFrame.noiseTileSize;
   return VideoEffectFrame(
     noise: 0.14 * intensity,
-    noiseCellSize: 1 / 900,
+    noiseCellSize: _param(params, VideoEffectParams.grainSize, max: 4) / 900,
     noiseOffsetX: (_random(40, bucket) * tile).floor(),
     noiseOffsetY: (_random(41, bucket) * tile).floor(),
   );
@@ -554,7 +698,11 @@ VideoEffectFrame _filmGrain(double intensity, int bucket) {
 /// Noise bursts follow windows of eight buckets (a third of a second): a
 /// window bursts with a chance that grows with [intensity], for its first one
 /// to three buckets. The first window always bursts.
-VideoEffectFrame _signalInterference(double intensity, int bucket) {
+VideoEffectFrame _signalInterference(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
   final bands = <VideoEffectBand>[];
   final count = 2 + (_random(50, bucket) * 2).floor();
   for (var k = 0; k < count; k++) {
@@ -567,8 +715,10 @@ VideoEffectFrame _signalInterference(double intensity, int bucket) {
   }
 
   final window = bucket ~/ 8;
-  final burstsHere =
-      window == 0 || _random(55, window) < 0.15 + 0.25 * intensity;
+  final chance =
+      (0.15 + 0.25 * intensity) *
+      _param(params, VideoEffectParams.frequency, max: 2.5, min: 0);
+  final burstsHere = window == 0 || _random(55, window) < chance;
   final burstLength = 1 + (_random(56, window) * 3).floor();
   if (!burstsHere || bucket - window * 8 >= burstLength) {
     return VideoEffectFrame(bands: bands);
@@ -587,52 +737,110 @@ VideoEffectFrame _signalInterference(double intensity, int bucket) {
 /// Strong, coarse scanlines with a slight color fringe and slightly darkened
 /// corners. The picture is brightened a little, so the dark scanlines do not
 /// darken it as a whole as much.
-VideoEffectFrame _crt(double intensity) => VideoEffectFrame(
-  rgbShift: 0.003 * intensity,
-  scanlines: 0.55 * intensity,
-  scanlinePeriod: 1 / 200,
-  brightness: 0.12 * intensity,
-  vignette: 0.35 * intensity,
-  vignetteRadius: 0.45,
-);
+VideoEffectFrame _crt(double intensity, Map<String, double> params) =>
+    VideoEffectFrame(
+      rgbShift: 0.003 * intensity,
+      scanlines: 0.55 * intensity,
+      scanlinePeriod: 1 / (200 * _param(params, VideoEffectParams.density)),
+      brightness: 0.12 * intensity,
+      vignette: 0.35 * intensity,
+      vignetteRadius: 0.45,
+    );
 
 /// The picture jumps to a new spot every bucket, in a random direction, by up
 /// to 2% of the frame at full [intensity]. It is zoomed in by a little more
 /// than twice that, so its edges never come into view.
-VideoEffectFrame _shake(double intensity, int bucket) {
-  final reach = 0.02 * intensity;
+VideoEffectFrame _shake(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
+  final reach = 0.02 * intensity * _param(params, VideoEffectParams.distance);
+  // Slower shakes hold each spot for several buckets.
+  final spot =
+      (bucket * _param(params, VideoEffectParams.speed, min: 0.25, max: 1))
+          .floor();
   return VideoEffectFrame(
     zoom: 2.2 * reach,
-    offsetX: (2 * _random(60, bucket) - 1) * reach,
-    offsetY: (2 * _random(61, bucket) - 1) * reach,
+    offsetX: (2 * _random(60, spot) - 1) * reach,
+    offsetY: (2 * _random(61, spot) - 1) * reach,
   );
 }
 
 /// Buckets between two zoom punches: a beat at 120 beats a minute.
 const int _zoomPulsePeriod = videoEffectFrameRate ~/ 2;
 
+/// Buckets between two zoom punches with [params]: [_zoomPulsePeriod], or
+/// that divided by [VideoEffectParams.tempo], at least a quarter second.
+int _zoomPulsePeriodOf(Map<String, double> params) =>
+    _periodOf(_zoomPulsePeriod, params, VideoEffectParams.tempo, min: 6);
+
 /// The picture punches in by up to 25% at the start of every half second and
 /// eases back out until the next punch.
-VideoEffectFrame _zoomPulse(double intensity, int bucket) {
-  final remaining = 1 - (bucket % _zoomPulsePeriod) / _zoomPulsePeriod;
+VideoEffectFrame _zoomPulse(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
+  final period = _zoomPulsePeriodOf(params);
+  final remaining = 1 - (bucket % period) / period;
   return VideoEffectFrame(zoom: 0.25 * intensity * remaining * remaining);
 }
 
-/// Buckets the wave takes to roll up one wave length: two seconds.
-const int _wavePeriodBuckets = 2 * videoEffectFrameRate;
+/// Buckets the wave takes to roll up one wave length: two seconds, or that
+/// divided by [VideoEffectParams.speed], at least a third of a second.
+int _wavePeriodOf(Map<String, double> params) => _periodOf(
+  2 * videoEffectFrameRate,
+  params,
+  VideoEffectParams.speed,
+  min: 8,
+);
 
 /// Rows bend sideways by up to 2.5% of the frame width along a wave half the
 /// frame tall, which rolls up the picture by one wave every two seconds. The
 /// picture is zoomed in by a little more than twice the bend, so the edges the
 /// rows move away from never come into view.
-VideoEffectFrame _wave(double intensity, int bucket) {
+VideoEffectFrame _wave(
+  double intensity,
+  int bucket,
+  Map<String, double> params,
+) {
   final amplitude = 0.025 * intensity;
   return VideoEffectFrame(
     zoom: 2.2 * amplitude,
     waveAmplitude: amplitude,
-    wavePeriod: 0.5,
-    wavePhase: bucket / _wavePeriodBuckets,
+    wavePeriod: 0.5 * _param(params, VideoEffectParams.wavelength, min: 0.25),
+    wavePhase: bucket / _wavePeriodOf(params),
   );
+}
+
+/// The param [key] of [params], clamped to [min]..[max], or [fallback] when
+/// it is missing, NaN or infinite.
+///
+/// Infinite values count as missing because `VideoEffect.toMap` leaves them
+/// out, as JSON cannot hold them, so a saved effect looks as it did.
+double _param(
+  Map<String, double> params,
+  String key, {
+  double fallback = 1,
+  double min = 0.3,
+  double max = 3,
+}) {
+  final value = params[key];
+  if (value == null || !value.isFinite) return fallback;
+  return value.clamp(min, max);
+}
+
+/// [buckets] divided by the param [key] of [params], a speed or a tempo
+/// between 0.25 and 4, rounded and at least [min].
+int _periodOf(
+  int buckets,
+  Map<String, double> params,
+  String key, {
+  required int min,
+}) {
+  final pace = _param(params, key, min: 0.25, max: 4);
+  return math.max(min, (buckets / pace).round());
 }
 
 /// A uniform value in `[0, 1)` for the given keys.

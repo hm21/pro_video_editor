@@ -783,6 +783,48 @@ void main() {
       );
     });
 
+    test('toAsyncMap sends an effect with its params, cycling as long as they '
+        'make it', () async {
+      const wave = VideoEffect.wave(
+        params: {VideoEffectParams.speed: 2, VideoEffectParams.wavelength: 2},
+      );
+      const glitch = VideoEffect.glitch(
+        params: {VideoEffectParams.distance: 2},
+        triggers: [Duration(milliseconds: 500)],
+      );
+      final map = await buildData(const [wave, glitch]).toAsyncMap();
+      final sent = map['effects'] as List<Map<String, dynamic>>;
+
+      // A wave twice as fast rolls up once a second.
+      final waveFrames = sent.first['frames'] as Float64List;
+      expect(waveFrames, hasLength(24 * VideoEffectFrame.stride));
+      for (final bucket in [0, 7, 23]) {
+        expect(
+          VideoEffectFrame.fromList(
+            waveFrames,
+            bucket * VideoEffectFrame.stride,
+          ),
+          wave.frameAt(Duration(microseconds: bucket * 41667)),
+          reason: 'bucket $bucket',
+        );
+      }
+      final hit = VideoEffectFrame.fromList(
+        sent.last['frames'] as Float64List,
+        60 * VideoEffectFrame.stride,
+      );
+      expect(hit, glitch.frameAt(const Duration(milliseconds: 500)));
+      expect(
+        hit.rgbShift,
+        closeTo(
+          2 *
+              const VideoEffect.glitch(
+                triggers: [Duration(milliseconds: 500)],
+              ).frameAt(const Duration(milliseconds: 500)).rgbShift,
+          1e-12,
+        ),
+      );
+    });
+
     test('toAsyncMap sends a triggered effect at the trigger rate, until its '
         'last hit has played', () async {
       const effect = VideoEffect.zoomPulse(

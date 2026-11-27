@@ -40,7 +40,8 @@ enum VideoEffectType {
   /// The picture flashes white twice a second and is dimmed in between.
   ///
   /// Two flashes a second stay below the three a second that WCAG 2.3.1 names
-  /// as the limit for content that can trigger seizures. Flashing effects that
+  /// as the limit for content that can trigger seizures, and a faster
+  /// [VideoEffectParams.tempo] never goes past three. Flashing effects that
   /// overlap in time add their flashes up, so keep one of them active at a
   /// time to stay within it.
   strobe,
@@ -79,8 +80,9 @@ enum VideoEffectType {
   /// out.
   zoomPulse,
 
-  /// The right half of the picture mirrors its left half. Less intensity
-  /// zooms in on the center.
+  /// The right half of the picture mirrors its left half, or with
+  /// [VideoEffectParams.vertical] the bottom half its top half. Less
+  /// intensity zooms in on the center.
   mirror,
 
   /// The picture mirrored into four symmetric parts: the right half mirrors
@@ -136,6 +138,7 @@ class VideoEffect with TimeRangeMixin {
     this.startTime,
     this.endTime,
     this.triggers = const [],
+    this.params = const {},
   }) : assert(
          intensity >= 0 && intensity <= 1,
          'intensity must be between 0 and 1',
@@ -147,12 +150,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.glitch,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.rgbSplit] effect.
@@ -161,12 +166,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.rgbSplit,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.vhs] effect.
@@ -175,12 +182,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.vhs,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.tvStatic] effect.
@@ -189,12 +198,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.tvStatic,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.pixelPulse] effect.
@@ -203,12 +214,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.pixelPulse,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.pixelate] effect.
@@ -217,12 +230,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.pixelate,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.oldFilm] effect.
@@ -231,12 +246,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.oldFilm,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.strobe] effect.
@@ -245,12 +262,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.strobe,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.negativeFlash] effect.
@@ -259,12 +278,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.negativeFlash,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.vignette] effect.
@@ -273,12 +294,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.vignette,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.blockGlitch] effect.
@@ -287,12 +310,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.blockGlitch,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.filmGrain] effect.
@@ -301,12 +326,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.filmGrain,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.signalInterference] effect.
@@ -315,12 +342,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.signalInterference,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.crt] effect.
@@ -329,12 +358,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.crt,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.shake] effect.
@@ -343,12 +374,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.shake,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.zoomPulse] effect.
@@ -357,12 +390,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.zoomPulse,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.mirror] effect.
@@ -371,12 +406,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.mirror,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.kaleidoscope] effect.
@@ -385,12 +422,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.kaleidoscope,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.splitScreen] effect.
@@ -399,12 +438,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.splitScreen,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.wave] effect.
@@ -413,12 +454,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.wave,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates a [VideoEffectType.glow] effect.
@@ -427,12 +470,14 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration> triggers = const [],
+    Map<String, double> params = const {},
   }) : this(
          type: VideoEffectType.glow,
          intensity: intensity,
          startTime: startTime,
          endTime: endTime,
          triggers: triggers,
+         params: params,
        );
 
   /// Creates an effect from [toMap]'s output.
@@ -452,6 +497,12 @@ class VideoEffect with TimeRangeMixin {
         for (final trigger in map['triggers'] as List? ?? const [])
           Duration(microseconds: safeParseInt(trigger)),
       ],
+      params: {
+        for (final MapEntry(:key, :value)
+            in (map['params'] as Map? ?? const {}).entries)
+          if (tryParseDouble(value) case final number? when number.isFinite)
+            '$key': number,
+      },
     );
   }
 
@@ -497,6 +548,17 @@ class VideoEffect with TimeRangeMixin {
   /// and the export start a hit on the same frame.
   final List<Duration> triggers;
 
+  /// How the effect looks beyond its [intensity], by the names in
+  /// [VideoEffectParams]: for example how often a [VideoEffectType.glitch]
+  /// bursts or how fast a [VideoEffectType.wave] rolls.
+  ///
+  /// Empty by default, which gives every effect its default look, as does a
+  /// param it does not read or a missing one. Each param is clamped into its
+  /// range, so no value breaks an effect, and a flashing effect stays within
+  /// the three flashes a second that WCAG 2.3.1 allows whatever its tempo.
+  /// NaN and infinite values count as missing, and [toMap] leaves them out.
+  final Map<String, double> params;
+
   /// Whether the effect applies at [position].
   bool isActiveAt(Duration position) =>
       (startTime == null || position >= startTime!) &&
@@ -513,10 +575,11 @@ class VideoEffect with TimeRangeMixin {
         intensity,
         videoEffectTriggerSteps(triggers, start: start, end: endTime),
         videoEffectTriggerStepOf(position - start),
+        params: params,
       );
     }
-    final bucket = videoEffectBucketOf(type, position - start);
-    return videoEffectFrameFor(type, intensity, bucket);
+    final bucket = videoEffectBucketOf(type, position - start, params: params);
+    return videoEffectFrameFor(type, intensity, bucket, params: params);
   }
 
   /// The combined pixel operations of every effect in [effects] that is
@@ -539,6 +602,7 @@ class VideoEffect with TimeRangeMixin {
     Duration? startTime,
     Duration? endTime,
     List<Duration>? triggers,
+    Map<String, double>? params,
   }) {
     return VideoEffect(
       type: type ?? this.type,
@@ -546,11 +610,19 @@ class VideoEffect with TimeRangeMixin {
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       triggers: triggers ?? this.triggers,
+      params: params ?? this.params,
     );
   }
 
   /// Converts the effect into a map, for saving it.
+  ///
+  /// [params] that are NaN or infinite are left out: JSON cannot hold them,
+  /// and the effect ignores them anyway.
   Map<String, dynamic> toMap() {
+    final finiteParams = {
+      for (final MapEntry(:key, :value) in params.entries)
+        if (value.isFinite) key: value,
+    };
     return <String, dynamic>{
       'type': type.name,
       'intensity': intensity,
@@ -558,6 +630,7 @@ class VideoEffect with TimeRangeMixin {
       'endTime': endTime?.inMicroseconds,
       if (triggers.isNotEmpty)
         'triggers': [for (final trigger in triggers) trigger.inMicroseconds],
+      if (finiteParams.isNotEmpty) 'params': finiteParams,
     };
   }
 
@@ -571,7 +644,8 @@ class VideoEffect with TimeRangeMixin {
       other.intensity == intensity &&
       other.startTime == startTime &&
       other.endTime == endTime &&
-      listEquals(other.triggers, triggers);
+      listEquals(other.triggers, triggers) &&
+      mapEquals(other.params, params);
 
   @override
   int get hashCode => Object.hash(
@@ -580,10 +654,104 @@ class VideoEffect with TimeRangeMixin {
     startTime,
     endTime,
     Object.hashAll(triggers),
+    Object.hashAllUnordered(
+      params.entries.map((entry) => Object.hash(entry.key, entry.value)),
+    ),
   );
 
   @override
   String toString() =>
       'VideoEffect(type: ${type.name}, intensity: $intensity, '
-      'startTime: $startTime, endTime: $endTime, triggers: $triggers)';
+      'startTime: $startTime, endTime: $endTime, triggers: $triggers, '
+      'params: $params)';
+}
+
+/// The names of the [VideoEffect.params] the effects read, each with the
+/// effects that read it, its range, and its default.
+///
+/// Every param is optional: a missing one, or one an effect does not read,
+/// keeps that effect's default look. Values outside a range are clamped into
+/// it, and NaN and infinite values count as missing.
+abstract final class VideoEffectParams {
+  /// How often a [VideoEffectType.glitch], [VideoEffectType.blockGlitch] or
+  /// [VideoEffectType.signalInterference] bursts, as a share of its default
+  /// chance: 0 (only the first burst) to 2.5, 1 by default.
+  static const frequency = 'frequency';
+
+  /// How far the channels and slices of a [VideoEffectType.glitch] or the
+  /// channels of an [VideoEffectType.rgbSplit] jump apart, or how far a
+  /// [VideoEffectType.shake] moves, as a share of the default: 0.3 to 3.
+  static const distance = 'distance';
+
+  /// How fast an [VideoEffectType.rgbSplit] swaps sides or a
+  /// [VideoEffectType.wave] rolls, as a share of the default: 0.25 to 4,
+  /// within each effect's own limits. A [VideoEffectType.shake] reads it from
+  /// 0.25 to 1, holding each spot for longer below 1. Does not apply to a hit
+  /// of an effect with [VideoEffect.triggers].
+  static const speed = 'speed';
+
+  /// How often a [VideoEffectType.pixelPulse], [VideoEffectType.strobe] or
+  /// [VideoEffectType.zoomPulse] repeats, as a share of the default: 0.25 to
+  /// 4, within each effect's own limits. A strobe never flashes more than
+  /// three times a second. Does not apply to a hit of an effect with
+  /// [VideoEffect.triggers].
+  static const tempo = 'tempo';
+
+  /// How strong the scanlines of a [VideoEffectType.vhs] are, as a share of
+  /// the default: 0.3 to 3.
+  static const scanlines = 'scanlines';
+
+  /// How strong the grain of a [VideoEffectType.vhs] or a
+  /// [VideoEffectType.tvStatic] is, as a share of the default: 0.3 to 3.
+  static const noise = 'noise';
+
+  /// How coarse the grain of a [VideoEffectType.tvStatic] or a
+  /// [VideoEffectType.filmGrain] is, as a share of the default: 0.3 to 4.
+  static const grainSize = 'grainSize';
+
+  /// How brown an [VideoEffectType.oldFilm] turns, as a share of the
+  /// default: 0 to 3, at most full sepia.
+  static const sepia = 'sepia';
+
+  /// How much an [VideoEffectType.oldFilm]'s exposure flickers, as a share of
+  /// the default: 0 to 1.25, so at most 5% either way, which keeps every
+  /// change below the 10% that WCAG 2.3.1 counts as a flash.
+  static const flicker = 'flicker';
+
+  /// How dark an [VideoEffectType.oldFilm]'s corners get, as a share of the
+  /// default: 0 to 3.
+  static const vignette = 'vignette';
+
+  /// How large the pixels of a [VideoEffectType.pixelate] are, or the clear
+  /// middle of a [VideoEffectType.vignette], as a share of the default: 0.3
+  /// to 3.
+  static const size = 'size';
+
+  /// How long a [VideoEffectType.negativeFlash] lasts, as a share of the
+  /// default: 0.3 to 3, ending before its echo.
+  static const length = 'length';
+
+  /// How coarse the blocks of a [VideoEffectType.blockGlitch] are, as a share
+  /// of the default: 0.3 to 3.
+  static const blockSize = 'blockSize';
+
+  /// How close together the scanlines of a [VideoEffectType.crt] lie, as a
+  /// share of the default: 0.3 to 3.
+  static const density = 'density';
+
+  /// 1 to mirror a [VideoEffectType.mirror]'s top half onto its bottom one
+  /// instead of its left half onto its right one; 0 by default.
+  static const vertical = 'vertical';
+
+  /// How tall a [VideoEffectType.wave]'s waves are, as a share of the default
+  /// half frame: 0.25 to 3.
+  static const wavelength = 'wavelength';
+
+  /// How readily a [VideoEffectType.glow] glows: 0 to 1, 0.5 by default;
+  /// higher glows from darker parts on.
+  static const threshold = 'threshold';
+
+  /// How far a [VideoEffectType.glow]'s halo spreads, as a share of the
+  /// default: 0.3 to 3.
+  static const radius = 'radius';
 }

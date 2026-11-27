@@ -1,3 +1,6 @@
+## 2.55.0
+- **FEAT**: `VideoEffect.params` shapes a built-in effect beyond its intensity, by the names in `VideoEffectParams`: how often it bursts, how far and how fast it moves, its tempo, scanlines, grain, sepia, flicker, sizes, an upright mirror and the glow's threshold and radius. Without params every effect renders as before; a strobe never flashes more than three times a second, an old film's flicker stays below a flash, and a triggered hit keeps its own pace.
+
 ## 2.54.2
 - **FIX**: `getWaveformStream` no longer loses its first chunks, so a waveform keeps its start and a short sound's stream finishes. Two waveform streams running at once no longer cut each other off.
 - **FIX**: `AudioWaveform.streaming` no longer throws an uncaught error for a video without sound; the new `onError` reports it.
