@@ -111,7 +111,7 @@ int videoEffectHitLengthOf(VideoEffectType type) => switch (type) {
   // The white flash and its fade, without the dim between flashes: going
   // back from dim to the normal picture would be a flash of its own.
   VideoEffectType.strobe => 3,
-  // The negative, which lasts at most four buckets, without the echo.
+  // The negative, which lasts at most five buckets, without the echo.
   VideoEffectType.negativeFlash => videoEffectFrameRate ~/ 4,
   VideoEffectType.vhs ||
   VideoEffectType.tvStatic ||
@@ -534,16 +534,18 @@ int _pixelPulsePeriodOf(Map<String, double> params) =>
     _periodOf(videoEffectFrameRate, params, VideoEffectParams.tempo, min: 12);
 
 /// Sepia tones, fine grain that changes every bucket, an exposure that
-/// flickers by up to 4% either way, and darkened corners.
+/// flickers by up to 4% either way, or 5% as [VideoEffectParams.flicker]
+/// scales it, and darkened corners.
 ///
-/// The flicker stays below the 10% change that WCAG 2.3.1 counts as a flash.
+/// The flicker stays below the 10% change that WCAG 2.3.1 counts as a flash,
+/// whatever the param says.
 VideoEffectFrame _oldFilm(
   double intensity,
   int bucket,
   Map<String, double> params,
 ) {
   const tile = VideoEffectFrame.noiseTileSize;
-  final flicker = _param(params, VideoEffectParams.flicker, min: 0, max: 2);
+  final flicker = _param(params, VideoEffectParams.flicker, min: 0, max: 1.25);
   return VideoEffectFrame(
     noise: 0.16 * intensity,
     noiseCellSize: 1 / 480,
@@ -590,17 +592,20 @@ VideoEffectFrame _strobe(
 }
 
 /// The negative for the first one to four buckets of every second, longer
-/// with more [intensity]. From half intensity on, a one-bucket echo follows a
-/// quarter second later, so there are at most two flashes a second.
+/// with more [intensity], or up to five as [VideoEffectParams.length] scales
+/// it. From half intensity on, a one-bucket echo follows a quarter second
+/// later, so there are at most two flashes a second.
 VideoEffectFrame _negativeFlash(
   double intensity,
   int bucket,
   Map<String, double> params,
 ) {
   final phase = bucket % videoEffectFrameRate;
-  // Ends before the echo, so the echo stays a flash of its own.
+  // Rounded before it is scaled, so it lasts exactly as long as before
+  // without the param, and ends before the echo, so the echo stays a flash
+  // of its own.
   final length =
-      ((1 + 3 * intensity) * _param(params, VideoEffectParams.length))
+      ((1 + (3 * intensity).round()) * _param(params, VideoEffectParams.length))
           .round()
           .clamp(1, videoEffectFrameRate ~/ 4 - 1);
   final echo = intensity >= 0.5 && phase == videoEffectFrameRate ~/ 4;
@@ -810,7 +815,10 @@ VideoEffectFrame _wave(
 }
 
 /// The param [key] of [params], clamped to [min]..[max], or [fallback] when
-/// it is missing or NaN.
+/// it is missing, NaN or infinite.
+///
+/// Infinite values count as missing because `VideoEffect.toMap` leaves them
+/// out, as JSON cannot hold them, so a saved effect looks as it did.
 double _param(
   Map<String, double> params,
   String key, {
@@ -819,7 +827,7 @@ double _param(
   double max = 3,
 }) {
   final value = params[key];
-  if (value == null || value.isNaN) return fallback;
+  if (value == null || !value.isFinite) return fallback;
   return value.clamp(min, max);
 }
 

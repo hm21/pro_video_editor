@@ -40,7 +40,8 @@ enum VideoEffectType {
   /// The picture flashes white twice a second and is dimmed in between.
   ///
   /// Two flashes a second stay below the three a second that WCAG 2.3.1 names
-  /// as the limit for content that can trigger seizures. Flashing effects that
+  /// as the limit for content that can trigger seizures, and a faster
+  /// [VideoEffectParams.tempo] never goes past three. Flashing effects that
   /// overlap in time add their flashes up, so keep one of them active at a
   /// time to stay within it.
   strobe,
@@ -79,8 +80,9 @@ enum VideoEffectType {
   /// out.
   zoomPulse,
 
-  /// The right half of the picture mirrors its left half. Less intensity
-  /// zooms in on the center.
+  /// The right half of the picture mirrors its left half, or with
+  /// [VideoEffectParams.vertical] the bottom half its top half. Less
+  /// intensity zooms in on the center.
   mirror,
 
   /// The picture mirrored into four symmetric parts: the right half mirrors
@@ -498,7 +500,8 @@ class VideoEffect with TimeRangeMixin {
       params: {
         for (final MapEntry(:key, :value)
             in (map['params'] as Map? ?? const {}).entries)
-          if (tryParseDouble(value) case final number?) '$key': number,
+          if (tryParseDouble(value) case final number? when number.isFinite)
+            '$key': number,
       },
     );
   }
@@ -553,6 +556,7 @@ class VideoEffect with TimeRangeMixin {
   /// param it does not read or a missing one. Each param is clamped into its
   /// range, so no value breaks an effect, and a flashing effect stays within
   /// the three flashes a second that WCAG 2.3.1 allows whatever its tempo.
+  /// NaN and infinite values count as missing, and [toMap] leaves them out.
   final Map<String, double> params;
 
   /// Whether the effect applies at [position].
@@ -611,7 +615,14 @@ class VideoEffect with TimeRangeMixin {
   }
 
   /// Converts the effect into a map, for saving it.
+  ///
+  /// [params] that are NaN or infinite are left out: JSON cannot hold them,
+  /// and the effect ignores them anyway.
   Map<String, dynamic> toMap() {
+    final finiteParams = {
+      for (final MapEntry(:key, :value) in params.entries)
+        if (value.isFinite) key: value,
+    };
     return <String, dynamic>{
       'type': type.name,
       'intensity': intensity,
@@ -619,7 +630,7 @@ class VideoEffect with TimeRangeMixin {
       'endTime': endTime?.inMicroseconds,
       if (triggers.isNotEmpty)
         'triggers': [for (final trigger in triggers) trigger.inMicroseconds],
-      if (params.isNotEmpty) 'params': params,
+      if (finiteParams.isNotEmpty) 'params': finiteParams,
     };
   }
 
@@ -660,7 +671,7 @@ class VideoEffect with TimeRangeMixin {
 ///
 /// Every param is optional: a missing one, or one an effect does not read,
 /// keeps that effect's default look. Values outside a range are clamped into
-/// it.
+/// it, and NaN and infinite values count as missing.
 abstract final class VideoEffectParams {
   /// How often a [VideoEffectType.glitch], [VideoEffectType.blockGlitch] or
   /// [VideoEffectType.signalInterference] bursts, as a share of its default
@@ -703,7 +714,8 @@ abstract final class VideoEffectParams {
   static const sepia = 'sepia';
 
   /// How much an [VideoEffectType.oldFilm]'s exposure flickers, as a share of
-  /// the default: 0 to 2, so at most 8% either way.
+  /// the default: 0 to 1.25, so at most 5% either way, which keeps every
+  /// change below the 10% that WCAG 2.3.1 counts as a flash.
   static const flicker = 'flicker';
 
   /// How dark an [VideoEffectType.oldFilm]'s corners get, as a share of the

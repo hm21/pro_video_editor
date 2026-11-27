@@ -1007,6 +1007,9 @@ void main() {
           VideoEffectType.zoomPulse,
           VideoEffectType.rgbSplit,
           VideoEffectType.strobe,
+          VideoEffectType.pixelPulse,
+          VideoEffectType.shake,
+          VideoEffectType.wave,
         ]) {
           for (var step = 0; step < 60; step++) {
             expect(
@@ -1098,6 +1101,76 @@ void main() {
         expect(glow.glowThreshold, closeTo(0.49, 1e-12));
       });
 
+      test('a strobe never flashes more than three times in any second, '
+          'whatever its tempo', () {
+        for (final tempo in <double>[
+          0.25,
+          1,
+          1.4,
+          1.5,
+          1.6,
+          2,
+          3,
+          4,
+          100,
+          double.infinity,
+          double.nan,
+        ]) {
+          final params = {VideoEffectParams.tempo: tempo};
+          final cycle = videoEffectCycleLengthOf(
+            VideoEffectType.strobe,
+            params: params,
+          );
+          // Three seconds of buckets, so every window wraps the cycle.
+          final flashes = [
+            for (var b = 0; b < 3 * videoEffectFrameRate; b++)
+              frame(VideoEffectType.strobe, params, b % cycle).flash == 1,
+          ];
+          for (var start = 0; start <= 2 * videoEffectFrameRate; start++) {
+            expect(
+              flashes
+                  .sublist(start, start + videoEffectFrameRate)
+                  .where((flash) => flash)
+                  .length,
+              lessThanOrEqualTo(3),
+              reason: 'tempo $tempo from bucket $start',
+            );
+          }
+        }
+      });
+
+      test('an old film flickers by less than the 10% WCAG 2.3.1 counts as '
+          'a flash, whatever its flicker', () {
+        for (final flicker in <double>[1.25, 2, 100, double.infinity]) {
+          final brightness = [
+            for (var b = 0; b < videoEffectCycleLength; b++)
+              frame(VideoEffectType.oldFilm, {
+                VideoEffectParams.flicker: flicker,
+              }, b).brightness,
+          ];
+          final swing =
+              brightness.reduce(math.max) - brightness.reduce(math.min);
+          expect(swing, lessThan(0.1), reason: 'flicker $flicker');
+        }
+      });
+
+      test('a negative flash without params lasts as long as before, even '
+          'where its length rounds on an edge', () {
+        // Three times these lands just below a half, where rounding the
+        // length after adding the first bucket would add a bucket.
+        for (final intensity in [0.49999999999999994, 0.16666666666666663]) {
+          final negative = [
+            for (var b = 0; b < videoEffectFrameRate ~/ 4; b++)
+              frame(VideoEffectType.negativeFlash, const {}, b, intensity),
+          ].where((f) => f.invert == 1).length;
+          expect(
+            negative,
+            1 + (3 * intensity).round(),
+            reason: 'intensity $intensity',
+          );
+        }
+      });
+
       test('a longer negative flash still ends before its echo', () {
         final flashes = [
           for (var b = 0; b < videoEffectFrameRate; b++)
@@ -1173,6 +1246,43 @@ void main() {
           effect.hashCode,
           const VideoEffect.wave(params: {VideoEffectParams.speed: 2}).hashCode,
         );
+      });
+
+      test('count NaN and infinite values as missing, and leave them out of '
+          'toMap and toJson', () {
+        const effect = VideoEffect.strobe(
+          params: {
+            VideoEffectParams.tempo: double.infinity,
+            VideoEffectParams.size: double.nan,
+            VideoEffectParams.length: double.negativeInfinity,
+            VideoEffectParams.distance: 2,
+          },
+        );
+        for (var bucket = 0; bucket < 24; bucket++) {
+          expect(
+            frame(VideoEffectType.strobe, effect.params, bucket),
+            frame(VideoEffectType.strobe, const {}, bucket),
+            reason: 'bucket $bucket',
+          );
+        }
+        expect(effect.toMap()['params'], {VideoEffectParams.distance: 2});
+        final restored = VideoEffect.fromJson(effect.toJson());
+        expect(restored.params, {VideoEffectParams.distance: 2});
+        expect(
+          VideoEffect.fromMap(const {
+            'type': 'strobe',
+            'params': {'tempo': 'Infinity', 'size': 'NaN', 'length': 2},
+          }).params,
+          {VideoEffectParams.length: 2.0},
+        );
+      });
+
+      test('toMap hands out a copy of the params', () {
+        // Not const, so writing into a shared map would go through.
+        final params = <String, double>{VideoEffectParams.speed: 2};
+        final effect = VideoEffect.wave(params: params);
+        (effect.toMap()['params'] as Map)[VideoEffectParams.speed] = 3.0;
+        expect(effect.params, {VideoEffectParams.speed: 2});
       });
 
       test('reads numbers of any kind from a map and drops the rest', () {
